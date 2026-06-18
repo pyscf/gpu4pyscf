@@ -29,7 +29,7 @@ void rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -282,7 +282,7 @@ void rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -600,7 +600,7 @@ void rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -1070,7 +1070,7 @@ void rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -1530,7 +1530,7 @@ void rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -2198,7 +2198,7 @@ void rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -3448,7 +3448,7 @@ void rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -3765,7 +3765,7 @@ void rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -4235,7 +4235,7 @@ void rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -4924,7 +4924,7 @@ void rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -5584,6 +5584,7 @@ void rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     int gout_id = threadIdx.y;
+    constexpr int g_size = 24;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     extern __shared__ double shared_memory[];
@@ -5601,7 +5602,7 @@ void rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -5679,9 +5680,9 @@ while (1) {
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double goutx[14];
         double gouty[14];
@@ -5708,9 +5709,9 @@ while (1) {
             }
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
@@ -5730,9 +5731,9 @@ while (1) {
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -5740,11 +5741,11 @@ while (1) {
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[1536] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
                         aij_cache[1] = aj_aij;
@@ -6232,6 +6233,8 @@ while (1) {
             double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
             double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
+                switch (gout_id) {
+                case 0: {
                 double vxij_00 = 0;
                 double vyij_00 = 0;
                 double vzij_00 = 0;
@@ -6241,8 +6244,6 @@ while (1) {
                 double vxij_02 = 0;
                 double vyij_02 = 0;
                 double vzij_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vxij_00 += goutx[0] * dm_lk_00;
                 vyij_00 += gouty[0] * dm_lk_00;
@@ -6299,8 +6300,26 @@ while (1) {
                 vxij_01 += goutx[13] * dm_lk_25;
                 vyij_01 += gouty[13] * dm_lk_25;
                 vzij_01 += goutz[13] * dm_lk_25;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
+                atomicAdd(vj_x+(i0+0)*nao+(j0+1), vxij_01);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+1), vyij_01);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+1), vzij_01);
+                atomicAdd(vj_x+(i0+0)*nao+(j0+2), vxij_02);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+2), vyij_02);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+2), vzij_02);
                 break; }
                 case 1: {
+                double vxij_00 = 0;
+                double vyij_00 = 0;
+                double vzij_00 = 0;
+                double vxij_01 = 0;
+                double vyij_01 = 0;
+                double vzij_01 = 0;
+                double vxij_02 = 0;
+                double vyij_02 = 0;
+                double vzij_02 = 0;
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vxij_01 += goutx[0] * dm_lk_00;
                 vyij_01 += gouty[0] * dm_lk_00;
@@ -6357,8 +6376,26 @@ while (1) {
                 vxij_02 += goutx[13] * dm_lk_25;
                 vyij_02 += gouty[13] * dm_lk_25;
                 vzij_02 += goutz[13] * dm_lk_25;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
+                atomicAdd(vj_x+(i0+0)*nao+(j0+1), vxij_01);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+1), vyij_01);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+1), vzij_01);
+                atomicAdd(vj_x+(i0+0)*nao+(j0+2), vxij_02);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+2), vyij_02);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+2), vzij_02);
                 break; }
                 case 2: {
+                double vxij_00 = 0;
+                double vyij_00 = 0;
+                double vzij_00 = 0;
+                double vxij_01 = 0;
+                double vyij_01 = 0;
+                double vzij_01 = 0;
+                double vxij_02 = 0;
+                double vyij_02 = 0;
+                double vzij_02 = 0;
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vxij_02 += goutx[0] * dm_lk_00;
                 vyij_02 += gouty[0] * dm_lk_00;
@@ -6411,8 +6448,26 @@ while (1) {
                 vxij_02 += goutx[12] * dm_lk_24;
                 vyij_02 += gouty[12] * dm_lk_24;
                 vzij_02 += goutz[12] * dm_lk_24;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
+                atomicAdd(vj_x+(i0+0)*nao+(j0+1), vxij_01);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+1), vyij_01);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+1), vzij_01);
+                atomicAdd(vj_x+(i0+0)*nao+(j0+2), vxij_02);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+2), vyij_02);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+2), vzij_02);
                 break; }
                 case 3: {
+                double vxij_00 = 0;
+                double vyij_00 = 0;
+                double vzij_00 = 0;
+                double vxij_01 = 0;
+                double vyij_01 = 0;
+                double vzij_01 = 0;
+                double vxij_02 = 0;
+                double vyij_02 = 0;
+                double vzij_02 = 0;
                 double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
                 vxij_00 += goutx[0] * dm_lk_01;
                 vyij_00 += gouty[0] * dm_lk_01;
@@ -6465,8 +6520,6 @@ while (1) {
                 vxij_00 += goutx[12] * dm_lk_25;
                 vyij_00 += gouty[12] * dm_lk_25;
                 vzij_00 += goutz[12] * dm_lk_25;
-                break; }
-                }
                 atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
                 atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
                 atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
@@ -6476,6 +6529,8 @@ while (1) {
                 atomicAdd(vj_x+(i0+0)*nao+(j0+2), vxij_02);
                 atomicAdd(vj_y+(i0+0)*nao+(j0+2), vyij_02);
                 atomicAdd(vj_z+(i0+0)*nao+(j0+2), vzij_02);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
@@ -6824,6 +6879,8 @@ while (1) {
                 }
             }
             if (do_k) {
+                switch (gout_id) {
+                case 0: {
                 double vxil_00 = 0;
                 double vyil_00 = 0;
                 double vzil_00 = 0;
@@ -6833,8 +6890,6 @@ while (1) {
                 double vxil_02 = 0;
                 double vyil_02 = 0;
                 double vzil_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_00 += goutx[0] * dm_jk_00;
                 vyil_00 += gouty[0] * dm_jk_00;
@@ -6886,8 +6941,26 @@ while (1) {
                 vxil_01 += goutx[8] * dm_jk_24;
                 vyil_01 += gouty[8] * dm_jk_24;
                 vzil_01 += goutz[8] * dm_jk_24;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+1), vxil_01);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+1), vyil_01);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+1), vzil_01);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+2), vxil_02);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+2), vyil_02);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+2), vzil_02);
                 break; }
                 case 1: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_01 = 0;
+                double vyil_01 = 0;
+                double vzil_01 = 0;
+                double vxil_02 = 0;
+                double vyil_02 = 0;
+                double vzil_02 = 0;
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
                 vxil_01 += goutx[5] * dm_jk_01;
                 vyil_01 += gouty[5] * dm_jk_01;
@@ -6939,8 +7012,26 @@ while (1) {
                 vxil_02 += goutx[13] * dm_jk_25;
                 vyil_02 += gouty[13] * dm_jk_25;
                 vzil_02 += goutz[13] * dm_jk_25;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+1), vxil_01);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+1), vyil_01);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+1), vzil_01);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+2), vxil_02);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+2), vyil_02);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+2), vzil_02);
                 break; }
                 case 2: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_01 = 0;
+                double vyil_01 = 0;
+                double vzil_01 = 0;
+                double vxil_02 = 0;
+                double vyil_02 = 0;
+                double vzil_02 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_01 += goutx[4] * dm_jk_00;
                 vyil_01 += gouty[4] * dm_jk_00;
@@ -6989,8 +7080,26 @@ while (1) {
                 vxil_02 += goutx[12] * dm_jk_24;
                 vyil_02 += gouty[12] * dm_jk_24;
                 vzil_02 += goutz[12] * dm_jk_24;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+1), vxil_01);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+1), vyil_01);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+1), vzil_01);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+2), vxil_02);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+2), vyil_02);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+2), vzil_02);
                 break; }
                 case 3: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_01 = 0;
+                double vyil_01 = 0;
+                double vzil_01 = 0;
+                double vxil_02 = 0;
+                double vyil_02 = 0;
+                double vzil_02 = 0;
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
                 vxil_00 += goutx[0] * dm_jk_01;
                 vyil_00 += gouty[0] * dm_jk_01;
@@ -7039,8 +7148,6 @@ while (1) {
                 vxil_01 += goutx[8] * dm_jk_25;
                 vyil_01 += gouty[8] * dm_jk_25;
                 vzil_01 += goutz[8] * dm_jk_25;
-                break; }
-                }
                 atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
                 atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
                 atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
@@ -7050,6 +7157,8 @@ while (1) {
                 atomicAdd(vk_x+(i0+0)*nao+(l0+2), vxil_02);
                 atomicAdd(vk_y+(i0+0)*nao+(l0+2), vyil_02);
                 atomicAdd(vk_z+(i0+0)*nao+(l0+2), vzil_02);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
@@ -7758,7 +7867,7 @@ void rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -8222,7 +8331,7 @@ void rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -8890,6 +8999,7 @@ void rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     int gout_id = threadIdx.y;
+    constexpr int g_size = 24;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     extern __shared__ double shared_memory[];
@@ -8907,7 +9017,7 @@ void rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -8985,9 +9095,9 @@ while (1) {
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double goutx[14];
         double gouty[14];
@@ -9014,9 +9124,9 @@ while (1) {
             }
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
@@ -9036,9 +9146,9 @@ while (1) {
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -9046,11 +9156,11 @@ while (1) {
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[1536] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
                         aij_cache[1] = aj_aij;
@@ -9914,6 +10024,8 @@ while (1) {
                 }
             }
             if (do_k) {
+                switch (gout_id) {
+                case 0: {
                 double vxil_00 = 0;
                 double vyil_00 = 0;
                 double vzil_00 = 0;
@@ -9923,8 +10035,6 @@ while (1) {
                 double vxil_02 = 0;
                 double vyil_02 = 0;
                 double vzil_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_00 += goutx[0] * dm_jk_00;
                 vyil_00 += gouty[0] * dm_jk_00;
@@ -9976,8 +10086,26 @@ while (1) {
                 vxil_02 += goutx[13] * dm_jk_42;
                 vyil_02 += gouty[13] * dm_jk_42;
                 vzil_02 += goutz[13] * dm_jk_42;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+1), vxil_01);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+1), vyil_01);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+1), vzil_01);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+2), vxil_02);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+2), vyil_02);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+2), vzil_02);
                 break; }
                 case 1: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_01 = 0;
+                double vyil_01 = 0;
+                double vzil_01 = 0;
+                double vxil_02 = 0;
+                double vyil_02 = 0;
+                double vzil_02 = 0;
                 double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
                 vxil_00 += goutx[0] * dm_jk_10;
                 vyil_00 += gouty[0] * dm_jk_10;
@@ -10029,8 +10157,26 @@ while (1) {
                 vxil_02 += goutx[13] * dm_jk_52;
                 vyil_02 += gouty[13] * dm_jk_52;
                 vzil_02 += goutz[13] * dm_jk_52;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+1), vxil_01);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+1), vyil_01);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+1), vzil_01);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+2), vxil_02);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+2), vyil_02);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+2), vzil_02);
                 break; }
                 case 2: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_01 = 0;
+                double vyil_01 = 0;
+                double vzil_01 = 0;
+                double vxil_02 = 0;
+                double vyil_02 = 0;
+                double vzil_02 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_01 += goutx[4] * dm_jk_00;
                 vyil_01 += gouty[4] * dm_jk_00;
@@ -10079,8 +10225,26 @@ while (1) {
                 vxil_01 += goutx[8] * dm_jk_42;
                 vyil_01 += gouty[8] * dm_jk_42;
                 vzil_01 += goutz[8] * dm_jk_42;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+1), vxil_01);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+1), vyil_01);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+1), vzil_01);
+                atomicAdd(vk_x+(i0+0)*nao+(l0+2), vxil_02);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+2), vyil_02);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+2), vzil_02);
                 break; }
                 case 3: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_01 = 0;
+                double vyil_01 = 0;
+                double vzil_01 = 0;
+                double vxil_02 = 0;
+                double vyil_02 = 0;
+                double vzil_02 = 0;
                 double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
                 vxil_01 += goutx[4] * dm_jk_10;
                 vyil_01 += gouty[4] * dm_jk_10;
@@ -10129,8 +10293,6 @@ while (1) {
                 vxil_01 += goutx[8] * dm_jk_52;
                 vyil_01 += gouty[8] * dm_jk_52;
                 vzil_01 += goutz[8] * dm_jk_52;
-                break; }
-                }
                 atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
                 atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
                 atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
@@ -10140,6 +10302,10 @@ while (1) {
                 atomicAdd(vk_x+(i0+0)*nao+(l0+2), vxil_02);
                 atomicAdd(vk_y+(i0+0)*nao+(l0+2), vyil_02);
                 atomicAdd(vk_z+(i0+0)*nao+(l0+2), vzil_02);
+                break; }
+                }
+                switch (gout_id) {
+                case 0: {
                 double vxik_00 = 0;
                 double vyik_00 = 0;
                 double vzik_00 = 0;
@@ -10149,8 +10315,6 @@ while (1) {
                 double vxik_02 = 0;
                 double vyik_02 = 0;
                 double vzik_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
                 vxik_00 += goutx[0] * dm_jl_00;
                 vyik_00 += gouty[0] * dm_jl_00;
@@ -10202,8 +10366,26 @@ while (1) {
                 vxik_02 += goutx[13] * dm_jl_42;
                 vyik_02 += gouty[13] * dm_jl_42;
                 vzik_02 += goutz[13] * dm_jl_42;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
+                atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
+                atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
                 break; }
                 case 1: {
+                double vxik_00 = 0;
+                double vyik_00 = 0;
+                double vzik_00 = 0;
+                double vxik_01 = 0;
+                double vyik_01 = 0;
+                double vzik_01 = 0;
+                double vxik_02 = 0;
+                double vyik_02 = 0;
+                double vzik_02 = 0;
                 double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
                 vxik_00 += goutx[0] * dm_jl_10;
                 vyik_00 += gouty[0] * dm_jl_10;
@@ -10255,8 +10437,26 @@ while (1) {
                 vxik_02 += goutx[13] * dm_jl_52;
                 vyik_02 += gouty[13] * dm_jl_52;
                 vzik_02 += goutz[13] * dm_jl_52;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
+                atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
+                atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
                 break; }
                 case 2: {
+                double vxik_00 = 0;
+                double vyik_00 = 0;
+                double vzik_00 = 0;
+                double vxik_01 = 0;
+                double vyik_01 = 0;
+                double vzik_01 = 0;
+                double vxik_02 = 0;
+                double vyik_02 = 0;
+                double vzik_02 = 0;
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
                 vxik_01 += goutx[1] * dm_jl_00;
                 vyik_01 += gouty[1] * dm_jl_00;
@@ -10305,8 +10505,26 @@ while (1) {
                 vxik_01 += goutx[11] * dm_jl_42;
                 vyik_01 += gouty[11] * dm_jl_42;
                 vzik_01 += goutz[11] * dm_jl_42;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
+                atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
+                atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
+                atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
+                atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
                 break; }
                 case 3: {
+                double vxik_00 = 0;
+                double vyik_00 = 0;
+                double vzik_00 = 0;
+                double vxik_01 = 0;
+                double vyik_01 = 0;
+                double vzik_01 = 0;
+                double vxik_02 = 0;
+                double vyik_02 = 0;
+                double vzik_02 = 0;
                 double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
                 vxik_01 += goutx[1] * dm_jl_10;
                 vyik_01 += gouty[1] * dm_jl_10;
@@ -10355,8 +10573,6 @@ while (1) {
                 vxik_01 += goutx[11] * dm_jl_52;
                 vyik_01 += gouty[11] * dm_jl_52;
                 vzik_01 += goutz[11] * dm_jl_52;
-                break; }
-                }
                 atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
                 atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
                 atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
@@ -10366,6 +10582,8 @@ while (1) {
                 atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
                 atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
                 atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
@@ -10859,16 +11077,11 @@ void rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
-    constexpr int nsq_per_block = 64;
-    constexpr int gout_stride = 4;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     extern __shared__ double shared_memory[];
-    double *rlrk = shared_memory + sq_id;
-    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 62 + sq_id;
-    double *cicj_cache = shared_memory + nsq_per_block * (62+nroots*2);
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
 
@@ -10877,7 +11090,7 @@ void rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -10954,16 +11167,11 @@ while (1) {
         double xlxk = env[rl+0] - env[rk+0];
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
-        if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
-        }
-        double goutx[9];
-        double gouty[9];
-        double goutz[9];
+        double goutx[18];
+        double gouty[18];
+        double goutz[18];
         #pragma unroll
-        for (int n = 0; n < 9; ++n) {
+        for (int n = 0; n < 18; ++n) {
             goutx[n] = 0;
             gouty[n] = 0;
             goutz[n] = 0;
@@ -10982,17 +11190,8 @@ while (1) {
             } else {
                 fac_sym = 0;
             }
-            __syncthreads();
-            if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
-                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
-                gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
-            }
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
@@ -11000,367 +11199,216 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xqc = xlxk * al_akl;
+                double yqc = ylyk * al_akl;
+                double zqc = zlzk * al_akl;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                __syncthreads();
-                if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
-                    double cicj = cicj_cache[ijp];
-                    gx[1152] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                        aij_cache[2] = ai * 2;
-                    }
-                }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
-                double s0, s1, s2;
-                double Ix, Iy, Iz;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                if (task_id >= ntasks) {
+                    continue;
+                }
                 for (int irys = 0; irys < nroots; ++irys) {
-                    __syncthreads();
-                    double rt = rw[irys*128];
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
+                    double rt = rw[ 2*irys   *nsq_per_block];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
+                    double b00 = .5 * rt_aa;
+                    double fx, fy, fz;
+                    double rt_akl = rt_aa * aij;
+                    double b01 = .5/akl * (1 - rt_akl);
+                    double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double rt_akl = rt_aa * aij;
-                    double b00 = .5 * rt_aa;
-                    double b01 = .5/akl * (1 - rt_akl);
-                    for (int n = gout_id; n < 3; n += 4) {
-                        if (n == 2) {
-                            gx[2304] = rw[irys*128+64];
-                        }
-                        double *_gx = gx + n * 1152;
-                        double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
-                        double c0x = Rpa - rt_aij * Rpq[n*64];
-                        s0 = _gx[0];
-                        s1 = c0x * s0;
-                        _gx[64] = s1;
-                        s2 = c0x * s1 + 1 * b10 * s0;
-                        _gx[128] = s2;
-                        s0 = s1;
-                        s1 = s2;
-                        s2 = c0x * s1 + 2 * b10 * s0;
-                        _gx[192] = s2;
-                        double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
-                        double cpx = Rqc + rt_akl * Rpq[n*64];
-                        s0 = _gx[0];
-                        s1 = cpx * s0;
-                        _gx[384] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        _gx[768] = s2;
-                        s0 = _gx[64];
-                        s1 = cpx * s0;
-                        s1 += 1 * b00 * _gx[0];
-                        _gx[448] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 1 * b00 * _gx[384];
-                        _gx[832] = s2;
-                        s0 = _gx[128];
-                        s1 = cpx * s0;
-                        s1 += 2 * b00 * _gx[64];
-                        _gx[512] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 2 * b00 * _gx[448];
-                        _gx[896] = s2;
-                        s0 = _gx[192];
-                        s1 = cpx * s0;
-                        s1 += 3 * b00 * _gx[128];
-                        _gx[576] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 3 * b00 * _gx[512];
-                        _gx[960] = s2;
-                        s1 = _gx[192];
-                        s0 = _gx[128];
-                        _gx[256] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[64];
-                        _gx[192] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[0];
-                        _gx[128] = s1 - xjxi * s0;
-                        s1 = _gx[256];
-                        s0 = _gx[192];
-                        _gx[320] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[128];
-                        _gx[256] = s1 - xjxi * s0;
-                        s1 = _gx[576];
-                        s0 = _gx[512];
-                        _gx[640] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[448];
-                        _gx[576] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[384];
-                        _gx[512] = s1 - xjxi * s0;
-                        s1 = _gx[640];
-                        s0 = _gx[576];
-                        _gx[704] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[512];
-                        _gx[640] = s1 - xjxi * s0;
-                        s1 = _gx[960];
-                        s0 = _gx[896];
-                        _gx[1024] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[832];
-                        _gx[960] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[768];
-                        _gx[896] = s1 - xjxi * s0;
-                        s1 = _gx[1024];
-                        s0 = _gx[960];
-                        _gx[1088] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[896];
-                        _gx[1024] = s1 - xjxi * s0;
-                    }
-                    __syncthreads();
-                    switch (gout_id) {
-                    case 0:
-                    Ix = gx[1024];
-                    Iy = gx[1152];
-                    Iz = gx[2304];
-                    goutx[0] += aij_cache[2] * gx[1088] * Iy * Iz;
-                    gouty[0] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[768];
-                    Iy = gx[1280];
-                    Iz = gx[2432];
-                    goutx[1] += aij_cache[2] * gx[832] * Iy * Iz;
-                    gouty[1] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[1] += aij_cache[2] * gx[2496] * Ix * Iy;
-                    Ix = gx[512];
-                    Iy = gx[1536];
-                    Iz = gx[2432];
-                    goutx[2] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[2] += aij_cache[2] * gx[1600] * Ix * Iz;
-                    goutz[2] += aij_cache[2] * gx[2496] * Ix * Iy;
-                    Ix = gx[640];
-                    Iy = gx[1152];
-                    Iz = gx[2688];
-                    goutx[3] += aij_cache[2] * gx[704] * Iy * Iz;
-                    gouty[3] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[2752] * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[1280];
-                    Iz = gx[2816];
-                    goutx[4] += aij_cache[2] * gx[448] * Iy * Iz;
-                    gouty[4] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[4] += aij_cache[2] * gx[2880] * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1920];
-                    Iz = gx[2432];
-                    goutx[5] += aij_cache[2] * gx[192] * Iy * Iz;
-                    gouty[5] += aij_cache[2] * gx[1984] * Ix * Iz;
-                    goutz[5] += aij_cache[2] * gx[2496] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1536];
-                    Iz = gx[2688];
-                    goutx[6] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[6] += aij_cache[2] * gx[1600] * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[2752] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1664];
-                    Iz = gx[2816];
-                    goutx[7] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[7] += aij_cache[2] * gx[1728] * Ix * Iz;
-                    goutz[7] += aij_cache[2] * gx[2880] * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1152];
-                    Iz = gx[3200];
-                    goutx[8] += aij_cache[2] * gx[192] * Iy * Iz;
-                    gouty[8] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[8] += aij_cache[2] * gx[3264] * Ix * Iy;
-                    break;
-                    case 1:
-                    Ix = gx[896];
-                    Iy = gx[1280];
-                    Iz = gx[2304];
-                    goutx[0] += aij_cache[2] * gx[960] * Iy * Iz;
-                    gouty[0] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[768];
-                    Iy = gx[1152];
-                    Iz = gx[2560];
-                    goutx[1] += aij_cache[2] * gx[832] * Iy * Iz;
-                    gouty[1] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[1] += aij_cache[2] * gx[2624] * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[1792];
-                    Iz = gx[2304];
-                    goutx[2] += aij_cache[2] * gx[448] * Iy * Iz;
-                    gouty[2] += aij_cache[2] * gx[1856] * Ix * Iz;
-                    goutz[2] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[512];
-                    Iy = gx[1280];
-                    Iz = gx[2688];
-                    goutx[3] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[3] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[2752] * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[1152];
-                    Iz = gx[2944];
-                    goutx[4] += aij_cache[2] * gx[448] * Iy * Iz;
-                    gouty[4] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[4] += aij_cache[2] * gx[3008] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[2176];
-                    Iz = gx[2304];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += aij_cache[2] * gx[2240] * Ix * Iz;
-                    goutz[5] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1664];
-                    Iz = gx[2688];
-                    goutx[6] += aij_cache[2] * gx[192] * Iy * Iz;
-                    gouty[6] += aij_cache[2] * gx[1728] * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[2752] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1536];
-                    Iz = gx[2944];
-                    goutx[7] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[7] += aij_cache[2] * gx[1600] * Ix * Iz;
-                    goutz[7] += aij_cache[2] * gx[3008] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1408];
-                    Iz = gx[3072];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += aij_cache[2] * gx[1472] * Ix * Iz;
-                    goutz[8] += aij_cache[2] * gx[3136] * Ix * Iy;
-                    break;
-                    case 2:
-                    Ix = gx[896];
-                    Iy = gx[1152];
-                    Iz = gx[2432];
-                    goutx[0] += aij_cache[2] * gx[960] * Iy * Iz;
-                    gouty[0] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[2496] * Ix * Iy;
-                    Ix = gx[640];
-                    Iy = gx[1536];
-                    Iz = gx[2304];
-                    goutx[1] += aij_cache[2] * gx[704] * Iy * Iz;
-                    gouty[1] += aij_cache[2] * gx[1600] * Ix * Iz;
-                    goutz[1] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[1664];
-                    Iz = gx[2432];
-                    goutx[2] += aij_cache[2] * gx[448] * Iy * Iz;
-                    gouty[2] += aij_cache[2] * gx[1728] * Ix * Iz;
-                    goutz[2] += aij_cache[2] * gx[2496] * Ix * Iy;
-                    Ix = gx[512];
-                    Iy = gx[1152];
-                    Iz = gx[2816];
-                    goutx[3] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[3] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[2880] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1920];
-                    Iz = gx[2304];
-                    goutx[4] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[4] += aij_cache[2] * gx[1984] * Ix * Iz;
-                    goutz[4] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[2048];
-                    Iz = gx[2432];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += aij_cache[2] * gx[2112] * Ix * Iz;
-                    goutz[5] += aij_cache[2] * gx[2496] * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1536];
-                    Iz = gx[2816];
-                    goutx[6] += aij_cache[2] * gx[192] * Iy * Iz;
-                    gouty[6] += aij_cache[2] * gx[1600] * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[2880] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1152];
-                    Iz = gx[3072];
-                    goutx[7] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[7] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[7] += aij_cache[2] * gx[3136] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1280];
-                    Iz = gx[3200];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[8] += aij_cache[2] * gx[3264] * Ix * Iy;
-                    break;
-                    case 3:
-                    Ix = gx[768];
-                    Iy = gx[1408];
-                    Iz = gx[2304];
-                    goutx[0] += aij_cache[2] * gx[832] * Iy * Iz;
-                    gouty[0] += aij_cache[2] * gx[1472] * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[512];
-                    Iy = gx[1664];
-                    Iz = gx[2304];
-                    goutx[1] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[1] += aij_cache[2] * gx[1728] * Ix * Iz;
-                    goutz[1] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[1536];
-                    Iz = gx[2560];
-                    goutx[2] += aij_cache[2] * gx[448] * Iy * Iz;
-                    gouty[2] += aij_cache[2] * gx[1600] * Ix * Iz;
-                    goutz[2] += aij_cache[2] * gx[2624] * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[1408];
-                    Iz = gx[2688];
-                    goutx[3] += aij_cache[2] * gx[448] * Iy * Iz;
-                    gouty[3] += aij_cache[2] * gx[1472] * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[2752] * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[2048];
-                    Iz = gx[2304];
-                    goutx[4] += aij_cache[2] * gx[192] * Iy * Iz;
-                    gouty[4] += aij_cache[2] * gx[2112] * Ix * Iz;
-                    goutz[4] += aij_cache[2] * gx[2368] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1920];
-                    Iz = gx[2560];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += aij_cache[2] * gx[1984] * Ix * Iz;
-                    goutz[5] += aij_cache[2] * gx[2624] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1792];
-                    Iz = gx[2688];
-                    goutx[6] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[6] += aij_cache[2] * gx[1856] * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[2752] * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1280];
-                    Iz = gx[3072];
-                    goutx[7] += aij_cache[2] * gx[192] * Iy * Iz;
-                    gouty[7] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[7] += aij_cache[2] * gx[3136] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1152];
-                    Iz = gx[3328];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += aij_cache[2] * gx[1216] * Ix * Iz;
-                    goutz[8] += aij_cache[2] * gx[3392] * Ix * Iy;
-                    break;
-                    }
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
+                    double trr_10x = c0x * 1;
+                    double trr_20x = c0x * trr_10x + 1*b10 * 1;
+                    double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                    double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                    double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                    double trr_32x = cpx * trr_31x + 1*b01 * trr_30x + 3*b00 * trr_21x;
+                    double trr_11x = cpx * trr_10x + 1*b00 * 1;
+                    double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
+                    double hrr_2120x = trr_32x - rjri[0] * trr_22x;
+                    double trr_01x = cpx * 1;
+                    double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
+                    double hrr_1120x = trr_22x - rjri[0] * trr_12x;
+                    double hrr_1220x = hrr_2120x - rjri[0] * hrr_1120x;
+                    fx = aij_cache[2] * hrr_1220x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
+                    double trr_10y = c0y * 1;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
+                    double trr_10z = c0z * wt;
+                    fz = aij_cache[2] * trr_10z;
+                    double trr_02x = cpx * trr_01x + 1*b01 * 1;
+                    double hrr_0120x = trr_12x - rjri[0] * trr_02x;
+                    double hrr_0220x = hrr_1120x - rjri[0] * hrr_0120x;
+                    goutx[0] +=  fx  * 1 * wt;
+                    gouty[0] += hrr_0220x *  fy  * wt;
+                    goutz[0] += hrr_0220x * 1 *  fz ;
+                    fx = aij_cache[2] * hrr_1120x;
+                    double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                    double hrr_1100y = trr_20y - rjri[1] * trr_10y;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0100y = trr_10y - rjri[1] * 1;
+                    goutx[1] +=  fx  * hrr_0100y * wt;
+                    gouty[1] += hrr_0120x *  fy  * wt;
+                    goutz[1] += hrr_0120x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * hrr_1120x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                    double hrr_1100z = trr_20z - rjri[2] * trr_10z;
+                    fz = aij_cache[2] * hrr_1100z;
+                    double hrr_0100z = trr_10z - rjri[2] * wt;
+                    goutx[2] +=  fx  * 1 * hrr_0100z;
+                    gouty[2] += hrr_0120x *  fy  * hrr_0100z;
+                    goutz[2] += hrr_0120x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_12x;
+                    double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                    double hrr_2100y = trr_30y - rjri[1] * trr_20y;
+                    double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
+                    fy = aij_cache[2] * hrr_1200y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
+                    goutx[3] +=  fx  * hrr_0200y * wt;
+                    gouty[3] += trr_02x *  fy  * wt;
+                    goutz[3] += trr_02x * hrr_0200y *  fz ;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1100z;
+                    goutx[4] +=  fx  * hrr_0100y * hrr_0100z;
+                    gouty[4] += trr_02x *  fy  * hrr_0100z;
+                    goutz[4] += trr_02x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                    double hrr_2100z = trr_30z - rjri[2] * trr_20z;
+                    double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1200z;
+                    double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
+                    goutx[5] +=  fx  * 1 * hrr_0200z;
+                    gouty[5] += trr_02x *  fy  * hrr_0200z;
+                    goutz[5] += trr_02x * 1 *  fz ;
+                    double hrr_2110x = trr_31x - rjri[0] * trr_21x;
+                    double hrr_1110x = trr_21x - rjri[0] * trr_11x;
+                    double hrr_1210x = hrr_2110x - rjri[0] * hrr_1110x;
+                    fx = aij_cache[2] * hrr_1210x;
+                    double cpy = yqc + ypq*rt_akl;
+                    double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0110x = trr_11x - rjri[0] * trr_01x;
+                    double hrr_0210x = hrr_1110x - rjri[0] * hrr_0110x;
+                    double trr_01y = cpy * 1;
+                    goutx[6] +=  fx  * trr_01y * wt;
+                    gouty[6] += hrr_0210x *  fy  * wt;
+                    goutz[6] += hrr_0210x * trr_01y *  fz ;
+                    fx = aij_cache[2] * hrr_1110x;
+                    double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                    double hrr_1110y = trr_21y - rjri[1] * trr_11y;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0110y = trr_11y - rjri[1] * trr_01y;
+                    goutx[7] +=  fx  * hrr_0110y * wt;
+                    gouty[7] += hrr_0110x *  fy  * wt;
+                    goutz[7] += hrr_0110x * hrr_0110y *  fz ;
+                    fx = aij_cache[2] * hrr_1110x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1100z;
+                    goutx[8] +=  fx  * trr_01y * hrr_0100z;
+                    gouty[8] += hrr_0110x *  fy  * hrr_0100z;
+                    goutz[8] += hrr_0110x * trr_01y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                    double hrr_2110y = trr_31y - rjri[1] * trr_21y;
+                    double hrr_1210y = hrr_2110y - rjri[1] * hrr_1110y;
+                    fy = aij_cache[2] * hrr_1210y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0210y = hrr_1110y - rjri[1] * hrr_0110y;
+                    goutx[9] +=  fx  * hrr_0210y * wt;
+                    gouty[9] += trr_01x *  fy  * wt;
+                    goutz[9] += trr_01x * hrr_0210y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * hrr_1100z;
+                    goutx[10] +=  fx  * hrr_0110y * hrr_0100z;
+                    gouty[10] += trr_01x *  fy  * hrr_0100z;
+                    goutz[10] += trr_01x * hrr_0110y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1200z;
+                    goutx[11] +=  fx  * trr_01y * hrr_0200z;
+                    gouty[11] += trr_01x *  fy  * hrr_0200z;
+                    goutz[11] += trr_01x * trr_01y *  fz ;
+                    fx = aij_cache[2] * hrr_1210x;
+                    fy = aij_cache[2] * trr_10y;
+                    double cpz = zqc + zpq*rt_akl;
+                    double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                    fz = aij_cache[2] * trr_11z;
+                    double trr_01z = cpz * wt;
+                    goutx[12] +=  fx  * 1 * trr_01z;
+                    gouty[12] += hrr_0210x *  fy  * trr_01z;
+                    goutz[12] += hrr_0210x * 1 *  fz ;
+                    fx = aij_cache[2] * hrr_1110x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_11z;
+                    goutx[13] +=  fx  * hrr_0100y * trr_01z;
+                    gouty[13] += hrr_0110x *  fy  * trr_01z;
+                    goutz[13] += hrr_0110x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * hrr_1110x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                    double hrr_1110z = trr_21z - rjri[2] * trr_11z;
+                    fz = aij_cache[2] * hrr_1110z;
+                    double hrr_0110z = trr_11z - rjri[2] * trr_01z;
+                    goutx[14] +=  fx  * 1 * hrr_0110z;
+                    gouty[14] += hrr_0110x *  fy  * hrr_0110z;
+                    goutz[14] += hrr_0110x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1200y;
+                    fz = aij_cache[2] * trr_11z;
+                    goutx[15] +=  fx  * hrr_0200y * trr_01z;
+                    gouty[15] += trr_01x *  fy  * trr_01z;
+                    goutz[15] += trr_01x * hrr_0200y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1110z;
+                    goutx[16] +=  fx  * hrr_0100y * hrr_0110z;
+                    gouty[16] += trr_01x *  fy  * hrr_0110z;
+                    goutz[16] += trr_01x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                    double hrr_2110z = trr_31z - rjri[2] * trr_21z;
+                    double hrr_1210z = hrr_2110z - rjri[2] * hrr_1110z;
+                    fz = aij_cache[2] * hrr_1210z;
+                    double hrr_0210z = hrr_1110z - rjri[2] * hrr_0110z;
+                    goutx[17] +=  fx  * 1 * hrr_0210z;
+                    gouty[17] += trr_01x *  fy  * hrr_0210z;
+                    goutz[17] += trr_01x * 1 *  fz ;
                 }
             }
         }
@@ -11382,714 +11430,212 @@ while (1) {
             double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
             double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
-                switch (gout_id) {
-                case 0: {
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
+                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
                 double dm_lk_02 = dm[(l0+0)*nao+(k0+2)];
-                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
-                double vxij_00 = goutx[0]*dm_lk_00 + goutx[3]*dm_lk_02 + goutx[6]*dm_lk_04;
+                double vxij_00 = goutx[0]*dm_lk_00 + goutx[6]*dm_lk_01 + goutx[12]*dm_lk_02;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
-                double vyij_00 = gouty[0]*dm_lk_00 + gouty[3]*dm_lk_02 + gouty[6]*dm_lk_04;
+                double vyij_00 = gouty[0]*dm_lk_00 + gouty[6]*dm_lk_01 + gouty[12]*dm_lk_02;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
-                double vzij_00 = goutz[0]*dm_lk_00 + goutz[3]*dm_lk_02 + goutz[6]*dm_lk_04;
+                double vzij_00 = goutz[0]*dm_lk_00 + goutz[6]*dm_lk_01 + goutz[12]*dm_lk_02;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
-                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
-                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
-                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
-                double vxij_02 = goutx[2]*dm_lk_01 + goutx[5]*dm_lk_03 + goutx[8]*dm_lk_05;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+2), vxij_02);
-                double vyij_02 = gouty[2]*dm_lk_01 + gouty[5]*dm_lk_03 + gouty[8]*dm_lk_05;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+2), vyij_02);
-                double vzij_02 = goutz[2]*dm_lk_01 + goutz[5]*dm_lk_03 + goutz[8]*dm_lk_05;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+2), vzij_02);
-                double vxij_04 = goutx[1]*dm_lk_00 + goutx[4]*dm_lk_02 + goutx[7]*dm_lk_04;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+4), vxij_04);
-                double vyij_04 = gouty[1]*dm_lk_00 + gouty[4]*dm_lk_02 + gouty[7]*dm_lk_04;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+4), vyij_04);
-                double vzij_04 = goutz[1]*dm_lk_00 + goutz[4]*dm_lk_02 + goutz[7]*dm_lk_04;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+4), vzij_04);
-                break; }
-                case 1: {
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double dm_lk_02 = dm[(l0+0)*nao+(k0+2)];
-                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
-                double vxij_01 = goutx[0]*dm_lk_00 + goutx[3]*dm_lk_02 + goutx[6]*dm_lk_04;
+                double vxij_01 = goutx[1]*dm_lk_00 + goutx[7]*dm_lk_01 + goutx[13]*dm_lk_02;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+1), vxij_01);
-                double vyij_01 = gouty[0]*dm_lk_00 + gouty[3]*dm_lk_02 + gouty[6]*dm_lk_04;
+                double vyij_01 = gouty[1]*dm_lk_00 + gouty[7]*dm_lk_01 + gouty[13]*dm_lk_02;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+1), vyij_01);
-                double vzij_01 = goutz[0]*dm_lk_00 + goutz[3]*dm_lk_02 + goutz[6]*dm_lk_04;
+                double vzij_01 = goutz[1]*dm_lk_00 + goutz[7]*dm_lk_01 + goutz[13]*dm_lk_02;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+1), vzij_01);
-                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
-                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
-                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
-                double vxij_03 = goutx[2]*dm_lk_01 + goutx[5]*dm_lk_03 + goutx[8]*dm_lk_05;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+3), vxij_03);
-                double vyij_03 = gouty[2]*dm_lk_01 + gouty[5]*dm_lk_03 + gouty[8]*dm_lk_05;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+3), vyij_03);
-                double vzij_03 = goutz[2]*dm_lk_01 + goutz[5]*dm_lk_03 + goutz[8]*dm_lk_05;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+3), vzij_03);
-                double vxij_05 = goutx[1]*dm_lk_00 + goutx[4]*dm_lk_02 + goutx[7]*dm_lk_04;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+5), vxij_05);
-                double vyij_05 = gouty[1]*dm_lk_00 + gouty[4]*dm_lk_02 + gouty[7]*dm_lk_04;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+5), vyij_05);
-                double vzij_05 = goutz[1]*dm_lk_00 + goutz[4]*dm_lk_02 + goutz[7]*dm_lk_04;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+5), vzij_05);
-                break; }
-                case 2: {
-                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
-                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
-                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
-                double vxij_00 = goutx[1]*dm_lk_01 + goutx[4]*dm_lk_03 + goutx[7]*dm_lk_05;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
-                double vyij_00 = gouty[1]*dm_lk_01 + gouty[4]*dm_lk_03 + gouty[7]*dm_lk_05;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
-                double vzij_00 = goutz[1]*dm_lk_01 + goutz[4]*dm_lk_03 + goutz[7]*dm_lk_05;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double dm_lk_02 = dm[(l0+0)*nao+(k0+2)];
-                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
-                double vxij_02 = goutx[0]*dm_lk_00 + goutx[3]*dm_lk_02 + goutx[6]*dm_lk_04;
+                double vxij_02 = goutx[2]*dm_lk_00 + goutx[8]*dm_lk_01 + goutx[14]*dm_lk_02;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+2), vxij_02);
-                double vyij_02 = gouty[0]*dm_lk_00 + gouty[3]*dm_lk_02 + gouty[6]*dm_lk_04;
+                double vyij_02 = gouty[2]*dm_lk_00 + gouty[8]*dm_lk_01 + gouty[14]*dm_lk_02;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+2), vyij_02);
-                double vzij_02 = goutz[0]*dm_lk_00 + goutz[3]*dm_lk_02 + goutz[6]*dm_lk_04;
+                double vzij_02 = goutz[2]*dm_lk_00 + goutz[8]*dm_lk_01 + goutz[14]*dm_lk_02;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+2), vzij_02);
-                double vxij_04 = goutx[2]*dm_lk_01 + goutx[5]*dm_lk_03 + goutx[8]*dm_lk_05;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+4), vxij_04);
-                double vyij_04 = gouty[2]*dm_lk_01 + gouty[5]*dm_lk_03 + gouty[8]*dm_lk_05;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+4), vyij_04);
-                double vzij_04 = goutz[2]*dm_lk_01 + goutz[5]*dm_lk_03 + goutz[8]*dm_lk_05;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+4), vzij_04);
-                break; }
-                case 3: {
-                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
-                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
-                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
-                double vxij_01 = goutx[1]*dm_lk_01 + goutx[4]*dm_lk_03 + goutx[7]*dm_lk_05;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+1), vxij_01);
-                double vyij_01 = gouty[1]*dm_lk_01 + gouty[4]*dm_lk_03 + gouty[7]*dm_lk_05;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+1), vyij_01);
-                double vzij_01 = goutz[1]*dm_lk_01 + goutz[4]*dm_lk_03 + goutz[7]*dm_lk_05;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+1), vzij_01);
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double dm_lk_02 = dm[(l0+0)*nao+(k0+2)];
-                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
-                double vxij_03 = goutx[0]*dm_lk_00 + goutx[3]*dm_lk_02 + goutx[6]*dm_lk_04;
+                double vxij_03 = goutx[3]*dm_lk_00 + goutx[9]*dm_lk_01 + goutx[15]*dm_lk_02;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+3), vxij_03);
-                double vyij_03 = gouty[0]*dm_lk_00 + gouty[3]*dm_lk_02 + gouty[6]*dm_lk_04;
+                double vyij_03 = gouty[3]*dm_lk_00 + gouty[9]*dm_lk_01 + gouty[15]*dm_lk_02;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+3), vyij_03);
-                double vzij_03 = goutz[0]*dm_lk_00 + goutz[3]*dm_lk_02 + goutz[6]*dm_lk_04;
+                double vzij_03 = goutz[3]*dm_lk_00 + goutz[9]*dm_lk_01 + goutz[15]*dm_lk_02;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+3), vzij_03);
-                double vxij_05 = goutx[2]*dm_lk_01 + goutx[5]*dm_lk_03 + goutx[8]*dm_lk_05;
+                double vxij_04 = goutx[4]*dm_lk_00 + goutx[10]*dm_lk_01 + goutx[16]*dm_lk_02;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+4), vxij_04);
+                double vyij_04 = gouty[4]*dm_lk_00 + gouty[10]*dm_lk_01 + gouty[16]*dm_lk_02;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+4), vyij_04);
+                double vzij_04 = goutz[4]*dm_lk_00 + goutz[10]*dm_lk_01 + goutz[16]*dm_lk_02;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+4), vzij_04);
+                double vxij_05 = goutx[5]*dm_lk_00 + goutx[11]*dm_lk_01 + goutx[17]*dm_lk_02;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+5), vxij_05);
-                double vyij_05 = gouty[2]*dm_lk_01 + gouty[5]*dm_lk_03 + gouty[8]*dm_lk_05;
+                double vyij_05 = gouty[5]*dm_lk_00 + gouty[11]*dm_lk_01 + gouty[17]*dm_lk_02;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+5), vyij_05);
-                double vzij_05 = goutz[2]*dm_lk_01 + goutz[5]*dm_lk_03 + goutz[8]*dm_lk_05;
+                double vzij_05 = goutz[5]*dm_lk_00 + goutz[11]*dm_lk_01 + goutz[17]*dm_lk_02;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+5), vzij_05);
-                break; }
-                }
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
-                double dm_ji_40 = dm[(j0+4)*nao+(i0+0)];
-                double vxkl_00 = goutx[0]*dm_ji_00 + goutx[1]*dm_ji_40;
-                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
-                double vykl_00 = gouty[0]*dm_ji_00 + gouty[1]*dm_ji_40;
-                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
-                double vzkl_00 = goutz[0]*dm_ji_00 + goutz[1]*dm_ji_40;
-                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
-                double dm_ji_20 = dm[(j0+2)*nao+(i0+0)];
-                double vxkl_10 = goutx[2]*dm_ji_20;
-                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
-                double vykl_10 = gouty[2]*dm_ji_20;
-                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
-                double vzkl_10 = goutz[2]*dm_ji_20;
-                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
-                double vxkl_20 = goutx[3]*dm_ji_00 + goutx[4]*dm_ji_40;
-                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
-                double vykl_20 = gouty[3]*dm_ji_00 + gouty[4]*dm_ji_40;
-                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
-                double vzkl_20 = goutz[3]*dm_ji_00 + goutz[4]*dm_ji_40;
-                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
-                double vxkl_30 = goutx[5]*dm_ji_20;
-                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
-                double vykl_30 = gouty[5]*dm_ji_20;
-                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
-                double vzkl_30 = goutz[5]*dm_ji_20;
-                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
-                double vxkl_40 = goutx[6]*dm_ji_00 + goutx[7]*dm_ji_40;
-                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
-                double vykl_40 = gouty[6]*dm_ji_00 + gouty[7]*dm_ji_40;
-                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
-                double vzkl_40 = goutz[6]*dm_ji_00 + goutz[7]*dm_ji_40;
-                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
-                double vxkl_50 = goutx[8]*dm_ji_20;
-                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
-                double vykl_50 = gouty[8]*dm_ji_20;
-                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
-                double vzkl_50 = goutz[8]*dm_ji_20;
-                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
-                break; }
-                case 1: {
                 double dm_ji_10 = dm[(j0+1)*nao+(i0+0)];
-                double dm_ji_50 = dm[(j0+5)*nao+(i0+0)];
-                double vxkl_00 = goutx[0]*dm_ji_10 + goutx[1]*dm_ji_50;
-                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
-                double vykl_00 = gouty[0]*dm_ji_10 + gouty[1]*dm_ji_50;
-                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
-                double vzkl_00 = goutz[0]*dm_ji_10 + goutz[1]*dm_ji_50;
-                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
-                double dm_ji_30 = dm[(j0+3)*nao+(i0+0)];
-                double vxkl_10 = goutx[2]*dm_ji_30;
-                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
-                double vykl_10 = gouty[2]*dm_ji_30;
-                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
-                double vzkl_10 = goutz[2]*dm_ji_30;
-                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
-                double vxkl_20 = goutx[3]*dm_ji_10 + goutx[4]*dm_ji_50;
-                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
-                double vykl_20 = gouty[3]*dm_ji_10 + gouty[4]*dm_ji_50;
-                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
-                double vzkl_20 = goutz[3]*dm_ji_10 + goutz[4]*dm_ji_50;
-                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
-                double vxkl_30 = goutx[5]*dm_ji_30;
-                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
-                double vykl_30 = gouty[5]*dm_ji_30;
-                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
-                double vzkl_30 = goutz[5]*dm_ji_30;
-                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
-                double vxkl_40 = goutx[6]*dm_ji_10 + goutx[7]*dm_ji_50;
-                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
-                double vykl_40 = gouty[6]*dm_ji_10 + gouty[7]*dm_ji_50;
-                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
-                double vzkl_40 = goutz[6]*dm_ji_10 + goutz[7]*dm_ji_50;
-                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
-                double vxkl_50 = goutx[8]*dm_ji_30;
-                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
-                double vykl_50 = gouty[8]*dm_ji_30;
-                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
-                double vzkl_50 = goutz[8]*dm_ji_30;
-                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
-                break; }
-                case 2: {
                 double dm_ji_20 = dm[(j0+2)*nao+(i0+0)];
-                double vxkl_00 = goutx[0]*dm_ji_20;
-                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
-                double vykl_00 = gouty[0]*dm_ji_20;
-                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
-                double vzkl_00 = goutz[0]*dm_ji_20;
-                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
-                double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
-                double dm_ji_40 = dm[(j0+4)*nao+(i0+0)];
-                double vxkl_10 = goutx[1]*dm_ji_00 + goutx[2]*dm_ji_40;
-                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
-                double vykl_10 = gouty[1]*dm_ji_00 + gouty[2]*dm_ji_40;
-                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
-                double vzkl_10 = goutz[1]*dm_ji_00 + goutz[2]*dm_ji_40;
-                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
-                double vxkl_20 = goutx[3]*dm_ji_20;
-                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
-                double vykl_20 = gouty[3]*dm_ji_20;
-                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
-                double vzkl_20 = goutz[3]*dm_ji_20;
-                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
-                double vxkl_30 = goutx[4]*dm_ji_00 + goutx[5]*dm_ji_40;
-                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
-                double vykl_30 = gouty[4]*dm_ji_00 + gouty[5]*dm_ji_40;
-                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
-                double vzkl_30 = goutz[4]*dm_ji_00 + goutz[5]*dm_ji_40;
-                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
-                double vxkl_40 = goutx[6]*dm_ji_20;
-                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
-                double vykl_40 = gouty[6]*dm_ji_20;
-                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
-                double vzkl_40 = goutz[6]*dm_ji_20;
-                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
-                double vxkl_50 = goutx[7]*dm_ji_00 + goutx[8]*dm_ji_40;
-                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
-                double vykl_50 = gouty[7]*dm_ji_00 + gouty[8]*dm_ji_40;
-                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
-                double vzkl_50 = goutz[7]*dm_ji_00 + goutz[8]*dm_ji_40;
-                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
-                break; }
-                case 3: {
                 double dm_ji_30 = dm[(j0+3)*nao+(i0+0)];
-                double vxkl_00 = goutx[0]*dm_ji_30;
-                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
-                double vykl_00 = gouty[0]*dm_ji_30;
-                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
-                double vzkl_00 = goutz[0]*dm_ji_30;
-                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
-                double dm_ji_10 = dm[(j0+1)*nao+(i0+0)];
+                double dm_ji_40 = dm[(j0+4)*nao+(i0+0)];
                 double dm_ji_50 = dm[(j0+5)*nao+(i0+0)];
-                double vxkl_10 = goutx[1]*dm_ji_10 + goutx[2]*dm_ji_50;
+                double vxkl_00 = goutx[0]*dm_ji_00 + goutx[1]*dm_ji_10 + goutx[2]*dm_ji_20 + goutx[3]*dm_ji_30 + goutx[4]*dm_ji_40 + goutx[5]*dm_ji_50;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                double vykl_00 = gouty[0]*dm_ji_00 + gouty[1]*dm_ji_10 + gouty[2]*dm_ji_20 + gouty[3]*dm_ji_30 + gouty[4]*dm_ji_40 + gouty[5]*dm_ji_50;
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                double vzkl_00 = goutz[0]*dm_ji_00 + goutz[1]*dm_ji_10 + goutz[2]*dm_ji_20 + goutz[3]*dm_ji_30 + goutz[4]*dm_ji_40 + goutz[5]*dm_ji_50;
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+                double vxkl_10 = goutx[6]*dm_ji_00 + goutx[7]*dm_ji_10 + goutx[8]*dm_ji_20 + goutx[9]*dm_ji_30 + goutx[10]*dm_ji_40 + goutx[11]*dm_ji_50;
                 atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
-                double vykl_10 = gouty[1]*dm_ji_10 + gouty[2]*dm_ji_50;
+                double vykl_10 = gouty[6]*dm_ji_00 + gouty[7]*dm_ji_10 + gouty[8]*dm_ji_20 + gouty[9]*dm_ji_30 + gouty[10]*dm_ji_40 + gouty[11]*dm_ji_50;
                 atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
-                double vzkl_10 = goutz[1]*dm_ji_10 + goutz[2]*dm_ji_50;
+                double vzkl_10 = goutz[6]*dm_ji_00 + goutz[7]*dm_ji_10 + goutz[8]*dm_ji_20 + goutz[9]*dm_ji_30 + goutz[10]*dm_ji_40 + goutz[11]*dm_ji_50;
                 atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
-                double vxkl_20 = goutx[3]*dm_ji_30;
+                double vxkl_20 = goutx[12]*dm_ji_00 + goutx[13]*dm_ji_10 + goutx[14]*dm_ji_20 + goutx[15]*dm_ji_30 + goutx[16]*dm_ji_40 + goutx[17]*dm_ji_50;
                 atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
-                double vykl_20 = gouty[3]*dm_ji_30;
+                double vykl_20 = gouty[12]*dm_ji_00 + gouty[13]*dm_ji_10 + gouty[14]*dm_ji_20 + gouty[15]*dm_ji_30 + gouty[16]*dm_ji_40 + gouty[17]*dm_ji_50;
                 atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
-                double vzkl_20 = goutz[3]*dm_ji_30;
+                double vzkl_20 = goutz[12]*dm_ji_00 + goutz[13]*dm_ji_10 + goutz[14]*dm_ji_20 + goutz[15]*dm_ji_30 + goutz[16]*dm_ji_40 + goutz[17]*dm_ji_50;
                 atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
-                double vxkl_30 = goutx[4]*dm_ji_10 + goutx[5]*dm_ji_50;
-                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
-                double vykl_30 = gouty[4]*dm_ji_10 + gouty[5]*dm_ji_50;
-                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
-                double vzkl_30 = goutz[4]*dm_ji_10 + goutz[5]*dm_ji_50;
-                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
-                double vxkl_40 = goutx[6]*dm_ji_30;
-                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
-                double vykl_40 = gouty[6]*dm_ji_30;
-                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
-                double vzkl_40 = goutz[6]*dm_ji_30;
-                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
-                double vxkl_50 = goutx[7]*dm_ji_10 + goutx[8]*dm_ji_50;
-                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
-                double vykl_50 = gouty[7]*dm_ji_10 + gouty[8]*dm_ji_50;
-                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
-                double vzkl_50 = goutz[7]*dm_ji_10 + goutz[8]*dm_ji_50;
-                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
-                break; }
-                }
             }
             if (do_k) {
                 double vxil_00 = 0;
                 double vyil_00 = 0;
                 double vzil_00 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_00 += goutx[0] * dm_jk_00;
                 vyil_00 += gouty[0] * dm_jk_00;
                 vzil_00 += goutz[0] * dm_jk_00;
-                double dm_jk_02 = dm[(j0+0)*nao+(k0+2)];
-                vxil_00 += goutx[3] * dm_jk_02;
-                vyil_00 += gouty[3] * dm_jk_02;
-                vzil_00 += goutz[3] * dm_jk_02;
-                double dm_jk_04 = dm[(j0+0)*nao+(k0+4)];
-                vxil_00 += goutx[6] * dm_jk_04;
-                vyil_00 += gouty[6] * dm_jk_04;
-                vzil_00 += goutz[6] * dm_jk_04;
-                double dm_jk_21 = dm[(j0+2)*nao+(k0+1)];
-                vxil_00 += goutx[2] * dm_jk_21;
-                vyil_00 += gouty[2] * dm_jk_21;
-                vzil_00 += goutz[2] * dm_jk_21;
-                double dm_jk_23 = dm[(j0+2)*nao+(k0+3)];
-                vxil_00 += goutx[5] * dm_jk_23;
-                vyil_00 += gouty[5] * dm_jk_23;
-                vzil_00 += goutz[5] * dm_jk_23;
-                double dm_jk_25 = dm[(j0+2)*nao+(k0+5)];
-                vxil_00 += goutx[8] * dm_jk_25;
-                vyil_00 += gouty[8] * dm_jk_25;
-                vzil_00 += goutz[8] * dm_jk_25;
-                double dm_jk_40 = dm[(j0+4)*nao+(k0+0)];
-                vxil_00 += goutx[1] * dm_jk_40;
-                vyil_00 += gouty[1] * dm_jk_40;
-                vzil_00 += goutz[1] * dm_jk_40;
-                double dm_jk_42 = dm[(j0+4)*nao+(k0+2)];
-                vxil_00 += goutx[4] * dm_jk_42;
-                vyil_00 += gouty[4] * dm_jk_42;
-                vzil_00 += goutz[4] * dm_jk_42;
-                double dm_jk_44 = dm[(j0+4)*nao+(k0+4)];
-                vxil_00 += goutx[7] * dm_jk_44;
-                vyil_00 += gouty[7] * dm_jk_44;
-                vzil_00 += goutz[7] * dm_jk_44;
-                break; }
-                case 1: {
-                double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
-                vxil_00 += goutx[0] * dm_jk_10;
-                vyil_00 += gouty[0] * dm_jk_10;
-                vzil_00 += goutz[0] * dm_jk_10;
-                double dm_jk_12 = dm[(j0+1)*nao+(k0+2)];
-                vxil_00 += goutx[3] * dm_jk_12;
-                vyil_00 += gouty[3] * dm_jk_12;
-                vzil_00 += goutz[3] * dm_jk_12;
-                double dm_jk_14 = dm[(j0+1)*nao+(k0+4)];
-                vxil_00 += goutx[6] * dm_jk_14;
-                vyil_00 += gouty[6] * dm_jk_14;
-                vzil_00 += goutz[6] * dm_jk_14;
-                double dm_jk_31 = dm[(j0+3)*nao+(k0+1)];
-                vxil_00 += goutx[2] * dm_jk_31;
-                vyil_00 += gouty[2] * dm_jk_31;
-                vzil_00 += goutz[2] * dm_jk_31;
-                double dm_jk_33 = dm[(j0+3)*nao+(k0+3)];
-                vxil_00 += goutx[5] * dm_jk_33;
-                vyil_00 += gouty[5] * dm_jk_33;
-                vzil_00 += goutz[5] * dm_jk_33;
-                double dm_jk_35 = dm[(j0+3)*nao+(k0+5)];
-                vxil_00 += goutx[8] * dm_jk_35;
-                vyil_00 += gouty[8] * dm_jk_35;
-                vzil_00 += goutz[8] * dm_jk_35;
-                double dm_jk_50 = dm[(j0+5)*nao+(k0+0)];
-                vxil_00 += goutx[1] * dm_jk_50;
-                vyil_00 += gouty[1] * dm_jk_50;
-                vzil_00 += goutz[1] * dm_jk_50;
-                double dm_jk_52 = dm[(j0+5)*nao+(k0+2)];
-                vxil_00 += goutx[4] * dm_jk_52;
-                vyil_00 += gouty[4] * dm_jk_52;
-                vzil_00 += goutz[4] * dm_jk_52;
-                double dm_jk_54 = dm[(j0+5)*nao+(k0+4)];
-                vxil_00 += goutx[7] * dm_jk_54;
-                vyil_00 += gouty[7] * dm_jk_54;
-                vzil_00 += goutz[7] * dm_jk_54;
-                break; }
-                case 2: {
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
-                vxil_00 += goutx[1] * dm_jk_01;
-                vyil_00 += gouty[1] * dm_jk_01;
-                vzil_00 += goutz[1] * dm_jk_01;
-                double dm_jk_03 = dm[(j0+0)*nao+(k0+3)];
-                vxil_00 += goutx[4] * dm_jk_03;
-                vyil_00 += gouty[4] * dm_jk_03;
-                vzil_00 += goutz[4] * dm_jk_03;
-                double dm_jk_05 = dm[(j0+0)*nao+(k0+5)];
-                vxil_00 += goutx[7] * dm_jk_05;
-                vyil_00 += gouty[7] * dm_jk_05;
-                vzil_00 += goutz[7] * dm_jk_05;
-                double dm_jk_20 = dm[(j0+2)*nao+(k0+0)];
-                vxil_00 += goutx[0] * dm_jk_20;
-                vyil_00 += gouty[0] * dm_jk_20;
-                vzil_00 += goutz[0] * dm_jk_20;
-                double dm_jk_22 = dm[(j0+2)*nao+(k0+2)];
-                vxil_00 += goutx[3] * dm_jk_22;
-                vyil_00 += gouty[3] * dm_jk_22;
-                vzil_00 += goutz[3] * dm_jk_22;
-                double dm_jk_24 = dm[(j0+2)*nao+(k0+4)];
-                vxil_00 += goutx[6] * dm_jk_24;
-                vyil_00 += gouty[6] * dm_jk_24;
-                vzil_00 += goutz[6] * dm_jk_24;
-                double dm_jk_41 = dm[(j0+4)*nao+(k0+1)];
-                vxil_00 += goutx[2] * dm_jk_41;
-                vyil_00 += gouty[2] * dm_jk_41;
-                vzil_00 += goutz[2] * dm_jk_41;
-                double dm_jk_43 = dm[(j0+4)*nao+(k0+3)];
-                vxil_00 += goutx[5] * dm_jk_43;
-                vyil_00 += gouty[5] * dm_jk_43;
-                vzil_00 += goutz[5] * dm_jk_43;
-                double dm_jk_45 = dm[(j0+4)*nao+(k0+5)];
-                vxil_00 += goutx[8] * dm_jk_45;
-                vyil_00 += gouty[8] * dm_jk_45;
-                vzil_00 += goutz[8] * dm_jk_45;
-                break; }
-                case 3: {
+                vxil_00 += goutx[6] * dm_jk_01;
+                vyil_00 += gouty[6] * dm_jk_01;
+                vzil_00 += goutz[6] * dm_jk_01;
+                double dm_jk_02 = dm[(j0+0)*nao+(k0+2)];
+                vxil_00 += goutx[12] * dm_jk_02;
+                vyil_00 += gouty[12] * dm_jk_02;
+                vzil_00 += goutz[12] * dm_jk_02;
+                double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
+                vxil_00 += goutx[1] * dm_jk_10;
+                vyil_00 += gouty[1] * dm_jk_10;
+                vzil_00 += goutz[1] * dm_jk_10;
                 double dm_jk_11 = dm[(j0+1)*nao+(k0+1)];
-                vxil_00 += goutx[1] * dm_jk_11;
-                vyil_00 += gouty[1] * dm_jk_11;
-                vzil_00 += goutz[1] * dm_jk_11;
-                double dm_jk_13 = dm[(j0+1)*nao+(k0+3)];
-                vxil_00 += goutx[4] * dm_jk_13;
-                vyil_00 += gouty[4] * dm_jk_13;
-                vzil_00 += goutz[4] * dm_jk_13;
-                double dm_jk_15 = dm[(j0+1)*nao+(k0+5)];
-                vxil_00 += goutx[7] * dm_jk_15;
-                vyil_00 += gouty[7] * dm_jk_15;
-                vzil_00 += goutz[7] * dm_jk_15;
+                vxil_00 += goutx[7] * dm_jk_11;
+                vyil_00 += gouty[7] * dm_jk_11;
+                vzil_00 += goutz[7] * dm_jk_11;
+                double dm_jk_12 = dm[(j0+1)*nao+(k0+2)];
+                vxil_00 += goutx[13] * dm_jk_12;
+                vyil_00 += gouty[13] * dm_jk_12;
+                vzil_00 += goutz[13] * dm_jk_12;
+                double dm_jk_20 = dm[(j0+2)*nao+(k0+0)];
+                vxil_00 += goutx[2] * dm_jk_20;
+                vyil_00 += gouty[2] * dm_jk_20;
+                vzil_00 += goutz[2] * dm_jk_20;
+                double dm_jk_21 = dm[(j0+2)*nao+(k0+1)];
+                vxil_00 += goutx[8] * dm_jk_21;
+                vyil_00 += gouty[8] * dm_jk_21;
+                vzil_00 += goutz[8] * dm_jk_21;
+                double dm_jk_22 = dm[(j0+2)*nao+(k0+2)];
+                vxil_00 += goutx[14] * dm_jk_22;
+                vyil_00 += gouty[14] * dm_jk_22;
+                vzil_00 += goutz[14] * dm_jk_22;
                 double dm_jk_30 = dm[(j0+3)*nao+(k0+0)];
-                vxil_00 += goutx[0] * dm_jk_30;
-                vyil_00 += gouty[0] * dm_jk_30;
-                vzil_00 += goutz[0] * dm_jk_30;
+                vxil_00 += goutx[3] * dm_jk_30;
+                vyil_00 += gouty[3] * dm_jk_30;
+                vzil_00 += goutz[3] * dm_jk_30;
+                double dm_jk_31 = dm[(j0+3)*nao+(k0+1)];
+                vxil_00 += goutx[9] * dm_jk_31;
+                vyil_00 += gouty[9] * dm_jk_31;
+                vzil_00 += goutz[9] * dm_jk_31;
                 double dm_jk_32 = dm[(j0+3)*nao+(k0+2)];
-                vxil_00 += goutx[3] * dm_jk_32;
-                vyil_00 += gouty[3] * dm_jk_32;
-                vzil_00 += goutz[3] * dm_jk_32;
-                double dm_jk_34 = dm[(j0+3)*nao+(k0+4)];
-                vxil_00 += goutx[6] * dm_jk_34;
-                vyil_00 += gouty[6] * dm_jk_34;
-                vzil_00 += goutz[6] * dm_jk_34;
+                vxil_00 += goutx[15] * dm_jk_32;
+                vyil_00 += gouty[15] * dm_jk_32;
+                vzil_00 += goutz[15] * dm_jk_32;
+                double dm_jk_40 = dm[(j0+4)*nao+(k0+0)];
+                vxil_00 += goutx[4] * dm_jk_40;
+                vyil_00 += gouty[4] * dm_jk_40;
+                vzil_00 += goutz[4] * dm_jk_40;
+                double dm_jk_41 = dm[(j0+4)*nao+(k0+1)];
+                vxil_00 += goutx[10] * dm_jk_41;
+                vyil_00 += gouty[10] * dm_jk_41;
+                vzil_00 += goutz[10] * dm_jk_41;
+                double dm_jk_42 = dm[(j0+4)*nao+(k0+2)];
+                vxil_00 += goutx[16] * dm_jk_42;
+                vyil_00 += gouty[16] * dm_jk_42;
+                vzil_00 += goutz[16] * dm_jk_42;
+                double dm_jk_50 = dm[(j0+5)*nao+(k0+0)];
+                vxil_00 += goutx[5] * dm_jk_50;
+                vyil_00 += gouty[5] * dm_jk_50;
+                vzil_00 += goutz[5] * dm_jk_50;
                 double dm_jk_51 = dm[(j0+5)*nao+(k0+1)];
-                vxil_00 += goutx[2] * dm_jk_51;
-                vyil_00 += gouty[2] * dm_jk_51;
-                vzil_00 += goutz[2] * dm_jk_51;
-                double dm_jk_53 = dm[(j0+5)*nao+(k0+3)];
-                vxil_00 += goutx[5] * dm_jk_53;
-                vyil_00 += gouty[5] * dm_jk_53;
-                vzil_00 += goutz[5] * dm_jk_53;
-                double dm_jk_55 = dm[(j0+5)*nao+(k0+5)];
-                vxil_00 += goutx[8] * dm_jk_55;
-                vyil_00 += gouty[8] * dm_jk_55;
-                vzil_00 += goutz[8] * dm_jk_55;
-                break; }
-                }
+                vxil_00 += goutx[11] * dm_jk_51;
+                vyil_00 += gouty[11] * dm_jk_51;
+                vzil_00 += goutz[11] * dm_jk_51;
+                double dm_jk_52 = dm[(j0+5)*nao+(k0+2)];
+                vxil_00 += goutx[17] * dm_jk_52;
+                vyil_00 += gouty[17] * dm_jk_52;
+                vzil_00 += goutz[17] * dm_jk_52;
                 atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
                 atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
                 atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
-                switch (gout_id) {
-                case 0: {
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double dm_jl_40 = dm[(j0+4)*nao+(l0+0)];
-                double vxik_00 = goutx[0]*dm_jl_00 + goutx[1]*dm_jl_40;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
-                double vyik_00 = gouty[0]*dm_jl_00 + gouty[1]*dm_jl_40;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
-                double vzik_00 = goutz[0]*dm_jl_00 + goutz[1]*dm_jl_40;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
-                double dm_jl_20 = dm[(j0+2)*nao+(l0+0)];
-                double vxik_01 = goutx[2]*dm_jl_20;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
-                double vyik_01 = gouty[2]*dm_jl_20;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
-                double vzik_01 = goutz[2]*dm_jl_20;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
-                double vxik_02 = goutx[3]*dm_jl_00 + goutx[4]*dm_jl_40;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
-                double vyik_02 = gouty[3]*dm_jl_00 + gouty[4]*dm_jl_40;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
-                double vzik_02 = goutz[3]*dm_jl_00 + goutz[4]*dm_jl_40;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
-                double vxik_03 = goutx[5]*dm_jl_20;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+3), vxik_03);
-                double vyik_03 = gouty[5]*dm_jl_20;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+3), vyik_03);
-                double vzik_03 = goutz[5]*dm_jl_20;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+3), vzik_03);
-                double vxik_04 = goutx[6]*dm_jl_00 + goutx[7]*dm_jl_40;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+4), vxik_04);
-                double vyik_04 = gouty[6]*dm_jl_00 + gouty[7]*dm_jl_40;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+4), vyik_04);
-                double vzik_04 = goutz[6]*dm_jl_00 + goutz[7]*dm_jl_40;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+4), vzik_04);
-                double vxik_05 = goutx[8]*dm_jl_20;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+5), vxik_05);
-                double vyik_05 = gouty[8]*dm_jl_20;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+5), vyik_05);
-                double vzik_05 = goutz[8]*dm_jl_20;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+5), vzik_05);
-                break; }
-                case 1: {
                 double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
-                double dm_jl_50 = dm[(j0+5)*nao+(l0+0)];
-                double vxik_00 = goutx[0]*dm_jl_10 + goutx[1]*dm_jl_50;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
-                double vyik_00 = gouty[0]*dm_jl_10 + gouty[1]*dm_jl_50;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
-                double vzik_00 = goutz[0]*dm_jl_10 + goutz[1]*dm_jl_50;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
-                double dm_jl_30 = dm[(j0+3)*nao+(l0+0)];
-                double vxik_01 = goutx[2]*dm_jl_30;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
-                double vyik_01 = gouty[2]*dm_jl_30;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
-                double vzik_01 = goutz[2]*dm_jl_30;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
-                double vxik_02 = goutx[3]*dm_jl_10 + goutx[4]*dm_jl_50;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
-                double vyik_02 = gouty[3]*dm_jl_10 + gouty[4]*dm_jl_50;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
-                double vzik_02 = goutz[3]*dm_jl_10 + goutz[4]*dm_jl_50;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
-                double vxik_03 = goutx[5]*dm_jl_30;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+3), vxik_03);
-                double vyik_03 = gouty[5]*dm_jl_30;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+3), vyik_03);
-                double vzik_03 = goutz[5]*dm_jl_30;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+3), vzik_03);
-                double vxik_04 = goutx[6]*dm_jl_10 + goutx[7]*dm_jl_50;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+4), vxik_04);
-                double vyik_04 = gouty[6]*dm_jl_10 + gouty[7]*dm_jl_50;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+4), vyik_04);
-                double vzik_04 = goutz[6]*dm_jl_10 + goutz[7]*dm_jl_50;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+4), vzik_04);
-                double vxik_05 = goutx[8]*dm_jl_30;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+5), vxik_05);
-                double vyik_05 = gouty[8]*dm_jl_30;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+5), vyik_05);
-                double vzik_05 = goutz[8]*dm_jl_30;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+5), vzik_05);
-                break; }
-                case 2: {
                 double dm_jl_20 = dm[(j0+2)*nao+(l0+0)];
-                double vxik_00 = goutx[0]*dm_jl_20;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
-                double vyik_00 = gouty[0]*dm_jl_20;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
-                double vzik_00 = goutz[0]*dm_jl_20;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
-                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double dm_jl_40 = dm[(j0+4)*nao+(l0+0)];
-                double vxik_01 = goutx[1]*dm_jl_00 + goutx[2]*dm_jl_40;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
-                double vyik_01 = gouty[1]*dm_jl_00 + gouty[2]*dm_jl_40;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
-                double vzik_01 = goutz[1]*dm_jl_00 + goutz[2]*dm_jl_40;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
-                double vxik_02 = goutx[3]*dm_jl_20;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
-                double vyik_02 = gouty[3]*dm_jl_20;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
-                double vzik_02 = goutz[3]*dm_jl_20;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
-                double vxik_03 = goutx[4]*dm_jl_00 + goutx[5]*dm_jl_40;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+3), vxik_03);
-                double vyik_03 = gouty[4]*dm_jl_00 + gouty[5]*dm_jl_40;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+3), vyik_03);
-                double vzik_03 = goutz[4]*dm_jl_00 + goutz[5]*dm_jl_40;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+3), vzik_03);
-                double vxik_04 = goutx[6]*dm_jl_20;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+4), vxik_04);
-                double vyik_04 = gouty[6]*dm_jl_20;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+4), vyik_04);
-                double vzik_04 = goutz[6]*dm_jl_20;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+4), vzik_04);
-                double vxik_05 = goutx[7]*dm_jl_00 + goutx[8]*dm_jl_40;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+5), vxik_05);
-                double vyik_05 = gouty[7]*dm_jl_00 + gouty[8]*dm_jl_40;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+5), vyik_05);
-                double vzik_05 = goutz[7]*dm_jl_00 + goutz[8]*dm_jl_40;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+5), vzik_05);
-                break; }
-                case 3: {
                 double dm_jl_30 = dm[(j0+3)*nao+(l0+0)];
-                double vxik_00 = goutx[0]*dm_jl_30;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
-                double vyik_00 = gouty[0]*dm_jl_30;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
-                double vzik_00 = goutz[0]*dm_jl_30;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
-                double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
+                double dm_jl_40 = dm[(j0+4)*nao+(l0+0)];
                 double dm_jl_50 = dm[(j0+5)*nao+(l0+0)];
-                double vxik_01 = goutx[1]*dm_jl_10 + goutx[2]*dm_jl_50;
+                double vxik_00 = goutx[0]*dm_jl_00 + goutx[1]*dm_jl_10 + goutx[2]*dm_jl_20 + goutx[3]*dm_jl_30 + goutx[4]*dm_jl_40 + goutx[5]*dm_jl_50;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
+                double vyik_00 = gouty[0]*dm_jl_00 + gouty[1]*dm_jl_10 + gouty[2]*dm_jl_20 + gouty[3]*dm_jl_30 + gouty[4]*dm_jl_40 + gouty[5]*dm_jl_50;
+                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
+                double vzik_00 = goutz[0]*dm_jl_00 + goutz[1]*dm_jl_10 + goutz[2]*dm_jl_20 + goutz[3]*dm_jl_30 + goutz[4]*dm_jl_40 + goutz[5]*dm_jl_50;
+                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
+                double vxik_01 = goutx[6]*dm_jl_00 + goutx[7]*dm_jl_10 + goutx[8]*dm_jl_20 + goutx[9]*dm_jl_30 + goutx[10]*dm_jl_40 + goutx[11]*dm_jl_50;
                 atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
-                double vyik_01 = gouty[1]*dm_jl_10 + gouty[2]*dm_jl_50;
+                double vyik_01 = gouty[6]*dm_jl_00 + gouty[7]*dm_jl_10 + gouty[8]*dm_jl_20 + gouty[9]*dm_jl_30 + gouty[10]*dm_jl_40 + gouty[11]*dm_jl_50;
                 atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
-                double vzik_01 = goutz[1]*dm_jl_10 + goutz[2]*dm_jl_50;
+                double vzik_01 = goutz[6]*dm_jl_00 + goutz[7]*dm_jl_10 + goutz[8]*dm_jl_20 + goutz[9]*dm_jl_30 + goutz[10]*dm_jl_40 + goutz[11]*dm_jl_50;
                 atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
-                double vxik_02 = goutx[3]*dm_jl_30;
+                double vxik_02 = goutx[12]*dm_jl_00 + goutx[13]*dm_jl_10 + goutx[14]*dm_jl_20 + goutx[15]*dm_jl_30 + goutx[16]*dm_jl_40 + goutx[17]*dm_jl_50;
                 atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
-                double vyik_02 = gouty[3]*dm_jl_30;
+                double vyik_02 = gouty[12]*dm_jl_00 + gouty[13]*dm_jl_10 + gouty[14]*dm_jl_20 + gouty[15]*dm_jl_30 + gouty[16]*dm_jl_40 + gouty[17]*dm_jl_50;
                 atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
-                double vzik_02 = goutz[3]*dm_jl_30;
+                double vzik_02 = goutz[12]*dm_jl_00 + goutz[13]*dm_jl_10 + goutz[14]*dm_jl_20 + goutz[15]*dm_jl_30 + goutz[16]*dm_jl_40 + goutz[17]*dm_jl_50;
                 atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
-                double vxik_03 = goutx[4]*dm_jl_10 + goutx[5]*dm_jl_50;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+3), vxik_03);
-                double vyik_03 = gouty[4]*dm_jl_10 + gouty[5]*dm_jl_50;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+3), vyik_03);
-                double vzik_03 = goutz[4]*dm_jl_10 + goutz[5]*dm_jl_50;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+3), vzik_03);
-                double vxik_04 = goutx[6]*dm_jl_30;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+4), vxik_04);
-                double vyik_04 = gouty[6]*dm_jl_30;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+4), vyik_04);
-                double vzik_04 = goutz[6]*dm_jl_30;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+4), vzik_04);
-                double vxik_05 = goutx[7]*dm_jl_10 + goutx[8]*dm_jl_50;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+5), vxik_05);
-                double vyik_05 = gouty[7]*dm_jl_10 + gouty[8]*dm_jl_50;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+5), vyik_05);
-                double vzik_05 = goutz[7]*dm_jl_10 + goutz[8]*dm_jl_50;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+5), vzik_05);
-                break; }
-                }
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
+                double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
                 double dm_ik_02 = dm[(i0+0)*nao+(k0+2)];
-                double dm_ik_04 = dm[(i0+0)*nao+(k0+4)];
-                double vxjl_00 = goutx[0]*dm_ik_00 + goutx[3]*dm_ik_02 + goutx[6]*dm_ik_04;
+                double vxjl_00 = goutx[0]*dm_ik_00 + goutx[6]*dm_ik_01 + goutx[12]*dm_ik_02;
                 atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
-                double vyjl_00 = gouty[0]*dm_ik_00 + gouty[3]*dm_ik_02 + gouty[6]*dm_ik_04;
+                double vyjl_00 = gouty[0]*dm_ik_00 + gouty[6]*dm_ik_01 + gouty[12]*dm_ik_02;
                 atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
-                double vzjl_00 = goutz[0]*dm_ik_00 + goutz[3]*dm_ik_02 + goutz[6]*dm_ik_04;
+                double vzjl_00 = goutz[0]*dm_ik_00 + goutz[6]*dm_ik_01 + goutz[12]*dm_ik_02;
                 atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
-                double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
-                double dm_ik_03 = dm[(i0+0)*nao+(k0+3)];
-                double dm_ik_05 = dm[(i0+0)*nao+(k0+5)];
-                double vxjl_20 = goutx[2]*dm_ik_01 + goutx[5]*dm_ik_03 + goutx[8]*dm_ik_05;
-                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
-                double vyjl_20 = gouty[2]*dm_ik_01 + gouty[5]*dm_ik_03 + gouty[8]*dm_ik_05;
-                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
-                double vzjl_20 = goutz[2]*dm_ik_01 + goutz[5]*dm_ik_03 + goutz[8]*dm_ik_05;
-                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
-                double vxjl_40 = goutx[1]*dm_ik_00 + goutx[4]*dm_ik_02 + goutx[7]*dm_ik_04;
-                atomicAdd(vk_x+(j0+4)*nao+(l0+0), vxjl_40);
-                double vyjl_40 = gouty[1]*dm_ik_00 + gouty[4]*dm_ik_02 + gouty[7]*dm_ik_04;
-                atomicAdd(vk_y+(j0+4)*nao+(l0+0), vyjl_40);
-                double vzjl_40 = goutz[1]*dm_ik_00 + goutz[4]*dm_ik_02 + goutz[7]*dm_ik_04;
-                atomicAdd(vk_z+(j0+4)*nao+(l0+0), vzjl_40);
-                break; }
-                case 1: {
-                double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
-                double dm_ik_02 = dm[(i0+0)*nao+(k0+2)];
-                double dm_ik_04 = dm[(i0+0)*nao+(k0+4)];
-                double vxjl_10 = goutx[0]*dm_ik_00 + goutx[3]*dm_ik_02 + goutx[6]*dm_ik_04;
+                double vxjl_10 = goutx[1]*dm_ik_00 + goutx[7]*dm_ik_01 + goutx[13]*dm_ik_02;
                 atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
-                double vyjl_10 = gouty[0]*dm_ik_00 + gouty[3]*dm_ik_02 + gouty[6]*dm_ik_04;
+                double vyjl_10 = gouty[1]*dm_ik_00 + gouty[7]*dm_ik_01 + gouty[13]*dm_ik_02;
                 atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
-                double vzjl_10 = goutz[0]*dm_ik_00 + goutz[3]*dm_ik_02 + goutz[6]*dm_ik_04;
+                double vzjl_10 = goutz[1]*dm_ik_00 + goutz[7]*dm_ik_01 + goutz[13]*dm_ik_02;
                 atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
-                double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
-                double dm_ik_03 = dm[(i0+0)*nao+(k0+3)];
-                double dm_ik_05 = dm[(i0+0)*nao+(k0+5)];
-                double vxjl_30 = goutx[2]*dm_ik_01 + goutx[5]*dm_ik_03 + goutx[8]*dm_ik_05;
-                atomicAdd(vk_x+(j0+3)*nao+(l0+0), vxjl_30);
-                double vyjl_30 = gouty[2]*dm_ik_01 + gouty[5]*dm_ik_03 + gouty[8]*dm_ik_05;
-                atomicAdd(vk_y+(j0+3)*nao+(l0+0), vyjl_30);
-                double vzjl_30 = goutz[2]*dm_ik_01 + goutz[5]*dm_ik_03 + goutz[8]*dm_ik_05;
-                atomicAdd(vk_z+(j0+3)*nao+(l0+0), vzjl_30);
-                double vxjl_50 = goutx[1]*dm_ik_00 + goutx[4]*dm_ik_02 + goutx[7]*dm_ik_04;
-                atomicAdd(vk_x+(j0+5)*nao+(l0+0), vxjl_50);
-                double vyjl_50 = gouty[1]*dm_ik_00 + gouty[4]*dm_ik_02 + gouty[7]*dm_ik_04;
-                atomicAdd(vk_y+(j0+5)*nao+(l0+0), vyjl_50);
-                double vzjl_50 = goutz[1]*dm_ik_00 + goutz[4]*dm_ik_02 + goutz[7]*dm_ik_04;
-                atomicAdd(vk_z+(j0+5)*nao+(l0+0), vzjl_50);
-                break; }
-                case 2: {
-                double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
-                double dm_ik_03 = dm[(i0+0)*nao+(k0+3)];
-                double dm_ik_05 = dm[(i0+0)*nao+(k0+5)];
-                double vxjl_00 = goutx[1]*dm_ik_01 + goutx[4]*dm_ik_03 + goutx[7]*dm_ik_05;
-                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
-                double vyjl_00 = gouty[1]*dm_ik_01 + gouty[4]*dm_ik_03 + gouty[7]*dm_ik_05;
-                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
-                double vzjl_00 = goutz[1]*dm_ik_01 + goutz[4]*dm_ik_03 + goutz[7]*dm_ik_05;
-                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
-                double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
-                double dm_ik_02 = dm[(i0+0)*nao+(k0+2)];
-                double dm_ik_04 = dm[(i0+0)*nao+(k0+4)];
-                double vxjl_20 = goutx[0]*dm_ik_00 + goutx[3]*dm_ik_02 + goutx[6]*dm_ik_04;
+                double vxjl_20 = goutx[2]*dm_ik_00 + goutx[8]*dm_ik_01 + goutx[14]*dm_ik_02;
                 atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
-                double vyjl_20 = gouty[0]*dm_ik_00 + gouty[3]*dm_ik_02 + gouty[6]*dm_ik_04;
+                double vyjl_20 = gouty[2]*dm_ik_00 + gouty[8]*dm_ik_01 + gouty[14]*dm_ik_02;
                 atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
-                double vzjl_20 = goutz[0]*dm_ik_00 + goutz[3]*dm_ik_02 + goutz[6]*dm_ik_04;
+                double vzjl_20 = goutz[2]*dm_ik_00 + goutz[8]*dm_ik_01 + goutz[14]*dm_ik_02;
                 atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
-                double vxjl_40 = goutx[2]*dm_ik_01 + goutx[5]*dm_ik_03 + goutx[8]*dm_ik_05;
-                atomicAdd(vk_x+(j0+4)*nao+(l0+0), vxjl_40);
-                double vyjl_40 = gouty[2]*dm_ik_01 + gouty[5]*dm_ik_03 + gouty[8]*dm_ik_05;
-                atomicAdd(vk_y+(j0+4)*nao+(l0+0), vyjl_40);
-                double vzjl_40 = goutz[2]*dm_ik_01 + goutz[5]*dm_ik_03 + goutz[8]*dm_ik_05;
-                atomicAdd(vk_z+(j0+4)*nao+(l0+0), vzjl_40);
-                break; }
-                case 3: {
-                double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
-                double dm_ik_03 = dm[(i0+0)*nao+(k0+3)];
-                double dm_ik_05 = dm[(i0+0)*nao+(k0+5)];
-                double vxjl_10 = goutx[1]*dm_ik_01 + goutx[4]*dm_ik_03 + goutx[7]*dm_ik_05;
-                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
-                double vyjl_10 = gouty[1]*dm_ik_01 + gouty[4]*dm_ik_03 + gouty[7]*dm_ik_05;
-                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
-                double vzjl_10 = goutz[1]*dm_ik_01 + goutz[4]*dm_ik_03 + goutz[7]*dm_ik_05;
-                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
-                double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
-                double dm_ik_02 = dm[(i0+0)*nao+(k0+2)];
-                double dm_ik_04 = dm[(i0+0)*nao+(k0+4)];
-                double vxjl_30 = goutx[0]*dm_ik_00 + goutx[3]*dm_ik_02 + goutx[6]*dm_ik_04;
+                double vxjl_30 = goutx[3]*dm_ik_00 + goutx[9]*dm_ik_01 + goutx[15]*dm_ik_02;
                 atomicAdd(vk_x+(j0+3)*nao+(l0+0), vxjl_30);
-                double vyjl_30 = gouty[0]*dm_ik_00 + gouty[3]*dm_ik_02 + gouty[6]*dm_ik_04;
+                double vyjl_30 = gouty[3]*dm_ik_00 + gouty[9]*dm_ik_01 + gouty[15]*dm_ik_02;
                 atomicAdd(vk_y+(j0+3)*nao+(l0+0), vyjl_30);
-                double vzjl_30 = goutz[0]*dm_ik_00 + goutz[3]*dm_ik_02 + goutz[6]*dm_ik_04;
+                double vzjl_30 = goutz[3]*dm_ik_00 + goutz[9]*dm_ik_01 + goutz[15]*dm_ik_02;
                 atomicAdd(vk_z+(j0+3)*nao+(l0+0), vzjl_30);
-                double vxjl_50 = goutx[2]*dm_ik_01 + goutx[5]*dm_ik_03 + goutx[8]*dm_ik_05;
+                double vxjl_40 = goutx[4]*dm_ik_00 + goutx[10]*dm_ik_01 + goutx[16]*dm_ik_02;
+                atomicAdd(vk_x+(j0+4)*nao+(l0+0), vxjl_40);
+                double vyjl_40 = gouty[4]*dm_ik_00 + gouty[10]*dm_ik_01 + gouty[16]*dm_ik_02;
+                atomicAdd(vk_y+(j0+4)*nao+(l0+0), vyjl_40);
+                double vzjl_40 = goutz[4]*dm_ik_00 + goutz[10]*dm_ik_01 + goutz[16]*dm_ik_02;
+                atomicAdd(vk_z+(j0+4)*nao+(l0+0), vzjl_40);
+                double vxjl_50 = goutx[5]*dm_ik_00 + goutx[11]*dm_ik_01 + goutx[17]*dm_ik_02;
                 atomicAdd(vk_x+(j0+5)*nao+(l0+0), vxjl_50);
-                double vyjl_50 = gouty[2]*dm_ik_01 + gouty[5]*dm_ik_03 + gouty[8]*dm_ik_05;
+                double vyjl_50 = gouty[5]*dm_ik_00 + gouty[11]*dm_ik_01 + gouty[17]*dm_ik_02;
                 atomicAdd(vk_y+(j0+5)*nao+(l0+0), vyjl_50);
-                double vzjl_50 = goutz[2]*dm_ik_01 + goutz[5]*dm_ik_03 + goutz[8]*dm_ik_05;
+                double vzjl_50 = goutz[5]*dm_ik_00 + goutz[11]*dm_ik_01 + goutz[17]*dm_ik_02;
                 atomicAdd(vk_z+(j0+5)*nao+(l0+0), vzjl_50);
-                break; }
-                }
-                switch (gout_id) {
-                case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 double vxjk_00 = goutx[0]*dm_il_00;
                 atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
@@ -12097,227 +11643,689 @@ while (1) {
                 atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
                 double vzjk_00 = goutz[0]*dm_il_00;
                 atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double vxjk_02 = goutx[3]*dm_il_00;
+                double vxjk_01 = goutx[6]*dm_il_00;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
+                double vyjk_01 = gouty[6]*dm_il_00;
+                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
+                double vzjk_01 = goutz[6]*dm_il_00;
+                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
+                double vxjk_02 = goutx[12]*dm_il_00;
                 atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
-                double vyjk_02 = gouty[3]*dm_il_00;
+                double vyjk_02 = gouty[12]*dm_il_00;
                 atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
-                double vzjk_02 = goutz[3]*dm_il_00;
+                double vzjk_02 = goutz[12]*dm_il_00;
                 atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
+                double vxjk_10 = goutx[1]*dm_il_00;
+                atomicAdd(vk_x+(j0+1)*nao+(k0+0), vxjk_10);
+                double vyjk_10 = gouty[1]*dm_il_00;
+                atomicAdd(vk_y+(j0+1)*nao+(k0+0), vyjk_10);
+                double vzjk_10 = goutz[1]*dm_il_00;
+                atomicAdd(vk_z+(j0+1)*nao+(k0+0), vzjk_10);
+                double vxjk_11 = goutx[7]*dm_il_00;
+                atomicAdd(vk_x+(j0+1)*nao+(k0+1), vxjk_11);
+                double vyjk_11 = gouty[7]*dm_il_00;
+                atomicAdd(vk_y+(j0+1)*nao+(k0+1), vyjk_11);
+                double vzjk_11 = goutz[7]*dm_il_00;
+                atomicAdd(vk_z+(j0+1)*nao+(k0+1), vzjk_11);
+                double vxjk_12 = goutx[13]*dm_il_00;
+                atomicAdd(vk_x+(j0+1)*nao+(k0+2), vxjk_12);
+                double vyjk_12 = gouty[13]*dm_il_00;
+                atomicAdd(vk_y+(j0+1)*nao+(k0+2), vyjk_12);
+                double vzjk_12 = goutz[13]*dm_il_00;
+                atomicAdd(vk_z+(j0+1)*nao+(k0+2), vzjk_12);
+                double vxjk_20 = goutx[2]*dm_il_00;
+                atomicAdd(vk_x+(j0+2)*nao+(k0+0), vxjk_20);
+                double vyjk_20 = gouty[2]*dm_il_00;
+                atomicAdd(vk_y+(j0+2)*nao+(k0+0), vyjk_20);
+                double vzjk_20 = goutz[2]*dm_il_00;
+                atomicAdd(vk_z+(j0+2)*nao+(k0+0), vzjk_20);
+                double vxjk_21 = goutx[8]*dm_il_00;
+                atomicAdd(vk_x+(j0+2)*nao+(k0+1), vxjk_21);
+                double vyjk_21 = gouty[8]*dm_il_00;
+                atomicAdd(vk_y+(j0+2)*nao+(k0+1), vyjk_21);
+                double vzjk_21 = goutz[8]*dm_il_00;
+                atomicAdd(vk_z+(j0+2)*nao+(k0+1), vzjk_21);
+                double vxjk_22 = goutx[14]*dm_il_00;
+                atomicAdd(vk_x+(j0+2)*nao+(k0+2), vxjk_22);
+                double vyjk_22 = gouty[14]*dm_il_00;
+                atomicAdd(vk_y+(j0+2)*nao+(k0+2), vyjk_22);
+                double vzjk_22 = goutz[14]*dm_il_00;
+                atomicAdd(vk_z+(j0+2)*nao+(k0+2), vzjk_22);
+                double vxjk_30 = goutx[3]*dm_il_00;
+                atomicAdd(vk_x+(j0+3)*nao+(k0+0), vxjk_30);
+                double vyjk_30 = gouty[3]*dm_il_00;
+                atomicAdd(vk_y+(j0+3)*nao+(k0+0), vyjk_30);
+                double vzjk_30 = goutz[3]*dm_il_00;
+                atomicAdd(vk_z+(j0+3)*nao+(k0+0), vzjk_30);
+                double vxjk_31 = goutx[9]*dm_il_00;
+                atomicAdd(vk_x+(j0+3)*nao+(k0+1), vxjk_31);
+                double vyjk_31 = gouty[9]*dm_il_00;
+                atomicAdd(vk_y+(j0+3)*nao+(k0+1), vyjk_31);
+                double vzjk_31 = goutz[9]*dm_il_00;
+                atomicAdd(vk_z+(j0+3)*nao+(k0+1), vzjk_31);
+                double vxjk_32 = goutx[15]*dm_il_00;
+                atomicAdd(vk_x+(j0+3)*nao+(k0+2), vxjk_32);
+                double vyjk_32 = gouty[15]*dm_il_00;
+                atomicAdd(vk_y+(j0+3)*nao+(k0+2), vyjk_32);
+                double vzjk_32 = goutz[15]*dm_il_00;
+                atomicAdd(vk_z+(j0+3)*nao+(k0+2), vzjk_32);
+                double vxjk_40 = goutx[4]*dm_il_00;
+                atomicAdd(vk_x+(j0+4)*nao+(k0+0), vxjk_40);
+                double vyjk_40 = gouty[4]*dm_il_00;
+                atomicAdd(vk_y+(j0+4)*nao+(k0+0), vyjk_40);
+                double vzjk_40 = goutz[4]*dm_il_00;
+                atomicAdd(vk_z+(j0+4)*nao+(k0+0), vzjk_40);
+                double vxjk_41 = goutx[10]*dm_il_00;
+                atomicAdd(vk_x+(j0+4)*nao+(k0+1), vxjk_41);
+                double vyjk_41 = gouty[10]*dm_il_00;
+                atomicAdd(vk_y+(j0+4)*nao+(k0+1), vyjk_41);
+                double vzjk_41 = goutz[10]*dm_il_00;
+                atomicAdd(vk_z+(j0+4)*nao+(k0+1), vzjk_41);
+                double vxjk_42 = goutx[16]*dm_il_00;
+                atomicAdd(vk_x+(j0+4)*nao+(k0+2), vxjk_42);
+                double vyjk_42 = gouty[16]*dm_il_00;
+                atomicAdd(vk_y+(j0+4)*nao+(k0+2), vyjk_42);
+                double vzjk_42 = goutz[16]*dm_il_00;
+                atomicAdd(vk_z+(j0+4)*nao+(k0+2), vzjk_42);
+                double vxjk_50 = goutx[5]*dm_il_00;
+                atomicAdd(vk_x+(j0+5)*nao+(k0+0), vxjk_50);
+                double vyjk_50 = gouty[5]*dm_il_00;
+                atomicAdd(vk_y+(j0+5)*nao+(k0+0), vyjk_50);
+                double vzjk_50 = goutz[5]*dm_il_00;
+                atomicAdd(vk_z+(j0+5)*nao+(k0+0), vzjk_50);
+                double vxjk_51 = goutx[11]*dm_il_00;
+                atomicAdd(vk_x+(j0+5)*nao+(k0+1), vxjk_51);
+                double vyjk_51 = gouty[11]*dm_il_00;
+                atomicAdd(vk_y+(j0+5)*nao+(k0+1), vyjk_51);
+                double vzjk_51 = goutz[11]*dm_il_00;
+                atomicAdd(vk_z+(j0+5)*nao+(k0+1), vzjk_51);
+                double vxjk_52 = goutx[17]*dm_il_00;
+                atomicAdd(vk_x+(j0+5)*nao+(k0+2), vxjk_52);
+                double vyjk_52 = gouty[17]*dm_il_00;
+                atomicAdd(vk_y+(j0+5)*nao+(k0+2), vyjk_52);
+                double vzjk_52 = goutz[17]*dm_il_00;
+                atomicAdd(vk_z+(j0+5)*nao+(k0+2), vzjk_52);
+            }
+        }
+        #pragma unroll
+        for (int n = 0; n < 18; ++n) {
+            goutx[n] = 0;
+            gouty[n] = 0;
+            goutz[n] = 0;
+        }
+        for (int klp = 0; klp < kprim*lprim; ++klp) {
+            int kp = klp / lprim;
+            int lp = klp % lprim;
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
+            double akl = ak + al;
+            double al_akl = al / akl;
+            double theta_kl = ak * al_akl;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh == lsh) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
+            for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
+                double xij = ri[0] + xpa;
+                double yij = ri[1] + ypa;
+                double zij = ri[2] + zpa;
+                double xqc = xlxk * al_akl;
+                double yqc = ylyk * al_akl;
+                double zqc = zlzk * al_akl;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
+                double xpq = xij - xkl;
+                double ypq = yij - ykl;
+                double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                if (task_id >= ntasks) {
+                    continue;
+                }
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
+                    double rt = rw[ 2*irys   *nsq_per_block];
+                    double aij = aij_cache[0];
+                    double rt_aa = rt / (aij + akl);
+                    double b00 = .5 * rt_aa;
+                    double fx, fy, fz;
+                    double rt_aij = rt_aa * akl;
+                    double b10 = .5/aij * (1 - rt_aij);
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
+                    double trr_10x = c0x * 1;
+                    double trr_20x = c0x * trr_10x + 1*b10 * 1;
+                    double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                    double hrr_2100x = trr_30x - rjri[0] * trr_20x;
+                    double hrr_1100x = trr_20x - rjri[0] * trr_10x;
+                    double hrr_1200x = hrr_2100x - rjri[0] * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1200x;
+                    double rt_akl = rt_aa * aij;
+                    double b01 = .5/akl * (1 - rt_akl);
+                    double cpy = yqc + ypq*rt_akl;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
+                    double trr_10y = c0y * 1;
+                    double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                    double trr_01y = cpy * 1;
+                    double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
+                    fy = aij_cache[2] * trr_12y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
+                    double trr_10z = c0z * wt;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0100x = trr_10x - rjri[0] * 1;
+                    double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
+                    double trr_02y = cpy * trr_01y + 1*b01 * 1;
+                    goutx[0] +=  fx  * trr_02y * wt;
+                    gouty[0] += hrr_0200x *  fy  * wt;
+                    goutz[0] += hrr_0200x * trr_02y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                    double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                    double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
+                    double hrr_1120y = trr_22y - rjri[1] * trr_12y;
+                    fy = aij_cache[2] * hrr_1120y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0120y = trr_12y - rjri[1] * trr_02y;
+                    goutx[1] +=  fx  * hrr_0120y * wt;
+                    gouty[1] += hrr_0100x *  fy  * wt;
+                    goutz[1] += hrr_0100x * hrr_0120y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_12y;
+                    double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                    double hrr_1100z = trr_20z - rjri[2] * trr_10z;
+                    fz = aij_cache[2] * hrr_1100z;
+                    double hrr_0100z = trr_10z - rjri[2] * wt;
+                    goutx[2] +=  fx  * trr_02y * hrr_0100z;
+                    gouty[2] += hrr_0100x *  fy  * hrr_0100z;
+                    goutz[2] += hrr_0100x * trr_02y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                    double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                    double trr_32y = cpy * trr_31y + 1*b01 * trr_30y + 3*b00 * trr_21y;
+                    double hrr_2120y = trr_32y - rjri[1] * trr_22y;
+                    double hrr_1220y = hrr_2120y - rjri[1] * hrr_1120y;
+                    fy = aij_cache[2] * hrr_1220y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0220y = hrr_1120y - rjri[1] * hrr_0120y;
+                    goutx[3] +=  fx  * hrr_0220y * wt;
+                    gouty[3] += 1 *  fy  * wt;
+                    goutz[3] += 1 * hrr_0220y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1120y;
+                    fz = aij_cache[2] * hrr_1100z;
+                    goutx[4] +=  fx  * hrr_0120y * hrr_0100z;
+                    gouty[4] += 1 *  fy  * hrr_0100z;
+                    goutz[4] += 1 * hrr_0120y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_12y;
+                    double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                    double hrr_2100z = trr_30z - rjri[2] * trr_20z;
+                    double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1200z;
+                    double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
+                    goutx[5] +=  fx  * trr_02y * hrr_0200z;
+                    gouty[5] += 1 *  fy  * hrr_0200z;
+                    goutz[5] += 1 * trr_02y *  fz ;
+                    fx = aij_cache[2] * hrr_1200x;
+                    fy = aij_cache[2] * trr_11y;
+                    double cpz = zqc + zpq*rt_akl;
+                    double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                    fz = aij_cache[2] * trr_11z;
+                    double trr_01z = cpz * wt;
+                    goutx[6] +=  fx  * trr_01y * trr_01z;
+                    gouty[6] += hrr_0200x *  fy  * trr_01z;
+                    goutz[6] += hrr_0200x * trr_01y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    double hrr_1110y = trr_21y - rjri[1] * trr_11y;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_11z;
+                    double hrr_0110y = trr_11y - rjri[1] * trr_01y;
+                    goutx[7] +=  fx  * hrr_0110y * trr_01z;
+                    gouty[7] += hrr_0100x *  fy  * trr_01z;
+                    goutz[7] += hrr_0100x * hrr_0110y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_11y;
+                    double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                    double hrr_1110z = trr_21z - rjri[2] * trr_11z;
+                    fz = aij_cache[2] * hrr_1110z;
+                    double hrr_0110z = trr_11z - rjri[2] * trr_01z;
+                    goutx[8] +=  fx  * trr_01y * hrr_0110z;
+                    gouty[8] += hrr_0100x *  fy  * hrr_0110z;
+                    goutz[8] += hrr_0100x * trr_01y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    double hrr_2110y = trr_31y - rjri[1] * trr_21y;
+                    double hrr_1210y = hrr_2110y - rjri[1] * hrr_1110y;
+                    fy = aij_cache[2] * hrr_1210y;
+                    fz = aij_cache[2] * trr_11z;
+                    double hrr_0210y = hrr_1110y - rjri[1] * hrr_0110y;
+                    goutx[9] +=  fx  * hrr_0210y * trr_01z;
+                    gouty[9] += 1 *  fy  * trr_01z;
+                    goutz[9] += 1 * hrr_0210y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * hrr_1110z;
+                    goutx[10] +=  fx  * hrr_0110y * hrr_0110z;
+                    gouty[10] += 1 *  fy  * hrr_0110z;
+                    goutz[10] += 1 * hrr_0110y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                    double hrr_2110z = trr_31z - rjri[2] * trr_21z;
+                    double hrr_1210z = hrr_2110z - rjri[2] * hrr_1110z;
+                    fz = aij_cache[2] * hrr_1210z;
+                    double hrr_0210z = hrr_1110z - rjri[2] * hrr_0110z;
+                    goutx[11] +=  fx  * trr_01y * hrr_0210z;
+                    gouty[11] += 1 *  fy  * hrr_0210z;
+                    goutz[11] += 1 * trr_01y *  fz ;
+                    fx = aij_cache[2] * hrr_1200x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
+                    fz = aij_cache[2] * trr_12z;
+                    double trr_02z = cpz * trr_01z + 1*b01 * wt;
+                    goutx[12] +=  fx  * 1 * trr_02z;
+                    gouty[12] += hrr_0200x *  fy  * trr_02z;
+                    goutz[12] += hrr_0200x * 1 *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    double hrr_1100y = trr_20y - rjri[1] * trr_10y;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_12z;
+                    double hrr_0100y = trr_10y - rjri[1] * 1;
+                    goutx[13] +=  fx  * hrr_0100y * trr_02z;
+                    gouty[13] += hrr_0100x *  fy  * trr_02z;
+                    goutz[13] += hrr_0100x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
+                    double hrr_1120z = trr_22z - rjri[2] * trr_12z;
+                    fz = aij_cache[2] * hrr_1120z;
+                    double hrr_0120z = trr_12z - rjri[2] * trr_02z;
+                    goutx[14] +=  fx  * 1 * hrr_0120z;
+                    gouty[14] += hrr_0100x *  fy  * hrr_0120z;
+                    goutz[14] += hrr_0100x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    double hrr_2100y = trr_30y - rjri[1] * trr_20y;
+                    double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
+                    fy = aij_cache[2] * hrr_1200y;
+                    fz = aij_cache[2] * trr_12z;
+                    double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
+                    goutx[15] +=  fx  * hrr_0200y * trr_02z;
+                    gouty[15] += 1 *  fy  * trr_02z;
+                    goutz[15] += 1 * hrr_0200y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1120z;
+                    goutx[16] +=  fx  * hrr_0100y * hrr_0120z;
+                    gouty[16] += 1 *  fy  * hrr_0120z;
+                    goutz[16] += 1 * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
+                    double hrr_2120z = trr_32z - rjri[2] * trr_22z;
+                    double hrr_1220z = hrr_2120z - rjri[2] * hrr_1120z;
+                    fz = aij_cache[2] * hrr_1220z;
+                    double hrr_0220z = hrr_1120z - rjri[2] * hrr_0120z;
+                    goutx[17] +=  fx  * 1 * hrr_0220z;
+                    gouty[17] += 1 *  fy  * hrr_0220z;
+                    goutz[17] += 1 * 1 *  fz ;
+                }
+            }
+        }
+        if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
+            int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
+            double *dm = jk.dm;
+            int do_j = jk.vj != NULL;
+            int do_k = jk.vk != NULL;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
+            if (do_j) {
+                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
+                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
+                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
+                double vxij_00 = goutx[0]*dm_lk_03 + goutx[6]*dm_lk_04 + goutx[12]*dm_lk_05;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
+                double vyij_00 = gouty[0]*dm_lk_03 + gouty[6]*dm_lk_04 + gouty[12]*dm_lk_05;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
+                double vzij_00 = goutz[0]*dm_lk_03 + goutz[6]*dm_lk_04 + goutz[12]*dm_lk_05;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
+                double vxij_01 = goutx[1]*dm_lk_03 + goutx[7]*dm_lk_04 + goutx[13]*dm_lk_05;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+1), vxij_01);
+                double vyij_01 = gouty[1]*dm_lk_03 + gouty[7]*dm_lk_04 + gouty[13]*dm_lk_05;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+1), vyij_01);
+                double vzij_01 = goutz[1]*dm_lk_03 + goutz[7]*dm_lk_04 + goutz[13]*dm_lk_05;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+1), vzij_01);
+                double vxij_02 = goutx[2]*dm_lk_03 + goutx[8]*dm_lk_04 + goutx[14]*dm_lk_05;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+2), vxij_02);
+                double vyij_02 = gouty[2]*dm_lk_03 + gouty[8]*dm_lk_04 + gouty[14]*dm_lk_05;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+2), vyij_02);
+                double vzij_02 = goutz[2]*dm_lk_03 + goutz[8]*dm_lk_04 + goutz[14]*dm_lk_05;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+2), vzij_02);
+                double vxij_03 = goutx[3]*dm_lk_03 + goutx[9]*dm_lk_04 + goutx[15]*dm_lk_05;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+3), vxij_03);
+                double vyij_03 = gouty[3]*dm_lk_03 + gouty[9]*dm_lk_04 + gouty[15]*dm_lk_05;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+3), vyij_03);
+                double vzij_03 = goutz[3]*dm_lk_03 + goutz[9]*dm_lk_04 + goutz[15]*dm_lk_05;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+3), vzij_03);
+                double vxij_04 = goutx[4]*dm_lk_03 + goutx[10]*dm_lk_04 + goutx[16]*dm_lk_05;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+4), vxij_04);
+                double vyij_04 = gouty[4]*dm_lk_03 + gouty[10]*dm_lk_04 + gouty[16]*dm_lk_05;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+4), vyij_04);
+                double vzij_04 = goutz[4]*dm_lk_03 + goutz[10]*dm_lk_04 + goutz[16]*dm_lk_05;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+4), vzij_04);
+                double vxij_05 = goutx[5]*dm_lk_03 + goutx[11]*dm_lk_04 + goutx[17]*dm_lk_05;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+5), vxij_05);
+                double vyij_05 = gouty[5]*dm_lk_03 + gouty[11]*dm_lk_04 + gouty[17]*dm_lk_05;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+5), vyij_05);
+                double vzij_05 = goutz[5]*dm_lk_03 + goutz[11]*dm_lk_04 + goutz[17]*dm_lk_05;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+5), vzij_05);
+                double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
+                double dm_ji_10 = dm[(j0+1)*nao+(i0+0)];
+                double dm_ji_20 = dm[(j0+2)*nao+(i0+0)];
+                double dm_ji_30 = dm[(j0+3)*nao+(i0+0)];
+                double dm_ji_40 = dm[(j0+4)*nao+(i0+0)];
+                double dm_ji_50 = dm[(j0+5)*nao+(i0+0)];
+                double vxkl_30 = goutx[0]*dm_ji_00 + goutx[1]*dm_ji_10 + goutx[2]*dm_ji_20 + goutx[3]*dm_ji_30 + goutx[4]*dm_ji_40 + goutx[5]*dm_ji_50;
+                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
+                double vykl_30 = gouty[0]*dm_ji_00 + gouty[1]*dm_ji_10 + gouty[2]*dm_ji_20 + gouty[3]*dm_ji_30 + gouty[4]*dm_ji_40 + gouty[5]*dm_ji_50;
+                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
+                double vzkl_30 = goutz[0]*dm_ji_00 + goutz[1]*dm_ji_10 + goutz[2]*dm_ji_20 + goutz[3]*dm_ji_30 + goutz[4]*dm_ji_40 + goutz[5]*dm_ji_50;
+                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
+                double vxkl_40 = goutx[6]*dm_ji_00 + goutx[7]*dm_ji_10 + goutx[8]*dm_ji_20 + goutx[9]*dm_ji_30 + goutx[10]*dm_ji_40 + goutx[11]*dm_ji_50;
+                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
+                double vykl_40 = gouty[6]*dm_ji_00 + gouty[7]*dm_ji_10 + gouty[8]*dm_ji_20 + gouty[9]*dm_ji_30 + gouty[10]*dm_ji_40 + gouty[11]*dm_ji_50;
+                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
+                double vzkl_40 = goutz[6]*dm_ji_00 + goutz[7]*dm_ji_10 + goutz[8]*dm_ji_20 + goutz[9]*dm_ji_30 + goutz[10]*dm_ji_40 + goutz[11]*dm_ji_50;
+                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
+                double vxkl_50 = goutx[12]*dm_ji_00 + goutx[13]*dm_ji_10 + goutx[14]*dm_ji_20 + goutx[15]*dm_ji_30 + goutx[16]*dm_ji_40 + goutx[17]*dm_ji_50;
+                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
+                double vykl_50 = gouty[12]*dm_ji_00 + gouty[13]*dm_ji_10 + gouty[14]*dm_ji_20 + gouty[15]*dm_ji_30 + gouty[16]*dm_ji_40 + gouty[17]*dm_ji_50;
+                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
+                double vzkl_50 = goutz[12]*dm_ji_00 + goutz[13]*dm_ji_10 + goutz[14]*dm_ji_20 + goutz[15]*dm_ji_30 + goutz[16]*dm_ji_40 + goutz[17]*dm_ji_50;
+                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
+            }
+            if (do_k) {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double dm_jk_03 = dm[(j0+0)*nao+(k0+3)];
+                vxil_00 += goutx[0] * dm_jk_03;
+                vyil_00 += gouty[0] * dm_jk_03;
+                vzil_00 += goutz[0] * dm_jk_03;
+                double dm_jk_04 = dm[(j0+0)*nao+(k0+4)];
+                vxil_00 += goutx[6] * dm_jk_04;
+                vyil_00 += gouty[6] * dm_jk_04;
+                vzil_00 += goutz[6] * dm_jk_04;
+                double dm_jk_05 = dm[(j0+0)*nao+(k0+5)];
+                vxil_00 += goutx[12] * dm_jk_05;
+                vyil_00 += gouty[12] * dm_jk_05;
+                vzil_00 += goutz[12] * dm_jk_05;
+                double dm_jk_13 = dm[(j0+1)*nao+(k0+3)];
+                vxil_00 += goutx[1] * dm_jk_13;
+                vyil_00 += gouty[1] * dm_jk_13;
+                vzil_00 += goutz[1] * dm_jk_13;
+                double dm_jk_14 = dm[(j0+1)*nao+(k0+4)];
+                vxil_00 += goutx[7] * dm_jk_14;
+                vyil_00 += gouty[7] * dm_jk_14;
+                vzil_00 += goutz[7] * dm_jk_14;
+                double dm_jk_15 = dm[(j0+1)*nao+(k0+5)];
+                vxil_00 += goutx[13] * dm_jk_15;
+                vyil_00 += gouty[13] * dm_jk_15;
+                vzil_00 += goutz[13] * dm_jk_15;
+                double dm_jk_23 = dm[(j0+2)*nao+(k0+3)];
+                vxil_00 += goutx[2] * dm_jk_23;
+                vyil_00 += gouty[2] * dm_jk_23;
+                vzil_00 += goutz[2] * dm_jk_23;
+                double dm_jk_24 = dm[(j0+2)*nao+(k0+4)];
+                vxil_00 += goutx[8] * dm_jk_24;
+                vyil_00 += gouty[8] * dm_jk_24;
+                vzil_00 += goutz[8] * dm_jk_24;
+                double dm_jk_25 = dm[(j0+2)*nao+(k0+5)];
+                vxil_00 += goutx[14] * dm_jk_25;
+                vyil_00 += gouty[14] * dm_jk_25;
+                vzil_00 += goutz[14] * dm_jk_25;
+                double dm_jk_33 = dm[(j0+3)*nao+(k0+3)];
+                vxil_00 += goutx[3] * dm_jk_33;
+                vyil_00 += gouty[3] * dm_jk_33;
+                vzil_00 += goutz[3] * dm_jk_33;
+                double dm_jk_34 = dm[(j0+3)*nao+(k0+4)];
+                vxil_00 += goutx[9] * dm_jk_34;
+                vyil_00 += gouty[9] * dm_jk_34;
+                vzil_00 += goutz[9] * dm_jk_34;
+                double dm_jk_35 = dm[(j0+3)*nao+(k0+5)];
+                vxil_00 += goutx[15] * dm_jk_35;
+                vyil_00 += gouty[15] * dm_jk_35;
+                vzil_00 += goutz[15] * dm_jk_35;
+                double dm_jk_43 = dm[(j0+4)*nao+(k0+3)];
+                vxil_00 += goutx[4] * dm_jk_43;
+                vyil_00 += gouty[4] * dm_jk_43;
+                vzil_00 += goutz[4] * dm_jk_43;
+                double dm_jk_44 = dm[(j0+4)*nao+(k0+4)];
+                vxil_00 += goutx[10] * dm_jk_44;
+                vyil_00 += gouty[10] * dm_jk_44;
+                vzil_00 += goutz[10] * dm_jk_44;
+                double dm_jk_45 = dm[(j0+4)*nao+(k0+5)];
+                vxil_00 += goutx[16] * dm_jk_45;
+                vyil_00 += gouty[16] * dm_jk_45;
+                vzil_00 += goutz[16] * dm_jk_45;
+                double dm_jk_53 = dm[(j0+5)*nao+(k0+3)];
+                vxil_00 += goutx[5] * dm_jk_53;
+                vyil_00 += gouty[5] * dm_jk_53;
+                vzil_00 += goutz[5] * dm_jk_53;
+                double dm_jk_54 = dm[(j0+5)*nao+(k0+4)];
+                vxil_00 += goutx[11] * dm_jk_54;
+                vyil_00 += gouty[11] * dm_jk_54;
+                vzil_00 += goutz[11] * dm_jk_54;
+                double dm_jk_55 = dm[(j0+5)*nao+(k0+5)];
+                vxil_00 += goutx[17] * dm_jk_55;
+                vyil_00 += gouty[17] * dm_jk_55;
+                vzil_00 += goutz[17] * dm_jk_55;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
+                double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
+                double dm_jl_20 = dm[(j0+2)*nao+(l0+0)];
+                double dm_jl_30 = dm[(j0+3)*nao+(l0+0)];
+                double dm_jl_40 = dm[(j0+4)*nao+(l0+0)];
+                double dm_jl_50 = dm[(j0+5)*nao+(l0+0)];
+                double vxik_03 = goutx[0]*dm_jl_00 + goutx[1]*dm_jl_10 + goutx[2]*dm_jl_20 + goutx[3]*dm_jl_30 + goutx[4]*dm_jl_40 + goutx[5]*dm_jl_50;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+3), vxik_03);
+                double vyik_03 = gouty[0]*dm_jl_00 + gouty[1]*dm_jl_10 + gouty[2]*dm_jl_20 + gouty[3]*dm_jl_30 + gouty[4]*dm_jl_40 + gouty[5]*dm_jl_50;
+                atomicAdd(vk_y+(i0+0)*nao+(k0+3), vyik_03);
+                double vzik_03 = goutz[0]*dm_jl_00 + goutz[1]*dm_jl_10 + goutz[2]*dm_jl_20 + goutz[3]*dm_jl_30 + goutz[4]*dm_jl_40 + goutz[5]*dm_jl_50;
+                atomicAdd(vk_z+(i0+0)*nao+(k0+3), vzik_03);
+                double vxik_04 = goutx[6]*dm_jl_00 + goutx[7]*dm_jl_10 + goutx[8]*dm_jl_20 + goutx[9]*dm_jl_30 + goutx[10]*dm_jl_40 + goutx[11]*dm_jl_50;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+4), vxik_04);
+                double vyik_04 = gouty[6]*dm_jl_00 + gouty[7]*dm_jl_10 + gouty[8]*dm_jl_20 + gouty[9]*dm_jl_30 + gouty[10]*dm_jl_40 + gouty[11]*dm_jl_50;
+                atomicAdd(vk_y+(i0+0)*nao+(k0+4), vyik_04);
+                double vzik_04 = goutz[6]*dm_jl_00 + goutz[7]*dm_jl_10 + goutz[8]*dm_jl_20 + goutz[9]*dm_jl_30 + goutz[10]*dm_jl_40 + goutz[11]*dm_jl_50;
+                atomicAdd(vk_z+(i0+0)*nao+(k0+4), vzik_04);
+                double vxik_05 = goutx[12]*dm_jl_00 + goutx[13]*dm_jl_10 + goutx[14]*dm_jl_20 + goutx[15]*dm_jl_30 + goutx[16]*dm_jl_40 + goutx[17]*dm_jl_50;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+5), vxik_05);
+                double vyik_05 = gouty[12]*dm_jl_00 + gouty[13]*dm_jl_10 + gouty[14]*dm_jl_20 + gouty[15]*dm_jl_30 + gouty[16]*dm_jl_40 + gouty[17]*dm_jl_50;
+                atomicAdd(vk_y+(i0+0)*nao+(k0+5), vyik_05);
+                double vzik_05 = goutz[12]*dm_jl_00 + goutz[13]*dm_jl_10 + goutz[14]*dm_jl_20 + goutz[15]*dm_jl_30 + goutz[16]*dm_jl_40 + goutz[17]*dm_jl_50;
+                atomicAdd(vk_z+(i0+0)*nao+(k0+5), vzik_05);
+                double dm_ik_03 = dm[(i0+0)*nao+(k0+3)];
+                double dm_ik_04 = dm[(i0+0)*nao+(k0+4)];
+                double dm_ik_05 = dm[(i0+0)*nao+(k0+5)];
+                double vxjl_00 = goutx[0]*dm_ik_03 + goutx[6]*dm_ik_04 + goutx[12]*dm_ik_05;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                double vyjl_00 = gouty[0]*dm_ik_03 + gouty[6]*dm_ik_04 + gouty[12]*dm_ik_05;
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                double vzjl_00 = goutz[0]*dm_ik_03 + goutz[6]*dm_ik_04 + goutz[12]*dm_ik_05;
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                double vxjl_10 = goutx[1]*dm_ik_03 + goutx[7]*dm_ik_04 + goutx[13]*dm_ik_05;
+                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
+                double vyjl_10 = gouty[1]*dm_ik_03 + gouty[7]*dm_ik_04 + gouty[13]*dm_ik_05;
+                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
+                double vzjl_10 = goutz[1]*dm_ik_03 + goutz[7]*dm_ik_04 + goutz[13]*dm_ik_05;
+                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
+                double vxjl_20 = goutx[2]*dm_ik_03 + goutx[8]*dm_ik_04 + goutx[14]*dm_ik_05;
+                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
+                double vyjl_20 = gouty[2]*dm_ik_03 + gouty[8]*dm_ik_04 + gouty[14]*dm_ik_05;
+                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
+                double vzjl_20 = goutz[2]*dm_ik_03 + goutz[8]*dm_ik_04 + goutz[14]*dm_ik_05;
+                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
+                double vxjl_30 = goutx[3]*dm_ik_03 + goutx[9]*dm_ik_04 + goutx[15]*dm_ik_05;
+                atomicAdd(vk_x+(j0+3)*nao+(l0+0), vxjl_30);
+                double vyjl_30 = gouty[3]*dm_ik_03 + gouty[9]*dm_ik_04 + gouty[15]*dm_ik_05;
+                atomicAdd(vk_y+(j0+3)*nao+(l0+0), vyjl_30);
+                double vzjl_30 = goutz[3]*dm_ik_03 + goutz[9]*dm_ik_04 + goutz[15]*dm_ik_05;
+                atomicAdd(vk_z+(j0+3)*nao+(l0+0), vzjl_30);
+                double vxjl_40 = goutx[4]*dm_ik_03 + goutx[10]*dm_ik_04 + goutx[16]*dm_ik_05;
+                atomicAdd(vk_x+(j0+4)*nao+(l0+0), vxjl_40);
+                double vyjl_40 = gouty[4]*dm_ik_03 + gouty[10]*dm_ik_04 + gouty[16]*dm_ik_05;
+                atomicAdd(vk_y+(j0+4)*nao+(l0+0), vyjl_40);
+                double vzjl_40 = goutz[4]*dm_ik_03 + goutz[10]*dm_ik_04 + goutz[16]*dm_ik_05;
+                atomicAdd(vk_z+(j0+4)*nao+(l0+0), vzjl_40);
+                double vxjl_50 = goutx[5]*dm_ik_03 + goutx[11]*dm_ik_04 + goutx[17]*dm_ik_05;
+                atomicAdd(vk_x+(j0+5)*nao+(l0+0), vxjl_50);
+                double vyjl_50 = gouty[5]*dm_ik_03 + gouty[11]*dm_ik_04 + gouty[17]*dm_ik_05;
+                atomicAdd(vk_y+(j0+5)*nao+(l0+0), vyjl_50);
+                double vzjl_50 = goutz[5]*dm_ik_03 + goutz[11]*dm_ik_04 + goutz[17]*dm_ik_05;
+                atomicAdd(vk_z+(j0+5)*nao+(l0+0), vzjl_50);
+                double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
+                double vxjk_03 = goutx[0]*dm_il_00;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+3), vxjk_03);
+                double vyjk_03 = gouty[0]*dm_il_00;
+                atomicAdd(vk_y+(j0+0)*nao+(k0+3), vyjk_03);
+                double vzjk_03 = goutz[0]*dm_il_00;
+                atomicAdd(vk_z+(j0+0)*nao+(k0+3), vzjk_03);
                 double vxjk_04 = goutx[6]*dm_il_00;
                 atomicAdd(vk_x+(j0+0)*nao+(k0+4), vxjk_04);
                 double vyjk_04 = gouty[6]*dm_il_00;
                 atomicAdd(vk_y+(j0+0)*nao+(k0+4), vyjk_04);
                 double vzjk_04 = goutz[6]*dm_il_00;
                 atomicAdd(vk_z+(j0+0)*nao+(k0+4), vzjk_04);
-                double vxjk_21 = goutx[2]*dm_il_00;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+1), vxjk_21);
-                double vyjk_21 = gouty[2]*dm_il_00;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+1), vyjk_21);
-                double vzjk_21 = goutz[2]*dm_il_00;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+1), vzjk_21);
-                double vxjk_23 = goutx[5]*dm_il_00;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+3), vxjk_23);
-                double vyjk_23 = gouty[5]*dm_il_00;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+3), vyjk_23);
-                double vzjk_23 = goutz[5]*dm_il_00;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+3), vzjk_23);
-                double vxjk_25 = goutx[8]*dm_il_00;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+5), vxjk_25);
-                double vyjk_25 = gouty[8]*dm_il_00;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+5), vyjk_25);
-                double vzjk_25 = goutz[8]*dm_il_00;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+5), vzjk_25);
-                double vxjk_40 = goutx[1]*dm_il_00;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+0), vxjk_40);
-                double vyjk_40 = gouty[1]*dm_il_00;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+0), vyjk_40);
-                double vzjk_40 = goutz[1]*dm_il_00;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+0), vzjk_40);
-                double vxjk_42 = goutx[4]*dm_il_00;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+2), vxjk_42);
-                double vyjk_42 = gouty[4]*dm_il_00;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+2), vyjk_42);
-                double vzjk_42 = goutz[4]*dm_il_00;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+2), vzjk_42);
-                double vxjk_44 = goutx[7]*dm_il_00;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+4), vxjk_44);
-                double vyjk_44 = gouty[7]*dm_il_00;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+4), vyjk_44);
-                double vzjk_44 = goutz[7]*dm_il_00;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+4), vzjk_44);
-                break; }
-                case 1: {
-                double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
-                double vxjk_10 = goutx[0]*dm_il_00;
-                atomicAdd(vk_x+(j0+1)*nao+(k0+0), vxjk_10);
-                double vyjk_10 = gouty[0]*dm_il_00;
-                atomicAdd(vk_y+(j0+1)*nao+(k0+0), vyjk_10);
-                double vzjk_10 = goutz[0]*dm_il_00;
-                atomicAdd(vk_z+(j0+1)*nao+(k0+0), vzjk_10);
-                double vxjk_12 = goutx[3]*dm_il_00;
-                atomicAdd(vk_x+(j0+1)*nao+(k0+2), vxjk_12);
-                double vyjk_12 = gouty[3]*dm_il_00;
-                atomicAdd(vk_y+(j0+1)*nao+(k0+2), vyjk_12);
-                double vzjk_12 = goutz[3]*dm_il_00;
-                atomicAdd(vk_z+(j0+1)*nao+(k0+2), vzjk_12);
-                double vxjk_14 = goutx[6]*dm_il_00;
-                atomicAdd(vk_x+(j0+1)*nao+(k0+4), vxjk_14);
-                double vyjk_14 = gouty[6]*dm_il_00;
-                atomicAdd(vk_y+(j0+1)*nao+(k0+4), vyjk_14);
-                double vzjk_14 = goutz[6]*dm_il_00;
-                atomicAdd(vk_z+(j0+1)*nao+(k0+4), vzjk_14);
-                double vxjk_31 = goutx[2]*dm_il_00;
-                atomicAdd(vk_x+(j0+3)*nao+(k0+1), vxjk_31);
-                double vyjk_31 = gouty[2]*dm_il_00;
-                atomicAdd(vk_y+(j0+3)*nao+(k0+1), vyjk_31);
-                double vzjk_31 = goutz[2]*dm_il_00;
-                atomicAdd(vk_z+(j0+3)*nao+(k0+1), vzjk_31);
-                double vxjk_33 = goutx[5]*dm_il_00;
-                atomicAdd(vk_x+(j0+3)*nao+(k0+3), vxjk_33);
-                double vyjk_33 = gouty[5]*dm_il_00;
-                atomicAdd(vk_y+(j0+3)*nao+(k0+3), vyjk_33);
-                double vzjk_33 = goutz[5]*dm_il_00;
-                atomicAdd(vk_z+(j0+3)*nao+(k0+3), vzjk_33);
-                double vxjk_35 = goutx[8]*dm_il_00;
-                atomicAdd(vk_x+(j0+3)*nao+(k0+5), vxjk_35);
-                double vyjk_35 = gouty[8]*dm_il_00;
-                atomicAdd(vk_y+(j0+3)*nao+(k0+5), vyjk_35);
-                double vzjk_35 = goutz[8]*dm_il_00;
-                atomicAdd(vk_z+(j0+3)*nao+(k0+5), vzjk_35);
-                double vxjk_50 = goutx[1]*dm_il_00;
-                atomicAdd(vk_x+(j0+5)*nao+(k0+0), vxjk_50);
-                double vyjk_50 = gouty[1]*dm_il_00;
-                atomicAdd(vk_y+(j0+5)*nao+(k0+0), vyjk_50);
-                double vzjk_50 = goutz[1]*dm_il_00;
-                atomicAdd(vk_z+(j0+5)*nao+(k0+0), vzjk_50);
-                double vxjk_52 = goutx[4]*dm_il_00;
-                atomicAdd(vk_x+(j0+5)*nao+(k0+2), vxjk_52);
-                double vyjk_52 = gouty[4]*dm_il_00;
-                atomicAdd(vk_y+(j0+5)*nao+(k0+2), vyjk_52);
-                double vzjk_52 = goutz[4]*dm_il_00;
-                atomicAdd(vk_z+(j0+5)*nao+(k0+2), vzjk_52);
-                double vxjk_54 = goutx[7]*dm_il_00;
-                atomicAdd(vk_x+(j0+5)*nao+(k0+4), vxjk_54);
-                double vyjk_54 = gouty[7]*dm_il_00;
-                atomicAdd(vk_y+(j0+5)*nao+(k0+4), vyjk_54);
-                double vzjk_54 = goutz[7]*dm_il_00;
-                atomicAdd(vk_z+(j0+5)*nao+(k0+4), vzjk_54);
-                break; }
-                case 2: {
-                double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
-                double vxjk_01 = goutx[1]*dm_il_00;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
-                double vyjk_01 = gouty[1]*dm_il_00;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
-                double vzjk_01 = goutz[1]*dm_il_00;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
-                double vxjk_03 = goutx[4]*dm_il_00;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+3), vxjk_03);
-                double vyjk_03 = gouty[4]*dm_il_00;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+3), vyjk_03);
-                double vzjk_03 = goutz[4]*dm_il_00;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+3), vzjk_03);
-                double vxjk_05 = goutx[7]*dm_il_00;
+                double vxjk_05 = goutx[12]*dm_il_00;
                 atomicAdd(vk_x+(j0+0)*nao+(k0+5), vxjk_05);
-                double vyjk_05 = gouty[7]*dm_il_00;
+                double vyjk_05 = gouty[12]*dm_il_00;
                 atomicAdd(vk_y+(j0+0)*nao+(k0+5), vyjk_05);
-                double vzjk_05 = goutz[7]*dm_il_00;
+                double vzjk_05 = goutz[12]*dm_il_00;
                 atomicAdd(vk_z+(j0+0)*nao+(k0+5), vzjk_05);
-                double vxjk_20 = goutx[0]*dm_il_00;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+0), vxjk_20);
-                double vyjk_20 = gouty[0]*dm_il_00;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+0), vyjk_20);
-                double vzjk_20 = goutz[0]*dm_il_00;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+0), vzjk_20);
-                double vxjk_22 = goutx[3]*dm_il_00;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+2), vxjk_22);
-                double vyjk_22 = gouty[3]*dm_il_00;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+2), vyjk_22);
-                double vzjk_22 = goutz[3]*dm_il_00;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+2), vzjk_22);
-                double vxjk_24 = goutx[6]*dm_il_00;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+4), vxjk_24);
-                double vyjk_24 = gouty[6]*dm_il_00;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+4), vyjk_24);
-                double vzjk_24 = goutz[6]*dm_il_00;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+4), vzjk_24);
-                double vxjk_41 = goutx[2]*dm_il_00;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+1), vxjk_41);
-                double vyjk_41 = gouty[2]*dm_il_00;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+1), vyjk_41);
-                double vzjk_41 = goutz[2]*dm_il_00;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+1), vzjk_41);
-                double vxjk_43 = goutx[5]*dm_il_00;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+3), vxjk_43);
-                double vyjk_43 = gouty[5]*dm_il_00;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+3), vyjk_43);
-                double vzjk_43 = goutz[5]*dm_il_00;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+3), vzjk_43);
-                double vxjk_45 = goutx[8]*dm_il_00;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+5), vxjk_45);
-                double vyjk_45 = gouty[8]*dm_il_00;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+5), vyjk_45);
-                double vzjk_45 = goutz[8]*dm_il_00;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+5), vzjk_45);
-                break; }
-                case 3: {
-                double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
-                double vxjk_11 = goutx[1]*dm_il_00;
-                atomicAdd(vk_x+(j0+1)*nao+(k0+1), vxjk_11);
-                double vyjk_11 = gouty[1]*dm_il_00;
-                atomicAdd(vk_y+(j0+1)*nao+(k0+1), vyjk_11);
-                double vzjk_11 = goutz[1]*dm_il_00;
-                atomicAdd(vk_z+(j0+1)*nao+(k0+1), vzjk_11);
-                double vxjk_13 = goutx[4]*dm_il_00;
+                double vxjk_13 = goutx[1]*dm_il_00;
                 atomicAdd(vk_x+(j0+1)*nao+(k0+3), vxjk_13);
-                double vyjk_13 = gouty[4]*dm_il_00;
+                double vyjk_13 = gouty[1]*dm_il_00;
                 atomicAdd(vk_y+(j0+1)*nao+(k0+3), vyjk_13);
-                double vzjk_13 = goutz[4]*dm_il_00;
+                double vzjk_13 = goutz[1]*dm_il_00;
                 atomicAdd(vk_z+(j0+1)*nao+(k0+3), vzjk_13);
-                double vxjk_15 = goutx[7]*dm_il_00;
+                double vxjk_14 = goutx[7]*dm_il_00;
+                atomicAdd(vk_x+(j0+1)*nao+(k0+4), vxjk_14);
+                double vyjk_14 = gouty[7]*dm_il_00;
+                atomicAdd(vk_y+(j0+1)*nao+(k0+4), vyjk_14);
+                double vzjk_14 = goutz[7]*dm_il_00;
+                atomicAdd(vk_z+(j0+1)*nao+(k0+4), vzjk_14);
+                double vxjk_15 = goutx[13]*dm_il_00;
                 atomicAdd(vk_x+(j0+1)*nao+(k0+5), vxjk_15);
-                double vyjk_15 = gouty[7]*dm_il_00;
+                double vyjk_15 = gouty[13]*dm_il_00;
                 atomicAdd(vk_y+(j0+1)*nao+(k0+5), vyjk_15);
-                double vzjk_15 = goutz[7]*dm_il_00;
+                double vzjk_15 = goutz[13]*dm_il_00;
                 atomicAdd(vk_z+(j0+1)*nao+(k0+5), vzjk_15);
-                double vxjk_30 = goutx[0]*dm_il_00;
-                atomicAdd(vk_x+(j0+3)*nao+(k0+0), vxjk_30);
-                double vyjk_30 = gouty[0]*dm_il_00;
-                atomicAdd(vk_y+(j0+3)*nao+(k0+0), vyjk_30);
-                double vzjk_30 = goutz[0]*dm_il_00;
-                atomicAdd(vk_z+(j0+3)*nao+(k0+0), vzjk_30);
-                double vxjk_32 = goutx[3]*dm_il_00;
-                atomicAdd(vk_x+(j0+3)*nao+(k0+2), vxjk_32);
-                double vyjk_32 = gouty[3]*dm_il_00;
-                atomicAdd(vk_y+(j0+3)*nao+(k0+2), vyjk_32);
-                double vzjk_32 = goutz[3]*dm_il_00;
-                atomicAdd(vk_z+(j0+3)*nao+(k0+2), vzjk_32);
-                double vxjk_34 = goutx[6]*dm_il_00;
+                double vxjk_23 = goutx[2]*dm_il_00;
+                atomicAdd(vk_x+(j0+2)*nao+(k0+3), vxjk_23);
+                double vyjk_23 = gouty[2]*dm_il_00;
+                atomicAdd(vk_y+(j0+2)*nao+(k0+3), vyjk_23);
+                double vzjk_23 = goutz[2]*dm_il_00;
+                atomicAdd(vk_z+(j0+2)*nao+(k0+3), vzjk_23);
+                double vxjk_24 = goutx[8]*dm_il_00;
+                atomicAdd(vk_x+(j0+2)*nao+(k0+4), vxjk_24);
+                double vyjk_24 = gouty[8]*dm_il_00;
+                atomicAdd(vk_y+(j0+2)*nao+(k0+4), vyjk_24);
+                double vzjk_24 = goutz[8]*dm_il_00;
+                atomicAdd(vk_z+(j0+2)*nao+(k0+4), vzjk_24);
+                double vxjk_25 = goutx[14]*dm_il_00;
+                atomicAdd(vk_x+(j0+2)*nao+(k0+5), vxjk_25);
+                double vyjk_25 = gouty[14]*dm_il_00;
+                atomicAdd(vk_y+(j0+2)*nao+(k0+5), vyjk_25);
+                double vzjk_25 = goutz[14]*dm_il_00;
+                atomicAdd(vk_z+(j0+2)*nao+(k0+5), vzjk_25);
+                double vxjk_33 = goutx[3]*dm_il_00;
+                atomicAdd(vk_x+(j0+3)*nao+(k0+3), vxjk_33);
+                double vyjk_33 = gouty[3]*dm_il_00;
+                atomicAdd(vk_y+(j0+3)*nao+(k0+3), vyjk_33);
+                double vzjk_33 = goutz[3]*dm_il_00;
+                atomicAdd(vk_z+(j0+3)*nao+(k0+3), vzjk_33);
+                double vxjk_34 = goutx[9]*dm_il_00;
                 atomicAdd(vk_x+(j0+3)*nao+(k0+4), vxjk_34);
-                double vyjk_34 = gouty[6]*dm_il_00;
+                double vyjk_34 = gouty[9]*dm_il_00;
                 atomicAdd(vk_y+(j0+3)*nao+(k0+4), vyjk_34);
-                double vzjk_34 = goutz[6]*dm_il_00;
+                double vzjk_34 = goutz[9]*dm_il_00;
                 atomicAdd(vk_z+(j0+3)*nao+(k0+4), vzjk_34);
-                double vxjk_51 = goutx[2]*dm_il_00;
-                atomicAdd(vk_x+(j0+5)*nao+(k0+1), vxjk_51);
-                double vyjk_51 = gouty[2]*dm_il_00;
-                atomicAdd(vk_y+(j0+5)*nao+(k0+1), vyjk_51);
-                double vzjk_51 = goutz[2]*dm_il_00;
-                atomicAdd(vk_z+(j0+5)*nao+(k0+1), vzjk_51);
+                double vxjk_35 = goutx[15]*dm_il_00;
+                atomicAdd(vk_x+(j0+3)*nao+(k0+5), vxjk_35);
+                double vyjk_35 = gouty[15]*dm_il_00;
+                atomicAdd(vk_y+(j0+3)*nao+(k0+5), vyjk_35);
+                double vzjk_35 = goutz[15]*dm_il_00;
+                atomicAdd(vk_z+(j0+3)*nao+(k0+5), vzjk_35);
+                double vxjk_43 = goutx[4]*dm_il_00;
+                atomicAdd(vk_x+(j0+4)*nao+(k0+3), vxjk_43);
+                double vyjk_43 = gouty[4]*dm_il_00;
+                atomicAdd(vk_y+(j0+4)*nao+(k0+3), vyjk_43);
+                double vzjk_43 = goutz[4]*dm_il_00;
+                atomicAdd(vk_z+(j0+4)*nao+(k0+3), vzjk_43);
+                double vxjk_44 = goutx[10]*dm_il_00;
+                atomicAdd(vk_x+(j0+4)*nao+(k0+4), vxjk_44);
+                double vyjk_44 = gouty[10]*dm_il_00;
+                atomicAdd(vk_y+(j0+4)*nao+(k0+4), vyjk_44);
+                double vzjk_44 = goutz[10]*dm_il_00;
+                atomicAdd(vk_z+(j0+4)*nao+(k0+4), vzjk_44);
+                double vxjk_45 = goutx[16]*dm_il_00;
+                atomicAdd(vk_x+(j0+4)*nao+(k0+5), vxjk_45);
+                double vyjk_45 = gouty[16]*dm_il_00;
+                atomicAdd(vk_y+(j0+4)*nao+(k0+5), vyjk_45);
+                double vzjk_45 = goutz[16]*dm_il_00;
+                atomicAdd(vk_z+(j0+4)*nao+(k0+5), vzjk_45);
                 double vxjk_53 = goutx[5]*dm_il_00;
                 atomicAdd(vk_x+(j0+5)*nao+(k0+3), vxjk_53);
                 double vyjk_53 = gouty[5]*dm_il_00;
                 atomicAdd(vk_y+(j0+5)*nao+(k0+3), vyjk_53);
                 double vzjk_53 = goutz[5]*dm_il_00;
                 atomicAdd(vk_z+(j0+5)*nao+(k0+3), vzjk_53);
-                double vxjk_55 = goutx[8]*dm_il_00;
+                double vxjk_54 = goutx[11]*dm_il_00;
+                atomicAdd(vk_x+(j0+5)*nao+(k0+4), vxjk_54);
+                double vyjk_54 = gouty[11]*dm_il_00;
+                atomicAdd(vk_y+(j0+5)*nao+(k0+4), vyjk_54);
+                double vzjk_54 = goutz[11]*dm_il_00;
+                atomicAdd(vk_z+(j0+5)*nao+(k0+4), vzjk_54);
+                double vxjk_55 = goutx[17]*dm_il_00;
                 atomicAdd(vk_x+(j0+5)*nao+(k0+5), vxjk_55);
-                double vyjk_55 = gouty[8]*dm_il_00;
+                double vyjk_55 = gouty[17]*dm_il_00;
                 atomicAdd(vk_y+(j0+5)*nao+(k0+5), vyjk_55);
-                double vzjk_55 = goutz[8]*dm_il_00;
+                double vzjk_55 = goutz[17]*dm_il_00;
                 atomicAdd(vk_z+(j0+5)*nao+(k0+5), vzjk_55);
-                break; }
-                }
             }
         }
     }
@@ -12348,7 +12356,7 @@ void rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -12662,7 +12670,7 @@ void rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -13129,7 +13137,7 @@ void rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -13821,7 +13829,7 @@ void rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -14481,6 +14489,7 @@ void rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     int gout_id = threadIdx.y;
+    constexpr int g_size = 18;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     extern __shared__ double shared_memory[];
@@ -14498,7 +14507,7 @@ void rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -14576,9 +14585,9 @@ while (1) {
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double goutx[14];
         double gouty[14];
@@ -14605,9 +14614,9 @@ while (1) {
             }
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
@@ -14627,9 +14636,9 @@ while (1) {
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -14637,11 +14646,11 @@ while (1) {
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[1152] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
                         aij_cache[1] = aj_aij;
@@ -15096,6 +15105,8 @@ while (1) {
             double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
             double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
+                switch (gout_id) {
+                case 0: {
                 double vxij_00 = 0;
                 double vyij_00 = 0;
                 double vzij_00 = 0;
@@ -15105,8 +15116,6 @@ while (1) {
                 double vxij_20 = 0;
                 double vyij_20 = 0;
                 double vzij_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vxij_00 += goutx[0] * dm_lk_00;
                 vyij_00 += gouty[0] * dm_lk_00;
@@ -15163,8 +15172,26 @@ while (1) {
                 vxij_10 += goutx[13] * dm_lk_25;
                 vyij_10 += gouty[13] * dm_lk_25;
                 vzij_10 += goutz[13] * dm_lk_25;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
+                atomicAdd(vj_x+(i0+1)*nao+(j0+0), vxij_10);
+                atomicAdd(vj_y+(i0+1)*nao+(j0+0), vyij_10);
+                atomicAdd(vj_z+(i0+1)*nao+(j0+0), vzij_10);
+                atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
+                atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
+                atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
                 break; }
                 case 1: {
+                double vxij_00 = 0;
+                double vyij_00 = 0;
+                double vzij_00 = 0;
+                double vxij_10 = 0;
+                double vyij_10 = 0;
+                double vzij_10 = 0;
+                double vxij_20 = 0;
+                double vyij_20 = 0;
+                double vzij_20 = 0;
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vxij_10 += goutx[0] * dm_lk_00;
                 vyij_10 += gouty[0] * dm_lk_00;
@@ -15221,8 +15248,26 @@ while (1) {
                 vxij_20 += goutx[13] * dm_lk_25;
                 vyij_20 += gouty[13] * dm_lk_25;
                 vzij_20 += goutz[13] * dm_lk_25;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
+                atomicAdd(vj_x+(i0+1)*nao+(j0+0), vxij_10);
+                atomicAdd(vj_y+(i0+1)*nao+(j0+0), vyij_10);
+                atomicAdd(vj_z+(i0+1)*nao+(j0+0), vzij_10);
+                atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
+                atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
+                atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
                 break; }
                 case 2: {
+                double vxij_00 = 0;
+                double vyij_00 = 0;
+                double vzij_00 = 0;
+                double vxij_10 = 0;
+                double vyij_10 = 0;
+                double vzij_10 = 0;
+                double vxij_20 = 0;
+                double vyij_20 = 0;
+                double vzij_20 = 0;
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vxij_20 += goutx[0] * dm_lk_00;
                 vyij_20 += gouty[0] * dm_lk_00;
@@ -15275,8 +15320,26 @@ while (1) {
                 vxij_20 += goutx[12] * dm_lk_24;
                 vyij_20 += gouty[12] * dm_lk_24;
                 vzij_20 += goutz[12] * dm_lk_24;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
+                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
+                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
+                atomicAdd(vj_x+(i0+1)*nao+(j0+0), vxij_10);
+                atomicAdd(vj_y+(i0+1)*nao+(j0+0), vyij_10);
+                atomicAdd(vj_z+(i0+1)*nao+(j0+0), vzij_10);
+                atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
+                atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
+                atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
                 break; }
                 case 3: {
+                double vxij_00 = 0;
+                double vyij_00 = 0;
+                double vzij_00 = 0;
+                double vxij_10 = 0;
+                double vyij_10 = 0;
+                double vzij_10 = 0;
+                double vxij_20 = 0;
+                double vyij_20 = 0;
+                double vzij_20 = 0;
                 double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
                 vxij_00 += goutx[0] * dm_lk_01;
                 vyij_00 += gouty[0] * dm_lk_01;
@@ -15329,8 +15392,6 @@ while (1) {
                 vxij_00 += goutx[12] * dm_lk_25;
                 vyij_00 += gouty[12] * dm_lk_25;
                 vzij_00 += goutz[12] * dm_lk_25;
-                break; }
-                }
                 atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
                 atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
                 atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
@@ -15340,6 +15401,8 @@ while (1) {
                 atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
                 atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
                 atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
@@ -16176,6 +16239,8 @@ while (1) {
                 atomicAdd(vk_z+(i0+2)*nao+(k0+5), vzik_25);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vxjl_00 = 0;
                 double vyjl_00 = 0;
                 double vzjl_00 = 0;
@@ -16185,8 +16250,6 @@ while (1) {
                 double vxjl_02 = 0;
                 double vyjl_02 = 0;
                 double vzjl_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_00 += goutx[0] * dm_ik_00;
                 vyjl_00 += gouty[0] * dm_ik_00;
@@ -16238,8 +16301,26 @@ while (1) {
                 vxjl_01 += goutx[8] * dm_ik_24;
                 vyjl_01 += gouty[8] * dm_ik_24;
                 vzjl_01 += goutz[8] * dm_ik_24;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+1), vxjl_01);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+1), vyjl_01);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+1), vzjl_01);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+2), vxjl_02);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+2), vyjl_02);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+2), vzjl_02);
                 break; }
                 case 1: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_01 = 0;
+                double vyjl_01 = 0;
+                double vzjl_01 = 0;
+                double vxjl_02 = 0;
+                double vyjl_02 = 0;
+                double vzjl_02 = 0;
                 double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
                 vxjl_01 += goutx[5] * dm_ik_01;
                 vyjl_01 += gouty[5] * dm_ik_01;
@@ -16291,8 +16372,26 @@ while (1) {
                 vxjl_02 += goutx[13] * dm_ik_25;
                 vyjl_02 += gouty[13] * dm_ik_25;
                 vzjl_02 += goutz[13] * dm_ik_25;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+1), vxjl_01);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+1), vyjl_01);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+1), vzjl_01);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+2), vxjl_02);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+2), vyjl_02);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+2), vzjl_02);
                 break; }
                 case 2: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_01 = 0;
+                double vyjl_01 = 0;
+                double vzjl_01 = 0;
+                double vxjl_02 = 0;
+                double vyjl_02 = 0;
+                double vzjl_02 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_01 += goutx[4] * dm_ik_00;
                 vyjl_01 += gouty[4] * dm_ik_00;
@@ -16341,8 +16440,26 @@ while (1) {
                 vxjl_02 += goutx[12] * dm_ik_24;
                 vyjl_02 += gouty[12] * dm_ik_24;
                 vzjl_02 += goutz[12] * dm_ik_24;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+1), vxjl_01);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+1), vyjl_01);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+1), vzjl_01);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+2), vxjl_02);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+2), vyjl_02);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+2), vzjl_02);
                 break; }
                 case 3: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_01 = 0;
+                double vyjl_01 = 0;
+                double vzjl_01 = 0;
+                double vxjl_02 = 0;
+                double vyjl_02 = 0;
+                double vzjl_02 = 0;
                 double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
                 vxjl_00 += goutx[0] * dm_ik_01;
                 vyjl_00 += gouty[0] * dm_ik_01;
@@ -16391,8 +16508,6 @@ while (1) {
                 vxjl_01 += goutx[8] * dm_ik_25;
                 vyjl_01 += gouty[8] * dm_ik_25;
                 vzjl_01 += goutz[8] * dm_ik_25;
-                break; }
-                }
                 atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
                 atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
                 atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
@@ -16402,6 +16517,8 @@ while (1) {
                 atomicAdd(vk_x+(j0+0)*nao+(l0+2), vxjl_02);
                 atomicAdd(vk_y+(j0+0)*nao+(l0+2), vyjl_02);
                 atomicAdd(vk_z+(j0+0)*nao+(l0+2), vzjl_02);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
@@ -16622,7 +16739,7 @@ void rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -17087,7 +17204,7 @@ void rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -17763,6 +17880,7 @@ void rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     int gout_id = threadIdx.y;
+    constexpr int g_size = 24;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     extern __shared__ double shared_memory[];
@@ -17780,7 +17898,7 @@ void rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -17858,9 +17976,9 @@ while (1) {
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double goutx[21];
         double gouty[21];
@@ -17887,9 +18005,9 @@ while (1) {
             }
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
@@ -17909,9 +18027,9 @@ while (1) {
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -17919,11 +18037,11 @@ while (1) {
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[1536] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
                         aij_cache[1] = aj_aij;
@@ -20165,6 +20283,7 @@ void rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     int gout_id = threadIdx.y;
+    constexpr int g_size = 18;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     extern __shared__ double shared_memory[];
@@ -20182,7 +20301,7 @@ void rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -20260,9 +20379,9 @@ while (1) {
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double goutx[14];
         double gouty[14];
@@ -20289,9 +20408,9 @@ while (1) {
             }
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
@@ -20311,9 +20430,9 @@ while (1) {
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -20321,11 +20440,11 @@ while (1) {
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[1152] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
                         aij_cache[1] = aj_aij;
@@ -21219,6 +21338,8 @@ while (1) {
                 }
             }
             if (do_k) {
+                switch (gout_id) {
+                case 0: {
                 double vxil_00 = 0;
                 double vyil_00 = 0;
                 double vzil_00 = 0;
@@ -21228,8 +21349,6 @@ while (1) {
                 double vxil_20 = 0;
                 double vyil_20 = 0;
                 double vzil_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_00 += goutx[0] * dm_jk_00;
                 vyil_00 += gouty[0] * dm_jk_00;
@@ -21286,8 +21405,26 @@ while (1) {
                 vxil_10 += goutx[13] * dm_jk_25;
                 vyil_10 += gouty[13] * dm_jk_25;
                 vzil_10 += goutz[13] * dm_jk_25;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
+                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
+                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
+                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
+                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
+                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
                 break; }
                 case 1: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_10 = 0;
+                double vyil_10 = 0;
+                double vzil_10 = 0;
+                double vxil_20 = 0;
+                double vyil_20 = 0;
+                double vzil_20 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_10 += goutx[0] * dm_jk_00;
                 vyil_10 += gouty[0] * dm_jk_00;
@@ -21344,8 +21481,26 @@ while (1) {
                 vxil_20 += goutx[13] * dm_jk_25;
                 vyil_20 += gouty[13] * dm_jk_25;
                 vzil_20 += goutz[13] * dm_jk_25;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
+                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
+                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
+                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
+                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
+                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
                 break; }
                 case 2: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_10 = 0;
+                double vyil_10 = 0;
+                double vzil_10 = 0;
+                double vxil_20 = 0;
+                double vyil_20 = 0;
+                double vzil_20 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_20 += goutx[0] * dm_jk_00;
                 vyil_20 += gouty[0] * dm_jk_00;
@@ -21398,8 +21553,26 @@ while (1) {
                 vxil_00 += goutx[10] * dm_jk_24;
                 vyil_00 += gouty[10] * dm_jk_24;
                 vzil_00 += goutz[10] * dm_jk_24;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
+                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
+                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
+                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
+                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
+                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
                 break; }
                 case 3: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_10 = 0;
+                double vyil_10 = 0;
+                double vzil_10 = 0;
+                double vxil_20 = 0;
+                double vyil_20 = 0;
+                double vzil_20 = 0;
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
                 vxil_20 += goutx[2] * dm_jk_01;
                 vyil_20 += gouty[2] * dm_jk_01;
@@ -21452,8 +21625,6 @@ while (1) {
                 vxil_00 += goutx[12] * dm_jk_25;
                 vyil_00 += gouty[12] * dm_jk_25;
                 vzil_00 += goutz[12] * dm_jk_25;
-                break; }
-                }
                 atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
                 atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
                 atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
@@ -21463,6 +21634,8 @@ while (1) {
                 atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
                 atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
                 atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
@@ -21809,6 +21982,8 @@ while (1) {
                 atomicAdd(vk_z+(i0+2)*nao+(k0+5), vzik_25);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vxjl_00 = 0;
                 double vyjl_00 = 0;
                 double vzjl_00 = 0;
@@ -21818,8 +21993,6 @@ while (1) {
                 double vxjl_20 = 0;
                 double vyjl_20 = 0;
                 double vzjl_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_00 += goutx[0] * dm_ik_00;
                 vyjl_00 += gouty[0] * dm_ik_00;
@@ -21876,8 +22049,26 @@ while (1) {
                 vxjl_20 += goutx[11] * dm_ik_24;
                 vyjl_20 += gouty[11] * dm_ik_24;
                 vzjl_20 += goutz[11] * dm_ik_24;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
+                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
+                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
+                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
+                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
+                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
                 break; }
                 case 1: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_10 = 0;
+                double vyjl_10 = 0;
+                double vzjl_10 = 0;
+                double vxjl_20 = 0;
+                double vyjl_20 = 0;
+                double vzjl_20 = 0;
                 double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
                 vxjl_00 += goutx[2] * dm_ik_01;
                 vyjl_00 += gouty[2] * dm_ik_01;
@@ -21934,8 +22125,26 @@ while (1) {
                 vxjl_20 += goutx[13] * dm_ik_25;
                 vyjl_20 += gouty[13] * dm_ik_25;
                 vzjl_20 += goutz[13] * dm_ik_25;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
+                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
+                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
+                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
+                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
+                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
                 break; }
                 case 2: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_10 = 0;
+                double vyjl_10 = 0;
+                double vzjl_10 = 0;
+                double vxjl_20 = 0;
+                double vyjl_20 = 0;
+                double vzjl_20 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_20 += goutx[1] * dm_ik_00;
                 vyjl_20 += gouty[1] * dm_ik_00;
@@ -21988,8 +22197,26 @@ while (1) {
                 vxjl_10 += goutx[12] * dm_ik_25;
                 vyjl_10 += gouty[12] * dm_ik_25;
                 vzjl_10 += goutz[12] * dm_ik_25;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
+                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
+                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
+                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
+                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
+                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
                 break; }
                 case 3: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_10 = 0;
+                double vyjl_10 = 0;
+                double vzjl_10 = 0;
+                double vxjl_20 = 0;
+                double vyjl_20 = 0;
+                double vzjl_20 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_10 += goutx[0] * dm_ik_00;
                 vyjl_10 += gouty[0] * dm_ik_00;
@@ -22042,8 +22269,6 @@ while (1) {
                 vxjl_00 += goutx[11] * dm_ik_25;
                 vyjl_00 += gouty[11] * dm_ik_25;
                 vzjl_00 += goutz[11] * dm_ik_25;
-                break; }
-                }
                 atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
                 atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
                 atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
@@ -22053,6 +22278,8 @@ while (1) {
                 atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
                 atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
                 atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
@@ -22429,7 +22656,7 @@ void rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -23092,6 +23319,7 @@ void rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     int gout_id = threadIdx.y;
+    constexpr int g_size = 18;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     extern __shared__ double shared_memory[];
@@ -23109,7 +23337,7 @@ void rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -23187,9 +23415,9 @@ while (1) {
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double goutx[14];
         double gouty[14];
@@ -23216,9 +23444,9 @@ while (1) {
             }
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
@@ -23238,9 +23466,9 @@ while (1) {
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -23248,11 +23476,11 @@ while (1) {
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[1152] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
                         aij_cache[1] = aj_aij;
@@ -23953,6 +24181,8 @@ while (1) {
                 atomicAdd(vj_z+(i0+2)*nao+(j0+5), vzij_25);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vxkl_00 = 0;
                 double vykl_00 = 0;
                 double vzkl_00 = 0;
@@ -23962,8 +24192,6 @@ while (1) {
                 double vxkl_20 = 0;
                 double vykl_20 = 0;
                 double vzkl_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vxkl_00 += goutx[0] * dm_ji_00;
                 vykl_00 += gouty[0] * dm_ji_00;
@@ -24015,8 +24243,26 @@ while (1) {
                 vxkl_20 += goutx[13] * dm_ji_51;
                 vykl_20 += gouty[13] * dm_ji_51;
                 vzkl_20 += goutz[13] * dm_ji_51;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
+                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
+                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
+                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
+                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
+                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
                 break; }
                 case 1: {
+                double vxkl_00 = 0;
+                double vykl_00 = 0;
+                double vzkl_00 = 0;
+                double vxkl_10 = 0;
+                double vykl_10 = 0;
+                double vzkl_10 = 0;
+                double vxkl_20 = 0;
+                double vykl_20 = 0;
+                double vzkl_20 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vxkl_00 += goutx[0] * dm_ji_01;
                 vykl_00 += gouty[0] * dm_ji_01;
@@ -24068,8 +24314,26 @@ while (1) {
                 vxkl_20 += goutx[13] * dm_ji_52;
                 vykl_20 += gouty[13] * dm_ji_52;
                 vzkl_20 += goutz[13] * dm_ji_52;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
+                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
+                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
+                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
+                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
+                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
                 break; }
                 case 2: {
+                double vxkl_00 = 0;
+                double vykl_00 = 0;
+                double vzkl_00 = 0;
+                double vxkl_10 = 0;
+                double vykl_10 = 0;
+                double vzkl_10 = 0;
+                double vxkl_20 = 0;
+                double vykl_20 = 0;
+                double vzkl_20 = 0;
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vxkl_10 += goutx[4] * dm_ji_00;
                 vykl_10 += gouty[4] * dm_ji_00;
@@ -24118,8 +24382,26 @@ while (1) {
                 vxkl_10 += goutx[8] * dm_ji_51;
                 vykl_10 += gouty[8] * dm_ji_51;
                 vzkl_10 += goutz[8] * dm_ji_51;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
+                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
+                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
+                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
+                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
+                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
                 break; }
                 case 3: {
+                double vxkl_00 = 0;
+                double vykl_00 = 0;
+                double vzkl_00 = 0;
+                double vxkl_10 = 0;
+                double vykl_10 = 0;
+                double vzkl_10 = 0;
+                double vxkl_20 = 0;
+                double vykl_20 = 0;
+                double vzkl_20 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vxkl_10 += goutx[4] * dm_ji_01;
                 vykl_10 += gouty[4] * dm_ji_01;
@@ -24168,8 +24450,6 @@ while (1) {
                 vxkl_10 += goutx[8] * dm_ji_52;
                 vykl_10 += gouty[8] * dm_ji_52;
                 vzkl_10 += goutz[8] * dm_ji_52;
-                break; }
-                }
                 atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
                 atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
                 atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
@@ -24179,8 +24459,12 @@ while (1) {
                 atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
                 atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
                 atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
+                break; }
+                }
             }
             if (do_k) {
+                switch (gout_id) {
+                case 0: {
                 double vxil_00 = 0;
                 double vyil_00 = 0;
                 double vzil_00 = 0;
@@ -24190,8 +24474,6 @@ while (1) {
                 double vxil_20 = 0;
                 double vyil_20 = 0;
                 double vzil_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_00 += goutx[0] * dm_jk_00;
                 vyil_00 += gouty[0] * dm_jk_00;
@@ -24248,8 +24530,26 @@ while (1) {
                 vxil_10 += goutx[13] * dm_jk_52;
                 vyil_10 += gouty[13] * dm_jk_52;
                 vzil_10 += goutz[13] * dm_jk_52;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
+                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
+                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
+                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
+                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
+                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
                 break; }
                 case 1: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_10 = 0;
+                double vyil_10 = 0;
+                double vzil_10 = 0;
+                double vxil_20 = 0;
+                double vyil_20 = 0;
+                double vzil_20 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_10 += goutx[0] * dm_jk_00;
                 vyil_10 += gouty[0] * dm_jk_00;
@@ -24306,8 +24606,26 @@ while (1) {
                 vxil_20 += goutx[13] * dm_jk_52;
                 vyil_20 += gouty[13] * dm_jk_52;
                 vzil_20 += goutz[13] * dm_jk_52;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
+                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
+                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
+                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
+                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
+                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
                 break; }
                 case 2: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_10 = 0;
+                double vyil_10 = 0;
+                double vzil_10 = 0;
+                double vxil_20 = 0;
+                double vyil_20 = 0;
+                double vzil_20 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vxil_20 += goutx[0] * dm_jk_00;
                 vyil_20 += gouty[0] * dm_jk_00;
@@ -24360,8 +24678,26 @@ while (1) {
                 vxil_10 += goutx[8] * dm_jk_51;
                 vyil_10 += gouty[8] * dm_jk_51;
                 vzil_10 += goutz[8] * dm_jk_51;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
+                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
+                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
+                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
+                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
+                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
                 break; }
                 case 3: {
+                double vxil_00 = 0;
+                double vyil_00 = 0;
+                double vzil_00 = 0;
+                double vxil_10 = 0;
+                double vyil_10 = 0;
+                double vzil_10 = 0;
+                double vxil_20 = 0;
+                double vyil_20 = 0;
+                double vzil_20 = 0;
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
                 vxil_10 += goutx[4] * dm_jk_01;
                 vyil_10 += gouty[4] * dm_jk_01;
@@ -24414,8 +24750,6 @@ while (1) {
                 vxil_00 += goutx[12] * dm_jk_52;
                 vyil_00 += gouty[12] * dm_jk_52;
                 vzil_00 += goutz[12] * dm_jk_52;
-                break; }
-                }
                 atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
                 atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
                 atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
@@ -24425,6 +24759,8 @@ while (1) {
                 atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
                 atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
                 atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
@@ -25241,7 +25577,7 @@ void rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -25699,7 +26035,7 @@ void rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -26364,6 +26700,7 @@ void rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     int gout_id = threadIdx.y;
+    constexpr int g_size = 16;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     extern __shared__ double shared_memory[];
@@ -26381,7 +26718,7 @@ void rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -26459,9 +26796,9 @@ while (1) {
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double goutx[14];
         double gouty[14];
@@ -26488,9 +26825,9 @@ while (1) {
             }
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
@@ -26510,9 +26847,9 @@ while (1) {
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -26520,11 +26857,11 @@ while (1) {
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[1024] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
                         aij_cache[1] = aj_aij;
@@ -27807,6 +28144,8 @@ while (1) {
                 atomicAdd(vk_z+(i0+5)*nao+(k0+2), vzik_52);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vxjl_00 = 0;
                 double vyjl_00 = 0;
                 double vzjl_00 = 0;
@@ -27816,8 +28155,6 @@ while (1) {
                 double vxjl_02 = 0;
                 double vyjl_02 = 0;
                 double vzjl_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_00 += goutx[0] * dm_ik_00;
                 vyjl_00 += gouty[0] * dm_ik_00;
@@ -27869,8 +28206,26 @@ while (1) {
                 vxjl_02 += goutx[13] * dm_ik_42;
                 vyjl_02 += gouty[13] * dm_ik_42;
                 vzjl_02 += goutz[13] * dm_ik_42;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+1), vxjl_01);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+1), vyjl_01);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+1), vzjl_01);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+2), vxjl_02);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+2), vyjl_02);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+2), vzjl_02);
                 break; }
                 case 1: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_01 = 0;
+                double vyjl_01 = 0;
+                double vzjl_01 = 0;
+                double vxjl_02 = 0;
+                double vyjl_02 = 0;
+                double vzjl_02 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vxjl_00 += goutx[0] * dm_ik_10;
                 vyjl_00 += gouty[0] * dm_ik_10;
@@ -27922,8 +28277,26 @@ while (1) {
                 vxjl_02 += goutx[13] * dm_ik_52;
                 vyjl_02 += gouty[13] * dm_ik_52;
                 vzjl_02 += goutz[13] * dm_ik_52;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+1), vxjl_01);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+1), vyjl_01);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+1), vzjl_01);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+2), vxjl_02);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+2), vyjl_02);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+2), vzjl_02);
                 break; }
                 case 2: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_01 = 0;
+                double vyjl_01 = 0;
+                double vzjl_01 = 0;
+                double vxjl_02 = 0;
+                double vyjl_02 = 0;
+                double vzjl_02 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_01 += goutx[4] * dm_ik_00;
                 vyjl_01 += gouty[4] * dm_ik_00;
@@ -27972,8 +28345,26 @@ while (1) {
                 vxjl_01 += goutx[8] * dm_ik_42;
                 vyjl_01 += gouty[8] * dm_ik_42;
                 vzjl_01 += goutz[8] * dm_ik_42;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+1), vxjl_01);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+1), vyjl_01);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+1), vzjl_01);
+                atomicAdd(vk_x+(j0+0)*nao+(l0+2), vxjl_02);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+2), vyjl_02);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+2), vzjl_02);
                 break; }
                 case 3: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_01 = 0;
+                double vyjl_01 = 0;
+                double vzjl_01 = 0;
+                double vxjl_02 = 0;
+                double vyjl_02 = 0;
+                double vzjl_02 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vxjl_01 += goutx[4] * dm_ik_10;
                 vyjl_01 += gouty[4] * dm_ik_10;
@@ -28022,8 +28413,6 @@ while (1) {
                 vxjl_01 += goutx[8] * dm_ik_52;
                 vyjl_01 += gouty[8] * dm_ik_52;
                 vzjl_01 += goutz[8] * dm_ik_52;
-                break; }
-                }
                 atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
                 atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
                 atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
@@ -28033,6 +28422,10 @@ while (1) {
                 atomicAdd(vk_x+(j0+0)*nao+(l0+2), vxjl_02);
                 atomicAdd(vk_y+(j0+0)*nao+(l0+2), vyjl_02);
                 atomicAdd(vk_z+(j0+0)*nao+(l0+2), vzjl_02);
+                break; }
+                }
+                switch (gout_id) {
+                case 0: {
                 double vxjk_00 = 0;
                 double vyjk_00 = 0;
                 double vzjk_00 = 0;
@@ -28042,8 +28435,6 @@ while (1) {
                 double vxjk_02 = 0;
                 double vyjk_02 = 0;
                 double vzjk_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vxjk_00 += goutx[0] * dm_il_00;
                 vyjk_00 += gouty[0] * dm_il_00;
@@ -28095,8 +28486,26 @@ while (1) {
                 vxjk_02 += goutx[13] * dm_il_42;
                 vyjk_02 += gouty[13] * dm_il_42;
                 vzjk_02 += goutz[13] * dm_il_42;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
+                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
+                atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
                 break; }
                 case 1: {
+                double vxjk_00 = 0;
+                double vyjk_00 = 0;
+                double vzjk_00 = 0;
+                double vxjk_01 = 0;
+                double vyjk_01 = 0;
+                double vzjk_01 = 0;
+                double vxjk_02 = 0;
+                double vyjk_02 = 0;
+                double vzjk_02 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vxjk_00 += goutx[0] * dm_il_10;
                 vyjk_00 += gouty[0] * dm_il_10;
@@ -28148,8 +28557,26 @@ while (1) {
                 vxjk_02 += goutx[13] * dm_il_52;
                 vyjk_02 += gouty[13] * dm_il_52;
                 vzjk_02 += goutz[13] * dm_il_52;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
+                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
+                atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
                 break; }
                 case 2: {
+                double vxjk_00 = 0;
+                double vyjk_00 = 0;
+                double vzjk_00 = 0;
+                double vxjk_01 = 0;
+                double vyjk_01 = 0;
+                double vzjk_01 = 0;
+                double vxjk_02 = 0;
+                double vyjk_02 = 0;
+                double vzjk_02 = 0;
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vxjk_01 += goutx[1] * dm_il_00;
                 vyjk_01 += gouty[1] * dm_il_00;
@@ -28198,8 +28625,26 @@ while (1) {
                 vxjk_01 += goutx[11] * dm_il_42;
                 vyjk_01 += gouty[11] * dm_il_42;
                 vzjk_01 += goutz[11] * dm_il_42;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
+                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
+                atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
+                atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
+                atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
                 break; }
                 case 3: {
+                double vxjk_00 = 0;
+                double vyjk_00 = 0;
+                double vzjk_00 = 0;
+                double vxjk_01 = 0;
+                double vyjk_01 = 0;
+                double vzjk_01 = 0;
+                double vxjk_02 = 0;
+                double vyjk_02 = 0;
+                double vzjk_02 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vxjk_01 += goutx[1] * dm_il_10;
                 vyjk_01 += gouty[1] * dm_il_10;
@@ -28248,8 +28693,6 @@ while (1) {
                 vxjk_01 += goutx[11] * dm_il_52;
                 vyjk_01 += gouty[11] * dm_il_52;
                 vzjk_01 += goutz[11] * dm_il_52;
-                break; }
-                }
                 atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
                 atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
                 atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
@@ -28259,6 +28702,8 @@ while (1) {
                 atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
                 atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
                 atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
+                break; }
+                }
             }
         }
     }
@@ -28276,16 +28721,11 @@ void rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
-    constexpr int nsq_per_block = 64;
-    constexpr int gout_stride = 4;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     extern __shared__ double shared_memory[];
-    double *rlrk = shared_memory + sq_id;
-    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 44 + sq_id;
-    double *cicj_cache = shared_memory + nsq_per_block * (44+nroots*2);
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
 
@@ -28294,7 +28734,7 @@ void rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -28371,16 +28811,11 @@ while (1) {
         double xlxk = env[rl+0] - env[rk+0];
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
-        if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
-        }
-        double goutx[9];
-        double gouty[9];
-        double goutz[9];
+        double goutx[18];
+        double gouty[18];
+        double goutz[18];
         #pragma unroll
-        for (int n = 0; n < 9; ++n) {
+        for (int n = 0; n < 18; ++n) {
             goutx[n] = 0;
             gouty[n] = 0;
             goutz[n] = 0;
@@ -28399,17 +28834,8 @@ while (1) {
             } else {
                 fac_sym = 0;
             }
-            __syncthreads();
-            if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
-                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
-                gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
-            }
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
@@ -28417,322 +28843,213 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xqc = xlxk * al_akl;
+                double yqc = ylyk * al_akl;
+                double zqc = zlzk * al_akl;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                __syncthreads();
-                if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
-                    double cicj = cicj_cache[ijp];
-                    gx[768] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                        aij_cache[2] = ai * 2;
-                    }
-                }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
-                double s0, s1, s2;
-                double Ix, Iy, Iz;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                if (task_id >= ntasks) {
+                    continue;
+                }
                 for (int irys = 0; irys < nroots; ++irys) {
-                    __syncthreads();
-                    double rt = rw[irys*128];
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
+                    double rt = rw[ 2*irys   *nsq_per_block];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
+                    double b00 = .5 * rt_aa;
+                    double fx, fy, fz;
+                    double rt_akl = rt_aa * aij;
+                    double b01 = .5/akl * (1 - rt_akl);
+                    double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double rt_akl = rt_aa * aij;
-                    double b00 = .5 * rt_aa;
-                    double b01 = .5/akl * (1 - rt_akl);
-                    for (int n = gout_id; n < 3; n += 4) {
-                        if (n == 2) {
-                            gx[1536] = rw[irys*128+64];
-                        }
-                        double *_gx = gx + n * 768;
-                        double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
-                        double c0x = Rpa - rt_aij * Rpq[n*64];
-                        s0 = _gx[0];
-                        s1 = c0x * s0;
-                        _gx[64] = s1;
-                        s2 = c0x * s1 + 1 * b10 * s0;
-                        _gx[128] = s2;
-                        s0 = s1;
-                        s1 = s2;
-                        s2 = c0x * s1 + 2 * b10 * s0;
-                        _gx[192] = s2;
-                        double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
-                        double cpx = Rqc + rt_akl * Rpq[n*64];
-                        s0 = _gx[0];
-                        s1 = cpx * s0;
-                        _gx[256] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        _gx[512] = s2;
-                        s0 = _gx[64];
-                        s1 = cpx * s0;
-                        s1 += 1 * b00 * _gx[0];
-                        _gx[320] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 1 * b00 * _gx[256];
-                        _gx[576] = s2;
-                        s0 = _gx[128];
-                        s1 = cpx * s0;
-                        s1 += 2 * b00 * _gx[64];
-                        _gx[384] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 2 * b00 * _gx[320];
-                        _gx[640] = s2;
-                        s0 = _gx[192];
-                        s1 = cpx * s0;
-                        s1 += 3 * b00 * _gx[128];
-                        _gx[448] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 3 * b00 * _gx[384];
-                        _gx[704] = s2;
-                    }
-                    __syncthreads();
-                    switch (gout_id) {
-                    case 0:
-                    Ix = gx[640];
-                    Iy = gx[768];
-                    Iz = gx[1536];
-                    goutx[0] += (aij_cache[2] * gx[704] - 2 * gx[576]) * Iy * Iz;
-                    gouty[0] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[512];
-                    Iy = gx[832];
-                    Iz = gx[1600];
-                    goutx[1] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[1] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[1] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[320];
-                    Iy = gx[1024];
-                    Iz = gx[1600];
-                    goutx[2] += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gouty[2] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[2] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[768];
-                    Iz = gx[1792];
-                    goutx[3] += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gouty[3] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[832];
-                    Iz = gx[1856];
-                    goutx[4] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[4] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[4] += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[1280];
-                    Iz = gx[1600];
-                    goutx[5] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[5] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[5] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1024];
-                    Iz = gx[1792];
-                    goutx[6] += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gouty[6] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1088];
-                    Iz = gx[1856];
-                    goutx[7] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[7] += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
-                    goutz[7] += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[768];
-                    Iz = gx[2112];
-                    goutx[8] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[8] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[8] += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
-                    break;
-                    case 1:
-                    Ix = gx[576];
-                    Iy = gx[832];
-                    Iz = gx[1536];
-                    goutx[0] += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gouty[0] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[512];
-                    Iy = gx[768];
-                    Iz = gx[1664];
-                    goutx[1] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[1] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[1] += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1152];
-                    Iz = gx[1536];
-                    goutx[2] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[2] += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
-                    goutz[2] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[320];
-                    Iy = gx[832];
-                    Iz = gx[1792];
-                    goutx[3] += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gouty[3] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[768];
-                    Iz = gx[1920];
-                    goutx[4] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[4] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[4] += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1408];
-                    Iz = gx[1536];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += (aij_cache[2] * gx[1472] - 2 * gx[1344]) * Ix * Iz;
-                    goutz[5] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[1088];
-                    Iz = gx[1792];
-                    goutx[6] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[6] += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1024];
-                    Iz = gx[1920];
-                    goutx[7] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[7] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[7] += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[896];
-                    Iz = gx[2048];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
-                    goutz[8] += aij_cache[2] * gx[2112] * Ix * Iy;
-                    break;
-                    case 2:
-                    Ix = gx[576];
-                    Iy = gx[768];
-                    Iz = gx[1600];
-                    goutx[0] += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gouty[0] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[0] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[1024];
-                    Iz = gx[1536];
-                    goutx[1] += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gouty[1] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[1] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1088];
-                    Iz = gx[1600];
-                    goutx[2] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[2] += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
-                    goutz[2] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[320];
-                    Iy = gx[768];
-                    Iz = gx[1856];
-                    goutx[3] += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gouty[3] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[3] += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1280];
-                    Iz = gx[1536];
-                    goutx[4] += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gouty[4] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[4] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1344];
-                    Iz = gx[1600];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
-                    goutz[5] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[1024];
-                    Iz = gx[1856];
-                    goutx[6] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[6] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[6] += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[768];
-                    Iz = gx[2048];
-                    goutx[7] += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gouty[7] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[7] += aij_cache[2] * gx[2112] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[832];
-                    Iz = gx[2112];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[8] += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
-                    break;
-                    case 3:
-                    Ix = gx[512];
-                    Iy = gx[896];
-                    Iz = gx[1536];
-                    goutx[0] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[0] += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[320];
-                    Iy = gx[1088];
-                    Iz = gx[1536];
-                    goutx[1] += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gouty[1] += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
-                    goutz[1] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1024];
-                    Iz = gx[1664];
-                    goutx[2] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[2] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[2] += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[896];
-                    Iz = gx[1792];
-                    goutx[3] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[3] += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[1344];
-                    Iz = gx[1536];
-                    goutx[4] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[4] += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
-                    goutz[4] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1280];
-                    Iz = gx[1664];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[5] += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1152];
-                    Iz = gx[1792];
-                    goutx[6] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[6] += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[832];
-                    Iz = gx[2048];
-                    goutx[7] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[7] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[7] += aij_cache[2] * gx[2112] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[768];
-                    Iz = gx[2176];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[8] += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
-                    break;
-                    }
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
+                    double trr_10x = c0x * 1;
+                    double trr_20x = c0x * trr_10x + 1*b10 * 1;
+                    double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                    double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
+                    double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
+                    double trr_32x = cpx * trr_31x + 1*b01 * trr_30x + 3*b00 * trr_21x;
+                    fx = aij_cache[2] * trr_32x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
+                    double trr_10y = c0y * 1;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
+                    double trr_10z = c0z * wt;
+                    fz = aij_cache[2] * trr_10z;
+                    double trr_11x = cpx * trr_10x + 1*b00 * 1;
+                    double trr_01x = cpx * 1;
+                    double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
+                    fx -= 2 * trr_12x;
+                    double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
+                    goutx[0] +=  fx  * 1 * wt;
+                    gouty[0] += trr_22x *  fy  * wt;
+                    goutz[0] += trr_22x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_22x;
+                    double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
+                    double trr_02x = cpx * trr_01x + 1*b01 * 1;
+                    fx -= 1 * trr_02x;
+                    fy -= 1 * 1;
+                    goutx[1] +=  fx  * trr_10y * wt;
+                    gouty[1] += trr_12x *  fy  * wt;
+                    goutz[1] += trr_12x * trr_10y *  fz ;
+                    fx = aij_cache[2] * trr_22x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                    fz = aij_cache[2] * trr_20z;
+                    fx -= 1 * trr_02x;
+                    fz -= 1 * wt;
+                    goutx[2] +=  fx  * 1 * trr_10z;
+                    gouty[2] += trr_12x *  fy  * trr_10z;
+                    goutz[2] += trr_12x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_12x;
+                    double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * trr_10z;
+                    fy -= 2 * trr_10y;
+                    goutx[3] +=  fx  * trr_20y * wt;
+                    gouty[3] += trr_02x *  fy  * wt;
+                    goutz[3] += trr_02x * trr_20y *  fz ;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_20z;
+                    fy -= 1 * 1;
+                    fz -= 1 * wt;
+                    goutx[4] +=  fx  * trr_10y * trr_10z;
+                    gouty[4] += trr_02x *  fy  * trr_10z;
+                    goutz[4] += trr_02x * trr_10y *  fz ;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                    fz = aij_cache[2] * trr_30z;
+                    fz -= 2 * trr_10z;
+                    goutx[5] +=  fx  * 1 * trr_20z;
+                    gouty[5] += trr_02x *  fy  * trr_20z;
+                    goutz[5] += trr_02x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_31x;
+                    double cpy = yqc + ypq*rt_akl;
+                    double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
+                    fx -= 2 * trr_11x;
+                    double trr_01y = cpy * 1;
+                    goutx[6] +=  fx  * trr_01y * wt;
+                    gouty[6] += trr_21x *  fy  * wt;
+                    goutz[6] += trr_21x * trr_01y *  fz ;
+                    fx = aij_cache[2] * trr_21x;
+                    double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_10z;
+                    fx -= 1 * trr_01x;
+                    fy -= 1 * trr_01y;
+                    goutx[7] +=  fx  * trr_11y * wt;
+                    gouty[7] += trr_11x *  fy  * wt;
+                    goutz[7] += trr_11x * trr_11y *  fz ;
+                    fx = aij_cache[2] * trr_21x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_20z;
+                    fx -= 1 * trr_01x;
+                    fz -= 1 * wt;
+                    goutx[8] +=  fx  * trr_01y * trr_10z;
+                    gouty[8] += trr_11x *  fy  * trr_10z;
+                    goutz[8] += trr_11x * trr_01y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                    fy = aij_cache[2] * trr_31y;
+                    fz = aij_cache[2] * trr_10z;
+                    fy -= 2 * trr_11y;
+                    goutx[9] +=  fx  * trr_21y * wt;
+                    gouty[9] += trr_01x *  fy  * wt;
+                    goutz[9] += trr_01x * trr_21y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_20z;
+                    fy -= 1 * trr_01y;
+                    fz -= 1 * wt;
+                    goutx[10] +=  fx  * trr_11y * trr_10z;
+                    gouty[10] += trr_01x *  fy  * trr_10z;
+                    goutz[10] += trr_01x * trr_11y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_30z;
+                    fz -= 2 * trr_10z;
+                    goutx[11] +=  fx  * trr_01y * trr_20z;
+                    gouty[11] += trr_01x *  fy  * trr_20z;
+                    goutz[11] += trr_01x * trr_01y *  fz ;
+                    fx = aij_cache[2] * trr_31x;
+                    fy = aij_cache[2] * trr_10y;
+                    double cpz = zqc + zpq*rt_akl;
+                    double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                    fz = aij_cache[2] * trr_11z;
+                    fx -= 2 * trr_11x;
+                    double trr_01z = cpz * wt;
+                    goutx[12] +=  fx  * 1 * trr_01z;
+                    gouty[12] += trr_21x *  fy  * trr_01z;
+                    goutz[12] += trr_21x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_21x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_11z;
+                    fx -= 1 * trr_01x;
+                    fy -= 1 * 1;
+                    goutx[13] +=  fx  * trr_10y * trr_01z;
+                    gouty[13] += trr_11x *  fy  * trr_01z;
+                    goutz[13] += trr_11x * trr_10y *  fz ;
+                    fx = aij_cache[2] * trr_21x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                    fz = aij_cache[2] * trr_21z;
+                    fx -= 1 * trr_01x;
+                    fz -= 1 * trr_01z;
+                    goutx[14] +=  fx  * 1 * trr_11z;
+                    gouty[14] += trr_11x *  fy  * trr_11z;
+                    goutz[14] += trr_11x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * trr_11z;
+                    fy -= 2 * trr_10y;
+                    goutx[15] +=  fx  * trr_20y * trr_01z;
+                    gouty[15] += trr_01x *  fy  * trr_01z;
+                    goutz[15] += trr_01x * trr_20y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_21z;
+                    fy -= 1 * 1;
+                    fz -= 1 * trr_01z;
+                    goutx[16] +=  fx  * trr_10y * trr_11z;
+                    gouty[16] += trr_01x *  fy  * trr_11z;
+                    goutz[16] += trr_01x * trr_10y *  fz ;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                    fz = aij_cache[2] * trr_31z;
+                    fz -= 2 * trr_11z;
+                    goutx[17] +=  fx  * 1 * trr_21z;
+                    gouty[17] += trr_01x *  fy  * trr_21z;
+                    goutz[17] += trr_01x * 1 *  fz ;
                 }
             }
         }
@@ -28754,388 +29071,110 @@ while (1) {
             double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
             double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
-                switch (gout_id) {
-                case 0: {
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
+                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
                 double dm_lk_02 = dm[(l0+0)*nao+(k0+2)];
-                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
-                double vxij_00 = goutx[0]*dm_lk_00 + goutx[3]*dm_lk_02 + goutx[6]*dm_lk_04;
+                double vxij_00 = goutx[0]*dm_lk_00 + goutx[6]*dm_lk_01 + goutx[12]*dm_lk_02;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
-                double vyij_00 = gouty[0]*dm_lk_00 + gouty[3]*dm_lk_02 + gouty[6]*dm_lk_04;
+                double vyij_00 = gouty[0]*dm_lk_00 + gouty[6]*dm_lk_01 + gouty[12]*dm_lk_02;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
-                double vzij_00 = goutz[0]*dm_lk_00 + goutz[3]*dm_lk_02 + goutz[6]*dm_lk_04;
+                double vzij_00 = goutz[0]*dm_lk_00 + goutz[6]*dm_lk_01 + goutz[12]*dm_lk_02;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
-                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
-                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
-                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
-                double vxij_20 = goutx[2]*dm_lk_01 + goutx[5]*dm_lk_03 + goutx[8]*dm_lk_05;
-                atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
-                double vyij_20 = gouty[2]*dm_lk_01 + gouty[5]*dm_lk_03 + gouty[8]*dm_lk_05;
-                atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
-                double vzij_20 = goutz[2]*dm_lk_01 + goutz[5]*dm_lk_03 + goutz[8]*dm_lk_05;
-                atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
-                double vxij_40 = goutx[1]*dm_lk_00 + goutx[4]*dm_lk_02 + goutx[7]*dm_lk_04;
-                atomicAdd(vj_x+(i0+4)*nao+(j0+0), vxij_40);
-                double vyij_40 = gouty[1]*dm_lk_00 + gouty[4]*dm_lk_02 + gouty[7]*dm_lk_04;
-                atomicAdd(vj_y+(i0+4)*nao+(j0+0), vyij_40);
-                double vzij_40 = goutz[1]*dm_lk_00 + goutz[4]*dm_lk_02 + goutz[7]*dm_lk_04;
-                atomicAdd(vj_z+(i0+4)*nao+(j0+0), vzij_40);
-                break; }
-                case 1: {
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double dm_lk_02 = dm[(l0+0)*nao+(k0+2)];
-                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
-                double vxij_10 = goutx[0]*dm_lk_00 + goutx[3]*dm_lk_02 + goutx[6]*dm_lk_04;
+                double vxij_10 = goutx[1]*dm_lk_00 + goutx[7]*dm_lk_01 + goutx[13]*dm_lk_02;
                 atomicAdd(vj_x+(i0+1)*nao+(j0+0), vxij_10);
-                double vyij_10 = gouty[0]*dm_lk_00 + gouty[3]*dm_lk_02 + gouty[6]*dm_lk_04;
+                double vyij_10 = gouty[1]*dm_lk_00 + gouty[7]*dm_lk_01 + gouty[13]*dm_lk_02;
                 atomicAdd(vj_y+(i0+1)*nao+(j0+0), vyij_10);
-                double vzij_10 = goutz[0]*dm_lk_00 + goutz[3]*dm_lk_02 + goutz[6]*dm_lk_04;
+                double vzij_10 = goutz[1]*dm_lk_00 + goutz[7]*dm_lk_01 + goutz[13]*dm_lk_02;
                 atomicAdd(vj_z+(i0+1)*nao+(j0+0), vzij_10);
-                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
-                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
-                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
-                double vxij_30 = goutx[2]*dm_lk_01 + goutx[5]*dm_lk_03 + goutx[8]*dm_lk_05;
-                atomicAdd(vj_x+(i0+3)*nao+(j0+0), vxij_30);
-                double vyij_30 = gouty[2]*dm_lk_01 + gouty[5]*dm_lk_03 + gouty[8]*dm_lk_05;
-                atomicAdd(vj_y+(i0+3)*nao+(j0+0), vyij_30);
-                double vzij_30 = goutz[2]*dm_lk_01 + goutz[5]*dm_lk_03 + goutz[8]*dm_lk_05;
-                atomicAdd(vj_z+(i0+3)*nao+(j0+0), vzij_30);
-                double vxij_50 = goutx[1]*dm_lk_00 + goutx[4]*dm_lk_02 + goutx[7]*dm_lk_04;
-                atomicAdd(vj_x+(i0+5)*nao+(j0+0), vxij_50);
-                double vyij_50 = gouty[1]*dm_lk_00 + gouty[4]*dm_lk_02 + gouty[7]*dm_lk_04;
-                atomicAdd(vj_y+(i0+5)*nao+(j0+0), vyij_50);
-                double vzij_50 = goutz[1]*dm_lk_00 + goutz[4]*dm_lk_02 + goutz[7]*dm_lk_04;
-                atomicAdd(vj_z+(i0+5)*nao+(j0+0), vzij_50);
-                break; }
-                case 2: {
-                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
-                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
-                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
-                double vxij_00 = goutx[1]*dm_lk_01 + goutx[4]*dm_lk_03 + goutx[7]*dm_lk_05;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
-                double vyij_00 = gouty[1]*dm_lk_01 + gouty[4]*dm_lk_03 + gouty[7]*dm_lk_05;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
-                double vzij_00 = goutz[1]*dm_lk_01 + goutz[4]*dm_lk_03 + goutz[7]*dm_lk_05;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double dm_lk_02 = dm[(l0+0)*nao+(k0+2)];
-                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
-                double vxij_20 = goutx[0]*dm_lk_00 + goutx[3]*dm_lk_02 + goutx[6]*dm_lk_04;
+                double vxij_20 = goutx[2]*dm_lk_00 + goutx[8]*dm_lk_01 + goutx[14]*dm_lk_02;
                 atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
-                double vyij_20 = gouty[0]*dm_lk_00 + gouty[3]*dm_lk_02 + gouty[6]*dm_lk_04;
+                double vyij_20 = gouty[2]*dm_lk_00 + gouty[8]*dm_lk_01 + gouty[14]*dm_lk_02;
                 atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
-                double vzij_20 = goutz[0]*dm_lk_00 + goutz[3]*dm_lk_02 + goutz[6]*dm_lk_04;
+                double vzij_20 = goutz[2]*dm_lk_00 + goutz[8]*dm_lk_01 + goutz[14]*dm_lk_02;
                 atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
-                double vxij_40 = goutx[2]*dm_lk_01 + goutx[5]*dm_lk_03 + goutx[8]*dm_lk_05;
-                atomicAdd(vj_x+(i0+4)*nao+(j0+0), vxij_40);
-                double vyij_40 = gouty[2]*dm_lk_01 + gouty[5]*dm_lk_03 + gouty[8]*dm_lk_05;
-                atomicAdd(vj_y+(i0+4)*nao+(j0+0), vyij_40);
-                double vzij_40 = goutz[2]*dm_lk_01 + goutz[5]*dm_lk_03 + goutz[8]*dm_lk_05;
-                atomicAdd(vj_z+(i0+4)*nao+(j0+0), vzij_40);
-                break; }
-                case 3: {
-                double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
-                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
-                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
-                double vxij_10 = goutx[1]*dm_lk_01 + goutx[4]*dm_lk_03 + goutx[7]*dm_lk_05;
-                atomicAdd(vj_x+(i0+1)*nao+(j0+0), vxij_10);
-                double vyij_10 = gouty[1]*dm_lk_01 + gouty[4]*dm_lk_03 + gouty[7]*dm_lk_05;
-                atomicAdd(vj_y+(i0+1)*nao+(j0+0), vyij_10);
-                double vzij_10 = goutz[1]*dm_lk_01 + goutz[4]*dm_lk_03 + goutz[7]*dm_lk_05;
-                atomicAdd(vj_z+(i0+1)*nao+(j0+0), vzij_10);
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double dm_lk_02 = dm[(l0+0)*nao+(k0+2)];
-                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
-                double vxij_30 = goutx[0]*dm_lk_00 + goutx[3]*dm_lk_02 + goutx[6]*dm_lk_04;
+                double vxij_30 = goutx[3]*dm_lk_00 + goutx[9]*dm_lk_01 + goutx[15]*dm_lk_02;
                 atomicAdd(vj_x+(i0+3)*nao+(j0+0), vxij_30);
-                double vyij_30 = gouty[0]*dm_lk_00 + gouty[3]*dm_lk_02 + gouty[6]*dm_lk_04;
+                double vyij_30 = gouty[3]*dm_lk_00 + gouty[9]*dm_lk_01 + gouty[15]*dm_lk_02;
                 atomicAdd(vj_y+(i0+3)*nao+(j0+0), vyij_30);
-                double vzij_30 = goutz[0]*dm_lk_00 + goutz[3]*dm_lk_02 + goutz[6]*dm_lk_04;
+                double vzij_30 = goutz[3]*dm_lk_00 + goutz[9]*dm_lk_01 + goutz[15]*dm_lk_02;
                 atomicAdd(vj_z+(i0+3)*nao+(j0+0), vzij_30);
-                double vxij_50 = goutx[2]*dm_lk_01 + goutx[5]*dm_lk_03 + goutx[8]*dm_lk_05;
+                double vxij_40 = goutx[4]*dm_lk_00 + goutx[10]*dm_lk_01 + goutx[16]*dm_lk_02;
+                atomicAdd(vj_x+(i0+4)*nao+(j0+0), vxij_40);
+                double vyij_40 = gouty[4]*dm_lk_00 + gouty[10]*dm_lk_01 + gouty[16]*dm_lk_02;
+                atomicAdd(vj_y+(i0+4)*nao+(j0+0), vyij_40);
+                double vzij_40 = goutz[4]*dm_lk_00 + goutz[10]*dm_lk_01 + goutz[16]*dm_lk_02;
+                atomicAdd(vj_z+(i0+4)*nao+(j0+0), vzij_40);
+                double vxij_50 = goutx[5]*dm_lk_00 + goutx[11]*dm_lk_01 + goutx[17]*dm_lk_02;
                 atomicAdd(vj_x+(i0+5)*nao+(j0+0), vxij_50);
-                double vyij_50 = gouty[2]*dm_lk_01 + gouty[5]*dm_lk_03 + gouty[8]*dm_lk_05;
+                double vyij_50 = gouty[5]*dm_lk_00 + gouty[11]*dm_lk_01 + gouty[17]*dm_lk_02;
                 atomicAdd(vj_y+(i0+5)*nao+(j0+0), vyij_50);
-                double vzij_50 = goutz[2]*dm_lk_01 + goutz[5]*dm_lk_03 + goutz[8]*dm_lk_05;
+                double vzij_50 = goutz[5]*dm_lk_00 + goutz[11]*dm_lk_01 + goutz[17]*dm_lk_02;
                 atomicAdd(vj_z+(i0+5)*nao+(j0+0), vzij_50);
-                break; }
-                }
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
-                double dm_ji_04 = dm[(j0+0)*nao+(i0+4)];
-                double vxkl_00 = goutx[0]*dm_ji_00 + goutx[1]*dm_ji_04;
-                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
-                double vykl_00 = gouty[0]*dm_ji_00 + gouty[1]*dm_ji_04;
-                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
-                double vzkl_00 = goutz[0]*dm_ji_00 + goutz[1]*dm_ji_04;
-                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
-                double dm_ji_02 = dm[(j0+0)*nao+(i0+2)];
-                double vxkl_10 = goutx[2]*dm_ji_02;
-                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
-                double vykl_10 = gouty[2]*dm_ji_02;
-                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
-                double vzkl_10 = goutz[2]*dm_ji_02;
-                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
-                double vxkl_20 = goutx[3]*dm_ji_00 + goutx[4]*dm_ji_04;
-                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
-                double vykl_20 = gouty[3]*dm_ji_00 + gouty[4]*dm_ji_04;
-                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
-                double vzkl_20 = goutz[3]*dm_ji_00 + goutz[4]*dm_ji_04;
-                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
-                double vxkl_30 = goutx[5]*dm_ji_02;
-                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
-                double vykl_30 = gouty[5]*dm_ji_02;
-                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
-                double vzkl_30 = goutz[5]*dm_ji_02;
-                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
-                double vxkl_40 = goutx[6]*dm_ji_00 + goutx[7]*dm_ji_04;
-                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
-                double vykl_40 = gouty[6]*dm_ji_00 + gouty[7]*dm_ji_04;
-                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
-                double vzkl_40 = goutz[6]*dm_ji_00 + goutz[7]*dm_ji_04;
-                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
-                double vxkl_50 = goutx[8]*dm_ji_02;
-                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
-                double vykl_50 = gouty[8]*dm_ji_02;
-                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
-                double vzkl_50 = goutz[8]*dm_ji_02;
-                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
-                break; }
-                case 1: {
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
-                double dm_ji_05 = dm[(j0+0)*nao+(i0+5)];
-                double vxkl_00 = goutx[0]*dm_ji_01 + goutx[1]*dm_ji_05;
-                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
-                double vykl_00 = gouty[0]*dm_ji_01 + gouty[1]*dm_ji_05;
-                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
-                double vzkl_00 = goutz[0]*dm_ji_01 + goutz[1]*dm_ji_05;
-                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
-                double dm_ji_03 = dm[(j0+0)*nao+(i0+3)];
-                double vxkl_10 = goutx[2]*dm_ji_03;
-                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
-                double vykl_10 = gouty[2]*dm_ji_03;
-                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
-                double vzkl_10 = goutz[2]*dm_ji_03;
-                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
-                double vxkl_20 = goutx[3]*dm_ji_01 + goutx[4]*dm_ji_05;
-                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
-                double vykl_20 = gouty[3]*dm_ji_01 + gouty[4]*dm_ji_05;
-                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
-                double vzkl_20 = goutz[3]*dm_ji_01 + goutz[4]*dm_ji_05;
-                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
-                double vxkl_30 = goutx[5]*dm_ji_03;
-                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
-                double vykl_30 = gouty[5]*dm_ji_03;
-                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
-                double vzkl_30 = goutz[5]*dm_ji_03;
-                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
-                double vxkl_40 = goutx[6]*dm_ji_01 + goutx[7]*dm_ji_05;
-                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
-                double vykl_40 = gouty[6]*dm_ji_01 + gouty[7]*dm_ji_05;
-                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
-                double vzkl_40 = goutz[6]*dm_ji_01 + goutz[7]*dm_ji_05;
-                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
-                double vxkl_50 = goutx[8]*dm_ji_03;
-                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
-                double vykl_50 = gouty[8]*dm_ji_03;
-                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
-                double vzkl_50 = goutz[8]*dm_ji_03;
-                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
-                break; }
-                case 2: {
                 double dm_ji_02 = dm[(j0+0)*nao+(i0+2)];
-                double vxkl_00 = goutx[0]*dm_ji_02;
-                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
-                double vykl_00 = gouty[0]*dm_ji_02;
-                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
-                double vzkl_00 = goutz[0]*dm_ji_02;
-                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
-                double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
-                double dm_ji_04 = dm[(j0+0)*nao+(i0+4)];
-                double vxkl_10 = goutx[1]*dm_ji_00 + goutx[2]*dm_ji_04;
-                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
-                double vykl_10 = gouty[1]*dm_ji_00 + gouty[2]*dm_ji_04;
-                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
-                double vzkl_10 = goutz[1]*dm_ji_00 + goutz[2]*dm_ji_04;
-                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
-                double vxkl_20 = goutx[3]*dm_ji_02;
-                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
-                double vykl_20 = gouty[3]*dm_ji_02;
-                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
-                double vzkl_20 = goutz[3]*dm_ji_02;
-                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
-                double vxkl_30 = goutx[4]*dm_ji_00 + goutx[5]*dm_ji_04;
-                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
-                double vykl_30 = gouty[4]*dm_ji_00 + gouty[5]*dm_ji_04;
-                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
-                double vzkl_30 = goutz[4]*dm_ji_00 + goutz[5]*dm_ji_04;
-                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
-                double vxkl_40 = goutx[6]*dm_ji_02;
-                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
-                double vykl_40 = gouty[6]*dm_ji_02;
-                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
-                double vzkl_40 = goutz[6]*dm_ji_02;
-                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
-                double vxkl_50 = goutx[7]*dm_ji_00 + goutx[8]*dm_ji_04;
-                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
-                double vykl_50 = gouty[7]*dm_ji_00 + gouty[8]*dm_ji_04;
-                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
-                double vzkl_50 = goutz[7]*dm_ji_00 + goutz[8]*dm_ji_04;
-                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
-                break; }
-                case 3: {
                 double dm_ji_03 = dm[(j0+0)*nao+(i0+3)];
-                double vxkl_00 = goutx[0]*dm_ji_03;
-                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
-                double vykl_00 = gouty[0]*dm_ji_03;
-                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
-                double vzkl_00 = goutz[0]*dm_ji_03;
-                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
-                double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
+                double dm_ji_04 = dm[(j0+0)*nao+(i0+4)];
                 double dm_ji_05 = dm[(j0+0)*nao+(i0+5)];
-                double vxkl_10 = goutx[1]*dm_ji_01 + goutx[2]*dm_ji_05;
+                double vxkl_00 = goutx[0]*dm_ji_00 + goutx[1]*dm_ji_01 + goutx[2]*dm_ji_02 + goutx[3]*dm_ji_03 + goutx[4]*dm_ji_04 + goutx[5]*dm_ji_05;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                double vykl_00 = gouty[0]*dm_ji_00 + gouty[1]*dm_ji_01 + gouty[2]*dm_ji_02 + gouty[3]*dm_ji_03 + gouty[4]*dm_ji_04 + gouty[5]*dm_ji_05;
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                double vzkl_00 = goutz[0]*dm_ji_00 + goutz[1]*dm_ji_01 + goutz[2]*dm_ji_02 + goutz[3]*dm_ji_03 + goutz[4]*dm_ji_04 + goutz[5]*dm_ji_05;
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+                double vxkl_10 = goutx[6]*dm_ji_00 + goutx[7]*dm_ji_01 + goutx[8]*dm_ji_02 + goutx[9]*dm_ji_03 + goutx[10]*dm_ji_04 + goutx[11]*dm_ji_05;
                 atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
-                double vykl_10 = gouty[1]*dm_ji_01 + gouty[2]*dm_ji_05;
+                double vykl_10 = gouty[6]*dm_ji_00 + gouty[7]*dm_ji_01 + gouty[8]*dm_ji_02 + gouty[9]*dm_ji_03 + gouty[10]*dm_ji_04 + gouty[11]*dm_ji_05;
                 atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
-                double vzkl_10 = goutz[1]*dm_ji_01 + goutz[2]*dm_ji_05;
+                double vzkl_10 = goutz[6]*dm_ji_00 + goutz[7]*dm_ji_01 + goutz[8]*dm_ji_02 + goutz[9]*dm_ji_03 + goutz[10]*dm_ji_04 + goutz[11]*dm_ji_05;
                 atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
-                double vxkl_20 = goutx[3]*dm_ji_03;
+                double vxkl_20 = goutx[12]*dm_ji_00 + goutx[13]*dm_ji_01 + goutx[14]*dm_ji_02 + goutx[15]*dm_ji_03 + goutx[16]*dm_ji_04 + goutx[17]*dm_ji_05;
                 atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
-                double vykl_20 = gouty[3]*dm_ji_03;
+                double vykl_20 = gouty[12]*dm_ji_00 + gouty[13]*dm_ji_01 + gouty[14]*dm_ji_02 + gouty[15]*dm_ji_03 + gouty[16]*dm_ji_04 + gouty[17]*dm_ji_05;
                 atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
-                double vzkl_20 = goutz[3]*dm_ji_03;
+                double vzkl_20 = goutz[12]*dm_ji_00 + goutz[13]*dm_ji_01 + goutz[14]*dm_ji_02 + goutz[15]*dm_ji_03 + goutz[16]*dm_ji_04 + goutz[17]*dm_ji_05;
                 atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
-                double vxkl_30 = goutx[4]*dm_ji_01 + goutx[5]*dm_ji_05;
-                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
-                double vykl_30 = gouty[4]*dm_ji_01 + gouty[5]*dm_ji_05;
-                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
-                double vzkl_30 = goutz[4]*dm_ji_01 + goutz[5]*dm_ji_05;
-                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
-                double vxkl_40 = goutx[6]*dm_ji_03;
-                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
-                double vykl_40 = gouty[6]*dm_ji_03;
-                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
-                double vzkl_40 = goutz[6]*dm_ji_03;
-                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
-                double vxkl_50 = goutx[7]*dm_ji_01 + goutx[8]*dm_ji_05;
-                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
-                double vykl_50 = gouty[7]*dm_ji_01 + gouty[8]*dm_ji_05;
-                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
-                double vzkl_50 = goutz[7]*dm_ji_01 + goutz[8]*dm_ji_05;
-                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
-                break; }
-                }
             }
             if (do_k) {
-                switch (gout_id) {
-                case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
+                double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
                 double dm_jk_02 = dm[(j0+0)*nao+(k0+2)];
-                double dm_jk_04 = dm[(j0+0)*nao+(k0+4)];
-                double vxil_00 = goutx[0]*dm_jk_00 + goutx[3]*dm_jk_02 + goutx[6]*dm_jk_04;
+                double vxil_00 = goutx[0]*dm_jk_00 + goutx[6]*dm_jk_01 + goutx[12]*dm_jk_02;
                 atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
-                double vyil_00 = gouty[0]*dm_jk_00 + gouty[3]*dm_jk_02 + gouty[6]*dm_jk_04;
+                double vyil_00 = gouty[0]*dm_jk_00 + gouty[6]*dm_jk_01 + gouty[12]*dm_jk_02;
                 atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
-                double vzil_00 = goutz[0]*dm_jk_00 + goutz[3]*dm_jk_02 + goutz[6]*dm_jk_04;
+                double vzil_00 = goutz[0]*dm_jk_00 + goutz[6]*dm_jk_01 + goutz[12]*dm_jk_02;
                 atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
-                double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
-                double dm_jk_03 = dm[(j0+0)*nao+(k0+3)];
-                double dm_jk_05 = dm[(j0+0)*nao+(k0+5)];
-                double vxil_20 = goutx[2]*dm_jk_01 + goutx[5]*dm_jk_03 + goutx[8]*dm_jk_05;
-                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
-                double vyil_20 = gouty[2]*dm_jk_01 + gouty[5]*dm_jk_03 + gouty[8]*dm_jk_05;
-                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
-                double vzil_20 = goutz[2]*dm_jk_01 + goutz[5]*dm_jk_03 + goutz[8]*dm_jk_05;
-                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
-                double vxil_40 = goutx[1]*dm_jk_00 + goutx[4]*dm_jk_02 + goutx[7]*dm_jk_04;
-                atomicAdd(vk_x+(i0+4)*nao+(l0+0), vxil_40);
-                double vyil_40 = gouty[1]*dm_jk_00 + gouty[4]*dm_jk_02 + gouty[7]*dm_jk_04;
-                atomicAdd(vk_y+(i0+4)*nao+(l0+0), vyil_40);
-                double vzil_40 = goutz[1]*dm_jk_00 + goutz[4]*dm_jk_02 + goutz[7]*dm_jk_04;
-                atomicAdd(vk_z+(i0+4)*nao+(l0+0), vzil_40);
-                break; }
-                case 1: {
-                double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
-                double dm_jk_02 = dm[(j0+0)*nao+(k0+2)];
-                double dm_jk_04 = dm[(j0+0)*nao+(k0+4)];
-                double vxil_10 = goutx[0]*dm_jk_00 + goutx[3]*dm_jk_02 + goutx[6]*dm_jk_04;
+                double vxil_10 = goutx[1]*dm_jk_00 + goutx[7]*dm_jk_01 + goutx[13]*dm_jk_02;
                 atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
-                double vyil_10 = gouty[0]*dm_jk_00 + gouty[3]*dm_jk_02 + gouty[6]*dm_jk_04;
+                double vyil_10 = gouty[1]*dm_jk_00 + gouty[7]*dm_jk_01 + gouty[13]*dm_jk_02;
                 atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
-                double vzil_10 = goutz[0]*dm_jk_00 + goutz[3]*dm_jk_02 + goutz[6]*dm_jk_04;
+                double vzil_10 = goutz[1]*dm_jk_00 + goutz[7]*dm_jk_01 + goutz[13]*dm_jk_02;
                 atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
-                double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
-                double dm_jk_03 = dm[(j0+0)*nao+(k0+3)];
-                double dm_jk_05 = dm[(j0+0)*nao+(k0+5)];
-                double vxil_30 = goutx[2]*dm_jk_01 + goutx[5]*dm_jk_03 + goutx[8]*dm_jk_05;
-                atomicAdd(vk_x+(i0+3)*nao+(l0+0), vxil_30);
-                double vyil_30 = gouty[2]*dm_jk_01 + gouty[5]*dm_jk_03 + gouty[8]*dm_jk_05;
-                atomicAdd(vk_y+(i0+3)*nao+(l0+0), vyil_30);
-                double vzil_30 = goutz[2]*dm_jk_01 + goutz[5]*dm_jk_03 + goutz[8]*dm_jk_05;
-                atomicAdd(vk_z+(i0+3)*nao+(l0+0), vzil_30);
-                double vxil_50 = goutx[1]*dm_jk_00 + goutx[4]*dm_jk_02 + goutx[7]*dm_jk_04;
-                atomicAdd(vk_x+(i0+5)*nao+(l0+0), vxil_50);
-                double vyil_50 = gouty[1]*dm_jk_00 + gouty[4]*dm_jk_02 + gouty[7]*dm_jk_04;
-                atomicAdd(vk_y+(i0+5)*nao+(l0+0), vyil_50);
-                double vzil_50 = goutz[1]*dm_jk_00 + goutz[4]*dm_jk_02 + goutz[7]*dm_jk_04;
-                atomicAdd(vk_z+(i0+5)*nao+(l0+0), vzil_50);
-                break; }
-                case 2: {
-                double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
-                double dm_jk_03 = dm[(j0+0)*nao+(k0+3)];
-                double dm_jk_05 = dm[(j0+0)*nao+(k0+5)];
-                double vxil_00 = goutx[1]*dm_jk_01 + goutx[4]*dm_jk_03 + goutx[7]*dm_jk_05;
-                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
-                double vyil_00 = gouty[1]*dm_jk_01 + gouty[4]*dm_jk_03 + gouty[7]*dm_jk_05;
-                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
-                double vzil_00 = goutz[1]*dm_jk_01 + goutz[4]*dm_jk_03 + goutz[7]*dm_jk_05;
-                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
-                double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
-                double dm_jk_02 = dm[(j0+0)*nao+(k0+2)];
-                double dm_jk_04 = dm[(j0+0)*nao+(k0+4)];
-                double vxil_20 = goutx[0]*dm_jk_00 + goutx[3]*dm_jk_02 + goutx[6]*dm_jk_04;
+                double vxil_20 = goutx[2]*dm_jk_00 + goutx[8]*dm_jk_01 + goutx[14]*dm_jk_02;
                 atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
-                double vyil_20 = gouty[0]*dm_jk_00 + gouty[3]*dm_jk_02 + gouty[6]*dm_jk_04;
+                double vyil_20 = gouty[2]*dm_jk_00 + gouty[8]*dm_jk_01 + gouty[14]*dm_jk_02;
                 atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
-                double vzil_20 = goutz[0]*dm_jk_00 + goutz[3]*dm_jk_02 + goutz[6]*dm_jk_04;
+                double vzil_20 = goutz[2]*dm_jk_00 + goutz[8]*dm_jk_01 + goutz[14]*dm_jk_02;
                 atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
-                double vxil_40 = goutx[2]*dm_jk_01 + goutx[5]*dm_jk_03 + goutx[8]*dm_jk_05;
-                atomicAdd(vk_x+(i0+4)*nao+(l0+0), vxil_40);
-                double vyil_40 = gouty[2]*dm_jk_01 + gouty[5]*dm_jk_03 + gouty[8]*dm_jk_05;
-                atomicAdd(vk_y+(i0+4)*nao+(l0+0), vyil_40);
-                double vzil_40 = goutz[2]*dm_jk_01 + goutz[5]*dm_jk_03 + goutz[8]*dm_jk_05;
-                atomicAdd(vk_z+(i0+4)*nao+(l0+0), vzil_40);
-                break; }
-                case 3: {
-                double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
-                double dm_jk_03 = dm[(j0+0)*nao+(k0+3)];
-                double dm_jk_05 = dm[(j0+0)*nao+(k0+5)];
-                double vxil_10 = goutx[1]*dm_jk_01 + goutx[4]*dm_jk_03 + goutx[7]*dm_jk_05;
-                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
-                double vyil_10 = gouty[1]*dm_jk_01 + gouty[4]*dm_jk_03 + gouty[7]*dm_jk_05;
-                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
-                double vzil_10 = goutz[1]*dm_jk_01 + goutz[4]*dm_jk_03 + goutz[7]*dm_jk_05;
-                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
-                double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
-                double dm_jk_02 = dm[(j0+0)*nao+(k0+2)];
-                double dm_jk_04 = dm[(j0+0)*nao+(k0+4)];
-                double vxil_30 = goutx[0]*dm_jk_00 + goutx[3]*dm_jk_02 + goutx[6]*dm_jk_04;
+                double vxil_30 = goutx[3]*dm_jk_00 + goutx[9]*dm_jk_01 + goutx[15]*dm_jk_02;
                 atomicAdd(vk_x+(i0+3)*nao+(l0+0), vxil_30);
-                double vyil_30 = gouty[0]*dm_jk_00 + gouty[3]*dm_jk_02 + gouty[6]*dm_jk_04;
+                double vyil_30 = gouty[3]*dm_jk_00 + gouty[9]*dm_jk_01 + gouty[15]*dm_jk_02;
                 atomicAdd(vk_y+(i0+3)*nao+(l0+0), vyil_30);
-                double vzil_30 = goutz[0]*dm_jk_00 + goutz[3]*dm_jk_02 + goutz[6]*dm_jk_04;
+                double vzil_30 = goutz[3]*dm_jk_00 + goutz[9]*dm_jk_01 + goutz[15]*dm_jk_02;
                 atomicAdd(vk_z+(i0+3)*nao+(l0+0), vzil_30);
-                double vxil_50 = goutx[2]*dm_jk_01 + goutx[5]*dm_jk_03 + goutx[8]*dm_jk_05;
+                double vxil_40 = goutx[4]*dm_jk_00 + goutx[10]*dm_jk_01 + goutx[16]*dm_jk_02;
+                atomicAdd(vk_x+(i0+4)*nao+(l0+0), vxil_40);
+                double vyil_40 = gouty[4]*dm_jk_00 + gouty[10]*dm_jk_01 + gouty[16]*dm_jk_02;
+                atomicAdd(vk_y+(i0+4)*nao+(l0+0), vyil_40);
+                double vzil_40 = goutz[4]*dm_jk_00 + goutz[10]*dm_jk_01 + goutz[16]*dm_jk_02;
+                atomicAdd(vk_z+(i0+4)*nao+(l0+0), vzil_40);
+                double vxil_50 = goutx[5]*dm_jk_00 + goutx[11]*dm_jk_01 + goutx[17]*dm_jk_02;
                 atomicAdd(vk_x+(i0+5)*nao+(l0+0), vxil_50);
-                double vyil_50 = gouty[2]*dm_jk_01 + gouty[5]*dm_jk_03 + gouty[8]*dm_jk_05;
+                double vyil_50 = gouty[5]*dm_jk_00 + gouty[11]*dm_jk_01 + gouty[17]*dm_jk_02;
                 atomicAdd(vk_y+(i0+5)*nao+(l0+0), vyil_50);
-                double vzil_50 = goutz[2]*dm_jk_01 + goutz[5]*dm_jk_03 + goutz[8]*dm_jk_05;
+                double vzil_50 = goutz[5]*dm_jk_00 + goutz[11]*dm_jk_01 + goutz[17]*dm_jk_02;
                 atomicAdd(vk_z+(i0+5)*nao+(l0+0), vzil_50);
-                break; }
-                }
-                switch (gout_id) {
-                case 0: {
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
                 double vxik_00 = goutx[0]*dm_jl_00;
                 atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
@@ -29143,553 +29182,783 @@ while (1) {
                 atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
                 double vzik_00 = goutz[0]*dm_jl_00;
                 atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
-                double vxik_02 = goutx[3]*dm_jl_00;
+                double vxik_01 = goutx[6]*dm_jl_00;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
+                double vyik_01 = gouty[6]*dm_jl_00;
+                atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
+                double vzik_01 = goutz[6]*dm_jl_00;
+                atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
+                double vxik_02 = goutx[12]*dm_jl_00;
                 atomicAdd(vk_x+(i0+0)*nao+(k0+2), vxik_02);
-                double vyik_02 = gouty[3]*dm_jl_00;
+                double vyik_02 = gouty[12]*dm_jl_00;
                 atomicAdd(vk_y+(i0+0)*nao+(k0+2), vyik_02);
-                double vzik_02 = goutz[3]*dm_jl_00;
+                double vzik_02 = goutz[12]*dm_jl_00;
                 atomicAdd(vk_z+(i0+0)*nao+(k0+2), vzik_02);
+                double vxik_10 = goutx[1]*dm_jl_00;
+                atomicAdd(vk_x+(i0+1)*nao+(k0+0), vxik_10);
+                double vyik_10 = gouty[1]*dm_jl_00;
+                atomicAdd(vk_y+(i0+1)*nao+(k0+0), vyik_10);
+                double vzik_10 = goutz[1]*dm_jl_00;
+                atomicAdd(vk_z+(i0+1)*nao+(k0+0), vzik_10);
+                double vxik_11 = goutx[7]*dm_jl_00;
+                atomicAdd(vk_x+(i0+1)*nao+(k0+1), vxik_11);
+                double vyik_11 = gouty[7]*dm_jl_00;
+                atomicAdd(vk_y+(i0+1)*nao+(k0+1), vyik_11);
+                double vzik_11 = goutz[7]*dm_jl_00;
+                atomicAdd(vk_z+(i0+1)*nao+(k0+1), vzik_11);
+                double vxik_12 = goutx[13]*dm_jl_00;
+                atomicAdd(vk_x+(i0+1)*nao+(k0+2), vxik_12);
+                double vyik_12 = gouty[13]*dm_jl_00;
+                atomicAdd(vk_y+(i0+1)*nao+(k0+2), vyik_12);
+                double vzik_12 = goutz[13]*dm_jl_00;
+                atomicAdd(vk_z+(i0+1)*nao+(k0+2), vzik_12);
+                double vxik_20 = goutx[2]*dm_jl_00;
+                atomicAdd(vk_x+(i0+2)*nao+(k0+0), vxik_20);
+                double vyik_20 = gouty[2]*dm_jl_00;
+                atomicAdd(vk_y+(i0+2)*nao+(k0+0), vyik_20);
+                double vzik_20 = goutz[2]*dm_jl_00;
+                atomicAdd(vk_z+(i0+2)*nao+(k0+0), vzik_20);
+                double vxik_21 = goutx[8]*dm_jl_00;
+                atomicAdd(vk_x+(i0+2)*nao+(k0+1), vxik_21);
+                double vyik_21 = gouty[8]*dm_jl_00;
+                atomicAdd(vk_y+(i0+2)*nao+(k0+1), vyik_21);
+                double vzik_21 = goutz[8]*dm_jl_00;
+                atomicAdd(vk_z+(i0+2)*nao+(k0+1), vzik_21);
+                double vxik_22 = goutx[14]*dm_jl_00;
+                atomicAdd(vk_x+(i0+2)*nao+(k0+2), vxik_22);
+                double vyik_22 = gouty[14]*dm_jl_00;
+                atomicAdd(vk_y+(i0+2)*nao+(k0+2), vyik_22);
+                double vzik_22 = goutz[14]*dm_jl_00;
+                atomicAdd(vk_z+(i0+2)*nao+(k0+2), vzik_22);
+                double vxik_30 = goutx[3]*dm_jl_00;
+                atomicAdd(vk_x+(i0+3)*nao+(k0+0), vxik_30);
+                double vyik_30 = gouty[3]*dm_jl_00;
+                atomicAdd(vk_y+(i0+3)*nao+(k0+0), vyik_30);
+                double vzik_30 = goutz[3]*dm_jl_00;
+                atomicAdd(vk_z+(i0+3)*nao+(k0+0), vzik_30);
+                double vxik_31 = goutx[9]*dm_jl_00;
+                atomicAdd(vk_x+(i0+3)*nao+(k0+1), vxik_31);
+                double vyik_31 = gouty[9]*dm_jl_00;
+                atomicAdd(vk_y+(i0+3)*nao+(k0+1), vyik_31);
+                double vzik_31 = goutz[9]*dm_jl_00;
+                atomicAdd(vk_z+(i0+3)*nao+(k0+1), vzik_31);
+                double vxik_32 = goutx[15]*dm_jl_00;
+                atomicAdd(vk_x+(i0+3)*nao+(k0+2), vxik_32);
+                double vyik_32 = gouty[15]*dm_jl_00;
+                atomicAdd(vk_y+(i0+3)*nao+(k0+2), vyik_32);
+                double vzik_32 = goutz[15]*dm_jl_00;
+                atomicAdd(vk_z+(i0+3)*nao+(k0+2), vzik_32);
+                double vxik_40 = goutx[4]*dm_jl_00;
+                atomicAdd(vk_x+(i0+4)*nao+(k0+0), vxik_40);
+                double vyik_40 = gouty[4]*dm_jl_00;
+                atomicAdd(vk_y+(i0+4)*nao+(k0+0), vyik_40);
+                double vzik_40 = goutz[4]*dm_jl_00;
+                atomicAdd(vk_z+(i0+4)*nao+(k0+0), vzik_40);
+                double vxik_41 = goutx[10]*dm_jl_00;
+                atomicAdd(vk_x+(i0+4)*nao+(k0+1), vxik_41);
+                double vyik_41 = gouty[10]*dm_jl_00;
+                atomicAdd(vk_y+(i0+4)*nao+(k0+1), vyik_41);
+                double vzik_41 = goutz[10]*dm_jl_00;
+                atomicAdd(vk_z+(i0+4)*nao+(k0+1), vzik_41);
+                double vxik_42 = goutx[16]*dm_jl_00;
+                atomicAdd(vk_x+(i0+4)*nao+(k0+2), vxik_42);
+                double vyik_42 = gouty[16]*dm_jl_00;
+                atomicAdd(vk_y+(i0+4)*nao+(k0+2), vyik_42);
+                double vzik_42 = goutz[16]*dm_jl_00;
+                atomicAdd(vk_z+(i0+4)*nao+(k0+2), vzik_42);
+                double vxik_50 = goutx[5]*dm_jl_00;
+                atomicAdd(vk_x+(i0+5)*nao+(k0+0), vxik_50);
+                double vyik_50 = gouty[5]*dm_jl_00;
+                atomicAdd(vk_y+(i0+5)*nao+(k0+0), vyik_50);
+                double vzik_50 = goutz[5]*dm_jl_00;
+                atomicAdd(vk_z+(i0+5)*nao+(k0+0), vzik_50);
+                double vxik_51 = goutx[11]*dm_jl_00;
+                atomicAdd(vk_x+(i0+5)*nao+(k0+1), vxik_51);
+                double vyik_51 = gouty[11]*dm_jl_00;
+                atomicAdd(vk_y+(i0+5)*nao+(k0+1), vyik_51);
+                double vzik_51 = goutz[11]*dm_jl_00;
+                atomicAdd(vk_z+(i0+5)*nao+(k0+1), vzik_51);
+                double vxik_52 = goutx[17]*dm_jl_00;
+                atomicAdd(vk_x+(i0+5)*nao+(k0+2), vxik_52);
+                double vyik_52 = gouty[17]*dm_jl_00;
+                atomicAdd(vk_y+(i0+5)*nao+(k0+2), vyik_52);
+                double vzik_52 = goutz[17]*dm_jl_00;
+                atomicAdd(vk_z+(i0+5)*nao+(k0+2), vzik_52);
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
+                vxjl_00 += goutx[0] * dm_ik_00;
+                vyjl_00 += gouty[0] * dm_ik_00;
+                vzjl_00 += goutz[0] * dm_ik_00;
+                double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
+                vxjl_00 += goutx[6] * dm_ik_01;
+                vyjl_00 += gouty[6] * dm_ik_01;
+                vzjl_00 += goutz[6] * dm_ik_01;
+                double dm_ik_02 = dm[(i0+0)*nao+(k0+2)];
+                vxjl_00 += goutx[12] * dm_ik_02;
+                vyjl_00 += gouty[12] * dm_ik_02;
+                vzjl_00 += goutz[12] * dm_ik_02;
+                double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
+                vxjl_00 += goutx[1] * dm_ik_10;
+                vyjl_00 += gouty[1] * dm_ik_10;
+                vzjl_00 += goutz[1] * dm_ik_10;
+                double dm_ik_11 = dm[(i0+1)*nao+(k0+1)];
+                vxjl_00 += goutx[7] * dm_ik_11;
+                vyjl_00 += gouty[7] * dm_ik_11;
+                vzjl_00 += goutz[7] * dm_ik_11;
+                double dm_ik_12 = dm[(i0+1)*nao+(k0+2)];
+                vxjl_00 += goutx[13] * dm_ik_12;
+                vyjl_00 += gouty[13] * dm_ik_12;
+                vzjl_00 += goutz[13] * dm_ik_12;
+                double dm_ik_20 = dm[(i0+2)*nao+(k0+0)];
+                vxjl_00 += goutx[2] * dm_ik_20;
+                vyjl_00 += gouty[2] * dm_ik_20;
+                vzjl_00 += goutz[2] * dm_ik_20;
+                double dm_ik_21 = dm[(i0+2)*nao+(k0+1)];
+                vxjl_00 += goutx[8] * dm_ik_21;
+                vyjl_00 += gouty[8] * dm_ik_21;
+                vzjl_00 += goutz[8] * dm_ik_21;
+                double dm_ik_22 = dm[(i0+2)*nao+(k0+2)];
+                vxjl_00 += goutx[14] * dm_ik_22;
+                vyjl_00 += gouty[14] * dm_ik_22;
+                vzjl_00 += goutz[14] * dm_ik_22;
+                double dm_ik_30 = dm[(i0+3)*nao+(k0+0)];
+                vxjl_00 += goutx[3] * dm_ik_30;
+                vyjl_00 += gouty[3] * dm_ik_30;
+                vzjl_00 += goutz[3] * dm_ik_30;
+                double dm_ik_31 = dm[(i0+3)*nao+(k0+1)];
+                vxjl_00 += goutx[9] * dm_ik_31;
+                vyjl_00 += gouty[9] * dm_ik_31;
+                vzjl_00 += goutz[9] * dm_ik_31;
+                double dm_ik_32 = dm[(i0+3)*nao+(k0+2)];
+                vxjl_00 += goutx[15] * dm_ik_32;
+                vyjl_00 += gouty[15] * dm_ik_32;
+                vzjl_00 += goutz[15] * dm_ik_32;
+                double dm_ik_40 = dm[(i0+4)*nao+(k0+0)];
+                vxjl_00 += goutx[4] * dm_ik_40;
+                vyjl_00 += gouty[4] * dm_ik_40;
+                vzjl_00 += goutz[4] * dm_ik_40;
+                double dm_ik_41 = dm[(i0+4)*nao+(k0+1)];
+                vxjl_00 += goutx[10] * dm_ik_41;
+                vyjl_00 += gouty[10] * dm_ik_41;
+                vzjl_00 += goutz[10] * dm_ik_41;
+                double dm_ik_42 = dm[(i0+4)*nao+(k0+2)];
+                vxjl_00 += goutx[16] * dm_ik_42;
+                vyjl_00 += gouty[16] * dm_ik_42;
+                vzjl_00 += goutz[16] * dm_ik_42;
+                double dm_ik_50 = dm[(i0+5)*nao+(k0+0)];
+                vxjl_00 += goutx[5] * dm_ik_50;
+                vyjl_00 += gouty[5] * dm_ik_50;
+                vzjl_00 += goutz[5] * dm_ik_50;
+                double dm_ik_51 = dm[(i0+5)*nao+(k0+1)];
+                vxjl_00 += goutx[11] * dm_ik_51;
+                vyjl_00 += gouty[11] * dm_ik_51;
+                vzjl_00 += goutz[11] * dm_ik_51;
+                double dm_ik_52 = dm[(i0+5)*nao+(k0+2)];
+                vxjl_00 += goutx[17] * dm_ik_52;
+                vyjl_00 += gouty[17] * dm_ik_52;
+                vzjl_00 += goutz[17] * dm_ik_52;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
+                double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
+                double dm_il_20 = dm[(i0+2)*nao+(l0+0)];
+                double dm_il_30 = dm[(i0+3)*nao+(l0+0)];
+                double dm_il_40 = dm[(i0+4)*nao+(l0+0)];
+                double dm_il_50 = dm[(i0+5)*nao+(l0+0)];
+                double vxjk_00 = goutx[0]*dm_il_00 + goutx[1]*dm_il_10 + goutx[2]*dm_il_20 + goutx[3]*dm_il_30 + goutx[4]*dm_il_40 + goutx[5]*dm_il_50;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
+                double vyjk_00 = gouty[0]*dm_il_00 + gouty[1]*dm_il_10 + gouty[2]*dm_il_20 + gouty[3]*dm_il_30 + gouty[4]*dm_il_40 + gouty[5]*dm_il_50;
+                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
+                double vzjk_00 = goutz[0]*dm_il_00 + goutz[1]*dm_il_10 + goutz[2]*dm_il_20 + goutz[3]*dm_il_30 + goutz[4]*dm_il_40 + goutz[5]*dm_il_50;
+                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
+                double vxjk_01 = goutx[6]*dm_il_00 + goutx[7]*dm_il_10 + goutx[8]*dm_il_20 + goutx[9]*dm_il_30 + goutx[10]*dm_il_40 + goutx[11]*dm_il_50;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
+                double vyjk_01 = gouty[6]*dm_il_00 + gouty[7]*dm_il_10 + gouty[8]*dm_il_20 + gouty[9]*dm_il_30 + gouty[10]*dm_il_40 + gouty[11]*dm_il_50;
+                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
+                double vzjk_01 = goutz[6]*dm_il_00 + goutz[7]*dm_il_10 + goutz[8]*dm_il_20 + goutz[9]*dm_il_30 + goutz[10]*dm_il_40 + goutz[11]*dm_il_50;
+                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
+                double vxjk_02 = goutx[12]*dm_il_00 + goutx[13]*dm_il_10 + goutx[14]*dm_il_20 + goutx[15]*dm_il_30 + goutx[16]*dm_il_40 + goutx[17]*dm_il_50;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
+                double vyjk_02 = gouty[12]*dm_il_00 + gouty[13]*dm_il_10 + gouty[14]*dm_il_20 + gouty[15]*dm_il_30 + gouty[16]*dm_il_40 + gouty[17]*dm_il_50;
+                atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
+                double vzjk_02 = goutz[12]*dm_il_00 + goutz[13]*dm_il_10 + goutz[14]*dm_il_20 + goutz[15]*dm_il_30 + goutz[16]*dm_il_40 + goutz[17]*dm_il_50;
+                atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
+            }
+        }
+        #pragma unroll
+        for (int n = 0; n < 18; ++n) {
+            goutx[n] = 0;
+            gouty[n] = 0;
+            goutz[n] = 0;
+        }
+        for (int klp = 0; klp < kprim*lprim; ++klp) {
+            int kp = klp / lprim;
+            int lp = klp % lprim;
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
+            double akl = ak + al;
+            double al_akl = al / akl;
+            double theta_kl = ak * al_akl;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh == lsh) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
+            for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
+                double xij = ri[0] + xpa;
+                double yij = ri[1] + ypa;
+                double zij = ri[2] + zpa;
+                double xqc = xlxk * al_akl;
+                double yqc = ylyk * al_akl;
+                double zqc = zlzk * al_akl;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
+                double xpq = xij - xkl;
+                double ypq = yij - ykl;
+                double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                if (task_id >= ntasks) {
+                    continue;
+                }
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
+                    double rt = rw[ 2*irys   *nsq_per_block];
+                    double aij = aij_cache[0];
+                    double rt_aa = rt / (aij + akl);
+                    double b00 = .5 * rt_aa;
+                    double fx, fy, fz;
+                    double rt_aij = rt_aa * akl;
+                    double b10 = .5/aij * (1 - rt_aij);
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
+                    double trr_10x = c0x * 1;
+                    double trr_20x = c0x * trr_10x + 1*b10 * 1;
+                    double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                    fx = aij_cache[2] * trr_30x;
+                    double rt_akl = rt_aa * aij;
+                    double b01 = .5/akl * (1 - rt_akl);
+                    double cpy = yqc + ypq*rt_akl;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
+                    double trr_10y = c0y * 1;
+                    double trr_11y = cpy * trr_10y + 1*b00 * 1;
+                    double trr_01y = cpy * 1;
+                    double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
+                    fy = aij_cache[2] * trr_12y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
+                    double trr_10z = c0z * wt;
+                    fz = aij_cache[2] * trr_10z;
+                    fx -= 2 * trr_10x;
+                    double trr_02y = cpy * trr_01y + 1*b01 * 1;
+                    goutx[0] +=  fx  * trr_02y * wt;
+                    gouty[0] += trr_20x *  fy  * wt;
+                    goutz[0] += trr_20x * trr_02y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                    double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
+                    double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
+                    fy = aij_cache[2] * trr_22y;
+                    fz = aij_cache[2] * trr_10z;
+                    fx -= 1 * 1;
+                    fy -= 1 * trr_02y;
+                    goutx[1] +=  fx  * trr_12y * wt;
+                    gouty[1] += trr_10x *  fy  * wt;
+                    goutz[1] += trr_10x * trr_12y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_12y;
+                    double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                    fz = aij_cache[2] * trr_20z;
+                    fx -= 1 * 1;
+                    fz -= 1 * wt;
+                    goutx[2] +=  fx  * trr_02y * trr_10z;
+                    gouty[2] += trr_10x *  fy  * trr_10z;
+                    goutz[2] += trr_10x * trr_02y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                    double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
+                    double trr_32y = cpy * trr_31y + 1*b01 * trr_30y + 3*b00 * trr_21y;
+                    fy = aij_cache[2] * trr_32y;
+                    fz = aij_cache[2] * trr_10z;
+                    fy -= 2 * trr_12y;
+                    goutx[3] +=  fx  * trr_22y * wt;
+                    gouty[3] += 1 *  fy  * wt;
+                    goutz[3] += 1 * trr_22y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_22y;
+                    fz = aij_cache[2] * trr_20z;
+                    fy -= 1 * trr_02y;
+                    fz -= 1 * wt;
+                    goutx[4] +=  fx  * trr_12y * trr_10z;
+                    gouty[4] += 1 *  fy  * trr_10z;
+                    goutz[4] += 1 * trr_12y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_12y;
+                    double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                    fz = aij_cache[2] * trr_30z;
+                    fz -= 2 * trr_10z;
+                    goutx[5] +=  fx  * trr_02y * trr_20z;
+                    gouty[5] += 1 *  fy  * trr_20z;
+                    goutz[5] += 1 * trr_02y *  fz ;
+                    fx = aij_cache[2] * trr_30x;
+                    fy = aij_cache[2] * trr_11y;
+                    double cpz = zqc + zpq*rt_akl;
+                    double trr_11z = cpz * trr_10z + 1*b00 * wt;
+                    fz = aij_cache[2] * trr_11z;
+                    fx -= 2 * trr_10x;
+                    double trr_01z = cpz * wt;
+                    goutx[6] +=  fx  * trr_01y * trr_01z;
+                    gouty[6] += trr_20x *  fy  * trr_01z;
+                    goutz[6] += trr_20x * trr_01y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_11z;
+                    fx -= 1 * 1;
+                    fy -= 1 * trr_01y;
+                    goutx[7] +=  fx  * trr_11y * trr_01z;
+                    gouty[7] += trr_10x *  fy  * trr_01z;
+                    goutz[7] += trr_10x * trr_11y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_11y;
+                    double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
+                    fz = aij_cache[2] * trr_21z;
+                    fx -= 1 * 1;
+                    fz -= 1 * trr_01z;
+                    goutx[8] +=  fx  * trr_01y * trr_11z;
+                    gouty[8] += trr_10x *  fy  * trr_11z;
+                    goutz[8] += trr_10x * trr_01y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_31y;
+                    fz = aij_cache[2] * trr_11z;
+                    fy -= 2 * trr_11y;
+                    goutx[9] +=  fx  * trr_21y * trr_01z;
+                    gouty[9] += 1 *  fy  * trr_01z;
+                    goutz[9] += 1 * trr_21y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_21z;
+                    fy -= 1 * trr_01y;
+                    fz -= 1 * trr_01z;
+                    goutx[10] +=  fx  * trr_11y * trr_11z;
+                    gouty[10] += 1 *  fy  * trr_11z;
+                    goutz[10] += 1 * trr_11y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
+                    fz = aij_cache[2] * trr_31z;
+                    fz -= 2 * trr_11z;
+                    goutx[11] +=  fx  * trr_01y * trr_21z;
+                    gouty[11] += 1 *  fy  * trr_21z;
+                    goutz[11] += 1 * trr_01y *  fz ;
+                    fx = aij_cache[2] * trr_30x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
+                    fz = aij_cache[2] * trr_12z;
+                    fx -= 2 * trr_10x;
+                    double trr_02z = cpz * trr_01z + 1*b01 * wt;
+                    goutx[12] +=  fx  * 1 * trr_02z;
+                    gouty[12] += trr_20x *  fy  * trr_02z;
+                    goutz[12] += trr_20x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_12z;
+                    fx -= 1 * 1;
+                    fy -= 1 * 1;
+                    goutx[13] +=  fx  * trr_10y * trr_02z;
+                    gouty[13] += trr_10x *  fy  * trr_02z;
+                    goutz[13] += trr_10x * trr_10y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
+                    fz = aij_cache[2] * trr_22z;
+                    fx -= 1 * 1;
+                    fz -= 1 * trr_02z;
+                    goutx[14] +=  fx  * 1 * trr_12z;
+                    gouty[14] += trr_10x *  fy  * trr_12z;
+                    goutz[14] += trr_10x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * trr_12z;
+                    fy -= 2 * trr_10y;
+                    goutx[15] +=  fx  * trr_20y * trr_02z;
+                    gouty[15] += 1 *  fy  * trr_02z;
+                    goutz[15] += 1 * trr_20y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_22z;
+                    fy -= 1 * 1;
+                    fz -= 1 * trr_02z;
+                    goutx[16] +=  fx  * trr_10y * trr_12z;
+                    gouty[16] += 1 *  fy  * trr_12z;
+                    goutz[16] += 1 * trr_10y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
+                    fz = aij_cache[2] * trr_32z;
+                    fz -= 2 * trr_12z;
+                    goutx[17] +=  fx  * 1 * trr_22z;
+                    gouty[17] += 1 *  fy  * trr_22z;
+                    goutz[17] += 1 * 1 *  fz ;
+                }
+            }
+        }
+        if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
+            int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
+            double *dm = jk.dm;
+            int do_j = jk.vj != NULL;
+            int do_k = jk.vk != NULL;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
+            if (do_j) {
+                double dm_lk_03 = dm[(l0+0)*nao+(k0+3)];
+                double dm_lk_04 = dm[(l0+0)*nao+(k0+4)];
+                double dm_lk_05 = dm[(l0+0)*nao+(k0+5)];
+                double vxij_00 = goutx[0]*dm_lk_03 + goutx[6]*dm_lk_04 + goutx[12]*dm_lk_05;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
+                double vyij_00 = gouty[0]*dm_lk_03 + gouty[6]*dm_lk_04 + gouty[12]*dm_lk_05;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
+                double vzij_00 = goutz[0]*dm_lk_03 + goutz[6]*dm_lk_04 + goutz[12]*dm_lk_05;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
+                double vxij_10 = goutx[1]*dm_lk_03 + goutx[7]*dm_lk_04 + goutx[13]*dm_lk_05;
+                atomicAdd(vj_x+(i0+1)*nao+(j0+0), vxij_10);
+                double vyij_10 = gouty[1]*dm_lk_03 + gouty[7]*dm_lk_04 + gouty[13]*dm_lk_05;
+                atomicAdd(vj_y+(i0+1)*nao+(j0+0), vyij_10);
+                double vzij_10 = goutz[1]*dm_lk_03 + goutz[7]*dm_lk_04 + goutz[13]*dm_lk_05;
+                atomicAdd(vj_z+(i0+1)*nao+(j0+0), vzij_10);
+                double vxij_20 = goutx[2]*dm_lk_03 + goutx[8]*dm_lk_04 + goutx[14]*dm_lk_05;
+                atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
+                double vyij_20 = gouty[2]*dm_lk_03 + gouty[8]*dm_lk_04 + gouty[14]*dm_lk_05;
+                atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
+                double vzij_20 = goutz[2]*dm_lk_03 + goutz[8]*dm_lk_04 + goutz[14]*dm_lk_05;
+                atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
+                double vxij_30 = goutx[3]*dm_lk_03 + goutx[9]*dm_lk_04 + goutx[15]*dm_lk_05;
+                atomicAdd(vj_x+(i0+3)*nao+(j0+0), vxij_30);
+                double vyij_30 = gouty[3]*dm_lk_03 + gouty[9]*dm_lk_04 + gouty[15]*dm_lk_05;
+                atomicAdd(vj_y+(i0+3)*nao+(j0+0), vyij_30);
+                double vzij_30 = goutz[3]*dm_lk_03 + goutz[9]*dm_lk_04 + goutz[15]*dm_lk_05;
+                atomicAdd(vj_z+(i0+3)*nao+(j0+0), vzij_30);
+                double vxij_40 = goutx[4]*dm_lk_03 + goutx[10]*dm_lk_04 + goutx[16]*dm_lk_05;
+                atomicAdd(vj_x+(i0+4)*nao+(j0+0), vxij_40);
+                double vyij_40 = gouty[4]*dm_lk_03 + gouty[10]*dm_lk_04 + gouty[16]*dm_lk_05;
+                atomicAdd(vj_y+(i0+4)*nao+(j0+0), vyij_40);
+                double vzij_40 = goutz[4]*dm_lk_03 + goutz[10]*dm_lk_04 + goutz[16]*dm_lk_05;
+                atomicAdd(vj_z+(i0+4)*nao+(j0+0), vzij_40);
+                double vxij_50 = goutx[5]*dm_lk_03 + goutx[11]*dm_lk_04 + goutx[17]*dm_lk_05;
+                atomicAdd(vj_x+(i0+5)*nao+(j0+0), vxij_50);
+                double vyij_50 = gouty[5]*dm_lk_03 + gouty[11]*dm_lk_04 + gouty[17]*dm_lk_05;
+                atomicAdd(vj_y+(i0+5)*nao+(j0+0), vyij_50);
+                double vzij_50 = goutz[5]*dm_lk_03 + goutz[11]*dm_lk_04 + goutz[17]*dm_lk_05;
+                atomicAdd(vj_z+(i0+5)*nao+(j0+0), vzij_50);
+                double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
+                double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
+                double dm_ji_02 = dm[(j0+0)*nao+(i0+2)];
+                double dm_ji_03 = dm[(j0+0)*nao+(i0+3)];
+                double dm_ji_04 = dm[(j0+0)*nao+(i0+4)];
+                double dm_ji_05 = dm[(j0+0)*nao+(i0+5)];
+                double vxkl_30 = goutx[0]*dm_ji_00 + goutx[1]*dm_ji_01 + goutx[2]*dm_ji_02 + goutx[3]*dm_ji_03 + goutx[4]*dm_ji_04 + goutx[5]*dm_ji_05;
+                atomicAdd(vj_x+(k0+3)*nao+(l0+0), vxkl_30);
+                double vykl_30 = gouty[0]*dm_ji_00 + gouty[1]*dm_ji_01 + gouty[2]*dm_ji_02 + gouty[3]*dm_ji_03 + gouty[4]*dm_ji_04 + gouty[5]*dm_ji_05;
+                atomicAdd(vj_y+(k0+3)*nao+(l0+0), vykl_30);
+                double vzkl_30 = goutz[0]*dm_ji_00 + goutz[1]*dm_ji_01 + goutz[2]*dm_ji_02 + goutz[3]*dm_ji_03 + goutz[4]*dm_ji_04 + goutz[5]*dm_ji_05;
+                atomicAdd(vj_z+(k0+3)*nao+(l0+0), vzkl_30);
+                double vxkl_40 = goutx[6]*dm_ji_00 + goutx[7]*dm_ji_01 + goutx[8]*dm_ji_02 + goutx[9]*dm_ji_03 + goutx[10]*dm_ji_04 + goutx[11]*dm_ji_05;
+                atomicAdd(vj_x+(k0+4)*nao+(l0+0), vxkl_40);
+                double vykl_40 = gouty[6]*dm_ji_00 + gouty[7]*dm_ji_01 + gouty[8]*dm_ji_02 + gouty[9]*dm_ji_03 + gouty[10]*dm_ji_04 + gouty[11]*dm_ji_05;
+                atomicAdd(vj_y+(k0+4)*nao+(l0+0), vykl_40);
+                double vzkl_40 = goutz[6]*dm_ji_00 + goutz[7]*dm_ji_01 + goutz[8]*dm_ji_02 + goutz[9]*dm_ji_03 + goutz[10]*dm_ji_04 + goutz[11]*dm_ji_05;
+                atomicAdd(vj_z+(k0+4)*nao+(l0+0), vzkl_40);
+                double vxkl_50 = goutx[12]*dm_ji_00 + goutx[13]*dm_ji_01 + goutx[14]*dm_ji_02 + goutx[15]*dm_ji_03 + goutx[16]*dm_ji_04 + goutx[17]*dm_ji_05;
+                atomicAdd(vj_x+(k0+5)*nao+(l0+0), vxkl_50);
+                double vykl_50 = gouty[12]*dm_ji_00 + gouty[13]*dm_ji_01 + gouty[14]*dm_ji_02 + gouty[15]*dm_ji_03 + gouty[16]*dm_ji_04 + gouty[17]*dm_ji_05;
+                atomicAdd(vj_y+(k0+5)*nao+(l0+0), vykl_50);
+                double vzkl_50 = goutz[12]*dm_ji_00 + goutz[13]*dm_ji_01 + goutz[14]*dm_ji_02 + goutz[15]*dm_ji_03 + goutz[16]*dm_ji_04 + goutz[17]*dm_ji_05;
+                atomicAdd(vj_z+(k0+5)*nao+(l0+0), vzkl_50);
+            }
+            if (do_k) {
+                double dm_jk_03 = dm[(j0+0)*nao+(k0+3)];
+                double dm_jk_04 = dm[(j0+0)*nao+(k0+4)];
+                double dm_jk_05 = dm[(j0+0)*nao+(k0+5)];
+                double vxil_00 = goutx[0]*dm_jk_03 + goutx[6]*dm_jk_04 + goutx[12]*dm_jk_05;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                double vyil_00 = gouty[0]*dm_jk_03 + gouty[6]*dm_jk_04 + gouty[12]*dm_jk_05;
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                double vzil_00 = goutz[0]*dm_jk_03 + goutz[6]*dm_jk_04 + goutz[12]*dm_jk_05;
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                double vxil_10 = goutx[1]*dm_jk_03 + goutx[7]*dm_jk_04 + goutx[13]*dm_jk_05;
+                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
+                double vyil_10 = gouty[1]*dm_jk_03 + gouty[7]*dm_jk_04 + gouty[13]*dm_jk_05;
+                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
+                double vzil_10 = goutz[1]*dm_jk_03 + goutz[7]*dm_jk_04 + goutz[13]*dm_jk_05;
+                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
+                double vxil_20 = goutx[2]*dm_jk_03 + goutx[8]*dm_jk_04 + goutx[14]*dm_jk_05;
+                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
+                double vyil_20 = gouty[2]*dm_jk_03 + gouty[8]*dm_jk_04 + gouty[14]*dm_jk_05;
+                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
+                double vzil_20 = goutz[2]*dm_jk_03 + goutz[8]*dm_jk_04 + goutz[14]*dm_jk_05;
+                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
+                double vxil_30 = goutx[3]*dm_jk_03 + goutx[9]*dm_jk_04 + goutx[15]*dm_jk_05;
+                atomicAdd(vk_x+(i0+3)*nao+(l0+0), vxil_30);
+                double vyil_30 = gouty[3]*dm_jk_03 + gouty[9]*dm_jk_04 + gouty[15]*dm_jk_05;
+                atomicAdd(vk_y+(i0+3)*nao+(l0+0), vyil_30);
+                double vzil_30 = goutz[3]*dm_jk_03 + goutz[9]*dm_jk_04 + goutz[15]*dm_jk_05;
+                atomicAdd(vk_z+(i0+3)*nao+(l0+0), vzil_30);
+                double vxil_40 = goutx[4]*dm_jk_03 + goutx[10]*dm_jk_04 + goutx[16]*dm_jk_05;
+                atomicAdd(vk_x+(i0+4)*nao+(l0+0), vxil_40);
+                double vyil_40 = gouty[4]*dm_jk_03 + gouty[10]*dm_jk_04 + gouty[16]*dm_jk_05;
+                atomicAdd(vk_y+(i0+4)*nao+(l0+0), vyil_40);
+                double vzil_40 = goutz[4]*dm_jk_03 + goutz[10]*dm_jk_04 + goutz[16]*dm_jk_05;
+                atomicAdd(vk_z+(i0+4)*nao+(l0+0), vzil_40);
+                double vxil_50 = goutx[5]*dm_jk_03 + goutx[11]*dm_jk_04 + goutx[17]*dm_jk_05;
+                atomicAdd(vk_x+(i0+5)*nao+(l0+0), vxil_50);
+                double vyil_50 = gouty[5]*dm_jk_03 + gouty[11]*dm_jk_04 + gouty[17]*dm_jk_05;
+                atomicAdd(vk_y+(i0+5)*nao+(l0+0), vyil_50);
+                double vzil_50 = goutz[5]*dm_jk_03 + goutz[11]*dm_jk_04 + goutz[17]*dm_jk_05;
+                atomicAdd(vk_z+(i0+5)*nao+(l0+0), vzil_50);
+                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
+                double vxik_03 = goutx[0]*dm_jl_00;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+3), vxik_03);
+                double vyik_03 = gouty[0]*dm_jl_00;
+                atomicAdd(vk_y+(i0+0)*nao+(k0+3), vyik_03);
+                double vzik_03 = goutz[0]*dm_jl_00;
+                atomicAdd(vk_z+(i0+0)*nao+(k0+3), vzik_03);
                 double vxik_04 = goutx[6]*dm_jl_00;
                 atomicAdd(vk_x+(i0+0)*nao+(k0+4), vxik_04);
                 double vyik_04 = gouty[6]*dm_jl_00;
                 atomicAdd(vk_y+(i0+0)*nao+(k0+4), vyik_04);
                 double vzik_04 = goutz[6]*dm_jl_00;
                 atomicAdd(vk_z+(i0+0)*nao+(k0+4), vzik_04);
-                double vxik_21 = goutx[2]*dm_jl_00;
-                atomicAdd(vk_x+(i0+2)*nao+(k0+1), vxik_21);
-                double vyik_21 = gouty[2]*dm_jl_00;
-                atomicAdd(vk_y+(i0+2)*nao+(k0+1), vyik_21);
-                double vzik_21 = goutz[2]*dm_jl_00;
-                atomicAdd(vk_z+(i0+2)*nao+(k0+1), vzik_21);
-                double vxik_23 = goutx[5]*dm_jl_00;
-                atomicAdd(vk_x+(i0+2)*nao+(k0+3), vxik_23);
-                double vyik_23 = gouty[5]*dm_jl_00;
-                atomicAdd(vk_y+(i0+2)*nao+(k0+3), vyik_23);
-                double vzik_23 = goutz[5]*dm_jl_00;
-                atomicAdd(vk_z+(i0+2)*nao+(k0+3), vzik_23);
-                double vxik_25 = goutx[8]*dm_jl_00;
-                atomicAdd(vk_x+(i0+2)*nao+(k0+5), vxik_25);
-                double vyik_25 = gouty[8]*dm_jl_00;
-                atomicAdd(vk_y+(i0+2)*nao+(k0+5), vyik_25);
-                double vzik_25 = goutz[8]*dm_jl_00;
-                atomicAdd(vk_z+(i0+2)*nao+(k0+5), vzik_25);
-                double vxik_40 = goutx[1]*dm_jl_00;
-                atomicAdd(vk_x+(i0+4)*nao+(k0+0), vxik_40);
-                double vyik_40 = gouty[1]*dm_jl_00;
-                atomicAdd(vk_y+(i0+4)*nao+(k0+0), vyik_40);
-                double vzik_40 = goutz[1]*dm_jl_00;
-                atomicAdd(vk_z+(i0+4)*nao+(k0+0), vzik_40);
-                double vxik_42 = goutx[4]*dm_jl_00;
-                atomicAdd(vk_x+(i0+4)*nao+(k0+2), vxik_42);
-                double vyik_42 = gouty[4]*dm_jl_00;
-                atomicAdd(vk_y+(i0+4)*nao+(k0+2), vyik_42);
-                double vzik_42 = goutz[4]*dm_jl_00;
-                atomicAdd(vk_z+(i0+4)*nao+(k0+2), vzik_42);
-                double vxik_44 = goutx[7]*dm_jl_00;
-                atomicAdd(vk_x+(i0+4)*nao+(k0+4), vxik_44);
-                double vyik_44 = gouty[7]*dm_jl_00;
-                atomicAdd(vk_y+(i0+4)*nao+(k0+4), vyik_44);
-                double vzik_44 = goutz[7]*dm_jl_00;
-                atomicAdd(vk_z+(i0+4)*nao+(k0+4), vzik_44);
-                break; }
-                case 1: {
-                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double vxik_10 = goutx[0]*dm_jl_00;
-                atomicAdd(vk_x+(i0+1)*nao+(k0+0), vxik_10);
-                double vyik_10 = gouty[0]*dm_jl_00;
-                atomicAdd(vk_y+(i0+1)*nao+(k0+0), vyik_10);
-                double vzik_10 = goutz[0]*dm_jl_00;
-                atomicAdd(vk_z+(i0+1)*nao+(k0+0), vzik_10);
-                double vxik_12 = goutx[3]*dm_jl_00;
-                atomicAdd(vk_x+(i0+1)*nao+(k0+2), vxik_12);
-                double vyik_12 = gouty[3]*dm_jl_00;
-                atomicAdd(vk_y+(i0+1)*nao+(k0+2), vyik_12);
-                double vzik_12 = goutz[3]*dm_jl_00;
-                atomicAdd(vk_z+(i0+1)*nao+(k0+2), vzik_12);
-                double vxik_14 = goutx[6]*dm_jl_00;
-                atomicAdd(vk_x+(i0+1)*nao+(k0+4), vxik_14);
-                double vyik_14 = gouty[6]*dm_jl_00;
-                atomicAdd(vk_y+(i0+1)*nao+(k0+4), vyik_14);
-                double vzik_14 = goutz[6]*dm_jl_00;
-                atomicAdd(vk_z+(i0+1)*nao+(k0+4), vzik_14);
-                double vxik_31 = goutx[2]*dm_jl_00;
-                atomicAdd(vk_x+(i0+3)*nao+(k0+1), vxik_31);
-                double vyik_31 = gouty[2]*dm_jl_00;
-                atomicAdd(vk_y+(i0+3)*nao+(k0+1), vyik_31);
-                double vzik_31 = goutz[2]*dm_jl_00;
-                atomicAdd(vk_z+(i0+3)*nao+(k0+1), vzik_31);
-                double vxik_33 = goutx[5]*dm_jl_00;
-                atomicAdd(vk_x+(i0+3)*nao+(k0+3), vxik_33);
-                double vyik_33 = gouty[5]*dm_jl_00;
-                atomicAdd(vk_y+(i0+3)*nao+(k0+3), vyik_33);
-                double vzik_33 = goutz[5]*dm_jl_00;
-                atomicAdd(vk_z+(i0+3)*nao+(k0+3), vzik_33);
-                double vxik_35 = goutx[8]*dm_jl_00;
-                atomicAdd(vk_x+(i0+3)*nao+(k0+5), vxik_35);
-                double vyik_35 = gouty[8]*dm_jl_00;
-                atomicAdd(vk_y+(i0+3)*nao+(k0+5), vyik_35);
-                double vzik_35 = goutz[8]*dm_jl_00;
-                atomicAdd(vk_z+(i0+3)*nao+(k0+5), vzik_35);
-                double vxik_50 = goutx[1]*dm_jl_00;
-                atomicAdd(vk_x+(i0+5)*nao+(k0+0), vxik_50);
-                double vyik_50 = gouty[1]*dm_jl_00;
-                atomicAdd(vk_y+(i0+5)*nao+(k0+0), vyik_50);
-                double vzik_50 = goutz[1]*dm_jl_00;
-                atomicAdd(vk_z+(i0+5)*nao+(k0+0), vzik_50);
-                double vxik_52 = goutx[4]*dm_jl_00;
-                atomicAdd(vk_x+(i0+5)*nao+(k0+2), vxik_52);
-                double vyik_52 = gouty[4]*dm_jl_00;
-                atomicAdd(vk_y+(i0+5)*nao+(k0+2), vyik_52);
-                double vzik_52 = goutz[4]*dm_jl_00;
-                atomicAdd(vk_z+(i0+5)*nao+(k0+2), vzik_52);
-                double vxik_54 = goutx[7]*dm_jl_00;
-                atomicAdd(vk_x+(i0+5)*nao+(k0+4), vxik_54);
-                double vyik_54 = gouty[7]*dm_jl_00;
-                atomicAdd(vk_y+(i0+5)*nao+(k0+4), vyik_54);
-                double vzik_54 = goutz[7]*dm_jl_00;
-                atomicAdd(vk_z+(i0+5)*nao+(k0+4), vzik_54);
-                break; }
-                case 2: {
-                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double vxik_01 = goutx[1]*dm_jl_00;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+1), vxik_01);
-                double vyik_01 = gouty[1]*dm_jl_00;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+1), vyik_01);
-                double vzik_01 = goutz[1]*dm_jl_00;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+1), vzik_01);
-                double vxik_03 = goutx[4]*dm_jl_00;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+3), vxik_03);
-                double vyik_03 = gouty[4]*dm_jl_00;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+3), vyik_03);
-                double vzik_03 = goutz[4]*dm_jl_00;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+3), vzik_03);
-                double vxik_05 = goutx[7]*dm_jl_00;
+                double vxik_05 = goutx[12]*dm_jl_00;
                 atomicAdd(vk_x+(i0+0)*nao+(k0+5), vxik_05);
-                double vyik_05 = gouty[7]*dm_jl_00;
+                double vyik_05 = gouty[12]*dm_jl_00;
                 atomicAdd(vk_y+(i0+0)*nao+(k0+5), vyik_05);
-                double vzik_05 = goutz[7]*dm_jl_00;
+                double vzik_05 = goutz[12]*dm_jl_00;
                 atomicAdd(vk_z+(i0+0)*nao+(k0+5), vzik_05);
-                double vxik_20 = goutx[0]*dm_jl_00;
-                atomicAdd(vk_x+(i0+2)*nao+(k0+0), vxik_20);
-                double vyik_20 = gouty[0]*dm_jl_00;
-                atomicAdd(vk_y+(i0+2)*nao+(k0+0), vyik_20);
-                double vzik_20 = goutz[0]*dm_jl_00;
-                atomicAdd(vk_z+(i0+2)*nao+(k0+0), vzik_20);
-                double vxik_22 = goutx[3]*dm_jl_00;
-                atomicAdd(vk_x+(i0+2)*nao+(k0+2), vxik_22);
-                double vyik_22 = gouty[3]*dm_jl_00;
-                atomicAdd(vk_y+(i0+2)*nao+(k0+2), vyik_22);
-                double vzik_22 = goutz[3]*dm_jl_00;
-                atomicAdd(vk_z+(i0+2)*nao+(k0+2), vzik_22);
-                double vxik_24 = goutx[6]*dm_jl_00;
-                atomicAdd(vk_x+(i0+2)*nao+(k0+4), vxik_24);
-                double vyik_24 = gouty[6]*dm_jl_00;
-                atomicAdd(vk_y+(i0+2)*nao+(k0+4), vyik_24);
-                double vzik_24 = goutz[6]*dm_jl_00;
-                atomicAdd(vk_z+(i0+2)*nao+(k0+4), vzik_24);
-                double vxik_41 = goutx[2]*dm_jl_00;
-                atomicAdd(vk_x+(i0+4)*nao+(k0+1), vxik_41);
-                double vyik_41 = gouty[2]*dm_jl_00;
-                atomicAdd(vk_y+(i0+4)*nao+(k0+1), vyik_41);
-                double vzik_41 = goutz[2]*dm_jl_00;
-                atomicAdd(vk_z+(i0+4)*nao+(k0+1), vzik_41);
-                double vxik_43 = goutx[5]*dm_jl_00;
-                atomicAdd(vk_x+(i0+4)*nao+(k0+3), vxik_43);
-                double vyik_43 = gouty[5]*dm_jl_00;
-                atomicAdd(vk_y+(i0+4)*nao+(k0+3), vyik_43);
-                double vzik_43 = goutz[5]*dm_jl_00;
-                atomicAdd(vk_z+(i0+4)*nao+(k0+3), vzik_43);
-                double vxik_45 = goutx[8]*dm_jl_00;
-                atomicAdd(vk_x+(i0+4)*nao+(k0+5), vxik_45);
-                double vyik_45 = gouty[8]*dm_jl_00;
-                atomicAdd(vk_y+(i0+4)*nao+(k0+5), vyik_45);
-                double vzik_45 = goutz[8]*dm_jl_00;
-                atomicAdd(vk_z+(i0+4)*nao+(k0+5), vzik_45);
-                break; }
-                case 3: {
-                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double vxik_11 = goutx[1]*dm_jl_00;
-                atomicAdd(vk_x+(i0+1)*nao+(k0+1), vxik_11);
-                double vyik_11 = gouty[1]*dm_jl_00;
-                atomicAdd(vk_y+(i0+1)*nao+(k0+1), vyik_11);
-                double vzik_11 = goutz[1]*dm_jl_00;
-                atomicAdd(vk_z+(i0+1)*nao+(k0+1), vzik_11);
-                double vxik_13 = goutx[4]*dm_jl_00;
+                double vxik_13 = goutx[1]*dm_jl_00;
                 atomicAdd(vk_x+(i0+1)*nao+(k0+3), vxik_13);
-                double vyik_13 = gouty[4]*dm_jl_00;
+                double vyik_13 = gouty[1]*dm_jl_00;
                 atomicAdd(vk_y+(i0+1)*nao+(k0+3), vyik_13);
-                double vzik_13 = goutz[4]*dm_jl_00;
+                double vzik_13 = goutz[1]*dm_jl_00;
                 atomicAdd(vk_z+(i0+1)*nao+(k0+3), vzik_13);
-                double vxik_15 = goutx[7]*dm_jl_00;
+                double vxik_14 = goutx[7]*dm_jl_00;
+                atomicAdd(vk_x+(i0+1)*nao+(k0+4), vxik_14);
+                double vyik_14 = gouty[7]*dm_jl_00;
+                atomicAdd(vk_y+(i0+1)*nao+(k0+4), vyik_14);
+                double vzik_14 = goutz[7]*dm_jl_00;
+                atomicAdd(vk_z+(i0+1)*nao+(k0+4), vzik_14);
+                double vxik_15 = goutx[13]*dm_jl_00;
                 atomicAdd(vk_x+(i0+1)*nao+(k0+5), vxik_15);
-                double vyik_15 = gouty[7]*dm_jl_00;
+                double vyik_15 = gouty[13]*dm_jl_00;
                 atomicAdd(vk_y+(i0+1)*nao+(k0+5), vyik_15);
-                double vzik_15 = goutz[7]*dm_jl_00;
+                double vzik_15 = goutz[13]*dm_jl_00;
                 atomicAdd(vk_z+(i0+1)*nao+(k0+5), vzik_15);
-                double vxik_30 = goutx[0]*dm_jl_00;
-                atomicAdd(vk_x+(i0+3)*nao+(k0+0), vxik_30);
-                double vyik_30 = gouty[0]*dm_jl_00;
-                atomicAdd(vk_y+(i0+3)*nao+(k0+0), vyik_30);
-                double vzik_30 = goutz[0]*dm_jl_00;
-                atomicAdd(vk_z+(i0+3)*nao+(k0+0), vzik_30);
-                double vxik_32 = goutx[3]*dm_jl_00;
-                atomicAdd(vk_x+(i0+3)*nao+(k0+2), vxik_32);
-                double vyik_32 = gouty[3]*dm_jl_00;
-                atomicAdd(vk_y+(i0+3)*nao+(k0+2), vyik_32);
-                double vzik_32 = goutz[3]*dm_jl_00;
-                atomicAdd(vk_z+(i0+3)*nao+(k0+2), vzik_32);
-                double vxik_34 = goutx[6]*dm_jl_00;
+                double vxik_23 = goutx[2]*dm_jl_00;
+                atomicAdd(vk_x+(i0+2)*nao+(k0+3), vxik_23);
+                double vyik_23 = gouty[2]*dm_jl_00;
+                atomicAdd(vk_y+(i0+2)*nao+(k0+3), vyik_23);
+                double vzik_23 = goutz[2]*dm_jl_00;
+                atomicAdd(vk_z+(i0+2)*nao+(k0+3), vzik_23);
+                double vxik_24 = goutx[8]*dm_jl_00;
+                atomicAdd(vk_x+(i0+2)*nao+(k0+4), vxik_24);
+                double vyik_24 = gouty[8]*dm_jl_00;
+                atomicAdd(vk_y+(i0+2)*nao+(k0+4), vyik_24);
+                double vzik_24 = goutz[8]*dm_jl_00;
+                atomicAdd(vk_z+(i0+2)*nao+(k0+4), vzik_24);
+                double vxik_25 = goutx[14]*dm_jl_00;
+                atomicAdd(vk_x+(i0+2)*nao+(k0+5), vxik_25);
+                double vyik_25 = gouty[14]*dm_jl_00;
+                atomicAdd(vk_y+(i0+2)*nao+(k0+5), vyik_25);
+                double vzik_25 = goutz[14]*dm_jl_00;
+                atomicAdd(vk_z+(i0+2)*nao+(k0+5), vzik_25);
+                double vxik_33 = goutx[3]*dm_jl_00;
+                atomicAdd(vk_x+(i0+3)*nao+(k0+3), vxik_33);
+                double vyik_33 = gouty[3]*dm_jl_00;
+                atomicAdd(vk_y+(i0+3)*nao+(k0+3), vyik_33);
+                double vzik_33 = goutz[3]*dm_jl_00;
+                atomicAdd(vk_z+(i0+3)*nao+(k0+3), vzik_33);
+                double vxik_34 = goutx[9]*dm_jl_00;
                 atomicAdd(vk_x+(i0+3)*nao+(k0+4), vxik_34);
-                double vyik_34 = gouty[6]*dm_jl_00;
+                double vyik_34 = gouty[9]*dm_jl_00;
                 atomicAdd(vk_y+(i0+3)*nao+(k0+4), vyik_34);
-                double vzik_34 = goutz[6]*dm_jl_00;
+                double vzik_34 = goutz[9]*dm_jl_00;
                 atomicAdd(vk_z+(i0+3)*nao+(k0+4), vzik_34);
-                double vxik_51 = goutx[2]*dm_jl_00;
-                atomicAdd(vk_x+(i0+5)*nao+(k0+1), vxik_51);
-                double vyik_51 = gouty[2]*dm_jl_00;
-                atomicAdd(vk_y+(i0+5)*nao+(k0+1), vyik_51);
-                double vzik_51 = goutz[2]*dm_jl_00;
-                atomicAdd(vk_z+(i0+5)*nao+(k0+1), vzik_51);
+                double vxik_35 = goutx[15]*dm_jl_00;
+                atomicAdd(vk_x+(i0+3)*nao+(k0+5), vxik_35);
+                double vyik_35 = gouty[15]*dm_jl_00;
+                atomicAdd(vk_y+(i0+3)*nao+(k0+5), vyik_35);
+                double vzik_35 = goutz[15]*dm_jl_00;
+                atomicAdd(vk_z+(i0+3)*nao+(k0+5), vzik_35);
+                double vxik_43 = goutx[4]*dm_jl_00;
+                atomicAdd(vk_x+(i0+4)*nao+(k0+3), vxik_43);
+                double vyik_43 = gouty[4]*dm_jl_00;
+                atomicAdd(vk_y+(i0+4)*nao+(k0+3), vyik_43);
+                double vzik_43 = goutz[4]*dm_jl_00;
+                atomicAdd(vk_z+(i0+4)*nao+(k0+3), vzik_43);
+                double vxik_44 = goutx[10]*dm_jl_00;
+                atomicAdd(vk_x+(i0+4)*nao+(k0+4), vxik_44);
+                double vyik_44 = gouty[10]*dm_jl_00;
+                atomicAdd(vk_y+(i0+4)*nao+(k0+4), vyik_44);
+                double vzik_44 = goutz[10]*dm_jl_00;
+                atomicAdd(vk_z+(i0+4)*nao+(k0+4), vzik_44);
+                double vxik_45 = goutx[16]*dm_jl_00;
+                atomicAdd(vk_x+(i0+4)*nao+(k0+5), vxik_45);
+                double vyik_45 = gouty[16]*dm_jl_00;
+                atomicAdd(vk_y+(i0+4)*nao+(k0+5), vyik_45);
+                double vzik_45 = goutz[16]*dm_jl_00;
+                atomicAdd(vk_z+(i0+4)*nao+(k0+5), vzik_45);
                 double vxik_53 = goutx[5]*dm_jl_00;
                 atomicAdd(vk_x+(i0+5)*nao+(k0+3), vxik_53);
                 double vyik_53 = gouty[5]*dm_jl_00;
                 atomicAdd(vk_y+(i0+5)*nao+(k0+3), vyik_53);
                 double vzik_53 = goutz[5]*dm_jl_00;
                 atomicAdd(vk_z+(i0+5)*nao+(k0+3), vzik_53);
-                double vxik_55 = goutx[8]*dm_jl_00;
+                double vxik_54 = goutx[11]*dm_jl_00;
+                atomicAdd(vk_x+(i0+5)*nao+(k0+4), vxik_54);
+                double vyik_54 = gouty[11]*dm_jl_00;
+                atomicAdd(vk_y+(i0+5)*nao+(k0+4), vyik_54);
+                double vzik_54 = goutz[11]*dm_jl_00;
+                atomicAdd(vk_z+(i0+5)*nao+(k0+4), vzik_54);
+                double vxik_55 = goutx[17]*dm_jl_00;
                 atomicAdd(vk_x+(i0+5)*nao+(k0+5), vxik_55);
-                double vyik_55 = gouty[8]*dm_jl_00;
+                double vyik_55 = gouty[17]*dm_jl_00;
                 atomicAdd(vk_y+(i0+5)*nao+(k0+5), vyik_55);
-                double vzik_55 = goutz[8]*dm_jl_00;
+                double vzik_55 = goutz[17]*dm_jl_00;
                 atomicAdd(vk_z+(i0+5)*nao+(k0+5), vzik_55);
-                break; }
-                }
                 double vxjl_00 = 0;
                 double vyjl_00 = 0;
                 double vzjl_00 = 0;
-                switch (gout_id) {
-                case 0: {
-                double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
-                vxjl_00 += goutx[0] * dm_ik_00;
-                vyjl_00 += gouty[0] * dm_ik_00;
-                vzjl_00 += goutz[0] * dm_ik_00;
-                double dm_ik_02 = dm[(i0+0)*nao+(k0+2)];
-                vxjl_00 += goutx[3] * dm_ik_02;
-                vyjl_00 += gouty[3] * dm_ik_02;
-                vzjl_00 += goutz[3] * dm_ik_02;
+                double dm_ik_03 = dm[(i0+0)*nao+(k0+3)];
+                vxjl_00 += goutx[0] * dm_ik_03;
+                vyjl_00 += gouty[0] * dm_ik_03;
+                vzjl_00 += goutz[0] * dm_ik_03;
                 double dm_ik_04 = dm[(i0+0)*nao+(k0+4)];
                 vxjl_00 += goutx[6] * dm_ik_04;
                 vyjl_00 += gouty[6] * dm_ik_04;
                 vzjl_00 += goutz[6] * dm_ik_04;
-                double dm_ik_21 = dm[(i0+2)*nao+(k0+1)];
-                vxjl_00 += goutx[2] * dm_ik_21;
-                vyjl_00 += gouty[2] * dm_ik_21;
-                vzjl_00 += goutz[2] * dm_ik_21;
-                double dm_ik_23 = dm[(i0+2)*nao+(k0+3)];
-                vxjl_00 += goutx[5] * dm_ik_23;
-                vyjl_00 += gouty[5] * dm_ik_23;
-                vzjl_00 += goutz[5] * dm_ik_23;
-                double dm_ik_25 = dm[(i0+2)*nao+(k0+5)];
-                vxjl_00 += goutx[8] * dm_ik_25;
-                vyjl_00 += gouty[8] * dm_ik_25;
-                vzjl_00 += goutz[8] * dm_ik_25;
-                double dm_ik_40 = dm[(i0+4)*nao+(k0+0)];
-                vxjl_00 += goutx[1] * dm_ik_40;
-                vyjl_00 += gouty[1] * dm_ik_40;
-                vzjl_00 += goutz[1] * dm_ik_40;
-                double dm_ik_42 = dm[(i0+4)*nao+(k0+2)];
-                vxjl_00 += goutx[4] * dm_ik_42;
-                vyjl_00 += gouty[4] * dm_ik_42;
-                vzjl_00 += goutz[4] * dm_ik_42;
-                double dm_ik_44 = dm[(i0+4)*nao+(k0+4)];
-                vxjl_00 += goutx[7] * dm_ik_44;
-                vyjl_00 += gouty[7] * dm_ik_44;
-                vzjl_00 += goutz[7] * dm_ik_44;
-                break; }
-                case 1: {
-                double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
-                vxjl_00 += goutx[0] * dm_ik_10;
-                vyjl_00 += gouty[0] * dm_ik_10;
-                vzjl_00 += goutz[0] * dm_ik_10;
-                double dm_ik_12 = dm[(i0+1)*nao+(k0+2)];
-                vxjl_00 += goutx[3] * dm_ik_12;
-                vyjl_00 += gouty[3] * dm_ik_12;
-                vzjl_00 += goutz[3] * dm_ik_12;
-                double dm_ik_14 = dm[(i0+1)*nao+(k0+4)];
-                vxjl_00 += goutx[6] * dm_ik_14;
-                vyjl_00 += gouty[6] * dm_ik_14;
-                vzjl_00 += goutz[6] * dm_ik_14;
-                double dm_ik_31 = dm[(i0+3)*nao+(k0+1)];
-                vxjl_00 += goutx[2] * dm_ik_31;
-                vyjl_00 += gouty[2] * dm_ik_31;
-                vzjl_00 += goutz[2] * dm_ik_31;
-                double dm_ik_33 = dm[(i0+3)*nao+(k0+3)];
-                vxjl_00 += goutx[5] * dm_ik_33;
-                vyjl_00 += gouty[5] * dm_ik_33;
-                vzjl_00 += goutz[5] * dm_ik_33;
-                double dm_ik_35 = dm[(i0+3)*nao+(k0+5)];
-                vxjl_00 += goutx[8] * dm_ik_35;
-                vyjl_00 += gouty[8] * dm_ik_35;
-                vzjl_00 += goutz[8] * dm_ik_35;
-                double dm_ik_50 = dm[(i0+5)*nao+(k0+0)];
-                vxjl_00 += goutx[1] * dm_ik_50;
-                vyjl_00 += gouty[1] * dm_ik_50;
-                vzjl_00 += goutz[1] * dm_ik_50;
-                double dm_ik_52 = dm[(i0+5)*nao+(k0+2)];
-                vxjl_00 += goutx[4] * dm_ik_52;
-                vyjl_00 += gouty[4] * dm_ik_52;
-                vzjl_00 += goutz[4] * dm_ik_52;
-                double dm_ik_54 = dm[(i0+5)*nao+(k0+4)];
-                vxjl_00 += goutx[7] * dm_ik_54;
-                vyjl_00 += gouty[7] * dm_ik_54;
-                vzjl_00 += goutz[7] * dm_ik_54;
-                break; }
-                case 2: {
-                double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
-                vxjl_00 += goutx[1] * dm_ik_01;
-                vyjl_00 += gouty[1] * dm_ik_01;
-                vzjl_00 += goutz[1] * dm_ik_01;
-                double dm_ik_03 = dm[(i0+0)*nao+(k0+3)];
-                vxjl_00 += goutx[4] * dm_ik_03;
-                vyjl_00 += gouty[4] * dm_ik_03;
-                vzjl_00 += goutz[4] * dm_ik_03;
                 double dm_ik_05 = dm[(i0+0)*nao+(k0+5)];
-                vxjl_00 += goutx[7] * dm_ik_05;
-                vyjl_00 += gouty[7] * dm_ik_05;
-                vzjl_00 += goutz[7] * dm_ik_05;
-                double dm_ik_20 = dm[(i0+2)*nao+(k0+0)];
-                vxjl_00 += goutx[0] * dm_ik_20;
-                vyjl_00 += gouty[0] * dm_ik_20;
-                vzjl_00 += goutz[0] * dm_ik_20;
-                double dm_ik_22 = dm[(i0+2)*nao+(k0+2)];
-                vxjl_00 += goutx[3] * dm_ik_22;
-                vyjl_00 += gouty[3] * dm_ik_22;
-                vzjl_00 += goutz[3] * dm_ik_22;
-                double dm_ik_24 = dm[(i0+2)*nao+(k0+4)];
-                vxjl_00 += goutx[6] * dm_ik_24;
-                vyjl_00 += gouty[6] * dm_ik_24;
-                vzjl_00 += goutz[6] * dm_ik_24;
-                double dm_ik_41 = dm[(i0+4)*nao+(k0+1)];
-                vxjl_00 += goutx[2] * dm_ik_41;
-                vyjl_00 += gouty[2] * dm_ik_41;
-                vzjl_00 += goutz[2] * dm_ik_41;
-                double dm_ik_43 = dm[(i0+4)*nao+(k0+3)];
-                vxjl_00 += goutx[5] * dm_ik_43;
-                vyjl_00 += gouty[5] * dm_ik_43;
-                vzjl_00 += goutz[5] * dm_ik_43;
-                double dm_ik_45 = dm[(i0+4)*nao+(k0+5)];
-                vxjl_00 += goutx[8] * dm_ik_45;
-                vyjl_00 += gouty[8] * dm_ik_45;
-                vzjl_00 += goutz[8] * dm_ik_45;
-                break; }
-                case 3: {
-                double dm_ik_11 = dm[(i0+1)*nao+(k0+1)];
-                vxjl_00 += goutx[1] * dm_ik_11;
-                vyjl_00 += gouty[1] * dm_ik_11;
-                vzjl_00 += goutz[1] * dm_ik_11;
+                vxjl_00 += goutx[12] * dm_ik_05;
+                vyjl_00 += gouty[12] * dm_ik_05;
+                vzjl_00 += goutz[12] * dm_ik_05;
                 double dm_ik_13 = dm[(i0+1)*nao+(k0+3)];
-                vxjl_00 += goutx[4] * dm_ik_13;
-                vyjl_00 += gouty[4] * dm_ik_13;
-                vzjl_00 += goutz[4] * dm_ik_13;
+                vxjl_00 += goutx[1] * dm_ik_13;
+                vyjl_00 += gouty[1] * dm_ik_13;
+                vzjl_00 += goutz[1] * dm_ik_13;
+                double dm_ik_14 = dm[(i0+1)*nao+(k0+4)];
+                vxjl_00 += goutx[7] * dm_ik_14;
+                vyjl_00 += gouty[7] * dm_ik_14;
+                vzjl_00 += goutz[7] * dm_ik_14;
                 double dm_ik_15 = dm[(i0+1)*nao+(k0+5)];
-                vxjl_00 += goutx[7] * dm_ik_15;
-                vyjl_00 += gouty[7] * dm_ik_15;
-                vzjl_00 += goutz[7] * dm_ik_15;
-                double dm_ik_30 = dm[(i0+3)*nao+(k0+0)];
-                vxjl_00 += goutx[0] * dm_ik_30;
-                vyjl_00 += gouty[0] * dm_ik_30;
-                vzjl_00 += goutz[0] * dm_ik_30;
-                double dm_ik_32 = dm[(i0+3)*nao+(k0+2)];
-                vxjl_00 += goutx[3] * dm_ik_32;
-                vyjl_00 += gouty[3] * dm_ik_32;
-                vzjl_00 += goutz[3] * dm_ik_32;
+                vxjl_00 += goutx[13] * dm_ik_15;
+                vyjl_00 += gouty[13] * dm_ik_15;
+                vzjl_00 += goutz[13] * dm_ik_15;
+                double dm_ik_23 = dm[(i0+2)*nao+(k0+3)];
+                vxjl_00 += goutx[2] * dm_ik_23;
+                vyjl_00 += gouty[2] * dm_ik_23;
+                vzjl_00 += goutz[2] * dm_ik_23;
+                double dm_ik_24 = dm[(i0+2)*nao+(k0+4)];
+                vxjl_00 += goutx[8] * dm_ik_24;
+                vyjl_00 += gouty[8] * dm_ik_24;
+                vzjl_00 += goutz[8] * dm_ik_24;
+                double dm_ik_25 = dm[(i0+2)*nao+(k0+5)];
+                vxjl_00 += goutx[14] * dm_ik_25;
+                vyjl_00 += gouty[14] * dm_ik_25;
+                vzjl_00 += goutz[14] * dm_ik_25;
+                double dm_ik_33 = dm[(i0+3)*nao+(k0+3)];
+                vxjl_00 += goutx[3] * dm_ik_33;
+                vyjl_00 += gouty[3] * dm_ik_33;
+                vzjl_00 += goutz[3] * dm_ik_33;
                 double dm_ik_34 = dm[(i0+3)*nao+(k0+4)];
-                vxjl_00 += goutx[6] * dm_ik_34;
-                vyjl_00 += gouty[6] * dm_ik_34;
-                vzjl_00 += goutz[6] * dm_ik_34;
-                double dm_ik_51 = dm[(i0+5)*nao+(k0+1)];
-                vxjl_00 += goutx[2] * dm_ik_51;
-                vyjl_00 += gouty[2] * dm_ik_51;
-                vzjl_00 += goutz[2] * dm_ik_51;
+                vxjl_00 += goutx[9] * dm_ik_34;
+                vyjl_00 += gouty[9] * dm_ik_34;
+                vzjl_00 += goutz[9] * dm_ik_34;
+                double dm_ik_35 = dm[(i0+3)*nao+(k0+5)];
+                vxjl_00 += goutx[15] * dm_ik_35;
+                vyjl_00 += gouty[15] * dm_ik_35;
+                vzjl_00 += goutz[15] * dm_ik_35;
+                double dm_ik_43 = dm[(i0+4)*nao+(k0+3)];
+                vxjl_00 += goutx[4] * dm_ik_43;
+                vyjl_00 += gouty[4] * dm_ik_43;
+                vzjl_00 += goutz[4] * dm_ik_43;
+                double dm_ik_44 = dm[(i0+4)*nao+(k0+4)];
+                vxjl_00 += goutx[10] * dm_ik_44;
+                vyjl_00 += gouty[10] * dm_ik_44;
+                vzjl_00 += goutz[10] * dm_ik_44;
+                double dm_ik_45 = dm[(i0+4)*nao+(k0+5)];
+                vxjl_00 += goutx[16] * dm_ik_45;
+                vyjl_00 += gouty[16] * dm_ik_45;
+                vzjl_00 += goutz[16] * dm_ik_45;
                 double dm_ik_53 = dm[(i0+5)*nao+(k0+3)];
                 vxjl_00 += goutx[5] * dm_ik_53;
                 vyjl_00 += gouty[5] * dm_ik_53;
                 vzjl_00 += goutz[5] * dm_ik_53;
+                double dm_ik_54 = dm[(i0+5)*nao+(k0+4)];
+                vxjl_00 += goutx[11] * dm_ik_54;
+                vyjl_00 += gouty[11] * dm_ik_54;
+                vzjl_00 += goutz[11] * dm_ik_54;
                 double dm_ik_55 = dm[(i0+5)*nao+(k0+5)];
-                vxjl_00 += goutx[8] * dm_ik_55;
-                vyjl_00 += gouty[8] * dm_ik_55;
-                vzjl_00 += goutz[8] * dm_ik_55;
-                break; }
-                }
+                vxjl_00 += goutx[17] * dm_ik_55;
+                vyjl_00 += gouty[17] * dm_ik_55;
+                vzjl_00 += goutz[17] * dm_ik_55;
                 atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
                 atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
                 atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
-                switch (gout_id) {
-                case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
-                double dm_il_40 = dm[(i0+4)*nao+(l0+0)];
-                double vxjk_00 = goutx[0]*dm_il_00 + goutx[1]*dm_il_40;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
-                double vyjk_00 = gouty[0]*dm_il_00 + gouty[1]*dm_il_40;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
-                double vzjk_00 = goutz[0]*dm_il_00 + goutz[1]*dm_il_40;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double dm_il_20 = dm[(i0+2)*nao+(l0+0)];
-                double vxjk_01 = goutx[2]*dm_il_20;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
-                double vyjk_01 = gouty[2]*dm_il_20;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
-                double vzjk_01 = goutz[2]*dm_il_20;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
-                double vxjk_02 = goutx[3]*dm_il_00 + goutx[4]*dm_il_40;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
-                double vyjk_02 = gouty[3]*dm_il_00 + gouty[4]*dm_il_40;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
-                double vzjk_02 = goutz[3]*dm_il_00 + goutz[4]*dm_il_40;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
-                double vxjk_03 = goutx[5]*dm_il_20;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+3), vxjk_03);
-                double vyjk_03 = gouty[5]*dm_il_20;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+3), vyjk_03);
-                double vzjk_03 = goutz[5]*dm_il_20;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+3), vzjk_03);
-                double vxjk_04 = goutx[6]*dm_il_00 + goutx[7]*dm_il_40;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+4), vxjk_04);
-                double vyjk_04 = gouty[6]*dm_il_00 + gouty[7]*dm_il_40;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+4), vyjk_04);
-                double vzjk_04 = goutz[6]*dm_il_00 + goutz[7]*dm_il_40;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+4), vzjk_04);
-                double vxjk_05 = goutx[8]*dm_il_20;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+5), vxjk_05);
-                double vyjk_05 = gouty[8]*dm_il_20;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+5), vyjk_05);
-                double vzjk_05 = goutz[8]*dm_il_20;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+5), vzjk_05);
-                break; }
-                case 1: {
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
-                double dm_il_50 = dm[(i0+5)*nao+(l0+0)];
-                double vxjk_00 = goutx[0]*dm_il_10 + goutx[1]*dm_il_50;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
-                double vyjk_00 = gouty[0]*dm_il_10 + gouty[1]*dm_il_50;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
-                double vzjk_00 = goutz[0]*dm_il_10 + goutz[1]*dm_il_50;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double dm_il_30 = dm[(i0+3)*nao+(l0+0)];
-                double vxjk_01 = goutx[2]*dm_il_30;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
-                double vyjk_01 = gouty[2]*dm_il_30;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
-                double vzjk_01 = goutz[2]*dm_il_30;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
-                double vxjk_02 = goutx[3]*dm_il_10 + goutx[4]*dm_il_50;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
-                double vyjk_02 = gouty[3]*dm_il_10 + gouty[4]*dm_il_50;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
-                double vzjk_02 = goutz[3]*dm_il_10 + goutz[4]*dm_il_50;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
-                double vxjk_03 = goutx[5]*dm_il_30;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+3), vxjk_03);
-                double vyjk_03 = gouty[5]*dm_il_30;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+3), vyjk_03);
-                double vzjk_03 = goutz[5]*dm_il_30;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+3), vzjk_03);
-                double vxjk_04 = goutx[6]*dm_il_10 + goutx[7]*dm_il_50;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+4), vxjk_04);
-                double vyjk_04 = gouty[6]*dm_il_10 + gouty[7]*dm_il_50;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+4), vyjk_04);
-                double vzjk_04 = goutz[6]*dm_il_10 + goutz[7]*dm_il_50;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+4), vzjk_04);
-                double vxjk_05 = goutx[8]*dm_il_30;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+5), vxjk_05);
-                double vyjk_05 = gouty[8]*dm_il_30;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+5), vyjk_05);
-                double vzjk_05 = goutz[8]*dm_il_30;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+5), vzjk_05);
-                break; }
-                case 2: {
                 double dm_il_20 = dm[(i0+2)*nao+(l0+0)];
-                double vxjk_00 = goutx[0]*dm_il_20;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
-                double vyjk_00 = gouty[0]*dm_il_20;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
-                double vzjk_00 = goutz[0]*dm_il_20;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
-                double dm_il_40 = dm[(i0+4)*nao+(l0+0)];
-                double vxjk_01 = goutx[1]*dm_il_00 + goutx[2]*dm_il_40;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
-                double vyjk_01 = gouty[1]*dm_il_00 + gouty[2]*dm_il_40;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
-                double vzjk_01 = goutz[1]*dm_il_00 + goutz[2]*dm_il_40;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
-                double vxjk_02 = goutx[3]*dm_il_20;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
-                double vyjk_02 = gouty[3]*dm_il_20;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
-                double vzjk_02 = goutz[3]*dm_il_20;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
-                double vxjk_03 = goutx[4]*dm_il_00 + goutx[5]*dm_il_40;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+3), vxjk_03);
-                double vyjk_03 = gouty[4]*dm_il_00 + gouty[5]*dm_il_40;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+3), vyjk_03);
-                double vzjk_03 = goutz[4]*dm_il_00 + goutz[5]*dm_il_40;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+3), vzjk_03);
-                double vxjk_04 = goutx[6]*dm_il_20;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+4), vxjk_04);
-                double vyjk_04 = gouty[6]*dm_il_20;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+4), vyjk_04);
-                double vzjk_04 = goutz[6]*dm_il_20;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+4), vzjk_04);
-                double vxjk_05 = goutx[7]*dm_il_00 + goutx[8]*dm_il_40;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+5), vxjk_05);
-                double vyjk_05 = gouty[7]*dm_il_00 + gouty[8]*dm_il_40;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+5), vyjk_05);
-                double vzjk_05 = goutz[7]*dm_il_00 + goutz[8]*dm_il_40;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+5), vzjk_05);
-                break; }
-                case 3: {
                 double dm_il_30 = dm[(i0+3)*nao+(l0+0)];
-                double vxjk_00 = goutx[0]*dm_il_30;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
-                double vyjk_00 = gouty[0]*dm_il_30;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
-                double vzjk_00 = goutz[0]*dm_il_30;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
+                double dm_il_40 = dm[(i0+4)*nao+(l0+0)];
                 double dm_il_50 = dm[(i0+5)*nao+(l0+0)];
-                double vxjk_01 = goutx[1]*dm_il_10 + goutx[2]*dm_il_50;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+1), vxjk_01);
-                double vyjk_01 = gouty[1]*dm_il_10 + gouty[2]*dm_il_50;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+1), vyjk_01);
-                double vzjk_01 = goutz[1]*dm_il_10 + goutz[2]*dm_il_50;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+1), vzjk_01);
-                double vxjk_02 = goutx[3]*dm_il_30;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+2), vxjk_02);
-                double vyjk_02 = gouty[3]*dm_il_30;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+2), vyjk_02);
-                double vzjk_02 = goutz[3]*dm_il_30;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+2), vzjk_02);
-                double vxjk_03 = goutx[4]*dm_il_10 + goutx[5]*dm_il_50;
+                double vxjk_03 = goutx[0]*dm_il_00 + goutx[1]*dm_il_10 + goutx[2]*dm_il_20 + goutx[3]*dm_il_30 + goutx[4]*dm_il_40 + goutx[5]*dm_il_50;
                 atomicAdd(vk_x+(j0+0)*nao+(k0+3), vxjk_03);
-                double vyjk_03 = gouty[4]*dm_il_10 + gouty[5]*dm_il_50;
+                double vyjk_03 = gouty[0]*dm_il_00 + gouty[1]*dm_il_10 + gouty[2]*dm_il_20 + gouty[3]*dm_il_30 + gouty[4]*dm_il_40 + gouty[5]*dm_il_50;
                 atomicAdd(vk_y+(j0+0)*nao+(k0+3), vyjk_03);
-                double vzjk_03 = goutz[4]*dm_il_10 + goutz[5]*dm_il_50;
+                double vzjk_03 = goutz[0]*dm_il_00 + goutz[1]*dm_il_10 + goutz[2]*dm_il_20 + goutz[3]*dm_il_30 + goutz[4]*dm_il_40 + goutz[5]*dm_il_50;
                 atomicAdd(vk_z+(j0+0)*nao+(k0+3), vzjk_03);
-                double vxjk_04 = goutx[6]*dm_il_30;
+                double vxjk_04 = goutx[6]*dm_il_00 + goutx[7]*dm_il_10 + goutx[8]*dm_il_20 + goutx[9]*dm_il_30 + goutx[10]*dm_il_40 + goutx[11]*dm_il_50;
                 atomicAdd(vk_x+(j0+0)*nao+(k0+4), vxjk_04);
-                double vyjk_04 = gouty[6]*dm_il_30;
+                double vyjk_04 = gouty[6]*dm_il_00 + gouty[7]*dm_il_10 + gouty[8]*dm_il_20 + gouty[9]*dm_il_30 + gouty[10]*dm_il_40 + gouty[11]*dm_il_50;
                 atomicAdd(vk_y+(j0+0)*nao+(k0+4), vyjk_04);
-                double vzjk_04 = goutz[6]*dm_il_30;
+                double vzjk_04 = goutz[6]*dm_il_00 + goutz[7]*dm_il_10 + goutz[8]*dm_il_20 + goutz[9]*dm_il_30 + goutz[10]*dm_il_40 + goutz[11]*dm_il_50;
                 atomicAdd(vk_z+(j0+0)*nao+(k0+4), vzjk_04);
-                double vxjk_05 = goutx[7]*dm_il_10 + goutx[8]*dm_il_50;
+                double vxjk_05 = goutx[12]*dm_il_00 + goutx[13]*dm_il_10 + goutx[14]*dm_il_20 + goutx[15]*dm_il_30 + goutx[16]*dm_il_40 + goutx[17]*dm_il_50;
                 atomicAdd(vk_x+(j0+0)*nao+(k0+5), vxjk_05);
-                double vyjk_05 = gouty[7]*dm_il_10 + gouty[8]*dm_il_50;
+                double vyjk_05 = gouty[12]*dm_il_00 + gouty[13]*dm_il_10 + gouty[14]*dm_il_20 + gouty[15]*dm_il_30 + gouty[16]*dm_il_40 + gouty[17]*dm_il_50;
                 atomicAdd(vk_y+(j0+0)*nao+(k0+5), vyjk_05);
-                double vzjk_05 = goutz[7]*dm_il_10 + goutz[8]*dm_il_50;
+                double vzjk_05 = goutz[12]*dm_il_00 + goutz[13]*dm_il_10 + goutz[14]*dm_il_20 + goutz[15]*dm_il_30 + goutz[16]*dm_il_40 + goutz[17]*dm_il_50;
                 atomicAdd(vk_z+(j0+0)*nao+(k0+5), vzjk_05);
-                break; }
-                }
             }
         }
     }
@@ -29720,7 +29989,7 @@ void rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -30383,6 +30652,7 @@ void rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     int gout_id = threadIdx.y;
+    constexpr int g_size = 16;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     extern __shared__ double shared_memory[];
@@ -30400,7 +30670,7 @@ void rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -30478,9 +30748,9 @@ while (1) {
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double goutx[14];
         double gouty[14];
@@ -30507,9 +30777,9 @@ while (1) {
             }
             __syncthreads();
             if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
@@ -30529,9 +30799,9 @@ while (1) {
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -30539,11 +30809,11 @@ while (1) {
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
                 if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
+                    Rpq[0*nsq_per_block] = xpq;
+                    Rpq[1*nsq_per_block] = ypq;
+                    Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[1024] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
                         aij_cache[1] = aj_aij;
@@ -31226,6 +31496,8 @@ while (1) {
                 atomicAdd(vj_z+(i0+5)*nao+(j0+2), vzij_52);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vxkl_00 = 0;
                 double vykl_00 = 0;
                 double vzkl_00 = 0;
@@ -31235,8 +31507,6 @@ while (1) {
                 double vxkl_20 = 0;
                 double vykl_20 = 0;
                 double vzkl_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vxkl_00 += goutx[0] * dm_ji_00;
                 vykl_00 += gouty[0] * dm_ji_00;
@@ -31288,8 +31558,26 @@ while (1) {
                 vxkl_20 += goutx[13] * dm_ji_24;
                 vykl_20 += gouty[13] * dm_ji_24;
                 vzkl_20 += goutz[13] * dm_ji_24;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
+                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
+                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
+                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
+                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
+                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
                 break; }
                 case 1: {
+                double vxkl_00 = 0;
+                double vykl_00 = 0;
+                double vzkl_00 = 0;
+                double vxkl_10 = 0;
+                double vykl_10 = 0;
+                double vzkl_10 = 0;
+                double vxkl_20 = 0;
+                double vykl_20 = 0;
+                double vzkl_20 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vxkl_00 += goutx[0] * dm_ji_01;
                 vykl_00 += gouty[0] * dm_ji_01;
@@ -31341,8 +31629,26 @@ while (1) {
                 vxkl_20 += goutx[13] * dm_ji_25;
                 vykl_20 += gouty[13] * dm_ji_25;
                 vzkl_20 += goutz[13] * dm_ji_25;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
+                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
+                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
+                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
+                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
+                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
                 break; }
                 case 2: {
+                double vxkl_00 = 0;
+                double vykl_00 = 0;
+                double vzkl_00 = 0;
+                double vxkl_10 = 0;
+                double vykl_10 = 0;
+                double vzkl_10 = 0;
+                double vxkl_20 = 0;
+                double vykl_20 = 0;
+                double vzkl_20 = 0;
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vxkl_10 += goutx[4] * dm_ji_00;
                 vykl_10 += gouty[4] * dm_ji_00;
@@ -31391,8 +31697,26 @@ while (1) {
                 vxkl_10 += goutx[8] * dm_ji_24;
                 vykl_10 += gouty[8] * dm_ji_24;
                 vzkl_10 += goutz[8] * dm_ji_24;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+                atomicAdd(vj_x+(k0+1)*nao+(l0+0), vxkl_10);
+                atomicAdd(vj_y+(k0+1)*nao+(l0+0), vykl_10);
+                atomicAdd(vj_z+(k0+1)*nao+(l0+0), vzkl_10);
+                atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
+                atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
+                atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
                 break; }
                 case 3: {
+                double vxkl_00 = 0;
+                double vykl_00 = 0;
+                double vzkl_00 = 0;
+                double vxkl_10 = 0;
+                double vykl_10 = 0;
+                double vzkl_10 = 0;
+                double vxkl_20 = 0;
+                double vykl_20 = 0;
+                double vzkl_20 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vxkl_10 += goutx[4] * dm_ji_01;
                 vykl_10 += gouty[4] * dm_ji_01;
@@ -31441,8 +31765,6 @@ while (1) {
                 vxkl_10 += goutx[8] * dm_ji_25;
                 vykl_10 += gouty[8] * dm_ji_25;
                 vzkl_10 += goutz[8] * dm_ji_25;
-                break; }
-                }
                 atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
                 atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
                 atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
@@ -31452,6 +31774,8 @@ while (1) {
                 atomicAdd(vj_x+(k0+2)*nao+(l0+0), vxkl_20);
                 atomicAdd(vj_y+(k0+2)*nao+(l0+0), vykl_20);
                 atomicAdd(vj_z+(k0+2)*nao+(l0+0), vzkl_20);
+                break; }
+                }
             }
             if (do_k) {
                 switch (gout_id) {
@@ -31810,6 +32134,8 @@ while (1) {
                 atomicAdd(vk_z+(i0+5)*nao+(k0+2), vzik_52);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vxjl_00 = 0;
                 double vyjl_00 = 0;
                 double vzjl_00 = 0;
@@ -31819,8 +32145,6 @@ while (1) {
                 double vxjl_20 = 0;
                 double vyjl_20 = 0;
                 double vzjl_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_00 += goutx[0] * dm_ik_00;
                 vyjl_00 += gouty[0] * dm_ik_00;
@@ -31872,8 +32196,26 @@ while (1) {
                 vxjl_20 += goutx[13] * dm_ik_42;
                 vyjl_20 += gouty[13] * dm_ik_42;
                 vzjl_20 += goutz[13] * dm_ik_42;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
+                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
+                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
+                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
+                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
+                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
                 break; }
                 case 1: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_10 = 0;
+                double vyjl_10 = 0;
+                double vzjl_10 = 0;
+                double vxjl_20 = 0;
+                double vyjl_20 = 0;
+                double vzjl_20 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vxjl_00 += goutx[0] * dm_ik_10;
                 vyjl_00 += gouty[0] * dm_ik_10;
@@ -31925,8 +32267,26 @@ while (1) {
                 vxjl_20 += goutx[13] * dm_ik_52;
                 vyjl_20 += gouty[13] * dm_ik_52;
                 vzjl_20 += goutz[13] * dm_ik_52;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
+                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
+                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
+                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
+                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
+                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
                 break; }
                 case 2: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_10 = 0;
+                double vyjl_10 = 0;
+                double vzjl_10 = 0;
+                double vxjl_20 = 0;
+                double vyjl_20 = 0;
+                double vzjl_20 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vxjl_10 += goutx[1] * dm_ik_00;
                 vyjl_10 += gouty[1] * dm_ik_00;
@@ -31975,8 +32335,26 @@ while (1) {
                 vxjl_10 += goutx[11] * dm_ik_42;
                 vyjl_10 += gouty[11] * dm_ik_42;
                 vzjl_10 += goutz[11] * dm_ik_42;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
+                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
+                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
+                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
+                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
+                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
                 break; }
                 case 3: {
+                double vxjl_00 = 0;
+                double vyjl_00 = 0;
+                double vzjl_00 = 0;
+                double vxjl_10 = 0;
+                double vyjl_10 = 0;
+                double vzjl_10 = 0;
+                double vxjl_20 = 0;
+                double vyjl_20 = 0;
+                double vzjl_20 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vxjl_10 += goutx[1] * dm_ik_10;
                 vyjl_10 += gouty[1] * dm_ik_10;
@@ -32025,8 +32403,6 @@ while (1) {
                 vxjl_10 += goutx[11] * dm_ik_52;
                 vyjl_10 += gouty[11] * dm_ik_52;
                 vzjl_10 += goutz[11] * dm_ik_52;
-                break; }
-                }
                 atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
                 atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
                 atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
@@ -32036,6 +32412,8 @@ while (1) {
                 atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
                 atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
                 atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
@@ -32291,16 +32669,11 @@ void rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
-    constexpr int nsq_per_block = 64;
-    constexpr int gout_stride = 4;
+    int nsq_per_block = blockDim.x;
+    int gout_stride = blockDim.y;
     extern __shared__ double shared_memory[];
-    double *rlrk = shared_memory + sq_id;
-    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 44 + sq_id;
-    double *cicj_cache = shared_memory + nsq_per_block * (44+nroots*2);
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
 
@@ -32309,7 +32682,7 @@ void rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 while (1) {
     __syncthreads();
     __shared__ int ish, jsh;
-    if (sq_id == 0) {
+    if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -32386,16 +32759,11 @@ while (1) {
         double xlxk = env[rl+0] - env[rk+0];
         double ylyk = env[rl+1] - env[rk+1];
         double zlzk = env[rl+2] - env[rk+2];
-        if (gout_id == 0) {
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
-        }
-        double goutx[9];
-        double gouty[9];
-        double goutz[9];
+        double goutx[18];
+        double gouty[18];
+        double goutz[18];
         #pragma unroll
-        for (int n = 0; n < 9; ++n) {
+        for (int n = 0; n < 18; ++n) {
             goutx[n] = 0;
             gouty[n] = 0;
             goutz[n] = 0;
@@ -32414,17 +32782,8 @@ while (1) {
             } else {
                 fac_sym = 0;
             }
-            __syncthreads();
-            if (gout_id == 0) {
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
-                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
-                gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
-            }
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
@@ -32432,325 +32791,212 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
-                double xkl = env[rk+0] + rlrk[0] * al_akl;
-                double ykl = env[rk+1] + rlrk[64] * al_akl;
-                double zkl = env[rk+2] + rlrk[128] * al_akl;
+                double xqc = xlxk * al_akl;
+                double yqc = ylyk * al_akl;
+                double zqc = zlzk * al_akl;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                __syncthreads();
-                if (gout_id == 0) {
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
-                    double cicj = cicj_cache[ijp];
-                    gx[768] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                        aij_cache[2] = ai * 2;
-                    }
-                }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
-                double s0, s1, s2;
-                double Ix, Iy, Iz;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                if (task_id >= ntasks) {
+                    continue;
+                }
                 for (int irys = 0; irys < nroots; ++irys) {
-                    __syncthreads();
-                    double rt = rw[irys*128];
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
+                    double rt = rw[ 2*irys   *nsq_per_block];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
+                    double fx, fy, fz;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    for (int n = gout_id; n < 3; n += 4) {
-                        if (n == 2) {
-                            gx[1536] = rw[irys*128+64];
-                        }
-                        double *_gx = gx + n * 768;
-                        double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
-                        double c0x = Rpa - rt_aij * Rpq[n*64];
-                        s0 = _gx[0];
-                        s1 = c0x * s0;
-                        _gx[64] = s1;
-                        s2 = c0x * s1 + 1 * b10 * s0;
-                        _gx[128] = s2;
-                        s0 = s1;
-                        s1 = s2;
-                        s2 = c0x * s1 + 2 * b10 * s0;
-                        _gx[192] = s2;
-                        s0 = s1;
-                        s1 = s2;
-                        s2 = c0x * s1 + 3 * b10 * s0;
-                        _gx[256] = s2;
-                        s0 = s1;
-                        s1 = s2;
-                        s2 = c0x * s1 + 4 * b10 * s0;
-                        _gx[320] = s2;
-                        s1 = _gx[320];
-                        s0 = _gx[256];
-                        _gx[512] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[192];
-                        _gx[448] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[128];
-                        _gx[384] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[64];
-                        _gx[320] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[0];
-                        _gx[256] = s1 - xjxi * s0;
-                        s1 = _gx[512];
-                        s0 = _gx[448];
-                        _gx[704] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[384];
-                        _gx[640] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[320];
-                        _gx[576] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[256];
-                        _gx[512] = s1 - xjxi * s0;
-                    }
-                    __syncthreads();
-                    switch (gout_id) {
-                    case 0:
-                    Ix = gx[640];
-                    Iy = gx[768];
-                    Iz = gx[1536];
-                    goutx[0] += (aij_cache[2] * gx[704] - 2 * gx[576]) * Iy * Iz;
-                    gouty[0] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[512];
-                    Iy = gx[832];
-                    Iz = gx[1600];
-                    goutx[1] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[1] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[1] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[320];
-                    Iy = gx[1024];
-                    Iz = gx[1600];
-                    goutx[2] += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gouty[2] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[2] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[768];
-                    Iz = gx[1792];
-                    goutx[3] += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gouty[3] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[832];
-                    Iz = gx[1856];
-                    goutx[4] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[4] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[4] += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[1280];
-                    Iz = gx[1600];
-                    goutx[5] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[5] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[5] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1024];
-                    Iz = gx[1792];
-                    goutx[6] += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gouty[6] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1088];
-                    Iz = gx[1856];
-                    goutx[7] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[7] += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
-                    goutz[7] += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[768];
-                    Iz = gx[2112];
-                    goutx[8] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[8] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[8] += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
-                    break;
-                    case 1:
-                    Ix = gx[576];
-                    Iy = gx[832];
-                    Iz = gx[1536];
-                    goutx[0] += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gouty[0] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[512];
-                    Iy = gx[768];
-                    Iz = gx[1664];
-                    goutx[1] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[1] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[1] += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1152];
-                    Iz = gx[1536];
-                    goutx[2] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[2] += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
-                    goutz[2] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[320];
-                    Iy = gx[832];
-                    Iz = gx[1792];
-                    goutx[3] += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gouty[3] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[768];
-                    Iz = gx[1920];
-                    goutx[4] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[4] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[4] += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1408];
-                    Iz = gx[1536];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += (aij_cache[2] * gx[1472] - 2 * gx[1344]) * Ix * Iz;
-                    goutz[5] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[1088];
-                    Iz = gx[1792];
-                    goutx[6] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[6] += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1024];
-                    Iz = gx[1920];
-                    goutx[7] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[7] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[7] += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[896];
-                    Iz = gx[2048];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
-                    goutz[8] += aij_cache[2] * gx[2112] * Ix * Iy;
-                    break;
-                    case 2:
-                    Ix = gx[576];
-                    Iy = gx[768];
-                    Iz = gx[1600];
-                    goutx[0] += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gouty[0] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[0] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[384];
-                    Iy = gx[1024];
-                    Iz = gx[1536];
-                    goutx[1] += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gouty[1] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[1] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1088];
-                    Iz = gx[1600];
-                    goutx[2] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[2] += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
-                    goutz[2] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[320];
-                    Iy = gx[768];
-                    Iz = gx[1856];
-                    goutx[3] += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gouty[3] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[3] += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[1280];
-                    Iz = gx[1536];
-                    goutx[4] += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gouty[4] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[4] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1344];
-                    Iz = gx[1600];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
-                    goutz[5] += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[1024];
-                    Iz = gx[1856];
-                    goutx[6] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[6] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[6] += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
-                    Ix = gx[128];
-                    Iy = gx[768];
-                    Iz = gx[2048];
-                    goutx[7] += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gouty[7] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[7] += aij_cache[2] * gx[2112] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[832];
-                    Iz = gx[2112];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[8] += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
-                    break;
-                    case 3:
-                    Ix = gx[512];
-                    Iy = gx[896];
-                    Iz = gx[1536];
-                    goutx[0] += aij_cache[2] * gx[576] * Iy * Iz;
-                    gouty[0] += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
-                    goutz[0] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[320];
-                    Iy = gx[1088];
-                    Iz = gx[1536];
-                    goutx[1] += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gouty[1] += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
-                    goutz[1] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[1024];
-                    Iz = gx[1664];
-                    goutx[2] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[2] += aij_cache[2] * gx[1088] * Ix * Iz;
-                    goutz[2] += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
-                    Ix = gx[256];
-                    Iy = gx[896];
-                    Iz = gx[1792];
-                    goutx[3] += aij_cache[2] * gx[320] * Iy * Iz;
-                    gouty[3] += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
-                    goutz[3] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[1344];
-                    Iz = gx[1536];
-                    goutx[4] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[4] += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
-                    goutz[4] += aij_cache[2] * gx[1600] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1280];
-                    Iz = gx[1664];
-                    goutx[5] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[5] += aij_cache[2] * gx[1344] * Ix * Iz;
-                    goutz[5] += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[1152];
-                    Iz = gx[1792];
-                    goutx[6] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[6] += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
-                    goutz[6] += aij_cache[2] * gx[1856] * Ix * Iy;
-                    Ix = gx[64];
-                    Iy = gx[832];
-                    Iz = gx[2048];
-                    goutx[7] += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gouty[7] += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
-                    goutz[7] += aij_cache[2] * gx[2112] * Ix * Iy;
-                    Ix = gx[0];
-                    Iy = gx[768];
-                    Iz = gx[2176];
-                    goutx[8] += aij_cache[2] * gx[64] * Iy * Iz;
-                    gouty[8] += aij_cache[2] * gx[832] * Ix * Iz;
-                    goutz[8] += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
-                    break;
-                    }
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
+                    double trr_10x = c0x * 1;
+                    double trr_20x = c0x * trr_10x + 1*b10 * 1;
+                    double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                    double trr_40x = c0x * trr_30x + 3*b10 * trr_20x;
+                    double trr_50x = c0x * trr_40x + 4*b10 * trr_30x;
+                    double hrr_4100x = trr_50x - rjri[0] * trr_40x;
+                    double hrr_3100x = trr_40x - rjri[0] * trr_30x;
+                    double hrr_3200x = hrr_4100x - rjri[0] * hrr_3100x;
+                    fx = aij_cache[2] * hrr_3200x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
+                    double trr_10y = c0y * 1;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
+                    double trr_10z = c0z * wt;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_2100x = trr_30x - rjri[0] * trr_20x;
+                    double hrr_1100x = trr_20x - rjri[0] * trr_10x;
+                    double hrr_1200x = hrr_2100x - rjri[0] * hrr_1100x;
+                    fx -= 2 * hrr_1200x;
+                    double hrr_2200x = hrr_3100x - rjri[0] * hrr_2100x;
+                    goutx[0] +=  fx  * 1 * wt;
+                    gouty[0] += hrr_2200x *  fy  * wt;
+                    goutz[0] += hrr_2200x * 1 *  fz ;
+                    fx = aij_cache[2] * hrr_2200x;
+                    double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0100x = trr_10x - rjri[0] * 1;
+                    double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
+                    fx -= 1 * hrr_0200x;
+                    fy -= 1 * 1;
+                    goutx[1] +=  fx  * trr_10y * wt;
+                    gouty[1] += hrr_1200x *  fy  * wt;
+                    goutz[1] += hrr_1200x * trr_10y *  fz ;
+                    fx = aij_cache[2] * hrr_2200x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                    fz = aij_cache[2] * trr_20z;
+                    fx -= 1 * hrr_0200x;
+                    fz -= 1 * wt;
+                    goutx[2] +=  fx  * 1 * trr_10z;
+                    gouty[2] += hrr_1200x *  fy  * trr_10z;
+                    goutz[2] += hrr_1200x * 1 *  fz ;
+                    fx = aij_cache[2] * hrr_1200x;
+                    double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * trr_10z;
+                    fy -= 2 * trr_10y;
+                    goutx[3] +=  fx  * trr_20y * wt;
+                    gouty[3] += hrr_0200x *  fy  * wt;
+                    goutz[3] += hrr_0200x * trr_20y *  fz ;
+                    fx = aij_cache[2] * hrr_1200x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_20z;
+                    fy -= 1 * 1;
+                    fz -= 1 * wt;
+                    goutx[4] +=  fx  * trr_10y * trr_10z;
+                    gouty[4] += hrr_0200x *  fy  * trr_10z;
+                    goutz[4] += hrr_0200x * trr_10y *  fz ;
+                    fx = aij_cache[2] * hrr_1200x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                    fz = aij_cache[2] * trr_30z;
+                    fz -= 2 * trr_10z;
+                    goutx[5] +=  fx  * 1 * trr_20z;
+                    gouty[5] += hrr_0200x *  fy  * trr_20z;
+                    goutz[5] += hrr_0200x * 1 *  fz ;
+                    fx = aij_cache[2] * hrr_3100x;
+                    double hrr_1100y = trr_20y - rjri[1] * trr_10y;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
+                    fx -= 2 * hrr_1100x;
+                    double hrr_0100y = trr_10y - rjri[1] * 1;
+                    goutx[6] +=  fx  * hrr_0100y * wt;
+                    gouty[6] += hrr_2100x *  fy  * wt;
+                    goutz[6] += hrr_2100x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * hrr_2100x;
+                    double hrr_2100y = trr_30y - rjri[1] * trr_20y;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * trr_10z;
+                    fx -= 1 * hrr_0100x;
+                    fy -= 1 * hrr_0100y;
+                    goutx[7] +=  fx  * hrr_1100y * wt;
+                    gouty[7] += hrr_1100x *  fy  * wt;
+                    goutz[7] += hrr_1100x * hrr_1100y *  fz ;
+                    fx = aij_cache[2] * hrr_2100x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_20z;
+                    fx -= 1 * hrr_0100x;
+                    fz -= 1 * wt;
+                    goutx[8] +=  fx  * hrr_0100y * trr_10z;
+                    gouty[8] += hrr_1100x *  fy  * trr_10z;
+                    goutz[8] += hrr_1100x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
+                    double hrr_3100y = trr_40y - rjri[1] * trr_30y;
+                    fy = aij_cache[2] * hrr_3100y;
+                    fz = aij_cache[2] * trr_10z;
+                    fy -= 2 * hrr_1100y;
+                    goutx[9] +=  fx  * hrr_2100y * wt;
+                    gouty[9] += hrr_0100x *  fy  * wt;
+                    goutz[9] += hrr_0100x * hrr_2100y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * trr_20z;
+                    fy -= 1 * hrr_0100y;
+                    fz -= 1 * wt;
+                    goutx[10] +=  fx  * hrr_1100y * trr_10z;
+                    gouty[10] += hrr_0100x *  fy  * trr_10z;
+                    goutz[10] += hrr_0100x * hrr_1100y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_30z;
+                    fz -= 2 * trr_10z;
+                    goutx[11] +=  fx  * hrr_0100y * trr_20z;
+                    gouty[11] += hrr_0100x *  fy  * trr_20z;
+                    goutz[11] += hrr_0100x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * hrr_3100x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1100z = trr_20z - rjri[2] * trr_10z;
+                    fz = aij_cache[2] * hrr_1100z;
+                    fx -= 2 * hrr_1100x;
+                    double hrr_0100z = trr_10z - rjri[2] * wt;
+                    goutx[12] +=  fx  * 1 * hrr_0100z;
+                    gouty[12] += hrr_2100x *  fy  * hrr_0100z;
+                    goutz[12] += hrr_2100x * 1 *  fz ;
+                    fx = aij_cache[2] * hrr_2100x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1100z;
+                    fx -= 1 * hrr_0100x;
+                    fy -= 1 * 1;
+                    goutx[13] +=  fx  * trr_10y * hrr_0100z;
+                    gouty[13] += hrr_1100x *  fy  * hrr_0100z;
+                    goutz[13] += hrr_1100x * trr_10y *  fz ;
+                    fx = aij_cache[2] * hrr_2100x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_2100z = trr_30z - rjri[2] * trr_20z;
+                    fz = aij_cache[2] * hrr_2100z;
+                    fx -= 1 * hrr_0100x;
+                    fz -= 1 * hrr_0100z;
+                    goutx[14] +=  fx  * 1 * hrr_1100z;
+                    gouty[14] += hrr_1100x *  fy  * hrr_1100z;
+                    goutz[14] += hrr_1100x * 1 *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * hrr_1100z;
+                    fy -= 2 * trr_10y;
+                    goutx[15] +=  fx  * trr_20y * hrr_0100z;
+                    gouty[15] += hrr_0100x *  fy  * hrr_0100z;
+                    goutz[15] += hrr_0100x * trr_20y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_2100z;
+                    fy -= 1 * 1;
+                    fz -= 1 * hrr_0100z;
+                    goutx[16] +=  fx  * trr_10y * hrr_1100z;
+                    gouty[16] += hrr_0100x *  fy  * hrr_1100z;
+                    goutz[16] += hrr_0100x * trr_10y *  fz ;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
+                    double hrr_3100z = trr_40z - rjri[2] * trr_30z;
+                    fz = aij_cache[2] * hrr_3100z;
+                    fz -= 2 * hrr_1100z;
+                    goutx[17] +=  fx  * 1 * hrr_2100z;
+                    gouty[17] += hrr_0100x *  fy  * hrr_2100z;
+                    goutz[17] += hrr_0100x * 1 *  fz ;
                 }
             }
         }
@@ -32772,8 +33018,6 @@ while (1) {
             double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
             double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
-                switch (gout_id) {
-                case 0: {
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 double vxij_00 = goutx[0]*dm_lk_00;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+0), vxij_00);
@@ -32781,933 +33025,888 @@ while (1) {
                 atomicAdd(vj_y+(i0+0)*nao+(j0+0), vyij_00);
                 double vzij_00 = goutz[0]*dm_lk_00;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+0), vzij_00);
-                double vxij_02 = goutx[3]*dm_lk_00;
+                double vxij_01 = goutx[6]*dm_lk_00;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+1), vxij_01);
+                double vyij_01 = gouty[6]*dm_lk_00;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+1), vyij_01);
+                double vzij_01 = goutz[6]*dm_lk_00;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+1), vzij_01);
+                double vxij_02 = goutx[12]*dm_lk_00;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+2), vxij_02);
-                double vyij_02 = gouty[3]*dm_lk_00;
+                double vyij_02 = gouty[12]*dm_lk_00;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+2), vyij_02);
-                double vzij_02 = goutz[3]*dm_lk_00;
+                double vzij_02 = goutz[12]*dm_lk_00;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+2), vzij_02);
+                double vxij_10 = goutx[1]*dm_lk_00;
+                atomicAdd(vj_x+(i0+1)*nao+(j0+0), vxij_10);
+                double vyij_10 = gouty[1]*dm_lk_00;
+                atomicAdd(vj_y+(i0+1)*nao+(j0+0), vyij_10);
+                double vzij_10 = goutz[1]*dm_lk_00;
+                atomicAdd(vj_z+(i0+1)*nao+(j0+0), vzij_10);
+                double vxij_11 = goutx[7]*dm_lk_00;
+                atomicAdd(vj_x+(i0+1)*nao+(j0+1), vxij_11);
+                double vyij_11 = gouty[7]*dm_lk_00;
+                atomicAdd(vj_y+(i0+1)*nao+(j0+1), vyij_11);
+                double vzij_11 = goutz[7]*dm_lk_00;
+                atomicAdd(vj_z+(i0+1)*nao+(j0+1), vzij_11);
+                double vxij_12 = goutx[13]*dm_lk_00;
+                atomicAdd(vj_x+(i0+1)*nao+(j0+2), vxij_12);
+                double vyij_12 = gouty[13]*dm_lk_00;
+                atomicAdd(vj_y+(i0+1)*nao+(j0+2), vyij_12);
+                double vzij_12 = goutz[13]*dm_lk_00;
+                atomicAdd(vj_z+(i0+1)*nao+(j0+2), vzij_12);
+                double vxij_20 = goutx[2]*dm_lk_00;
+                atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
+                double vyij_20 = gouty[2]*dm_lk_00;
+                atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
+                double vzij_20 = goutz[2]*dm_lk_00;
+                atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
+                double vxij_21 = goutx[8]*dm_lk_00;
+                atomicAdd(vj_x+(i0+2)*nao+(j0+1), vxij_21);
+                double vyij_21 = gouty[8]*dm_lk_00;
+                atomicAdd(vj_y+(i0+2)*nao+(j0+1), vyij_21);
+                double vzij_21 = goutz[8]*dm_lk_00;
+                atomicAdd(vj_z+(i0+2)*nao+(j0+1), vzij_21);
+                double vxij_22 = goutx[14]*dm_lk_00;
+                atomicAdd(vj_x+(i0+2)*nao+(j0+2), vxij_22);
+                double vyij_22 = gouty[14]*dm_lk_00;
+                atomicAdd(vj_y+(i0+2)*nao+(j0+2), vyij_22);
+                double vzij_22 = goutz[14]*dm_lk_00;
+                atomicAdd(vj_z+(i0+2)*nao+(j0+2), vzij_22);
+                double vxij_30 = goutx[3]*dm_lk_00;
+                atomicAdd(vj_x+(i0+3)*nao+(j0+0), vxij_30);
+                double vyij_30 = gouty[3]*dm_lk_00;
+                atomicAdd(vj_y+(i0+3)*nao+(j0+0), vyij_30);
+                double vzij_30 = goutz[3]*dm_lk_00;
+                atomicAdd(vj_z+(i0+3)*nao+(j0+0), vzij_30);
+                double vxij_31 = goutx[9]*dm_lk_00;
+                atomicAdd(vj_x+(i0+3)*nao+(j0+1), vxij_31);
+                double vyij_31 = gouty[9]*dm_lk_00;
+                atomicAdd(vj_y+(i0+3)*nao+(j0+1), vyij_31);
+                double vzij_31 = goutz[9]*dm_lk_00;
+                atomicAdd(vj_z+(i0+3)*nao+(j0+1), vzij_31);
+                double vxij_32 = goutx[15]*dm_lk_00;
+                atomicAdd(vj_x+(i0+3)*nao+(j0+2), vxij_32);
+                double vyij_32 = gouty[15]*dm_lk_00;
+                atomicAdd(vj_y+(i0+3)*nao+(j0+2), vyij_32);
+                double vzij_32 = goutz[15]*dm_lk_00;
+                atomicAdd(vj_z+(i0+3)*nao+(j0+2), vzij_32);
+                double vxij_40 = goutx[4]*dm_lk_00;
+                atomicAdd(vj_x+(i0+4)*nao+(j0+0), vxij_40);
+                double vyij_40 = gouty[4]*dm_lk_00;
+                atomicAdd(vj_y+(i0+4)*nao+(j0+0), vyij_40);
+                double vzij_40 = goutz[4]*dm_lk_00;
+                atomicAdd(vj_z+(i0+4)*nao+(j0+0), vzij_40);
+                double vxij_41 = goutx[10]*dm_lk_00;
+                atomicAdd(vj_x+(i0+4)*nao+(j0+1), vxij_41);
+                double vyij_41 = gouty[10]*dm_lk_00;
+                atomicAdd(vj_y+(i0+4)*nao+(j0+1), vyij_41);
+                double vzij_41 = goutz[10]*dm_lk_00;
+                atomicAdd(vj_z+(i0+4)*nao+(j0+1), vzij_41);
+                double vxij_42 = goutx[16]*dm_lk_00;
+                atomicAdd(vj_x+(i0+4)*nao+(j0+2), vxij_42);
+                double vyij_42 = gouty[16]*dm_lk_00;
+                atomicAdd(vj_y+(i0+4)*nao+(j0+2), vyij_42);
+                double vzij_42 = goutz[16]*dm_lk_00;
+                atomicAdd(vj_z+(i0+4)*nao+(j0+2), vzij_42);
+                double vxij_50 = goutx[5]*dm_lk_00;
+                atomicAdd(vj_x+(i0+5)*nao+(j0+0), vxij_50);
+                double vyij_50 = gouty[5]*dm_lk_00;
+                atomicAdd(vj_y+(i0+5)*nao+(j0+0), vyij_50);
+                double vzij_50 = goutz[5]*dm_lk_00;
+                atomicAdd(vj_z+(i0+5)*nao+(j0+0), vzij_50);
+                double vxij_51 = goutx[11]*dm_lk_00;
+                atomicAdd(vj_x+(i0+5)*nao+(j0+1), vxij_51);
+                double vyij_51 = gouty[11]*dm_lk_00;
+                atomicAdd(vj_y+(i0+5)*nao+(j0+1), vyij_51);
+                double vzij_51 = goutz[11]*dm_lk_00;
+                atomicAdd(vj_z+(i0+5)*nao+(j0+1), vzij_51);
+                double vxij_52 = goutx[17]*dm_lk_00;
+                atomicAdd(vj_x+(i0+5)*nao+(j0+2), vxij_52);
+                double vyij_52 = gouty[17]*dm_lk_00;
+                atomicAdd(vj_y+(i0+5)*nao+(j0+2), vyij_52);
+                double vzij_52 = goutz[17]*dm_lk_00;
+                atomicAdd(vj_z+(i0+5)*nao+(j0+2), vzij_52);
+                double vxkl_00 = 0;
+                double vykl_00 = 0;
+                double vzkl_00 = 0;
+                double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
+                vxkl_00 += goutx[0] * dm_ji_00;
+                vykl_00 += gouty[0] * dm_ji_00;
+                vzkl_00 += goutz[0] * dm_ji_00;
+                double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
+                vxkl_00 += goutx[1] * dm_ji_01;
+                vykl_00 += gouty[1] * dm_ji_01;
+                vzkl_00 += goutz[1] * dm_ji_01;
+                double dm_ji_02 = dm[(j0+0)*nao+(i0+2)];
+                vxkl_00 += goutx[2] * dm_ji_02;
+                vykl_00 += gouty[2] * dm_ji_02;
+                vzkl_00 += goutz[2] * dm_ji_02;
+                double dm_ji_03 = dm[(j0+0)*nao+(i0+3)];
+                vxkl_00 += goutx[3] * dm_ji_03;
+                vykl_00 += gouty[3] * dm_ji_03;
+                vzkl_00 += goutz[3] * dm_ji_03;
+                double dm_ji_04 = dm[(j0+0)*nao+(i0+4)];
+                vxkl_00 += goutx[4] * dm_ji_04;
+                vykl_00 += gouty[4] * dm_ji_04;
+                vzkl_00 += goutz[4] * dm_ji_04;
+                double dm_ji_05 = dm[(j0+0)*nao+(i0+5)];
+                vxkl_00 += goutx[5] * dm_ji_05;
+                vykl_00 += gouty[5] * dm_ji_05;
+                vzkl_00 += goutz[5] * dm_ji_05;
+                double dm_ji_10 = dm[(j0+1)*nao+(i0+0)];
+                vxkl_00 += goutx[6] * dm_ji_10;
+                vykl_00 += gouty[6] * dm_ji_10;
+                vzkl_00 += goutz[6] * dm_ji_10;
+                double dm_ji_11 = dm[(j0+1)*nao+(i0+1)];
+                vxkl_00 += goutx[7] * dm_ji_11;
+                vykl_00 += gouty[7] * dm_ji_11;
+                vzkl_00 += goutz[7] * dm_ji_11;
+                double dm_ji_12 = dm[(j0+1)*nao+(i0+2)];
+                vxkl_00 += goutx[8] * dm_ji_12;
+                vykl_00 += gouty[8] * dm_ji_12;
+                vzkl_00 += goutz[8] * dm_ji_12;
+                double dm_ji_13 = dm[(j0+1)*nao+(i0+3)];
+                vxkl_00 += goutx[9] * dm_ji_13;
+                vykl_00 += gouty[9] * dm_ji_13;
+                vzkl_00 += goutz[9] * dm_ji_13;
+                double dm_ji_14 = dm[(j0+1)*nao+(i0+4)];
+                vxkl_00 += goutx[10] * dm_ji_14;
+                vykl_00 += gouty[10] * dm_ji_14;
+                vzkl_00 += goutz[10] * dm_ji_14;
+                double dm_ji_15 = dm[(j0+1)*nao+(i0+5)];
+                vxkl_00 += goutx[11] * dm_ji_15;
+                vykl_00 += gouty[11] * dm_ji_15;
+                vzkl_00 += goutz[11] * dm_ji_15;
+                double dm_ji_20 = dm[(j0+2)*nao+(i0+0)];
+                vxkl_00 += goutx[12] * dm_ji_20;
+                vykl_00 += gouty[12] * dm_ji_20;
+                vzkl_00 += goutz[12] * dm_ji_20;
+                double dm_ji_21 = dm[(j0+2)*nao+(i0+1)];
+                vxkl_00 += goutx[13] * dm_ji_21;
+                vykl_00 += gouty[13] * dm_ji_21;
+                vzkl_00 += goutz[13] * dm_ji_21;
+                double dm_ji_22 = dm[(j0+2)*nao+(i0+2)];
+                vxkl_00 += goutx[14] * dm_ji_22;
+                vykl_00 += gouty[14] * dm_ji_22;
+                vzkl_00 += goutz[14] * dm_ji_22;
+                double dm_ji_23 = dm[(j0+2)*nao+(i0+3)];
+                vxkl_00 += goutx[15] * dm_ji_23;
+                vykl_00 += gouty[15] * dm_ji_23;
+                vzkl_00 += goutz[15] * dm_ji_23;
+                double dm_ji_24 = dm[(j0+2)*nao+(i0+4)];
+                vxkl_00 += goutx[16] * dm_ji_24;
+                vykl_00 += gouty[16] * dm_ji_24;
+                vzkl_00 += goutz[16] * dm_ji_24;
+                double dm_ji_25 = dm[(j0+2)*nao+(i0+5)];
+                vxkl_00 += goutx[17] * dm_ji_25;
+                vykl_00 += gouty[17] * dm_ji_25;
+                vzkl_00 += goutz[17] * dm_ji_25;
+                atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
+                atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
+                atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
+            }
+            if (do_k) {
+                double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
+                double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
+                double dm_jk_20 = dm[(j0+2)*nao+(k0+0)];
+                double vxil_00 = goutx[0]*dm_jk_00 + goutx[6]*dm_jk_10 + goutx[12]*dm_jk_20;
+                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
+                double vyil_00 = gouty[0]*dm_jk_00 + gouty[6]*dm_jk_10 + gouty[12]*dm_jk_20;
+                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
+                double vzil_00 = goutz[0]*dm_jk_00 + goutz[6]*dm_jk_10 + goutz[12]*dm_jk_20;
+                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
+                double vxil_10 = goutx[1]*dm_jk_00 + goutx[7]*dm_jk_10 + goutx[13]*dm_jk_20;
+                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
+                double vyil_10 = gouty[1]*dm_jk_00 + gouty[7]*dm_jk_10 + gouty[13]*dm_jk_20;
+                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
+                double vzil_10 = goutz[1]*dm_jk_00 + goutz[7]*dm_jk_10 + goutz[13]*dm_jk_20;
+                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
+                double vxil_20 = goutx[2]*dm_jk_00 + goutx[8]*dm_jk_10 + goutx[14]*dm_jk_20;
+                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
+                double vyil_20 = gouty[2]*dm_jk_00 + gouty[8]*dm_jk_10 + gouty[14]*dm_jk_20;
+                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
+                double vzil_20 = goutz[2]*dm_jk_00 + goutz[8]*dm_jk_10 + goutz[14]*dm_jk_20;
+                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
+                double vxil_30 = goutx[3]*dm_jk_00 + goutx[9]*dm_jk_10 + goutx[15]*dm_jk_20;
+                atomicAdd(vk_x+(i0+3)*nao+(l0+0), vxil_30);
+                double vyil_30 = gouty[3]*dm_jk_00 + gouty[9]*dm_jk_10 + gouty[15]*dm_jk_20;
+                atomicAdd(vk_y+(i0+3)*nao+(l0+0), vyil_30);
+                double vzil_30 = goutz[3]*dm_jk_00 + goutz[9]*dm_jk_10 + goutz[15]*dm_jk_20;
+                atomicAdd(vk_z+(i0+3)*nao+(l0+0), vzil_30);
+                double vxil_40 = goutx[4]*dm_jk_00 + goutx[10]*dm_jk_10 + goutx[16]*dm_jk_20;
+                atomicAdd(vk_x+(i0+4)*nao+(l0+0), vxil_40);
+                double vyil_40 = gouty[4]*dm_jk_00 + gouty[10]*dm_jk_10 + gouty[16]*dm_jk_20;
+                atomicAdd(vk_y+(i0+4)*nao+(l0+0), vyil_40);
+                double vzil_40 = goutz[4]*dm_jk_00 + goutz[10]*dm_jk_10 + goutz[16]*dm_jk_20;
+                atomicAdd(vk_z+(i0+4)*nao+(l0+0), vzil_40);
+                double vxil_50 = goutx[5]*dm_jk_00 + goutx[11]*dm_jk_10 + goutx[17]*dm_jk_20;
+                atomicAdd(vk_x+(i0+5)*nao+(l0+0), vxil_50);
+                double vyil_50 = gouty[5]*dm_jk_00 + gouty[11]*dm_jk_10 + gouty[17]*dm_jk_20;
+                atomicAdd(vk_y+(i0+5)*nao+(l0+0), vyil_50);
+                double vzil_50 = goutz[5]*dm_jk_00 + goutz[11]*dm_jk_10 + goutz[17]*dm_jk_20;
+                atomicAdd(vk_z+(i0+5)*nao+(l0+0), vzil_50);
+                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
+                double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
+                double dm_jl_20 = dm[(j0+2)*nao+(l0+0)];
+                double vxik_00 = goutx[0]*dm_jl_00 + goutx[6]*dm_jl_10 + goutx[12]*dm_jl_20;
+                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
+                double vyik_00 = gouty[0]*dm_jl_00 + gouty[6]*dm_jl_10 + gouty[12]*dm_jl_20;
+                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
+                double vzik_00 = goutz[0]*dm_jl_00 + goutz[6]*dm_jl_10 + goutz[12]*dm_jl_20;
+                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
+                double vxik_10 = goutx[1]*dm_jl_00 + goutx[7]*dm_jl_10 + goutx[13]*dm_jl_20;
+                atomicAdd(vk_x+(i0+1)*nao+(k0+0), vxik_10);
+                double vyik_10 = gouty[1]*dm_jl_00 + gouty[7]*dm_jl_10 + gouty[13]*dm_jl_20;
+                atomicAdd(vk_y+(i0+1)*nao+(k0+0), vyik_10);
+                double vzik_10 = goutz[1]*dm_jl_00 + goutz[7]*dm_jl_10 + goutz[13]*dm_jl_20;
+                atomicAdd(vk_z+(i0+1)*nao+(k0+0), vzik_10);
+                double vxik_20 = goutx[2]*dm_jl_00 + goutx[8]*dm_jl_10 + goutx[14]*dm_jl_20;
+                atomicAdd(vk_x+(i0+2)*nao+(k0+0), vxik_20);
+                double vyik_20 = gouty[2]*dm_jl_00 + gouty[8]*dm_jl_10 + gouty[14]*dm_jl_20;
+                atomicAdd(vk_y+(i0+2)*nao+(k0+0), vyik_20);
+                double vzik_20 = goutz[2]*dm_jl_00 + goutz[8]*dm_jl_10 + goutz[14]*dm_jl_20;
+                atomicAdd(vk_z+(i0+2)*nao+(k0+0), vzik_20);
+                double vxik_30 = goutx[3]*dm_jl_00 + goutx[9]*dm_jl_10 + goutx[15]*dm_jl_20;
+                atomicAdd(vk_x+(i0+3)*nao+(k0+0), vxik_30);
+                double vyik_30 = gouty[3]*dm_jl_00 + gouty[9]*dm_jl_10 + gouty[15]*dm_jl_20;
+                atomicAdd(vk_y+(i0+3)*nao+(k0+0), vyik_30);
+                double vzik_30 = goutz[3]*dm_jl_00 + goutz[9]*dm_jl_10 + goutz[15]*dm_jl_20;
+                atomicAdd(vk_z+(i0+3)*nao+(k0+0), vzik_30);
+                double vxik_40 = goutx[4]*dm_jl_00 + goutx[10]*dm_jl_10 + goutx[16]*dm_jl_20;
+                atomicAdd(vk_x+(i0+4)*nao+(k0+0), vxik_40);
+                double vyik_40 = gouty[4]*dm_jl_00 + gouty[10]*dm_jl_10 + gouty[16]*dm_jl_20;
+                atomicAdd(vk_y+(i0+4)*nao+(k0+0), vyik_40);
+                double vzik_40 = goutz[4]*dm_jl_00 + goutz[10]*dm_jl_10 + goutz[16]*dm_jl_20;
+                atomicAdd(vk_z+(i0+4)*nao+(k0+0), vzik_40);
+                double vxik_50 = goutx[5]*dm_jl_00 + goutx[11]*dm_jl_10 + goutx[17]*dm_jl_20;
+                atomicAdd(vk_x+(i0+5)*nao+(k0+0), vxik_50);
+                double vyik_50 = gouty[5]*dm_jl_00 + gouty[11]*dm_jl_10 + gouty[17]*dm_jl_20;
+                atomicAdd(vk_y+(i0+5)*nao+(k0+0), vyik_50);
+                double vzik_50 = goutz[5]*dm_jl_00 + goutz[11]*dm_jl_10 + goutz[17]*dm_jl_20;
+                atomicAdd(vk_z+(i0+5)*nao+(k0+0), vzik_50);
+                double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
+                double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
+                double dm_ik_20 = dm[(i0+2)*nao+(k0+0)];
+                double dm_ik_30 = dm[(i0+3)*nao+(k0+0)];
+                double dm_ik_40 = dm[(i0+4)*nao+(k0+0)];
+                double dm_ik_50 = dm[(i0+5)*nao+(k0+0)];
+                double vxjl_00 = goutx[0]*dm_ik_00 + goutx[1]*dm_ik_10 + goutx[2]*dm_ik_20 + goutx[3]*dm_ik_30 + goutx[4]*dm_ik_40 + goutx[5]*dm_ik_50;
+                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
+                double vyjl_00 = gouty[0]*dm_ik_00 + gouty[1]*dm_ik_10 + gouty[2]*dm_ik_20 + gouty[3]*dm_ik_30 + gouty[4]*dm_ik_40 + gouty[5]*dm_ik_50;
+                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
+                double vzjl_00 = goutz[0]*dm_ik_00 + goutz[1]*dm_ik_10 + goutz[2]*dm_ik_20 + goutz[3]*dm_ik_30 + goutz[4]*dm_ik_40 + goutz[5]*dm_ik_50;
+                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
+                double vxjl_10 = goutx[6]*dm_ik_00 + goutx[7]*dm_ik_10 + goutx[8]*dm_ik_20 + goutx[9]*dm_ik_30 + goutx[10]*dm_ik_40 + goutx[11]*dm_ik_50;
+                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
+                double vyjl_10 = gouty[6]*dm_ik_00 + gouty[7]*dm_ik_10 + gouty[8]*dm_ik_20 + gouty[9]*dm_ik_30 + gouty[10]*dm_ik_40 + gouty[11]*dm_ik_50;
+                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
+                double vzjl_10 = goutz[6]*dm_ik_00 + goutz[7]*dm_ik_10 + goutz[8]*dm_ik_20 + goutz[9]*dm_ik_30 + goutz[10]*dm_ik_40 + goutz[11]*dm_ik_50;
+                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
+                double vxjl_20 = goutx[12]*dm_ik_00 + goutx[13]*dm_ik_10 + goutx[14]*dm_ik_20 + goutx[15]*dm_ik_30 + goutx[16]*dm_ik_40 + goutx[17]*dm_ik_50;
+                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
+                double vyjl_20 = gouty[12]*dm_ik_00 + gouty[13]*dm_ik_10 + gouty[14]*dm_ik_20 + gouty[15]*dm_ik_30 + gouty[16]*dm_ik_40 + gouty[17]*dm_ik_50;
+                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
+                double vzjl_20 = goutz[12]*dm_ik_00 + goutz[13]*dm_ik_10 + goutz[14]*dm_ik_20 + goutz[15]*dm_ik_30 + goutz[16]*dm_ik_40 + goutz[17]*dm_ik_50;
+                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
+                double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
+                double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
+                double dm_il_20 = dm[(i0+2)*nao+(l0+0)];
+                double dm_il_30 = dm[(i0+3)*nao+(l0+0)];
+                double dm_il_40 = dm[(i0+4)*nao+(l0+0)];
+                double dm_il_50 = dm[(i0+5)*nao+(l0+0)];
+                double vxjk_00 = goutx[0]*dm_il_00 + goutx[1]*dm_il_10 + goutx[2]*dm_il_20 + goutx[3]*dm_il_30 + goutx[4]*dm_il_40 + goutx[5]*dm_il_50;
+                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
+                double vyjk_00 = gouty[0]*dm_il_00 + gouty[1]*dm_il_10 + gouty[2]*dm_il_20 + gouty[3]*dm_il_30 + gouty[4]*dm_il_40 + gouty[5]*dm_il_50;
+                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
+                double vzjk_00 = goutz[0]*dm_il_00 + goutz[1]*dm_il_10 + goutz[2]*dm_il_20 + goutz[3]*dm_il_30 + goutz[4]*dm_il_40 + goutz[5]*dm_il_50;
+                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
+                double vxjk_10 = goutx[6]*dm_il_00 + goutx[7]*dm_il_10 + goutx[8]*dm_il_20 + goutx[9]*dm_il_30 + goutx[10]*dm_il_40 + goutx[11]*dm_il_50;
+                atomicAdd(vk_x+(j0+1)*nao+(k0+0), vxjk_10);
+                double vyjk_10 = gouty[6]*dm_il_00 + gouty[7]*dm_il_10 + gouty[8]*dm_il_20 + gouty[9]*dm_il_30 + gouty[10]*dm_il_40 + gouty[11]*dm_il_50;
+                atomicAdd(vk_y+(j0+1)*nao+(k0+0), vyjk_10);
+                double vzjk_10 = goutz[6]*dm_il_00 + goutz[7]*dm_il_10 + goutz[8]*dm_il_20 + goutz[9]*dm_il_30 + goutz[10]*dm_il_40 + goutz[11]*dm_il_50;
+                atomicAdd(vk_z+(j0+1)*nao+(k0+0), vzjk_10);
+                double vxjk_20 = goutx[12]*dm_il_00 + goutx[13]*dm_il_10 + goutx[14]*dm_il_20 + goutx[15]*dm_il_30 + goutx[16]*dm_il_40 + goutx[17]*dm_il_50;
+                atomicAdd(vk_x+(j0+2)*nao+(k0+0), vxjk_20);
+                double vyjk_20 = gouty[12]*dm_il_00 + gouty[13]*dm_il_10 + gouty[14]*dm_il_20 + gouty[15]*dm_il_30 + gouty[16]*dm_il_40 + gouty[17]*dm_il_50;
+                atomicAdd(vk_y+(j0+2)*nao+(k0+0), vyjk_20);
+                double vzjk_20 = goutz[12]*dm_il_00 + goutz[13]*dm_il_10 + goutz[14]*dm_il_20 + goutz[15]*dm_il_30 + goutz[16]*dm_il_40 + goutz[17]*dm_il_50;
+                atomicAdd(vk_z+(j0+2)*nao+(k0+0), vzjk_20);
+            }
+        }
+        #pragma unroll
+        for (int n = 0; n < 18; ++n) {
+            goutx[n] = 0;
+            gouty[n] = 0;
+            goutz[n] = 0;
+        }
+        for (int klp = 0; klp < kprim*lprim; ++klp) {
+            int kp = klp / lprim;
+            int lp = klp % lprim;
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
+            double akl = ak + al;
+            double al_akl = al / akl;
+            double theta_kl = ak * al_akl;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh == lsh) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+            double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
+            for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
+                double xij = ri[0] + xpa;
+                double yij = ri[1] + ypa;
+                double zij = ri[2] + zpa;
+                double xqc = xlxk * al_akl;
+                double yqc = ylyk * al_akl;
+                double zqc = zlzk * al_akl;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
+                double xpq = xij - xkl;
+                double ypq = yij - ykl;
+                double zpq = zij - zkl;
+                double theta = aij * akl / (aij + akl);
+                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                if (task_id >= ntasks) {
+                    continue;
+                }
+                for (int irys = 0; irys < nroots; ++irys) {
+                    double wt = rw[(2*irys+1)*nsq_per_block] * fac;
+                    double rt = rw[ 2*irys   *nsq_per_block];
+                    double aij = aij_cache[0];
+                    double rt_aa = rt / (aij + akl);
+                    double fx, fy, fz;
+                    double rt_aij = rt_aa * akl;
+                    double b10 = .5/aij * (1 - rt_aij);
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
+                    double trr_10x = c0x * 1;
+                    double trr_20x = c0x * trr_10x + 1*b10 * 1;
+                    double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
+                    fx = aij_cache[2] * trr_30x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
+                    double trr_10y = c0y * 1;
+                    double trr_20y = c0y * trr_10y + 1*b10 * 1;
+                    double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
+                    double hrr_2100y = trr_30y - rjri[1] * trr_20y;
+                    double hrr_1100y = trr_20y - rjri[1] * trr_10y;
+                    double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
+                    fy = aij_cache[2] * hrr_1200y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
+                    double trr_10z = c0z * wt;
+                    fz = aij_cache[2] * trr_10z;
+                    fx -= 2 * trr_10x;
+                    double hrr_0100y = trr_10y - rjri[1] * 1;
+                    double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
+                    goutx[0] +=  fx  * hrr_0200y * wt;
+                    gouty[0] += trr_20x *  fy  * wt;
+                    goutz[0] += trr_20x * hrr_0200y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
+                    double hrr_3100y = trr_40y - rjri[1] * trr_30y;
+                    double hrr_2200y = hrr_3100y - rjri[1] * hrr_2100y;
+                    fy = aij_cache[2] * hrr_2200y;
+                    fz = aij_cache[2] * trr_10z;
+                    fx -= 1 * 1;
+                    fy -= 1 * hrr_0200y;
+                    goutx[1] +=  fx  * hrr_1200y * wt;
+                    gouty[1] += trr_10x *  fy  * wt;
+                    goutz[1] += trr_10x * hrr_1200y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * hrr_1200y;
+                    double trr_20z = c0z * trr_10z + 1*b10 * wt;
+                    fz = aij_cache[2] * trr_20z;
+                    fx -= 1 * 1;
+                    fz -= 1 * wt;
+                    goutx[2] +=  fx  * hrr_0200y * trr_10z;
+                    gouty[2] += trr_10x *  fy  * trr_10z;
+                    goutz[2] += trr_10x * hrr_0200y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    double trr_50y = c0y * trr_40y + 4*b10 * trr_30y;
+                    double hrr_4100y = trr_50y - rjri[1] * trr_40y;
+                    double hrr_3200y = hrr_4100y - rjri[1] * hrr_3100y;
+                    fy = aij_cache[2] * hrr_3200y;
+                    fz = aij_cache[2] * trr_10z;
+                    fy -= 2 * hrr_1200y;
+                    goutx[3] +=  fx  * hrr_2200y * wt;
+                    gouty[3] += 1 *  fy  * wt;
+                    goutz[3] += 1 * hrr_2200y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_2200y;
+                    fz = aij_cache[2] * trr_20z;
+                    fy -= 1 * hrr_0200y;
+                    fz -= 1 * wt;
+                    goutx[4] +=  fx  * hrr_1200y * trr_10z;
+                    gouty[4] += 1 *  fy  * trr_10z;
+                    goutz[4] += 1 * hrr_1200y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1200y;
+                    double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
+                    fz = aij_cache[2] * trr_30z;
+                    fz -= 2 * trr_10z;
+                    goutx[5] +=  fx  * hrr_0200y * trr_20z;
+                    gouty[5] += 1 *  fy  * trr_20z;
+                    goutz[5] += 1 * hrr_0200y *  fz ;
+                    fx = aij_cache[2] * trr_30x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    double hrr_1100z = trr_20z - rjri[2] * trr_10z;
+                    fz = aij_cache[2] * hrr_1100z;
+                    fx -= 2 * trr_10x;
+                    double hrr_0100z = trr_10z - rjri[2] * wt;
+                    goutx[6] +=  fx  * hrr_0100y * hrr_0100z;
+                    gouty[6] += trr_20x *  fy  * hrr_0100z;
+                    goutz[6] += trr_20x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * hrr_1100z;
+                    fx -= 1 * 1;
+                    fy -= 1 * hrr_0100y;
+                    goutx[7] +=  fx  * hrr_1100y * hrr_0100z;
+                    gouty[7] += trr_10x *  fy  * hrr_0100z;
+                    goutz[7] += trr_10x * hrr_1100y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    double hrr_2100z = trr_30z - rjri[2] * trr_20z;
+                    fz = aij_cache[2] * hrr_2100z;
+                    fx -= 1 * 1;
+                    fz -= 1 * hrr_0100z;
+                    goutx[8] +=  fx  * hrr_0100y * hrr_1100z;
+                    gouty[8] += trr_10x *  fy  * hrr_1100z;
+                    goutz[8] += trr_10x * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_3100y;
+                    fz = aij_cache[2] * hrr_1100z;
+                    fy -= 2 * hrr_1100y;
+                    goutx[9] +=  fx  * hrr_2100y * hrr_0100z;
+                    gouty[9] += 1 *  fy  * hrr_0100z;
+                    goutz[9] += 1 * hrr_2100y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * hrr_2100z;
+                    fy -= 1 * hrr_0100y;
+                    fz -= 1 * hrr_0100z;
+                    goutx[10] +=  fx  * hrr_1100y * hrr_1100z;
+                    gouty[10] += 1 *  fy  * hrr_1100z;
+                    goutz[10] += 1 * hrr_1100y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
+                    double hrr_3100z = trr_40z - rjri[2] * trr_30z;
+                    fz = aij_cache[2] * hrr_3100z;
+                    fz -= 2 * hrr_1100z;
+                    goutx[11] +=  fx  * hrr_0100y * hrr_2100z;
+                    gouty[11] += 1 *  fy  * hrr_2100z;
+                    goutz[11] += 1 * hrr_0100y *  fz ;
+                    fx = aij_cache[2] * trr_30x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1200z;
+                    fx -= 2 * trr_10x;
+                    double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
+                    goutx[12] +=  fx  * 1 * hrr_0200z;
+                    gouty[12] += trr_20x *  fy  * hrr_0200z;
+                    goutz[12] += trr_20x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1200z;
+                    fx -= 1 * 1;
+                    fy -= 1 * 1;
+                    goutx[13] +=  fx  * trr_10y * hrr_0200z;
+                    gouty[13] += trr_10x *  fy  * hrr_0200z;
+                    goutz[13] += trr_10x * trr_10y *  fz ;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_2200z = hrr_3100z - rjri[2] * hrr_2100z;
+                    fz = aij_cache[2] * hrr_2200z;
+                    fx -= 1 * 1;
+                    fz -= 1 * hrr_0200z;
+                    goutx[14] +=  fx  * 1 * hrr_1200z;
+                    gouty[14] += trr_10x *  fy  * hrr_1200z;
+                    goutz[14] += trr_10x * 1 *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * hrr_1200z;
+                    fy -= 2 * trr_10y;
+                    goutx[15] +=  fx  * trr_20y * hrr_0200z;
+                    gouty[15] += 1 *  fy  * hrr_0200z;
+                    goutz[15] += 1 * trr_20y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_2200z;
+                    fy -= 1 * 1;
+                    fz -= 1 * hrr_0200z;
+                    goutx[16] +=  fx  * trr_10y * hrr_1200z;
+                    gouty[16] += 1 *  fy  * hrr_1200z;
+                    goutz[16] += 1 * trr_10y *  fz ;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
+                    double trr_50z = c0z * trr_40z + 4*b10 * trr_30z;
+                    double hrr_4100z = trr_50z - rjri[2] * trr_40z;
+                    double hrr_3200z = hrr_4100z - rjri[2] * hrr_3100z;
+                    fz = aij_cache[2] * hrr_3200z;
+                    fz -= 2 * hrr_1200z;
+                    goutx[17] +=  fx  * 1 * hrr_2200z;
+                    gouty[17] += 1 *  fy  * hrr_2200z;
+                    goutz[17] += 1 * 1 *  fz ;
+                }
+            }
+        }
+        if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
+            int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
+            double *dm = jk.dm;
+            int do_j = jk.vj != NULL;
+            int do_k = jk.vk != NULL;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
+            if (do_j) {
+                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
+                double vxij_03 = goutx[0]*dm_lk_00;
+                atomicAdd(vj_x+(i0+0)*nao+(j0+3), vxij_03);
+                double vyij_03 = gouty[0]*dm_lk_00;
+                atomicAdd(vj_y+(i0+0)*nao+(j0+3), vyij_03);
+                double vzij_03 = goutz[0]*dm_lk_00;
+                atomicAdd(vj_z+(i0+0)*nao+(j0+3), vzij_03);
                 double vxij_04 = goutx[6]*dm_lk_00;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+4), vxij_04);
                 double vyij_04 = gouty[6]*dm_lk_00;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+4), vyij_04);
                 double vzij_04 = goutz[6]*dm_lk_00;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+4), vzij_04);
-                double vxij_21 = goutx[2]*dm_lk_00;
-                atomicAdd(vj_x+(i0+2)*nao+(j0+1), vxij_21);
-                double vyij_21 = gouty[2]*dm_lk_00;
-                atomicAdd(vj_y+(i0+2)*nao+(j0+1), vyij_21);
-                double vzij_21 = goutz[2]*dm_lk_00;
-                atomicAdd(vj_z+(i0+2)*nao+(j0+1), vzij_21);
-                double vxij_23 = goutx[5]*dm_lk_00;
-                atomicAdd(vj_x+(i0+2)*nao+(j0+3), vxij_23);
-                double vyij_23 = gouty[5]*dm_lk_00;
-                atomicAdd(vj_y+(i0+2)*nao+(j0+3), vyij_23);
-                double vzij_23 = goutz[5]*dm_lk_00;
-                atomicAdd(vj_z+(i0+2)*nao+(j0+3), vzij_23);
-                double vxij_25 = goutx[8]*dm_lk_00;
-                atomicAdd(vj_x+(i0+2)*nao+(j0+5), vxij_25);
-                double vyij_25 = gouty[8]*dm_lk_00;
-                atomicAdd(vj_y+(i0+2)*nao+(j0+5), vyij_25);
-                double vzij_25 = goutz[8]*dm_lk_00;
-                atomicAdd(vj_z+(i0+2)*nao+(j0+5), vzij_25);
-                double vxij_40 = goutx[1]*dm_lk_00;
-                atomicAdd(vj_x+(i0+4)*nao+(j0+0), vxij_40);
-                double vyij_40 = gouty[1]*dm_lk_00;
-                atomicAdd(vj_y+(i0+4)*nao+(j0+0), vyij_40);
-                double vzij_40 = goutz[1]*dm_lk_00;
-                atomicAdd(vj_z+(i0+4)*nao+(j0+0), vzij_40);
-                double vxij_42 = goutx[4]*dm_lk_00;
-                atomicAdd(vj_x+(i0+4)*nao+(j0+2), vxij_42);
-                double vyij_42 = gouty[4]*dm_lk_00;
-                atomicAdd(vj_y+(i0+4)*nao+(j0+2), vyij_42);
-                double vzij_42 = goutz[4]*dm_lk_00;
-                atomicAdd(vj_z+(i0+4)*nao+(j0+2), vzij_42);
-                double vxij_44 = goutx[7]*dm_lk_00;
-                atomicAdd(vj_x+(i0+4)*nao+(j0+4), vxij_44);
-                double vyij_44 = gouty[7]*dm_lk_00;
-                atomicAdd(vj_y+(i0+4)*nao+(j0+4), vyij_44);
-                double vzij_44 = goutz[7]*dm_lk_00;
-                atomicAdd(vj_z+(i0+4)*nao+(j0+4), vzij_44);
-                break; }
-                case 1: {
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double vxij_10 = goutx[0]*dm_lk_00;
-                atomicAdd(vj_x+(i0+1)*nao+(j0+0), vxij_10);
-                double vyij_10 = gouty[0]*dm_lk_00;
-                atomicAdd(vj_y+(i0+1)*nao+(j0+0), vyij_10);
-                double vzij_10 = goutz[0]*dm_lk_00;
-                atomicAdd(vj_z+(i0+1)*nao+(j0+0), vzij_10);
-                double vxij_12 = goutx[3]*dm_lk_00;
-                atomicAdd(vj_x+(i0+1)*nao+(j0+2), vxij_12);
-                double vyij_12 = gouty[3]*dm_lk_00;
-                atomicAdd(vj_y+(i0+1)*nao+(j0+2), vyij_12);
-                double vzij_12 = goutz[3]*dm_lk_00;
-                atomicAdd(vj_z+(i0+1)*nao+(j0+2), vzij_12);
-                double vxij_14 = goutx[6]*dm_lk_00;
-                atomicAdd(vj_x+(i0+1)*nao+(j0+4), vxij_14);
-                double vyij_14 = gouty[6]*dm_lk_00;
-                atomicAdd(vj_y+(i0+1)*nao+(j0+4), vyij_14);
-                double vzij_14 = goutz[6]*dm_lk_00;
-                atomicAdd(vj_z+(i0+1)*nao+(j0+4), vzij_14);
-                double vxij_31 = goutx[2]*dm_lk_00;
-                atomicAdd(vj_x+(i0+3)*nao+(j0+1), vxij_31);
-                double vyij_31 = gouty[2]*dm_lk_00;
-                atomicAdd(vj_y+(i0+3)*nao+(j0+1), vyij_31);
-                double vzij_31 = goutz[2]*dm_lk_00;
-                atomicAdd(vj_z+(i0+3)*nao+(j0+1), vzij_31);
-                double vxij_33 = goutx[5]*dm_lk_00;
-                atomicAdd(vj_x+(i0+3)*nao+(j0+3), vxij_33);
-                double vyij_33 = gouty[5]*dm_lk_00;
-                atomicAdd(vj_y+(i0+3)*nao+(j0+3), vyij_33);
-                double vzij_33 = goutz[5]*dm_lk_00;
-                atomicAdd(vj_z+(i0+3)*nao+(j0+3), vzij_33);
-                double vxij_35 = goutx[8]*dm_lk_00;
-                atomicAdd(vj_x+(i0+3)*nao+(j0+5), vxij_35);
-                double vyij_35 = gouty[8]*dm_lk_00;
-                atomicAdd(vj_y+(i0+3)*nao+(j0+5), vyij_35);
-                double vzij_35 = goutz[8]*dm_lk_00;
-                atomicAdd(vj_z+(i0+3)*nao+(j0+5), vzij_35);
-                double vxij_50 = goutx[1]*dm_lk_00;
-                atomicAdd(vj_x+(i0+5)*nao+(j0+0), vxij_50);
-                double vyij_50 = gouty[1]*dm_lk_00;
-                atomicAdd(vj_y+(i0+5)*nao+(j0+0), vyij_50);
-                double vzij_50 = goutz[1]*dm_lk_00;
-                atomicAdd(vj_z+(i0+5)*nao+(j0+0), vzij_50);
-                double vxij_52 = goutx[4]*dm_lk_00;
-                atomicAdd(vj_x+(i0+5)*nao+(j0+2), vxij_52);
-                double vyij_52 = gouty[4]*dm_lk_00;
-                atomicAdd(vj_y+(i0+5)*nao+(j0+2), vyij_52);
-                double vzij_52 = goutz[4]*dm_lk_00;
-                atomicAdd(vj_z+(i0+5)*nao+(j0+2), vzij_52);
-                double vxij_54 = goutx[7]*dm_lk_00;
-                atomicAdd(vj_x+(i0+5)*nao+(j0+4), vxij_54);
-                double vyij_54 = gouty[7]*dm_lk_00;
-                atomicAdd(vj_y+(i0+5)*nao+(j0+4), vyij_54);
-                double vzij_54 = goutz[7]*dm_lk_00;
-                atomicAdd(vj_z+(i0+5)*nao+(j0+4), vzij_54);
-                break; }
-                case 2: {
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double vxij_01 = goutx[1]*dm_lk_00;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+1), vxij_01);
-                double vyij_01 = gouty[1]*dm_lk_00;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+1), vyij_01);
-                double vzij_01 = goutz[1]*dm_lk_00;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+1), vzij_01);
-                double vxij_03 = goutx[4]*dm_lk_00;
-                atomicAdd(vj_x+(i0+0)*nao+(j0+3), vxij_03);
-                double vyij_03 = gouty[4]*dm_lk_00;
-                atomicAdd(vj_y+(i0+0)*nao+(j0+3), vyij_03);
-                double vzij_03 = goutz[4]*dm_lk_00;
-                atomicAdd(vj_z+(i0+0)*nao+(j0+3), vzij_03);
-                double vxij_05 = goutx[7]*dm_lk_00;
+                double vxij_05 = goutx[12]*dm_lk_00;
                 atomicAdd(vj_x+(i0+0)*nao+(j0+5), vxij_05);
-                double vyij_05 = gouty[7]*dm_lk_00;
+                double vyij_05 = gouty[12]*dm_lk_00;
                 atomicAdd(vj_y+(i0+0)*nao+(j0+5), vyij_05);
-                double vzij_05 = goutz[7]*dm_lk_00;
+                double vzij_05 = goutz[12]*dm_lk_00;
                 atomicAdd(vj_z+(i0+0)*nao+(j0+5), vzij_05);
-                double vxij_20 = goutx[0]*dm_lk_00;
-                atomicAdd(vj_x+(i0+2)*nao+(j0+0), vxij_20);
-                double vyij_20 = gouty[0]*dm_lk_00;
-                atomicAdd(vj_y+(i0+2)*nao+(j0+0), vyij_20);
-                double vzij_20 = goutz[0]*dm_lk_00;
-                atomicAdd(vj_z+(i0+2)*nao+(j0+0), vzij_20);
-                double vxij_22 = goutx[3]*dm_lk_00;
-                atomicAdd(vj_x+(i0+2)*nao+(j0+2), vxij_22);
-                double vyij_22 = gouty[3]*dm_lk_00;
-                atomicAdd(vj_y+(i0+2)*nao+(j0+2), vyij_22);
-                double vzij_22 = goutz[3]*dm_lk_00;
-                atomicAdd(vj_z+(i0+2)*nao+(j0+2), vzij_22);
-                double vxij_24 = goutx[6]*dm_lk_00;
-                atomicAdd(vj_x+(i0+2)*nao+(j0+4), vxij_24);
-                double vyij_24 = gouty[6]*dm_lk_00;
-                atomicAdd(vj_y+(i0+2)*nao+(j0+4), vyij_24);
-                double vzij_24 = goutz[6]*dm_lk_00;
-                atomicAdd(vj_z+(i0+2)*nao+(j0+4), vzij_24);
-                double vxij_41 = goutx[2]*dm_lk_00;
-                atomicAdd(vj_x+(i0+4)*nao+(j0+1), vxij_41);
-                double vyij_41 = gouty[2]*dm_lk_00;
-                atomicAdd(vj_y+(i0+4)*nao+(j0+1), vyij_41);
-                double vzij_41 = goutz[2]*dm_lk_00;
-                atomicAdd(vj_z+(i0+4)*nao+(j0+1), vzij_41);
-                double vxij_43 = goutx[5]*dm_lk_00;
-                atomicAdd(vj_x+(i0+4)*nao+(j0+3), vxij_43);
-                double vyij_43 = gouty[5]*dm_lk_00;
-                atomicAdd(vj_y+(i0+4)*nao+(j0+3), vyij_43);
-                double vzij_43 = goutz[5]*dm_lk_00;
-                atomicAdd(vj_z+(i0+4)*nao+(j0+3), vzij_43);
-                double vxij_45 = goutx[8]*dm_lk_00;
-                atomicAdd(vj_x+(i0+4)*nao+(j0+5), vxij_45);
-                double vyij_45 = gouty[8]*dm_lk_00;
-                atomicAdd(vj_y+(i0+4)*nao+(j0+5), vyij_45);
-                double vzij_45 = goutz[8]*dm_lk_00;
-                atomicAdd(vj_z+(i0+4)*nao+(j0+5), vzij_45);
-                break; }
-                case 3: {
-                double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
-                double vxij_11 = goutx[1]*dm_lk_00;
-                atomicAdd(vj_x+(i0+1)*nao+(j0+1), vxij_11);
-                double vyij_11 = gouty[1]*dm_lk_00;
-                atomicAdd(vj_y+(i0+1)*nao+(j0+1), vyij_11);
-                double vzij_11 = goutz[1]*dm_lk_00;
-                atomicAdd(vj_z+(i0+1)*nao+(j0+1), vzij_11);
-                double vxij_13 = goutx[4]*dm_lk_00;
+                double vxij_13 = goutx[1]*dm_lk_00;
                 atomicAdd(vj_x+(i0+1)*nao+(j0+3), vxij_13);
-                double vyij_13 = gouty[4]*dm_lk_00;
+                double vyij_13 = gouty[1]*dm_lk_00;
                 atomicAdd(vj_y+(i0+1)*nao+(j0+3), vyij_13);
-                double vzij_13 = goutz[4]*dm_lk_00;
+                double vzij_13 = goutz[1]*dm_lk_00;
                 atomicAdd(vj_z+(i0+1)*nao+(j0+3), vzij_13);
-                double vxij_15 = goutx[7]*dm_lk_00;
+                double vxij_14 = goutx[7]*dm_lk_00;
+                atomicAdd(vj_x+(i0+1)*nao+(j0+4), vxij_14);
+                double vyij_14 = gouty[7]*dm_lk_00;
+                atomicAdd(vj_y+(i0+1)*nao+(j0+4), vyij_14);
+                double vzij_14 = goutz[7]*dm_lk_00;
+                atomicAdd(vj_z+(i0+1)*nao+(j0+4), vzij_14);
+                double vxij_15 = goutx[13]*dm_lk_00;
                 atomicAdd(vj_x+(i0+1)*nao+(j0+5), vxij_15);
-                double vyij_15 = gouty[7]*dm_lk_00;
+                double vyij_15 = gouty[13]*dm_lk_00;
                 atomicAdd(vj_y+(i0+1)*nao+(j0+5), vyij_15);
-                double vzij_15 = goutz[7]*dm_lk_00;
+                double vzij_15 = goutz[13]*dm_lk_00;
                 atomicAdd(vj_z+(i0+1)*nao+(j0+5), vzij_15);
-                double vxij_30 = goutx[0]*dm_lk_00;
-                atomicAdd(vj_x+(i0+3)*nao+(j0+0), vxij_30);
-                double vyij_30 = gouty[0]*dm_lk_00;
-                atomicAdd(vj_y+(i0+3)*nao+(j0+0), vyij_30);
-                double vzij_30 = goutz[0]*dm_lk_00;
-                atomicAdd(vj_z+(i0+3)*nao+(j0+0), vzij_30);
-                double vxij_32 = goutx[3]*dm_lk_00;
-                atomicAdd(vj_x+(i0+3)*nao+(j0+2), vxij_32);
-                double vyij_32 = gouty[3]*dm_lk_00;
-                atomicAdd(vj_y+(i0+3)*nao+(j0+2), vyij_32);
-                double vzij_32 = goutz[3]*dm_lk_00;
-                atomicAdd(vj_z+(i0+3)*nao+(j0+2), vzij_32);
-                double vxij_34 = goutx[6]*dm_lk_00;
+                double vxij_23 = goutx[2]*dm_lk_00;
+                atomicAdd(vj_x+(i0+2)*nao+(j0+3), vxij_23);
+                double vyij_23 = gouty[2]*dm_lk_00;
+                atomicAdd(vj_y+(i0+2)*nao+(j0+3), vyij_23);
+                double vzij_23 = goutz[2]*dm_lk_00;
+                atomicAdd(vj_z+(i0+2)*nao+(j0+3), vzij_23);
+                double vxij_24 = goutx[8]*dm_lk_00;
+                atomicAdd(vj_x+(i0+2)*nao+(j0+4), vxij_24);
+                double vyij_24 = gouty[8]*dm_lk_00;
+                atomicAdd(vj_y+(i0+2)*nao+(j0+4), vyij_24);
+                double vzij_24 = goutz[8]*dm_lk_00;
+                atomicAdd(vj_z+(i0+2)*nao+(j0+4), vzij_24);
+                double vxij_25 = goutx[14]*dm_lk_00;
+                atomicAdd(vj_x+(i0+2)*nao+(j0+5), vxij_25);
+                double vyij_25 = gouty[14]*dm_lk_00;
+                atomicAdd(vj_y+(i0+2)*nao+(j0+5), vyij_25);
+                double vzij_25 = goutz[14]*dm_lk_00;
+                atomicAdd(vj_z+(i0+2)*nao+(j0+5), vzij_25);
+                double vxij_33 = goutx[3]*dm_lk_00;
+                atomicAdd(vj_x+(i0+3)*nao+(j0+3), vxij_33);
+                double vyij_33 = gouty[3]*dm_lk_00;
+                atomicAdd(vj_y+(i0+3)*nao+(j0+3), vyij_33);
+                double vzij_33 = goutz[3]*dm_lk_00;
+                atomicAdd(vj_z+(i0+3)*nao+(j0+3), vzij_33);
+                double vxij_34 = goutx[9]*dm_lk_00;
                 atomicAdd(vj_x+(i0+3)*nao+(j0+4), vxij_34);
-                double vyij_34 = gouty[6]*dm_lk_00;
+                double vyij_34 = gouty[9]*dm_lk_00;
                 atomicAdd(vj_y+(i0+3)*nao+(j0+4), vyij_34);
-                double vzij_34 = goutz[6]*dm_lk_00;
+                double vzij_34 = goutz[9]*dm_lk_00;
                 atomicAdd(vj_z+(i0+3)*nao+(j0+4), vzij_34);
-                double vxij_51 = goutx[2]*dm_lk_00;
-                atomicAdd(vj_x+(i0+5)*nao+(j0+1), vxij_51);
-                double vyij_51 = gouty[2]*dm_lk_00;
-                atomicAdd(vj_y+(i0+5)*nao+(j0+1), vyij_51);
-                double vzij_51 = goutz[2]*dm_lk_00;
-                atomicAdd(vj_z+(i0+5)*nao+(j0+1), vzij_51);
+                double vxij_35 = goutx[15]*dm_lk_00;
+                atomicAdd(vj_x+(i0+3)*nao+(j0+5), vxij_35);
+                double vyij_35 = gouty[15]*dm_lk_00;
+                atomicAdd(vj_y+(i0+3)*nao+(j0+5), vyij_35);
+                double vzij_35 = goutz[15]*dm_lk_00;
+                atomicAdd(vj_z+(i0+3)*nao+(j0+5), vzij_35);
+                double vxij_43 = goutx[4]*dm_lk_00;
+                atomicAdd(vj_x+(i0+4)*nao+(j0+3), vxij_43);
+                double vyij_43 = gouty[4]*dm_lk_00;
+                atomicAdd(vj_y+(i0+4)*nao+(j0+3), vyij_43);
+                double vzij_43 = goutz[4]*dm_lk_00;
+                atomicAdd(vj_z+(i0+4)*nao+(j0+3), vzij_43);
+                double vxij_44 = goutx[10]*dm_lk_00;
+                atomicAdd(vj_x+(i0+4)*nao+(j0+4), vxij_44);
+                double vyij_44 = gouty[10]*dm_lk_00;
+                atomicAdd(vj_y+(i0+4)*nao+(j0+4), vyij_44);
+                double vzij_44 = goutz[10]*dm_lk_00;
+                atomicAdd(vj_z+(i0+4)*nao+(j0+4), vzij_44);
+                double vxij_45 = goutx[16]*dm_lk_00;
+                atomicAdd(vj_x+(i0+4)*nao+(j0+5), vxij_45);
+                double vyij_45 = gouty[16]*dm_lk_00;
+                atomicAdd(vj_y+(i0+4)*nao+(j0+5), vyij_45);
+                double vzij_45 = goutz[16]*dm_lk_00;
+                atomicAdd(vj_z+(i0+4)*nao+(j0+5), vzij_45);
                 double vxij_53 = goutx[5]*dm_lk_00;
                 atomicAdd(vj_x+(i0+5)*nao+(j0+3), vxij_53);
                 double vyij_53 = gouty[5]*dm_lk_00;
                 atomicAdd(vj_y+(i0+5)*nao+(j0+3), vyij_53);
                 double vzij_53 = goutz[5]*dm_lk_00;
                 atomicAdd(vj_z+(i0+5)*nao+(j0+3), vzij_53);
-                double vxij_55 = goutx[8]*dm_lk_00;
+                double vxij_54 = goutx[11]*dm_lk_00;
+                atomicAdd(vj_x+(i0+5)*nao+(j0+4), vxij_54);
+                double vyij_54 = gouty[11]*dm_lk_00;
+                atomicAdd(vj_y+(i0+5)*nao+(j0+4), vyij_54);
+                double vzij_54 = goutz[11]*dm_lk_00;
+                atomicAdd(vj_z+(i0+5)*nao+(j0+4), vzij_54);
+                double vxij_55 = goutx[17]*dm_lk_00;
                 atomicAdd(vj_x+(i0+5)*nao+(j0+5), vxij_55);
-                double vyij_55 = gouty[8]*dm_lk_00;
+                double vyij_55 = gouty[17]*dm_lk_00;
                 atomicAdd(vj_y+(i0+5)*nao+(j0+5), vyij_55);
-                double vzij_55 = goutz[8]*dm_lk_00;
+                double vzij_55 = goutz[17]*dm_lk_00;
                 atomicAdd(vj_z+(i0+5)*nao+(j0+5), vzij_55);
-                break; }
-                }
                 double vxkl_00 = 0;
                 double vykl_00 = 0;
                 double vzkl_00 = 0;
-                switch (gout_id) {
-                case 0: {
-                double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
-                vxkl_00 += goutx[0] * dm_ji_00;
-                vykl_00 += gouty[0] * dm_ji_00;
-                vzkl_00 += goutz[0] * dm_ji_00;
-                double dm_ji_04 = dm[(j0+0)*nao+(i0+4)];
-                vxkl_00 += goutx[1] * dm_ji_04;
-                vykl_00 += gouty[1] * dm_ji_04;
-                vzkl_00 += goutz[1] * dm_ji_04;
-                double dm_ji_12 = dm[(j0+1)*nao+(i0+2)];
-                vxkl_00 += goutx[2] * dm_ji_12;
-                vykl_00 += gouty[2] * dm_ji_12;
-                vzkl_00 += goutz[2] * dm_ji_12;
-                double dm_ji_20 = dm[(j0+2)*nao+(i0+0)];
-                vxkl_00 += goutx[3] * dm_ji_20;
-                vykl_00 += gouty[3] * dm_ji_20;
-                vzkl_00 += goutz[3] * dm_ji_20;
-                double dm_ji_24 = dm[(j0+2)*nao+(i0+4)];
-                vxkl_00 += goutx[4] * dm_ji_24;
-                vykl_00 += gouty[4] * dm_ji_24;
-                vzkl_00 += goutz[4] * dm_ji_24;
-                double dm_ji_32 = dm[(j0+3)*nao+(i0+2)];
-                vxkl_00 += goutx[5] * dm_ji_32;
-                vykl_00 += gouty[5] * dm_ji_32;
-                vzkl_00 += goutz[5] * dm_ji_32;
-                double dm_ji_40 = dm[(j0+4)*nao+(i0+0)];
-                vxkl_00 += goutx[6] * dm_ji_40;
-                vykl_00 += gouty[6] * dm_ji_40;
-                vzkl_00 += goutz[6] * dm_ji_40;
-                double dm_ji_44 = dm[(j0+4)*nao+(i0+4)];
-                vxkl_00 += goutx[7] * dm_ji_44;
-                vykl_00 += gouty[7] * dm_ji_44;
-                vzkl_00 += goutz[7] * dm_ji_44;
-                double dm_ji_52 = dm[(j0+5)*nao+(i0+2)];
-                vxkl_00 += goutx[8] * dm_ji_52;
-                vykl_00 += gouty[8] * dm_ji_52;
-                vzkl_00 += goutz[8] * dm_ji_52;
-                break; }
-                case 1: {
-                double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
-                vxkl_00 += goutx[0] * dm_ji_01;
-                vykl_00 += gouty[0] * dm_ji_01;
-                vzkl_00 += goutz[0] * dm_ji_01;
-                double dm_ji_05 = dm[(j0+0)*nao+(i0+5)];
-                vxkl_00 += goutx[1] * dm_ji_05;
-                vykl_00 += gouty[1] * dm_ji_05;
-                vzkl_00 += goutz[1] * dm_ji_05;
-                double dm_ji_13 = dm[(j0+1)*nao+(i0+3)];
-                vxkl_00 += goutx[2] * dm_ji_13;
-                vykl_00 += gouty[2] * dm_ji_13;
-                vzkl_00 += goutz[2] * dm_ji_13;
-                double dm_ji_21 = dm[(j0+2)*nao+(i0+1)];
-                vxkl_00 += goutx[3] * dm_ji_21;
-                vykl_00 += gouty[3] * dm_ji_21;
-                vzkl_00 += goutz[3] * dm_ji_21;
-                double dm_ji_25 = dm[(j0+2)*nao+(i0+5)];
-                vxkl_00 += goutx[4] * dm_ji_25;
-                vykl_00 += gouty[4] * dm_ji_25;
-                vzkl_00 += goutz[4] * dm_ji_25;
-                double dm_ji_33 = dm[(j0+3)*nao+(i0+3)];
-                vxkl_00 += goutx[5] * dm_ji_33;
-                vykl_00 += gouty[5] * dm_ji_33;
-                vzkl_00 += goutz[5] * dm_ji_33;
-                double dm_ji_41 = dm[(j0+4)*nao+(i0+1)];
-                vxkl_00 += goutx[6] * dm_ji_41;
-                vykl_00 += gouty[6] * dm_ji_41;
-                vzkl_00 += goutz[6] * dm_ji_41;
-                double dm_ji_45 = dm[(j0+4)*nao+(i0+5)];
-                vxkl_00 += goutx[7] * dm_ji_45;
-                vykl_00 += gouty[7] * dm_ji_45;
-                vzkl_00 += goutz[7] * dm_ji_45;
-                double dm_ji_53 = dm[(j0+5)*nao+(i0+3)];
-                vxkl_00 += goutx[8] * dm_ji_53;
-                vykl_00 += gouty[8] * dm_ji_53;
-                vzkl_00 += goutz[8] * dm_ji_53;
-                break; }
-                case 2: {
-                double dm_ji_02 = dm[(j0+0)*nao+(i0+2)];
-                vxkl_00 += goutx[0] * dm_ji_02;
-                vykl_00 += gouty[0] * dm_ji_02;
-                vzkl_00 += goutz[0] * dm_ji_02;
-                double dm_ji_10 = dm[(j0+1)*nao+(i0+0)];
-                vxkl_00 += goutx[1] * dm_ji_10;
-                vykl_00 += gouty[1] * dm_ji_10;
-                vzkl_00 += goutz[1] * dm_ji_10;
-                double dm_ji_14 = dm[(j0+1)*nao+(i0+4)];
-                vxkl_00 += goutx[2] * dm_ji_14;
-                vykl_00 += gouty[2] * dm_ji_14;
-                vzkl_00 += goutz[2] * dm_ji_14;
-                double dm_ji_22 = dm[(j0+2)*nao+(i0+2)];
-                vxkl_00 += goutx[3] * dm_ji_22;
-                vykl_00 += gouty[3] * dm_ji_22;
-                vzkl_00 += goutz[3] * dm_ji_22;
                 double dm_ji_30 = dm[(j0+3)*nao+(i0+0)];
-                vxkl_00 += goutx[4] * dm_ji_30;
-                vykl_00 += gouty[4] * dm_ji_30;
-                vzkl_00 += goutz[4] * dm_ji_30;
-                double dm_ji_34 = dm[(j0+3)*nao+(i0+4)];
-                vxkl_00 += goutx[5] * dm_ji_34;
-                vykl_00 += gouty[5] * dm_ji_34;
-                vzkl_00 += goutz[5] * dm_ji_34;
-                double dm_ji_42 = dm[(j0+4)*nao+(i0+2)];
-                vxkl_00 += goutx[6] * dm_ji_42;
-                vykl_00 += gouty[6] * dm_ji_42;
-                vzkl_00 += goutz[6] * dm_ji_42;
-                double dm_ji_50 = dm[(j0+5)*nao+(i0+0)];
-                vxkl_00 += goutx[7] * dm_ji_50;
-                vykl_00 += gouty[7] * dm_ji_50;
-                vzkl_00 += goutz[7] * dm_ji_50;
-                double dm_ji_54 = dm[(j0+5)*nao+(i0+4)];
-                vxkl_00 += goutx[8] * dm_ji_54;
-                vykl_00 += gouty[8] * dm_ji_54;
-                vzkl_00 += goutz[8] * dm_ji_54;
-                break; }
-                case 3: {
-                double dm_ji_03 = dm[(j0+0)*nao+(i0+3)];
-                vxkl_00 += goutx[0] * dm_ji_03;
-                vykl_00 += gouty[0] * dm_ji_03;
-                vzkl_00 += goutz[0] * dm_ji_03;
-                double dm_ji_11 = dm[(j0+1)*nao+(i0+1)];
-                vxkl_00 += goutx[1] * dm_ji_11;
-                vykl_00 += gouty[1] * dm_ji_11;
-                vzkl_00 += goutz[1] * dm_ji_11;
-                double dm_ji_15 = dm[(j0+1)*nao+(i0+5)];
-                vxkl_00 += goutx[2] * dm_ji_15;
-                vykl_00 += gouty[2] * dm_ji_15;
-                vzkl_00 += goutz[2] * dm_ji_15;
-                double dm_ji_23 = dm[(j0+2)*nao+(i0+3)];
-                vxkl_00 += goutx[3] * dm_ji_23;
-                vykl_00 += gouty[3] * dm_ji_23;
-                vzkl_00 += goutz[3] * dm_ji_23;
+                vxkl_00 += goutx[0] * dm_ji_30;
+                vykl_00 += gouty[0] * dm_ji_30;
+                vzkl_00 += goutz[0] * dm_ji_30;
                 double dm_ji_31 = dm[(j0+3)*nao+(i0+1)];
-                vxkl_00 += goutx[4] * dm_ji_31;
-                vykl_00 += gouty[4] * dm_ji_31;
-                vzkl_00 += goutz[4] * dm_ji_31;
+                vxkl_00 += goutx[1] * dm_ji_31;
+                vykl_00 += gouty[1] * dm_ji_31;
+                vzkl_00 += goutz[1] * dm_ji_31;
+                double dm_ji_32 = dm[(j0+3)*nao+(i0+2)];
+                vxkl_00 += goutx[2] * dm_ji_32;
+                vykl_00 += gouty[2] * dm_ji_32;
+                vzkl_00 += goutz[2] * dm_ji_32;
+                double dm_ji_33 = dm[(j0+3)*nao+(i0+3)];
+                vxkl_00 += goutx[3] * dm_ji_33;
+                vykl_00 += gouty[3] * dm_ji_33;
+                vzkl_00 += goutz[3] * dm_ji_33;
+                double dm_ji_34 = dm[(j0+3)*nao+(i0+4)];
+                vxkl_00 += goutx[4] * dm_ji_34;
+                vykl_00 += gouty[4] * dm_ji_34;
+                vzkl_00 += goutz[4] * dm_ji_34;
                 double dm_ji_35 = dm[(j0+3)*nao+(i0+5)];
                 vxkl_00 += goutx[5] * dm_ji_35;
                 vykl_00 += gouty[5] * dm_ji_35;
                 vzkl_00 += goutz[5] * dm_ji_35;
+                double dm_ji_40 = dm[(j0+4)*nao+(i0+0)];
+                vxkl_00 += goutx[6] * dm_ji_40;
+                vykl_00 += gouty[6] * dm_ji_40;
+                vzkl_00 += goutz[6] * dm_ji_40;
+                double dm_ji_41 = dm[(j0+4)*nao+(i0+1)];
+                vxkl_00 += goutx[7] * dm_ji_41;
+                vykl_00 += gouty[7] * dm_ji_41;
+                vzkl_00 += goutz[7] * dm_ji_41;
+                double dm_ji_42 = dm[(j0+4)*nao+(i0+2)];
+                vxkl_00 += goutx[8] * dm_ji_42;
+                vykl_00 += gouty[8] * dm_ji_42;
+                vzkl_00 += goutz[8] * dm_ji_42;
                 double dm_ji_43 = dm[(j0+4)*nao+(i0+3)];
-                vxkl_00 += goutx[6] * dm_ji_43;
-                vykl_00 += gouty[6] * dm_ji_43;
-                vzkl_00 += goutz[6] * dm_ji_43;
+                vxkl_00 += goutx[9] * dm_ji_43;
+                vykl_00 += gouty[9] * dm_ji_43;
+                vzkl_00 += goutz[9] * dm_ji_43;
+                double dm_ji_44 = dm[(j0+4)*nao+(i0+4)];
+                vxkl_00 += goutx[10] * dm_ji_44;
+                vykl_00 += gouty[10] * dm_ji_44;
+                vzkl_00 += goutz[10] * dm_ji_44;
+                double dm_ji_45 = dm[(j0+4)*nao+(i0+5)];
+                vxkl_00 += goutx[11] * dm_ji_45;
+                vykl_00 += gouty[11] * dm_ji_45;
+                vzkl_00 += goutz[11] * dm_ji_45;
+                double dm_ji_50 = dm[(j0+5)*nao+(i0+0)];
+                vxkl_00 += goutx[12] * dm_ji_50;
+                vykl_00 += gouty[12] * dm_ji_50;
+                vzkl_00 += goutz[12] * dm_ji_50;
                 double dm_ji_51 = dm[(j0+5)*nao+(i0+1)];
-                vxkl_00 += goutx[7] * dm_ji_51;
-                vykl_00 += gouty[7] * dm_ji_51;
-                vzkl_00 += goutz[7] * dm_ji_51;
+                vxkl_00 += goutx[13] * dm_ji_51;
+                vykl_00 += gouty[13] * dm_ji_51;
+                vzkl_00 += goutz[13] * dm_ji_51;
+                double dm_ji_52 = dm[(j0+5)*nao+(i0+2)];
+                vxkl_00 += goutx[14] * dm_ji_52;
+                vykl_00 += gouty[14] * dm_ji_52;
+                vzkl_00 += goutz[14] * dm_ji_52;
+                double dm_ji_53 = dm[(j0+5)*nao+(i0+3)];
+                vxkl_00 += goutx[15] * dm_ji_53;
+                vykl_00 += gouty[15] * dm_ji_53;
+                vzkl_00 += goutz[15] * dm_ji_53;
+                double dm_ji_54 = dm[(j0+5)*nao+(i0+4)];
+                vxkl_00 += goutx[16] * dm_ji_54;
+                vykl_00 += gouty[16] * dm_ji_54;
+                vzkl_00 += goutz[16] * dm_ji_54;
                 double dm_ji_55 = dm[(j0+5)*nao+(i0+5)];
-                vxkl_00 += goutx[8] * dm_ji_55;
-                vykl_00 += gouty[8] * dm_ji_55;
-                vzkl_00 += goutz[8] * dm_ji_55;
-                break; }
-                }
+                vxkl_00 += goutx[17] * dm_ji_55;
+                vykl_00 += gouty[17] * dm_ji_55;
+                vzkl_00 += goutz[17] * dm_ji_55;
                 atomicAdd(vj_x+(k0+0)*nao+(l0+0), vxkl_00);
                 atomicAdd(vj_y+(k0+0)*nao+(l0+0), vykl_00);
                 atomicAdd(vj_z+(k0+0)*nao+(l0+0), vzkl_00);
             }
             if (do_k) {
-                switch (gout_id) {
-                case 0: {
-                double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
-                double dm_jk_20 = dm[(j0+2)*nao+(k0+0)];
+                double dm_jk_30 = dm[(j0+3)*nao+(k0+0)];
                 double dm_jk_40 = dm[(j0+4)*nao+(k0+0)];
-                double vxil_00 = goutx[0]*dm_jk_00 + goutx[3]*dm_jk_20 + goutx[6]*dm_jk_40;
+                double dm_jk_50 = dm[(j0+5)*nao+(k0+0)];
+                double vxil_00 = goutx[0]*dm_jk_30 + goutx[6]*dm_jk_40 + goutx[12]*dm_jk_50;
                 atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
-                double vyil_00 = gouty[0]*dm_jk_00 + gouty[3]*dm_jk_20 + gouty[6]*dm_jk_40;
+                double vyil_00 = gouty[0]*dm_jk_30 + gouty[6]*dm_jk_40 + gouty[12]*dm_jk_50;
                 atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
-                double vzil_00 = goutz[0]*dm_jk_00 + goutz[3]*dm_jk_20 + goutz[6]*dm_jk_40;
+                double vzil_00 = goutz[0]*dm_jk_30 + goutz[6]*dm_jk_40 + goutz[12]*dm_jk_50;
                 atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
-                double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
-                double dm_jk_30 = dm[(j0+3)*nao+(k0+0)];
-                double dm_jk_50 = dm[(j0+5)*nao+(k0+0)];
-                double vxil_20 = goutx[2]*dm_jk_10 + goutx[5]*dm_jk_30 + goutx[8]*dm_jk_50;
-                atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
-                double vyil_20 = gouty[2]*dm_jk_10 + gouty[5]*dm_jk_30 + gouty[8]*dm_jk_50;
-                atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
-                double vzil_20 = goutz[2]*dm_jk_10 + goutz[5]*dm_jk_30 + goutz[8]*dm_jk_50;
-                atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
-                double vxil_40 = goutx[1]*dm_jk_00 + goutx[4]*dm_jk_20 + goutx[7]*dm_jk_40;
-                atomicAdd(vk_x+(i0+4)*nao+(l0+0), vxil_40);
-                double vyil_40 = gouty[1]*dm_jk_00 + gouty[4]*dm_jk_20 + gouty[7]*dm_jk_40;
-                atomicAdd(vk_y+(i0+4)*nao+(l0+0), vyil_40);
-                double vzil_40 = goutz[1]*dm_jk_00 + goutz[4]*dm_jk_20 + goutz[7]*dm_jk_40;
-                atomicAdd(vk_z+(i0+4)*nao+(l0+0), vzil_40);
-                break; }
-                case 1: {
-                double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
-                double dm_jk_20 = dm[(j0+2)*nao+(k0+0)];
-                double dm_jk_40 = dm[(j0+4)*nao+(k0+0)];
-                double vxil_10 = goutx[0]*dm_jk_00 + goutx[3]*dm_jk_20 + goutx[6]*dm_jk_40;
+                double vxil_10 = goutx[1]*dm_jk_30 + goutx[7]*dm_jk_40 + goutx[13]*dm_jk_50;
                 atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
-                double vyil_10 = gouty[0]*dm_jk_00 + gouty[3]*dm_jk_20 + gouty[6]*dm_jk_40;
+                double vyil_10 = gouty[1]*dm_jk_30 + gouty[7]*dm_jk_40 + gouty[13]*dm_jk_50;
                 atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
-                double vzil_10 = goutz[0]*dm_jk_00 + goutz[3]*dm_jk_20 + goutz[6]*dm_jk_40;
+                double vzil_10 = goutz[1]*dm_jk_30 + goutz[7]*dm_jk_40 + goutz[13]*dm_jk_50;
                 atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
-                double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
-                double dm_jk_30 = dm[(j0+3)*nao+(k0+0)];
-                double dm_jk_50 = dm[(j0+5)*nao+(k0+0)];
-                double vxil_30 = goutx[2]*dm_jk_10 + goutx[5]*dm_jk_30 + goutx[8]*dm_jk_50;
-                atomicAdd(vk_x+(i0+3)*nao+(l0+0), vxil_30);
-                double vyil_30 = gouty[2]*dm_jk_10 + gouty[5]*dm_jk_30 + gouty[8]*dm_jk_50;
-                atomicAdd(vk_y+(i0+3)*nao+(l0+0), vyil_30);
-                double vzil_30 = goutz[2]*dm_jk_10 + goutz[5]*dm_jk_30 + goutz[8]*dm_jk_50;
-                atomicAdd(vk_z+(i0+3)*nao+(l0+0), vzil_30);
-                double vxil_50 = goutx[1]*dm_jk_00 + goutx[4]*dm_jk_20 + goutx[7]*dm_jk_40;
-                atomicAdd(vk_x+(i0+5)*nao+(l0+0), vxil_50);
-                double vyil_50 = gouty[1]*dm_jk_00 + gouty[4]*dm_jk_20 + gouty[7]*dm_jk_40;
-                atomicAdd(vk_y+(i0+5)*nao+(l0+0), vyil_50);
-                double vzil_50 = goutz[1]*dm_jk_00 + goutz[4]*dm_jk_20 + goutz[7]*dm_jk_40;
-                atomicAdd(vk_z+(i0+5)*nao+(l0+0), vzil_50);
-                break; }
-                case 2: {
-                double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
-                double dm_jk_30 = dm[(j0+3)*nao+(k0+0)];
-                double dm_jk_50 = dm[(j0+5)*nao+(k0+0)];
-                double vxil_00 = goutx[1]*dm_jk_10 + goutx[4]*dm_jk_30 + goutx[7]*dm_jk_50;
-                atomicAdd(vk_x+(i0+0)*nao+(l0+0), vxil_00);
-                double vyil_00 = gouty[1]*dm_jk_10 + gouty[4]*dm_jk_30 + gouty[7]*dm_jk_50;
-                atomicAdd(vk_y+(i0+0)*nao+(l0+0), vyil_00);
-                double vzil_00 = goutz[1]*dm_jk_10 + goutz[4]*dm_jk_30 + goutz[7]*dm_jk_50;
-                atomicAdd(vk_z+(i0+0)*nao+(l0+0), vzil_00);
-                double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
-                double dm_jk_20 = dm[(j0+2)*nao+(k0+0)];
-                double dm_jk_40 = dm[(j0+4)*nao+(k0+0)];
-                double vxil_20 = goutx[0]*dm_jk_00 + goutx[3]*dm_jk_20 + goutx[6]*dm_jk_40;
+                double vxil_20 = goutx[2]*dm_jk_30 + goutx[8]*dm_jk_40 + goutx[14]*dm_jk_50;
                 atomicAdd(vk_x+(i0+2)*nao+(l0+0), vxil_20);
-                double vyil_20 = gouty[0]*dm_jk_00 + gouty[3]*dm_jk_20 + gouty[6]*dm_jk_40;
+                double vyil_20 = gouty[2]*dm_jk_30 + gouty[8]*dm_jk_40 + gouty[14]*dm_jk_50;
                 atomicAdd(vk_y+(i0+2)*nao+(l0+0), vyil_20);
-                double vzil_20 = goutz[0]*dm_jk_00 + goutz[3]*dm_jk_20 + goutz[6]*dm_jk_40;
+                double vzil_20 = goutz[2]*dm_jk_30 + goutz[8]*dm_jk_40 + goutz[14]*dm_jk_50;
                 atomicAdd(vk_z+(i0+2)*nao+(l0+0), vzil_20);
-                double vxil_40 = goutx[2]*dm_jk_10 + goutx[5]*dm_jk_30 + goutx[8]*dm_jk_50;
-                atomicAdd(vk_x+(i0+4)*nao+(l0+0), vxil_40);
-                double vyil_40 = gouty[2]*dm_jk_10 + gouty[5]*dm_jk_30 + gouty[8]*dm_jk_50;
-                atomicAdd(vk_y+(i0+4)*nao+(l0+0), vyil_40);
-                double vzil_40 = goutz[2]*dm_jk_10 + goutz[5]*dm_jk_30 + goutz[8]*dm_jk_50;
-                atomicAdd(vk_z+(i0+4)*nao+(l0+0), vzil_40);
-                break; }
-                case 3: {
-                double dm_jk_10 = dm[(j0+1)*nao+(k0+0)];
-                double dm_jk_30 = dm[(j0+3)*nao+(k0+0)];
-                double dm_jk_50 = dm[(j0+5)*nao+(k0+0)];
-                double vxil_10 = goutx[1]*dm_jk_10 + goutx[4]*dm_jk_30 + goutx[7]*dm_jk_50;
-                atomicAdd(vk_x+(i0+1)*nao+(l0+0), vxil_10);
-                double vyil_10 = gouty[1]*dm_jk_10 + gouty[4]*dm_jk_30 + gouty[7]*dm_jk_50;
-                atomicAdd(vk_y+(i0+1)*nao+(l0+0), vyil_10);
-                double vzil_10 = goutz[1]*dm_jk_10 + goutz[4]*dm_jk_30 + goutz[7]*dm_jk_50;
-                atomicAdd(vk_z+(i0+1)*nao+(l0+0), vzil_10);
-                double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
-                double dm_jk_20 = dm[(j0+2)*nao+(k0+0)];
-                double dm_jk_40 = dm[(j0+4)*nao+(k0+0)];
-                double vxil_30 = goutx[0]*dm_jk_00 + goutx[3]*dm_jk_20 + goutx[6]*dm_jk_40;
+                double vxil_30 = goutx[3]*dm_jk_30 + goutx[9]*dm_jk_40 + goutx[15]*dm_jk_50;
                 atomicAdd(vk_x+(i0+3)*nao+(l0+0), vxil_30);
-                double vyil_30 = gouty[0]*dm_jk_00 + gouty[3]*dm_jk_20 + gouty[6]*dm_jk_40;
+                double vyil_30 = gouty[3]*dm_jk_30 + gouty[9]*dm_jk_40 + gouty[15]*dm_jk_50;
                 atomicAdd(vk_y+(i0+3)*nao+(l0+0), vyil_30);
-                double vzil_30 = goutz[0]*dm_jk_00 + goutz[3]*dm_jk_20 + goutz[6]*dm_jk_40;
+                double vzil_30 = goutz[3]*dm_jk_30 + goutz[9]*dm_jk_40 + goutz[15]*dm_jk_50;
                 atomicAdd(vk_z+(i0+3)*nao+(l0+0), vzil_30);
-                double vxil_50 = goutx[2]*dm_jk_10 + goutx[5]*dm_jk_30 + goutx[8]*dm_jk_50;
+                double vxil_40 = goutx[4]*dm_jk_30 + goutx[10]*dm_jk_40 + goutx[16]*dm_jk_50;
+                atomicAdd(vk_x+(i0+4)*nao+(l0+0), vxil_40);
+                double vyil_40 = gouty[4]*dm_jk_30 + gouty[10]*dm_jk_40 + gouty[16]*dm_jk_50;
+                atomicAdd(vk_y+(i0+4)*nao+(l0+0), vyil_40);
+                double vzil_40 = goutz[4]*dm_jk_30 + goutz[10]*dm_jk_40 + goutz[16]*dm_jk_50;
+                atomicAdd(vk_z+(i0+4)*nao+(l0+0), vzil_40);
+                double vxil_50 = goutx[5]*dm_jk_30 + goutx[11]*dm_jk_40 + goutx[17]*dm_jk_50;
                 atomicAdd(vk_x+(i0+5)*nao+(l0+0), vxil_50);
-                double vyil_50 = gouty[2]*dm_jk_10 + gouty[5]*dm_jk_30 + gouty[8]*dm_jk_50;
+                double vyil_50 = gouty[5]*dm_jk_30 + gouty[11]*dm_jk_40 + gouty[17]*dm_jk_50;
                 atomicAdd(vk_y+(i0+5)*nao+(l0+0), vyil_50);
-                double vzil_50 = goutz[2]*dm_jk_10 + goutz[5]*dm_jk_30 + goutz[8]*dm_jk_50;
+                double vzil_50 = goutz[5]*dm_jk_30 + goutz[11]*dm_jk_40 + goutz[17]*dm_jk_50;
                 atomicAdd(vk_z+(i0+5)*nao+(l0+0), vzil_50);
-                break; }
-                }
-                switch (gout_id) {
-                case 0: {
-                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double dm_jl_20 = dm[(j0+2)*nao+(l0+0)];
+                double dm_jl_30 = dm[(j0+3)*nao+(l0+0)];
                 double dm_jl_40 = dm[(j0+4)*nao+(l0+0)];
-                double vxik_00 = goutx[0]*dm_jl_00 + goutx[3]*dm_jl_20 + goutx[6]*dm_jl_40;
+                double dm_jl_50 = dm[(j0+5)*nao+(l0+0)];
+                double vxik_00 = goutx[0]*dm_jl_30 + goutx[6]*dm_jl_40 + goutx[12]*dm_jl_50;
                 atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
-                double vyik_00 = gouty[0]*dm_jl_00 + gouty[3]*dm_jl_20 + gouty[6]*dm_jl_40;
+                double vyik_00 = gouty[0]*dm_jl_30 + gouty[6]*dm_jl_40 + gouty[12]*dm_jl_50;
                 atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
-                double vzik_00 = goutz[0]*dm_jl_00 + goutz[3]*dm_jl_20 + goutz[6]*dm_jl_40;
+                double vzik_00 = goutz[0]*dm_jl_30 + goutz[6]*dm_jl_40 + goutz[12]*dm_jl_50;
                 atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
-                double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
-                double dm_jl_30 = dm[(j0+3)*nao+(l0+0)];
-                double dm_jl_50 = dm[(j0+5)*nao+(l0+0)];
-                double vxik_20 = goutx[2]*dm_jl_10 + goutx[5]*dm_jl_30 + goutx[8]*dm_jl_50;
-                atomicAdd(vk_x+(i0+2)*nao+(k0+0), vxik_20);
-                double vyik_20 = gouty[2]*dm_jl_10 + gouty[5]*dm_jl_30 + gouty[8]*dm_jl_50;
-                atomicAdd(vk_y+(i0+2)*nao+(k0+0), vyik_20);
-                double vzik_20 = goutz[2]*dm_jl_10 + goutz[5]*dm_jl_30 + goutz[8]*dm_jl_50;
-                atomicAdd(vk_z+(i0+2)*nao+(k0+0), vzik_20);
-                double vxik_40 = goutx[1]*dm_jl_00 + goutx[4]*dm_jl_20 + goutx[7]*dm_jl_40;
-                atomicAdd(vk_x+(i0+4)*nao+(k0+0), vxik_40);
-                double vyik_40 = gouty[1]*dm_jl_00 + gouty[4]*dm_jl_20 + gouty[7]*dm_jl_40;
-                atomicAdd(vk_y+(i0+4)*nao+(k0+0), vyik_40);
-                double vzik_40 = goutz[1]*dm_jl_00 + goutz[4]*dm_jl_20 + goutz[7]*dm_jl_40;
-                atomicAdd(vk_z+(i0+4)*nao+(k0+0), vzik_40);
-                break; }
-                case 1: {
-                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double dm_jl_20 = dm[(j0+2)*nao+(l0+0)];
-                double dm_jl_40 = dm[(j0+4)*nao+(l0+0)];
-                double vxik_10 = goutx[0]*dm_jl_00 + goutx[3]*dm_jl_20 + goutx[6]*dm_jl_40;
+                double vxik_10 = goutx[1]*dm_jl_30 + goutx[7]*dm_jl_40 + goutx[13]*dm_jl_50;
                 atomicAdd(vk_x+(i0+1)*nao+(k0+0), vxik_10);
-                double vyik_10 = gouty[0]*dm_jl_00 + gouty[3]*dm_jl_20 + gouty[6]*dm_jl_40;
+                double vyik_10 = gouty[1]*dm_jl_30 + gouty[7]*dm_jl_40 + gouty[13]*dm_jl_50;
                 atomicAdd(vk_y+(i0+1)*nao+(k0+0), vyik_10);
-                double vzik_10 = goutz[0]*dm_jl_00 + goutz[3]*dm_jl_20 + goutz[6]*dm_jl_40;
+                double vzik_10 = goutz[1]*dm_jl_30 + goutz[7]*dm_jl_40 + goutz[13]*dm_jl_50;
                 atomicAdd(vk_z+(i0+1)*nao+(k0+0), vzik_10);
-                double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
-                double dm_jl_30 = dm[(j0+3)*nao+(l0+0)];
-                double dm_jl_50 = dm[(j0+5)*nao+(l0+0)];
-                double vxik_30 = goutx[2]*dm_jl_10 + goutx[5]*dm_jl_30 + goutx[8]*dm_jl_50;
-                atomicAdd(vk_x+(i0+3)*nao+(k0+0), vxik_30);
-                double vyik_30 = gouty[2]*dm_jl_10 + gouty[5]*dm_jl_30 + gouty[8]*dm_jl_50;
-                atomicAdd(vk_y+(i0+3)*nao+(k0+0), vyik_30);
-                double vzik_30 = goutz[2]*dm_jl_10 + goutz[5]*dm_jl_30 + goutz[8]*dm_jl_50;
-                atomicAdd(vk_z+(i0+3)*nao+(k0+0), vzik_30);
-                double vxik_50 = goutx[1]*dm_jl_00 + goutx[4]*dm_jl_20 + goutx[7]*dm_jl_40;
-                atomicAdd(vk_x+(i0+5)*nao+(k0+0), vxik_50);
-                double vyik_50 = gouty[1]*dm_jl_00 + gouty[4]*dm_jl_20 + gouty[7]*dm_jl_40;
-                atomicAdd(vk_y+(i0+5)*nao+(k0+0), vyik_50);
-                double vzik_50 = goutz[1]*dm_jl_00 + goutz[4]*dm_jl_20 + goutz[7]*dm_jl_40;
-                atomicAdd(vk_z+(i0+5)*nao+(k0+0), vzik_50);
-                break; }
-                case 2: {
-                double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
-                double dm_jl_30 = dm[(j0+3)*nao+(l0+0)];
-                double dm_jl_50 = dm[(j0+5)*nao+(l0+0)];
-                double vxik_00 = goutx[1]*dm_jl_10 + goutx[4]*dm_jl_30 + goutx[7]*dm_jl_50;
-                atomicAdd(vk_x+(i0+0)*nao+(k0+0), vxik_00);
-                double vyik_00 = gouty[1]*dm_jl_10 + gouty[4]*dm_jl_30 + gouty[7]*dm_jl_50;
-                atomicAdd(vk_y+(i0+0)*nao+(k0+0), vyik_00);
-                double vzik_00 = goutz[1]*dm_jl_10 + goutz[4]*dm_jl_30 + goutz[7]*dm_jl_50;
-                atomicAdd(vk_z+(i0+0)*nao+(k0+0), vzik_00);
-                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double dm_jl_20 = dm[(j0+2)*nao+(l0+0)];
-                double dm_jl_40 = dm[(j0+4)*nao+(l0+0)];
-                double vxik_20 = goutx[0]*dm_jl_00 + goutx[3]*dm_jl_20 + goutx[6]*dm_jl_40;
+                double vxik_20 = goutx[2]*dm_jl_30 + goutx[8]*dm_jl_40 + goutx[14]*dm_jl_50;
                 atomicAdd(vk_x+(i0+2)*nao+(k0+0), vxik_20);
-                double vyik_20 = gouty[0]*dm_jl_00 + gouty[3]*dm_jl_20 + gouty[6]*dm_jl_40;
+                double vyik_20 = gouty[2]*dm_jl_30 + gouty[8]*dm_jl_40 + gouty[14]*dm_jl_50;
                 atomicAdd(vk_y+(i0+2)*nao+(k0+0), vyik_20);
-                double vzik_20 = goutz[0]*dm_jl_00 + goutz[3]*dm_jl_20 + goutz[6]*dm_jl_40;
+                double vzik_20 = goutz[2]*dm_jl_30 + goutz[8]*dm_jl_40 + goutz[14]*dm_jl_50;
                 atomicAdd(vk_z+(i0+2)*nao+(k0+0), vzik_20);
-                double vxik_40 = goutx[2]*dm_jl_10 + goutx[5]*dm_jl_30 + goutx[8]*dm_jl_50;
-                atomicAdd(vk_x+(i0+4)*nao+(k0+0), vxik_40);
-                double vyik_40 = gouty[2]*dm_jl_10 + gouty[5]*dm_jl_30 + gouty[8]*dm_jl_50;
-                atomicAdd(vk_y+(i0+4)*nao+(k0+0), vyik_40);
-                double vzik_40 = goutz[2]*dm_jl_10 + goutz[5]*dm_jl_30 + goutz[8]*dm_jl_50;
-                atomicAdd(vk_z+(i0+4)*nao+(k0+0), vzik_40);
-                break; }
-                case 3: {
-                double dm_jl_10 = dm[(j0+1)*nao+(l0+0)];
-                double dm_jl_30 = dm[(j0+3)*nao+(l0+0)];
-                double dm_jl_50 = dm[(j0+5)*nao+(l0+0)];
-                double vxik_10 = goutx[1]*dm_jl_10 + goutx[4]*dm_jl_30 + goutx[7]*dm_jl_50;
-                atomicAdd(vk_x+(i0+1)*nao+(k0+0), vxik_10);
-                double vyik_10 = gouty[1]*dm_jl_10 + gouty[4]*dm_jl_30 + gouty[7]*dm_jl_50;
-                atomicAdd(vk_y+(i0+1)*nao+(k0+0), vyik_10);
-                double vzik_10 = goutz[1]*dm_jl_10 + goutz[4]*dm_jl_30 + goutz[7]*dm_jl_50;
-                atomicAdd(vk_z+(i0+1)*nao+(k0+0), vzik_10);
-                double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
-                double dm_jl_20 = dm[(j0+2)*nao+(l0+0)];
-                double dm_jl_40 = dm[(j0+4)*nao+(l0+0)];
-                double vxik_30 = goutx[0]*dm_jl_00 + goutx[3]*dm_jl_20 + goutx[6]*dm_jl_40;
+                double vxik_30 = goutx[3]*dm_jl_30 + goutx[9]*dm_jl_40 + goutx[15]*dm_jl_50;
                 atomicAdd(vk_x+(i0+3)*nao+(k0+0), vxik_30);
-                double vyik_30 = gouty[0]*dm_jl_00 + gouty[3]*dm_jl_20 + gouty[6]*dm_jl_40;
+                double vyik_30 = gouty[3]*dm_jl_30 + gouty[9]*dm_jl_40 + gouty[15]*dm_jl_50;
                 atomicAdd(vk_y+(i0+3)*nao+(k0+0), vyik_30);
-                double vzik_30 = goutz[0]*dm_jl_00 + goutz[3]*dm_jl_20 + goutz[6]*dm_jl_40;
+                double vzik_30 = goutz[3]*dm_jl_30 + goutz[9]*dm_jl_40 + goutz[15]*dm_jl_50;
                 atomicAdd(vk_z+(i0+3)*nao+(k0+0), vzik_30);
-                double vxik_50 = goutx[2]*dm_jl_10 + goutx[5]*dm_jl_30 + goutx[8]*dm_jl_50;
+                double vxik_40 = goutx[4]*dm_jl_30 + goutx[10]*dm_jl_40 + goutx[16]*dm_jl_50;
+                atomicAdd(vk_x+(i0+4)*nao+(k0+0), vxik_40);
+                double vyik_40 = gouty[4]*dm_jl_30 + gouty[10]*dm_jl_40 + gouty[16]*dm_jl_50;
+                atomicAdd(vk_y+(i0+4)*nao+(k0+0), vyik_40);
+                double vzik_40 = goutz[4]*dm_jl_30 + goutz[10]*dm_jl_40 + goutz[16]*dm_jl_50;
+                atomicAdd(vk_z+(i0+4)*nao+(k0+0), vzik_40);
+                double vxik_50 = goutx[5]*dm_jl_30 + goutx[11]*dm_jl_40 + goutx[17]*dm_jl_50;
                 atomicAdd(vk_x+(i0+5)*nao+(k0+0), vxik_50);
-                double vyik_50 = gouty[2]*dm_jl_10 + gouty[5]*dm_jl_30 + gouty[8]*dm_jl_50;
+                double vyik_50 = gouty[5]*dm_jl_30 + gouty[11]*dm_jl_40 + gouty[17]*dm_jl_50;
                 atomicAdd(vk_y+(i0+5)*nao+(k0+0), vyik_50);
-                double vzik_50 = goutz[2]*dm_jl_10 + goutz[5]*dm_jl_30 + goutz[8]*dm_jl_50;
+                double vzik_50 = goutz[5]*dm_jl_30 + goutz[11]*dm_jl_40 + goutz[17]*dm_jl_50;
                 atomicAdd(vk_z+(i0+5)*nao+(k0+0), vzik_50);
-                break; }
-                }
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
-                double dm_ik_40 = dm[(i0+4)*nao+(k0+0)];
-                double vxjl_00 = goutx[0]*dm_ik_00 + goutx[1]*dm_ik_40;
-                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
-                double vyjl_00 = gouty[0]*dm_ik_00 + gouty[1]*dm_ik_40;
-                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
-                double vzjl_00 = goutz[0]*dm_ik_00 + goutz[1]*dm_ik_40;
-                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
-                double dm_ik_20 = dm[(i0+2)*nao+(k0+0)];
-                double vxjl_10 = goutx[2]*dm_ik_20;
-                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
-                double vyjl_10 = gouty[2]*dm_ik_20;
-                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
-                double vzjl_10 = goutz[2]*dm_ik_20;
-                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
-                double vxjl_20 = goutx[3]*dm_ik_00 + goutx[4]*dm_ik_40;
-                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
-                double vyjl_20 = gouty[3]*dm_ik_00 + gouty[4]*dm_ik_40;
-                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
-                double vzjl_20 = goutz[3]*dm_ik_00 + goutz[4]*dm_ik_40;
-                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
-                double vxjl_30 = goutx[5]*dm_ik_20;
-                atomicAdd(vk_x+(j0+3)*nao+(l0+0), vxjl_30);
-                double vyjl_30 = gouty[5]*dm_ik_20;
-                atomicAdd(vk_y+(j0+3)*nao+(l0+0), vyjl_30);
-                double vzjl_30 = goutz[5]*dm_ik_20;
-                atomicAdd(vk_z+(j0+3)*nao+(l0+0), vzjl_30);
-                double vxjl_40 = goutx[6]*dm_ik_00 + goutx[7]*dm_ik_40;
-                atomicAdd(vk_x+(j0+4)*nao+(l0+0), vxjl_40);
-                double vyjl_40 = gouty[6]*dm_ik_00 + gouty[7]*dm_ik_40;
-                atomicAdd(vk_y+(j0+4)*nao+(l0+0), vyjl_40);
-                double vzjl_40 = goutz[6]*dm_ik_00 + goutz[7]*dm_ik_40;
-                atomicAdd(vk_z+(j0+4)*nao+(l0+0), vzjl_40);
-                double vxjl_50 = goutx[8]*dm_ik_20;
-                atomicAdd(vk_x+(j0+5)*nao+(l0+0), vxjl_50);
-                double vyjl_50 = gouty[8]*dm_ik_20;
-                atomicAdd(vk_y+(j0+5)*nao+(l0+0), vyjl_50);
-                double vzjl_50 = goutz[8]*dm_ik_20;
-                atomicAdd(vk_z+(j0+5)*nao+(l0+0), vzjl_50);
-                break; }
-                case 1: {
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
-                double dm_ik_50 = dm[(i0+5)*nao+(k0+0)];
-                double vxjl_00 = goutx[0]*dm_ik_10 + goutx[1]*dm_ik_50;
-                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
-                double vyjl_00 = gouty[0]*dm_ik_10 + gouty[1]*dm_ik_50;
-                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
-                double vzjl_00 = goutz[0]*dm_ik_10 + goutz[1]*dm_ik_50;
-                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
-                double dm_ik_30 = dm[(i0+3)*nao+(k0+0)];
-                double vxjl_10 = goutx[2]*dm_ik_30;
-                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
-                double vyjl_10 = gouty[2]*dm_ik_30;
-                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
-                double vzjl_10 = goutz[2]*dm_ik_30;
-                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
-                double vxjl_20 = goutx[3]*dm_ik_10 + goutx[4]*dm_ik_50;
-                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
-                double vyjl_20 = gouty[3]*dm_ik_10 + gouty[4]*dm_ik_50;
-                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
-                double vzjl_20 = goutz[3]*dm_ik_10 + goutz[4]*dm_ik_50;
-                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
-                double vxjl_30 = goutx[5]*dm_ik_30;
-                atomicAdd(vk_x+(j0+3)*nao+(l0+0), vxjl_30);
-                double vyjl_30 = gouty[5]*dm_ik_30;
-                atomicAdd(vk_y+(j0+3)*nao+(l0+0), vyjl_30);
-                double vzjl_30 = goutz[5]*dm_ik_30;
-                atomicAdd(vk_z+(j0+3)*nao+(l0+0), vzjl_30);
-                double vxjl_40 = goutx[6]*dm_ik_10 + goutx[7]*dm_ik_50;
-                atomicAdd(vk_x+(j0+4)*nao+(l0+0), vxjl_40);
-                double vyjl_40 = gouty[6]*dm_ik_10 + gouty[7]*dm_ik_50;
-                atomicAdd(vk_y+(j0+4)*nao+(l0+0), vyjl_40);
-                double vzjl_40 = goutz[6]*dm_ik_10 + goutz[7]*dm_ik_50;
-                atomicAdd(vk_z+(j0+4)*nao+(l0+0), vzjl_40);
-                double vxjl_50 = goutx[8]*dm_ik_30;
-                atomicAdd(vk_x+(j0+5)*nao+(l0+0), vxjl_50);
-                double vyjl_50 = gouty[8]*dm_ik_30;
-                atomicAdd(vk_y+(j0+5)*nao+(l0+0), vyjl_50);
-                double vzjl_50 = goutz[8]*dm_ik_30;
-                atomicAdd(vk_z+(j0+5)*nao+(l0+0), vzjl_50);
-                break; }
-                case 2: {
                 double dm_ik_20 = dm[(i0+2)*nao+(k0+0)];
-                double vxjl_00 = goutx[0]*dm_ik_20;
-                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
-                double vyjl_00 = gouty[0]*dm_ik_20;
-                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
-                double vzjl_00 = goutz[0]*dm_ik_20;
-                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
-                double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
-                double dm_ik_40 = dm[(i0+4)*nao+(k0+0)];
-                double vxjl_10 = goutx[1]*dm_ik_00 + goutx[2]*dm_ik_40;
-                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
-                double vyjl_10 = gouty[1]*dm_ik_00 + gouty[2]*dm_ik_40;
-                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
-                double vzjl_10 = goutz[1]*dm_ik_00 + goutz[2]*dm_ik_40;
-                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
-                double vxjl_20 = goutx[3]*dm_ik_20;
-                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
-                double vyjl_20 = gouty[3]*dm_ik_20;
-                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
-                double vzjl_20 = goutz[3]*dm_ik_20;
-                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
-                double vxjl_30 = goutx[4]*dm_ik_00 + goutx[5]*dm_ik_40;
-                atomicAdd(vk_x+(j0+3)*nao+(l0+0), vxjl_30);
-                double vyjl_30 = gouty[4]*dm_ik_00 + gouty[5]*dm_ik_40;
-                atomicAdd(vk_y+(j0+3)*nao+(l0+0), vyjl_30);
-                double vzjl_30 = goutz[4]*dm_ik_00 + goutz[5]*dm_ik_40;
-                atomicAdd(vk_z+(j0+3)*nao+(l0+0), vzjl_30);
-                double vxjl_40 = goutx[6]*dm_ik_20;
-                atomicAdd(vk_x+(j0+4)*nao+(l0+0), vxjl_40);
-                double vyjl_40 = gouty[6]*dm_ik_20;
-                atomicAdd(vk_y+(j0+4)*nao+(l0+0), vyjl_40);
-                double vzjl_40 = goutz[6]*dm_ik_20;
-                atomicAdd(vk_z+(j0+4)*nao+(l0+0), vzjl_40);
-                double vxjl_50 = goutx[7]*dm_ik_00 + goutx[8]*dm_ik_40;
-                atomicAdd(vk_x+(j0+5)*nao+(l0+0), vxjl_50);
-                double vyjl_50 = gouty[7]*dm_ik_00 + gouty[8]*dm_ik_40;
-                atomicAdd(vk_y+(j0+5)*nao+(l0+0), vyjl_50);
-                double vzjl_50 = goutz[7]*dm_ik_00 + goutz[8]*dm_ik_40;
-                atomicAdd(vk_z+(j0+5)*nao+(l0+0), vzjl_50);
-                break; }
-                case 3: {
                 double dm_ik_30 = dm[(i0+3)*nao+(k0+0)];
-                double vxjl_00 = goutx[0]*dm_ik_30;
-                atomicAdd(vk_x+(j0+0)*nao+(l0+0), vxjl_00);
-                double vyjl_00 = gouty[0]*dm_ik_30;
-                atomicAdd(vk_y+(j0+0)*nao+(l0+0), vyjl_00);
-                double vzjl_00 = goutz[0]*dm_ik_30;
-                atomicAdd(vk_z+(j0+0)*nao+(l0+0), vzjl_00);
-                double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
+                double dm_ik_40 = dm[(i0+4)*nao+(k0+0)];
                 double dm_ik_50 = dm[(i0+5)*nao+(k0+0)];
-                double vxjl_10 = goutx[1]*dm_ik_10 + goutx[2]*dm_ik_50;
-                atomicAdd(vk_x+(j0+1)*nao+(l0+0), vxjl_10);
-                double vyjl_10 = gouty[1]*dm_ik_10 + gouty[2]*dm_ik_50;
-                atomicAdd(vk_y+(j0+1)*nao+(l0+0), vyjl_10);
-                double vzjl_10 = goutz[1]*dm_ik_10 + goutz[2]*dm_ik_50;
-                atomicAdd(vk_z+(j0+1)*nao+(l0+0), vzjl_10);
-                double vxjl_20 = goutx[3]*dm_ik_30;
-                atomicAdd(vk_x+(j0+2)*nao+(l0+0), vxjl_20);
-                double vyjl_20 = gouty[3]*dm_ik_30;
-                atomicAdd(vk_y+(j0+2)*nao+(l0+0), vyjl_20);
-                double vzjl_20 = goutz[3]*dm_ik_30;
-                atomicAdd(vk_z+(j0+2)*nao+(l0+0), vzjl_20);
-                double vxjl_30 = goutx[4]*dm_ik_10 + goutx[5]*dm_ik_50;
+                double vxjl_30 = goutx[0]*dm_ik_00 + goutx[1]*dm_ik_10 + goutx[2]*dm_ik_20 + goutx[3]*dm_ik_30 + goutx[4]*dm_ik_40 + goutx[5]*dm_ik_50;
                 atomicAdd(vk_x+(j0+3)*nao+(l0+0), vxjl_30);
-                double vyjl_30 = gouty[4]*dm_ik_10 + gouty[5]*dm_ik_50;
+                double vyjl_30 = gouty[0]*dm_ik_00 + gouty[1]*dm_ik_10 + gouty[2]*dm_ik_20 + gouty[3]*dm_ik_30 + gouty[4]*dm_ik_40 + gouty[5]*dm_ik_50;
                 atomicAdd(vk_y+(j0+3)*nao+(l0+0), vyjl_30);
-                double vzjl_30 = goutz[4]*dm_ik_10 + goutz[5]*dm_ik_50;
+                double vzjl_30 = goutz[0]*dm_ik_00 + goutz[1]*dm_ik_10 + goutz[2]*dm_ik_20 + goutz[3]*dm_ik_30 + goutz[4]*dm_ik_40 + goutz[5]*dm_ik_50;
                 atomicAdd(vk_z+(j0+3)*nao+(l0+0), vzjl_30);
-                double vxjl_40 = goutx[6]*dm_ik_30;
+                double vxjl_40 = goutx[6]*dm_ik_00 + goutx[7]*dm_ik_10 + goutx[8]*dm_ik_20 + goutx[9]*dm_ik_30 + goutx[10]*dm_ik_40 + goutx[11]*dm_ik_50;
                 atomicAdd(vk_x+(j0+4)*nao+(l0+0), vxjl_40);
-                double vyjl_40 = gouty[6]*dm_ik_30;
+                double vyjl_40 = gouty[6]*dm_ik_00 + gouty[7]*dm_ik_10 + gouty[8]*dm_ik_20 + gouty[9]*dm_ik_30 + gouty[10]*dm_ik_40 + gouty[11]*dm_ik_50;
                 atomicAdd(vk_y+(j0+4)*nao+(l0+0), vyjl_40);
-                double vzjl_40 = goutz[6]*dm_ik_30;
+                double vzjl_40 = goutz[6]*dm_ik_00 + goutz[7]*dm_ik_10 + goutz[8]*dm_ik_20 + goutz[9]*dm_ik_30 + goutz[10]*dm_ik_40 + goutz[11]*dm_ik_50;
                 atomicAdd(vk_z+(j0+4)*nao+(l0+0), vzjl_40);
-                double vxjl_50 = goutx[7]*dm_ik_10 + goutx[8]*dm_ik_50;
+                double vxjl_50 = goutx[12]*dm_ik_00 + goutx[13]*dm_ik_10 + goutx[14]*dm_ik_20 + goutx[15]*dm_ik_30 + goutx[16]*dm_ik_40 + goutx[17]*dm_ik_50;
                 atomicAdd(vk_x+(j0+5)*nao+(l0+0), vxjl_50);
-                double vyjl_50 = gouty[7]*dm_ik_10 + gouty[8]*dm_ik_50;
+                double vyjl_50 = gouty[12]*dm_ik_00 + gouty[13]*dm_ik_10 + gouty[14]*dm_ik_20 + gouty[15]*dm_ik_30 + gouty[16]*dm_ik_40 + gouty[17]*dm_ik_50;
                 atomicAdd(vk_y+(j0+5)*nao+(l0+0), vyjl_50);
-                double vzjl_50 = goutz[7]*dm_ik_10 + goutz[8]*dm_ik_50;
+                double vzjl_50 = goutz[12]*dm_ik_00 + goutz[13]*dm_ik_10 + goutz[14]*dm_ik_20 + goutz[15]*dm_ik_30 + goutz[16]*dm_ik_40 + goutz[17]*dm_ik_50;
                 atomicAdd(vk_z+(j0+5)*nao+(l0+0), vzjl_50);
-                break; }
-                }
-                switch (gout_id) {
-                case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
-                double dm_il_40 = dm[(i0+4)*nao+(l0+0)];
-                double vxjk_00 = goutx[0]*dm_il_00 + goutx[1]*dm_il_40;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
-                double vyjk_00 = gouty[0]*dm_il_00 + gouty[1]*dm_il_40;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
-                double vzjk_00 = goutz[0]*dm_il_00 + goutz[1]*dm_il_40;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double dm_il_20 = dm[(i0+2)*nao+(l0+0)];
-                double vxjk_10 = goutx[2]*dm_il_20;
-                atomicAdd(vk_x+(j0+1)*nao+(k0+0), vxjk_10);
-                double vyjk_10 = gouty[2]*dm_il_20;
-                atomicAdd(vk_y+(j0+1)*nao+(k0+0), vyjk_10);
-                double vzjk_10 = goutz[2]*dm_il_20;
-                atomicAdd(vk_z+(j0+1)*nao+(k0+0), vzjk_10);
-                double vxjk_20 = goutx[3]*dm_il_00 + goutx[4]*dm_il_40;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+0), vxjk_20);
-                double vyjk_20 = gouty[3]*dm_il_00 + gouty[4]*dm_il_40;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+0), vyjk_20);
-                double vzjk_20 = goutz[3]*dm_il_00 + goutz[4]*dm_il_40;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+0), vzjk_20);
-                double vxjk_30 = goutx[5]*dm_il_20;
-                atomicAdd(vk_x+(j0+3)*nao+(k0+0), vxjk_30);
-                double vyjk_30 = gouty[5]*dm_il_20;
-                atomicAdd(vk_y+(j0+3)*nao+(k0+0), vyjk_30);
-                double vzjk_30 = goutz[5]*dm_il_20;
-                atomicAdd(vk_z+(j0+3)*nao+(k0+0), vzjk_30);
-                double vxjk_40 = goutx[6]*dm_il_00 + goutx[7]*dm_il_40;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+0), vxjk_40);
-                double vyjk_40 = gouty[6]*dm_il_00 + gouty[7]*dm_il_40;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+0), vyjk_40);
-                double vzjk_40 = goutz[6]*dm_il_00 + goutz[7]*dm_il_40;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+0), vzjk_40);
-                double vxjk_50 = goutx[8]*dm_il_20;
-                atomicAdd(vk_x+(j0+5)*nao+(k0+0), vxjk_50);
-                double vyjk_50 = gouty[8]*dm_il_20;
-                atomicAdd(vk_y+(j0+5)*nao+(k0+0), vyjk_50);
-                double vzjk_50 = goutz[8]*dm_il_20;
-                atomicAdd(vk_z+(j0+5)*nao+(k0+0), vzjk_50);
-                break; }
-                case 1: {
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
-                double dm_il_50 = dm[(i0+5)*nao+(l0+0)];
-                double vxjk_00 = goutx[0]*dm_il_10 + goutx[1]*dm_il_50;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
-                double vyjk_00 = gouty[0]*dm_il_10 + gouty[1]*dm_il_50;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
-                double vzjk_00 = goutz[0]*dm_il_10 + goutz[1]*dm_il_50;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double dm_il_30 = dm[(i0+3)*nao+(l0+0)];
-                double vxjk_10 = goutx[2]*dm_il_30;
-                atomicAdd(vk_x+(j0+1)*nao+(k0+0), vxjk_10);
-                double vyjk_10 = gouty[2]*dm_il_30;
-                atomicAdd(vk_y+(j0+1)*nao+(k0+0), vyjk_10);
-                double vzjk_10 = goutz[2]*dm_il_30;
-                atomicAdd(vk_z+(j0+1)*nao+(k0+0), vzjk_10);
-                double vxjk_20 = goutx[3]*dm_il_10 + goutx[4]*dm_il_50;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+0), vxjk_20);
-                double vyjk_20 = gouty[3]*dm_il_10 + gouty[4]*dm_il_50;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+0), vyjk_20);
-                double vzjk_20 = goutz[3]*dm_il_10 + goutz[4]*dm_il_50;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+0), vzjk_20);
-                double vxjk_30 = goutx[5]*dm_il_30;
-                atomicAdd(vk_x+(j0+3)*nao+(k0+0), vxjk_30);
-                double vyjk_30 = gouty[5]*dm_il_30;
-                atomicAdd(vk_y+(j0+3)*nao+(k0+0), vyjk_30);
-                double vzjk_30 = goutz[5]*dm_il_30;
-                atomicAdd(vk_z+(j0+3)*nao+(k0+0), vzjk_30);
-                double vxjk_40 = goutx[6]*dm_il_10 + goutx[7]*dm_il_50;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+0), vxjk_40);
-                double vyjk_40 = gouty[6]*dm_il_10 + gouty[7]*dm_il_50;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+0), vyjk_40);
-                double vzjk_40 = goutz[6]*dm_il_10 + goutz[7]*dm_il_50;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+0), vzjk_40);
-                double vxjk_50 = goutx[8]*dm_il_30;
-                atomicAdd(vk_x+(j0+5)*nao+(k0+0), vxjk_50);
-                double vyjk_50 = gouty[8]*dm_il_30;
-                atomicAdd(vk_y+(j0+5)*nao+(k0+0), vyjk_50);
-                double vzjk_50 = goutz[8]*dm_il_30;
-                atomicAdd(vk_z+(j0+5)*nao+(k0+0), vzjk_50);
-                break; }
-                case 2: {
                 double dm_il_20 = dm[(i0+2)*nao+(l0+0)];
-                double vxjk_00 = goutx[0]*dm_il_20;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
-                double vyjk_00 = gouty[0]*dm_il_20;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
-                double vzjk_00 = goutz[0]*dm_il_20;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
-                double dm_il_40 = dm[(i0+4)*nao+(l0+0)];
-                double vxjk_10 = goutx[1]*dm_il_00 + goutx[2]*dm_il_40;
-                atomicAdd(vk_x+(j0+1)*nao+(k0+0), vxjk_10);
-                double vyjk_10 = gouty[1]*dm_il_00 + gouty[2]*dm_il_40;
-                atomicAdd(vk_y+(j0+1)*nao+(k0+0), vyjk_10);
-                double vzjk_10 = goutz[1]*dm_il_00 + goutz[2]*dm_il_40;
-                atomicAdd(vk_z+(j0+1)*nao+(k0+0), vzjk_10);
-                double vxjk_20 = goutx[3]*dm_il_20;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+0), vxjk_20);
-                double vyjk_20 = gouty[3]*dm_il_20;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+0), vyjk_20);
-                double vzjk_20 = goutz[3]*dm_il_20;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+0), vzjk_20);
-                double vxjk_30 = goutx[4]*dm_il_00 + goutx[5]*dm_il_40;
-                atomicAdd(vk_x+(j0+3)*nao+(k0+0), vxjk_30);
-                double vyjk_30 = gouty[4]*dm_il_00 + gouty[5]*dm_il_40;
-                atomicAdd(vk_y+(j0+3)*nao+(k0+0), vyjk_30);
-                double vzjk_30 = goutz[4]*dm_il_00 + goutz[5]*dm_il_40;
-                atomicAdd(vk_z+(j0+3)*nao+(k0+0), vzjk_30);
-                double vxjk_40 = goutx[6]*dm_il_20;
-                atomicAdd(vk_x+(j0+4)*nao+(k0+0), vxjk_40);
-                double vyjk_40 = gouty[6]*dm_il_20;
-                atomicAdd(vk_y+(j0+4)*nao+(k0+0), vyjk_40);
-                double vzjk_40 = goutz[6]*dm_il_20;
-                atomicAdd(vk_z+(j0+4)*nao+(k0+0), vzjk_40);
-                double vxjk_50 = goutx[7]*dm_il_00 + goutx[8]*dm_il_40;
-                atomicAdd(vk_x+(j0+5)*nao+(k0+0), vxjk_50);
-                double vyjk_50 = gouty[7]*dm_il_00 + gouty[8]*dm_il_40;
-                atomicAdd(vk_y+(j0+5)*nao+(k0+0), vyjk_50);
-                double vzjk_50 = goutz[7]*dm_il_00 + goutz[8]*dm_il_40;
-                atomicAdd(vk_z+(j0+5)*nao+(k0+0), vzjk_50);
-                break; }
-                case 3: {
                 double dm_il_30 = dm[(i0+3)*nao+(l0+0)];
-                double vxjk_00 = goutx[0]*dm_il_30;
-                atomicAdd(vk_x+(j0+0)*nao+(k0+0), vxjk_00);
-                double vyjk_00 = gouty[0]*dm_il_30;
-                atomicAdd(vk_y+(j0+0)*nao+(k0+0), vyjk_00);
-                double vzjk_00 = goutz[0]*dm_il_30;
-                atomicAdd(vk_z+(j0+0)*nao+(k0+0), vzjk_00);
-                double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
+                double dm_il_40 = dm[(i0+4)*nao+(l0+0)];
                 double dm_il_50 = dm[(i0+5)*nao+(l0+0)];
-                double vxjk_10 = goutx[1]*dm_il_10 + goutx[2]*dm_il_50;
-                atomicAdd(vk_x+(j0+1)*nao+(k0+0), vxjk_10);
-                double vyjk_10 = gouty[1]*dm_il_10 + gouty[2]*dm_il_50;
-                atomicAdd(vk_y+(j0+1)*nao+(k0+0), vyjk_10);
-                double vzjk_10 = goutz[1]*dm_il_10 + goutz[2]*dm_il_50;
-                atomicAdd(vk_z+(j0+1)*nao+(k0+0), vzjk_10);
-                double vxjk_20 = goutx[3]*dm_il_30;
-                atomicAdd(vk_x+(j0+2)*nao+(k0+0), vxjk_20);
-                double vyjk_20 = gouty[3]*dm_il_30;
-                atomicAdd(vk_y+(j0+2)*nao+(k0+0), vyjk_20);
-                double vzjk_20 = goutz[3]*dm_il_30;
-                atomicAdd(vk_z+(j0+2)*nao+(k0+0), vzjk_20);
-                double vxjk_30 = goutx[4]*dm_il_10 + goutx[5]*dm_il_50;
+                double vxjk_30 = goutx[0]*dm_il_00 + goutx[1]*dm_il_10 + goutx[2]*dm_il_20 + goutx[3]*dm_il_30 + goutx[4]*dm_il_40 + goutx[5]*dm_il_50;
                 atomicAdd(vk_x+(j0+3)*nao+(k0+0), vxjk_30);
-                double vyjk_30 = gouty[4]*dm_il_10 + gouty[5]*dm_il_50;
+                double vyjk_30 = gouty[0]*dm_il_00 + gouty[1]*dm_il_10 + gouty[2]*dm_il_20 + gouty[3]*dm_il_30 + gouty[4]*dm_il_40 + gouty[5]*dm_il_50;
                 atomicAdd(vk_y+(j0+3)*nao+(k0+0), vyjk_30);
-                double vzjk_30 = goutz[4]*dm_il_10 + goutz[5]*dm_il_50;
+                double vzjk_30 = goutz[0]*dm_il_00 + goutz[1]*dm_il_10 + goutz[2]*dm_il_20 + goutz[3]*dm_il_30 + goutz[4]*dm_il_40 + goutz[5]*dm_il_50;
                 atomicAdd(vk_z+(j0+3)*nao+(k0+0), vzjk_30);
-                double vxjk_40 = goutx[6]*dm_il_30;
+                double vxjk_40 = goutx[6]*dm_il_00 + goutx[7]*dm_il_10 + goutx[8]*dm_il_20 + goutx[9]*dm_il_30 + goutx[10]*dm_il_40 + goutx[11]*dm_il_50;
                 atomicAdd(vk_x+(j0+4)*nao+(k0+0), vxjk_40);
-                double vyjk_40 = gouty[6]*dm_il_30;
+                double vyjk_40 = gouty[6]*dm_il_00 + gouty[7]*dm_il_10 + gouty[8]*dm_il_20 + gouty[9]*dm_il_30 + gouty[10]*dm_il_40 + gouty[11]*dm_il_50;
                 atomicAdd(vk_y+(j0+4)*nao+(k0+0), vyjk_40);
-                double vzjk_40 = goutz[6]*dm_il_30;
+                double vzjk_40 = goutz[6]*dm_il_00 + goutz[7]*dm_il_10 + goutz[8]*dm_il_20 + goutz[9]*dm_il_30 + goutz[10]*dm_il_40 + goutz[11]*dm_il_50;
                 atomicAdd(vk_z+(j0+4)*nao+(k0+0), vzjk_40);
-                double vxjk_50 = goutx[7]*dm_il_10 + goutx[8]*dm_il_50;
+                double vxjk_50 = goutx[12]*dm_il_00 + goutx[13]*dm_il_10 + goutx[14]*dm_il_20 + goutx[15]*dm_il_30 + goutx[16]*dm_il_40 + goutx[17]*dm_il_50;
                 atomicAdd(vk_x+(j0+5)*nao+(k0+0), vxjk_50);
-                double vyjk_50 = gouty[7]*dm_il_10 + gouty[8]*dm_il_50;
+                double vyjk_50 = gouty[12]*dm_il_00 + gouty[13]*dm_il_10 + gouty[14]*dm_il_20 + gouty[15]*dm_il_30 + gouty[16]*dm_il_40 + gouty[17]*dm_il_50;
                 atomicAdd(vk_y+(j0+5)*nao+(k0+0), vyjk_50);
-                double vzjk_50 = goutz[7]*dm_il_10 + goutz[8]*dm_il_50;
+                double vzjk_50 = goutz[12]*dm_il_00 + goutz[13]*dm_il_10 + goutz[14]*dm_il_20 + goutz[15]*dm_il_30 + goutz[16]*dm_il_40 + goutz[17]*dm_il_50;
                 atomicAdd(vk_z+(j0+5)*nao+(k0+0), vzjk_50);
-                break; }
-                }
             }
         }
     }
@@ -33773,8 +33972,6 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         gout_stride = 4;
         break;
     case 60: // (0, 2, 2, 0)
-        nsq_per_block = 64;
-        gout_stride = 4;
         break;
     case 125: // (1, 0, 0, 0)
         adjust_threads(rys_vjk_ip1_1000, nsq_per_block);
@@ -33824,8 +34021,6 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         gout_stride = 4;
         break;
     case 260: // (2, 0, 2, 0)
-        nsq_per_block = 64;
-        gout_stride = 4;
         break;
     case 275: // (2, 1, 0, 0)
         adjust_threads(rys_vjk_ip1_2100, nsq_per_block);
@@ -33835,8 +34030,6 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         gout_stride = 4;
         break;
     case 300: // (2, 2, 0, 0)
-        nsq_per_block = 64;
-        gout_stride = 4;
         break;
     }
 
@@ -33890,7 +34083,6 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         rys_vjk_ip1_0211<<<workers, threads, buflen*sizeof(double)>>>(
             *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 60: // (0, 2, 2, 0)
-        buflen = 4608 + iprim * jprim;
         rys_vjk_ip1_0220<<<workers, threads, buflen*sizeof(double)>>>(
             *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 125: // (1, 0, 0, 0)
@@ -33941,7 +34133,6 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         rys_vjk_ip1_2011<<<workers, threads, buflen*sizeof(double)>>>(
             *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 260: // (2, 0, 2, 0)
-        buflen = 3456 + iprim * jprim;
         rys_vjk_ip1_2020<<<workers, threads, buflen*sizeof(double)>>>(
             *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 275: // (2, 1, 0, 0)
@@ -33952,7 +34143,6 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         rys_vjk_ip1_2110<<<workers, threads, buflen*sizeof(double)>>>(
             *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 300: // (2, 2, 0, 0)
-        buflen = 3456 + iprim * jprim;
         rys_vjk_ip1_2200<<<workers, threads, buflen*sizeof(double)>>>(
             *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     default: return 0;
