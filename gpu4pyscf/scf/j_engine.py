@@ -125,7 +125,7 @@ class _VHFOpt(jk._VHFOpt):
         ll = ls[:,None] + ls
         ll = ll.ravel()[pair_lst] # drops the pairs that do not contribute to integrals
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
-        pair_loc_gpu = cp.cumsum(cp.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
+        pair_loc_gpu = cp.cumsum(cp.append(cp.zeros(1, dtype=np.int32), xyz_size.ravel()), dtype=np.int32)
         xyz_size = ls = ll = None
 
         pair_lst = np.asarray(pair_lst.get(), dtype=np.int32)

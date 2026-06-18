@@ -259,6 +259,28 @@ class KnownValues(unittest.TestCase):
         e2 = mfs(atom_coords)
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
 
+    def test_rsjk_df_mixed_krhf_grad(self):
+        cell = gto.Cell()
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]
+        cell.a = '''
+        0.00, 3.37, 3.37
+        3.37, 0.00, 3.37
+        3.37, 3.37, 0.00'''
+        cell.basis = [[0, [3., 1]], [0, [.8, 1]], [1, [.8, 1]]]
+        cell.unit = 'bohr'
+        cell.build()
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KRHF(kpts=kpts).to_gpu().density_fit()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(g[1,2], 0.042341071658407975, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.16254422558624573, 6)
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'The meaning of get_hcore in *.pbc.grad has been changed in pyscf==2.12. It doesn\'t include pseudopotential nonlocal term anymore.')
     def test_hcore(self):

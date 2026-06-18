@@ -28,8 +28,9 @@ from gpu4pyscf.hessian.rhf import _ao2mo
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
-                                       reduce_to_device, transpose_sum, take_last2d, batched_vec3_norm2)
+from gpu4pyscf.lib.cupy_helper import (
+    contract, add_sparse, get_avail_mem, reduce_to_device, transpose_sum,
+    take_last2d, batched_vec_norm2)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import num_devices, min_grid_blksize
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD, _contract_rho1_fxc
@@ -231,7 +232,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
 
             mo_coeff_mask = mo_coeff[mask,:]
             rho = numint.eval_rho2(_sorted_mol, ao[0], mo_coeff_mask, mo_occ, mask, xctype, buf=aow_buf, out=rho)
-            vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype)[1][0]
+            vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype, spin=0)[1][0]
             wv = cupy.multiply(weight, vxc, out=vxc)
             aow  = cupy.ndarray((nao_sub, blk_size), memptr=aow_buf.data)
             aow = numint._scale_ao(ao[0], wv, out=aow)
@@ -260,7 +261,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
 
             mo_coeff_mask = mo_coeff[mask,:]
             rho = numint.eval_rho2(_sorted_mol, ao[:4], mo_coeff_mask, mo_occ, mask, xctype, buf=aow_buf, out=rho)
-            vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype)[1]
+            vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype, spin=0)[1]
             wv = cupy.multiply(weight, vxc, out=vxc)
             aow  = cupy.ndarray((nao_sub, blk_size), memptr=aow_buf.data)
             aow = numint._scale_ao(ao[:4], wv[:4], out=aow)
@@ -295,7 +296,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
 
             mo_coeff_mask = mo_coeff[mask,:]
             rho = numint.eval_rho2(_sorted_mol, ao[:10], mo_coeff_mask, mo_occ, mask, xctype, buf=aow_buf, out=rho)
-            vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype)[1]
+            vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype, spin=0)[1]
             wv = cupy.multiply(weight, vxc, out=vxc)
             wv[4] *= .5  # for the factor 1/2 in tau
             aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
@@ -457,7 +458,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
                 rho = numint.eval_rho2(_sorted_mol, ao1[0], mo_coeff, mo_occ, mask, xctype, buf=aow_buf, out=rho)
                 t1 = log.timer_debug2('eval rho', *t1)
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
+                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
                 wv1 = cupy.multiply(weight, vxc[0], out=vxc[0])
                 wf = cupy.multiply(weight, fxc[0,0], out=fxc[0,0])
@@ -514,7 +515,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 ao = contract('nip,ij->njp', ao_mask, coeff[mask], out=ao1)
                 rho = numint.eval_rho2(_sorted_mol, ao[:4], mo_coeff, mo_occ, mask, xctype, buf=aow_buf, out=rho)
                 t1 = log.timer_debug2('eval rho', *t1)
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
+                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
                 wv1 = cupy.multiply(weight, vxc, out=vxc)
                 wf = cupy.multiply(weight, fxc, out=fxc)
@@ -574,7 +575,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 ao = contract('nip,ij->njp', ao_mask, coeff[mask], out=ao1)
                 rho = numint.eval_rho2(_sorted_mol, ao[:10], mo_coeff, mo_occ, mask, xctype, buf=aow_buf, out=rho)
                 t1 = log.timer_debug2('eval rho', *t1)
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
+                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
                 wv1 = cupy.multiply(weight, vxc, out=vxc)
                 wf = cupy.multiply(weight, fxc, out=fxc)
@@ -802,8 +803,8 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
-    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     stream = cupy.cuda.get_current_stream()
 
@@ -1307,7 +1308,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 rho = numint.eval_rho2(_sorted_mol, ao1[0], mo_coeff, mo_occ, mask, xctype, buf=aow_buf, out=rho)
 
                 t1 = log.timer_debug2('eval rho', *t1)
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
+                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
                 wv1 = cupy.multiply(weight, vxc[0], out=vxc[0])
                 wf = cupy.multiply(weight, fxc[0,0], out=fxc[0,0])
@@ -1355,7 +1356,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 ao1 = contract('nip,ij->njp', ao, coeff[mask], out=ao1)
                 rho = numint.eval_rho2(_sorted_mol, ao1[:4], mo_coeff, mo_occ, mask, xctype, buf=aow_buf, out=rho)
                 t1 = log.timer_debug2('eval rho', *t1)
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
+                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
@@ -1404,7 +1405,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 ao1 = contract('nip,ij->njp', ao, coeff[mask], out=ao1)
                 rho = numint.eval_rho2(_sorted_mol, ao1[:10], mo_coeff, mo_occ, mask, xctype, buf=aow_buf, out=rho)
                 t1 = log.timer_debug2('eval rho', *t1)
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype)[1:3]
+                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t0)
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wf = cupy.multiply(weight, fxc, out=fxc)
@@ -1559,7 +1560,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             mocc_masked = mocc_sorted[idx, :]
 
             rho = numint.eval_rho(_sorted_mol, ao[0], dm0_masked, xctype = xctype, hermi = 1)
-            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[1:3]
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype, spin=0)[1:3]
             del rho
 
             depsilon_drho = vxc[0] # Just of shape (ngrids,)
@@ -1634,7 +1635,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             mocc_masked = mocc_sorted[idx, :]
 
             rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
-            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[1:3]
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype, spin=0)[1:3]
             del rho
 
             dw_dA = get_dweight_dA(_sorted_mol, grids, (g0,g1))
@@ -1745,7 +1746,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             mocc_masked = mocc_sorted[idx, :]
 
             rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
-            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[1:3]
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype, spin=0)[1:3]
             del rho
 
             dw_dA = get_dweight_dA(_sorted_mol, grids, (g0,g1))
@@ -2121,8 +2122,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
-    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     stream = cupy.cuda.get_current_stream()
 
@@ -3237,9 +3238,9 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
             rho = numint.eval_rho(_sorted_mol, ao, dm0_masked, xctype = xctype, hermi = 1)
-            exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype)[0]
+            exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype, spin=0)[0]
 
-            epsilon = exc[:, 0] * rho
+            epsilon = exc * rho
             del rho, exc
 
             d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0,g1))
@@ -3265,7 +3266,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
 
             rho = numint.eval_rho(_sorted_mol, ao[0], dm0_masked, xctype = xctype, hermi = 1)
-            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype = xctype)[1:3]
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype = xctype, spin=0)[1:3]
             del rho
 
             depsilon_drho = vxc[0]
@@ -3314,9 +3315,9 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
             rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
-            exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype)[0]
+            exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype, spin=0)[0]
 
-            epsilon = exc[:, 0] * rho[0, :]
+            epsilon = exc * rho[0, :]
             del rho, exc
 
             d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0,g1))
@@ -3343,7 +3344,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
 
             rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
-            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype = xctype)[1:3]
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype = xctype, spin=0)[1:3]
             del rho
 
             depsilon_drho = vxc[0]
@@ -3399,9 +3400,9 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
             rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
-            exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype)[0]
+            exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype, spin=0)[0]
 
-            epsilon = exc[:, 0] * rho[0, :]
+            epsilon = exc * rho[0, :]
             del rho, exc
 
             d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0,g1))
@@ -3428,7 +3429,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
 
             rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
-            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype = xctype)[1:3]
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype = xctype, spin=0)[1:3]
             del rho
 
             depsilon_drho = vxc[0]
@@ -3696,7 +3697,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     stream = cupy.cuda.get_current_stream()
 

@@ -108,6 +108,9 @@ class Mole(lib.StreamObject):
         
         self.atheat = None     # Heat of formation term
         self.unit = kwargs.get('unit', 'Angstrom')
+        # Point group symmetry is not supported for the semi-empirical Mole.
+        # The attribute is kept for API compatibility with the geometry optimizer.
+        self.symmetry = False
         self._check_input(kwargs)
         self.BOHR = kwargs.get('BOHR', 0.529177210903)
         self.HARTREE2EV = kwargs.get('HARTREE2EV', 27.211386245988)
@@ -410,6 +413,96 @@ class Mole(lib.StreamObject):
     def atom_charge(self, atom_id):
         """Returns nuclear charge Z for a given atom index."""
         return self._atom_ids[atom_id]
+
+    def atom_charges(self):
+        """Returns the array of nuclear charges Z for all atoms."""
+        return self._atom_ids
+
+    def atom_symbol(self, atom_id):
+        """Returns the element symbol for a given atom index."""
+        return elements._symbol(int(self._atom_ids[atom_id]))
+
+    def atom_pure_symbol(self, atom_id):
+        """Returns the element symbol (without special characters) for a given atom index."""
+        return elements._symbol(int(self._atom_ids[atom_id]))
+
+    @property
+    def ao_loc(self):
+        """
+        AO location pointer (natm+1,), consistent with the orbital slices.
+        Used as a fingerprint of the basis layout in the SCF scanner.
+        """
+        loc = np.zeros(self.natm + 1, dtype=np.int32)
+        loc[1:] = self._aoslice[:, 1]
+        return loc
+
+    def copy(self, deep=False):
+        """
+        Returns a copy of the Mole object.
+
+        Kwargs:
+            deep : bool
+                When False (default), a shallow copy is returned. Because
+                :meth:`build` reassigns (rather than mutates in place) all of
+                the derived arrays, a shallow copy is sufficient to obtain an
+                independent geometry without duplicating the GPU arrays.
+        """
+        import copy as _copy
+        if deep:
+            newmol = _copy.deepcopy(self)
+        else:
+            newmol = _copy.copy(self)
+        return newmol
+
+    def set_geom_(self, atoms_or_coords, unit=None, inplace=True):
+        """
+        Update the molecular geometry and rebuild the model.
+
+        Args:
+            atoms_or_coords : list, str, or numpy.ndarray
+                When specified in list or str, it is processed as the Mole.atom
+                attribute. When a (natm, 3) numpy array is provided, the array
+                represents the Cartesian coordinates of the atoms.
+
+        Kwargs:
+            unit : str
+                The unit for the input `atoms_or_coords`. If specified, mol.unit
+                is updated to this value; otherwise the current mol.unit is used.
+            inplace : bool
+                Whether to overwrite the existing Mole object.
+
+        Returns:
+            The updated Mole object (rebuilt).
+        """
+        if inplace:
+            mol = self
+        else:
+            mol = self.copy()
+
+        if unit is not None:
+            mol.unit = unit
+
+        if isinstance(atoms_or_coords, np.ndarray):
+            symbols = [elements._symbol(int(z)) for z in mol._atom_ids]
+            mol.atom = list(zip(symbols, np.asarray(atoms_or_coords).tolist()))
+        else:
+            mol.atom = atoms_or_coords
+
+        mol._built = False
+        mol.build()
+        return mol
+
+    def reset(self, atom=None):
+        """
+        Reset the molecule for a fresh build. Used by the SCF/gradient scanners
+        during geometry optimization. If `atom` is provided, it replaces the
+        current geometry.
+        """
+        if atom is not None:
+            self.atom = atom
+        self._built = False
+        self.build()
+        return self
 
     def aoslice_by_atom(self):
         """

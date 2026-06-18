@@ -481,8 +481,7 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
                     ctypes.c_float(log_cutoff),
                     ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    mol._atm.ctypes, ctypes.c_int(mol.natm),
-                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                    mol._bas.ctypes, mol._env.ctypes)
                 if err != 0:
                     raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
                 kern_counts += 1

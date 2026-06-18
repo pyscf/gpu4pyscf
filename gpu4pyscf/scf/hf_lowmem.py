@@ -19,10 +19,11 @@ at the cost of efficiency.
 
 import numpy as np
 import cupy as cp
+from pyscf import lib
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
-from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril
-from gpu4pyscf import lib
+from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril, tag_array
+from gpu4pyscf.lib.diis import DIIS
 from gpu4pyscf.scf import diis, jk, j_engine, hf
 from gpu4pyscf.lib import logger
 
@@ -84,7 +85,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
             mf.converged = scf_conv
         return e_tot
 
-    if isinstance(mf.diis, lib.diis.DIIS):
+    if isinstance(mf.diis, DIIS):
         mf_diis = mf.diis
     elif mf.diis:
         mf_diis = mf.DIIS(mf, mf.diis_file)
@@ -255,6 +256,7 @@ class RHF(hf.RHF):
         vj = jopt.get_j(dm, log)
         assert vj.ndim == 3
         vj = jopt.apply_coeff_CT_mat_C(vj)
+        ecoul = _trace_ecoul(vj[0], dm_or_wfn, dm_last, vhf_last)
         vhf, vj = vj, None
 
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
@@ -265,10 +267,14 @@ class RHF(hf.RHF):
 
         vhf += vk
         vhf = pack_tril(vhf[0])
-        if vhf_last is not None:
+
+        if dm_last is not None:
             vhf += asarray(vhf_last)
+        vhf = vhf.get()
+        if ecoul is not None:
+            vhf = lib.tag_array(vhf, ecoul=ecoul)
         log.timer('veff', *cput0)
-        return vhf.get()
+        return vhf
 
     def _delta_rdm1(self, dm_or_wfn, dm_last, vhfopt):
         '''Construct dm-dm_last suitable for the vhfopt.get_jk method'''
@@ -284,7 +290,7 @@ class RHF(hf.RHF):
         if isinstance(dm_last, WaveFunction):
             dm_last = dm_last.make_rdm1()
         if dm_last is not None:
-            dm -= dm_last
+            dm -= cp.asarray(dm_last)
 
         dm = vhfopt.apply_coeff_C_mat_CT(dm)
         return dm[None] # Add an additional axis, as required by the get_jk function
@@ -366,14 +372,38 @@ class RHF(hf.RHF):
         dm_tril[diag] *= .5
         dm_tril = dm_tril.get()
         e1 = float(h1e.dot(dm_tril) * 2)
-        e_coul = float(vhf.dot(dm_tril))
+        e2 = float(vhf.dot(dm_tril))
         vtmp = h1e * 2
         vtmp += vhf
         e_tot = float(vtmp.dot(dm_tril))
+        ecoul = vhf.ecoul.real
+        exx = e2 - ecoul
         self.scf_summary['e1'] = e1
-        self.scf_summary['e2'] = e_coul
-        logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-        return e_tot, e_coul
+        self.scf_summary['e2'] = e2
+        self.scf_summary['coul'] = ecoul
+        self.scf_summary['exc'] = exx
+        logger.debug(self, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exx)
+        return e_tot, e2
 
     def to_cpu(self):
         raise NotImplementedError
+
+def _trace_ecoul(vj, dm_or_wfn, dm_last, vhf_last):
+    if dm_last is not None:
+        if isinstance(dm_or_wfn, WaveFunction):
+            ddm = dm_or_wfn.make_rdm1()
+        else:
+            ddm = dm_or_wfn.copy()
+        if isinstance(dm_last, WaveFunction):
+            dm_last = dm_last.make_rdm1()
+        ddm -= dm_last
+        ecoul = cp.einsum('ij,ji->', dm_last, vj).real.get()
+        ecoul += cp.einsum('ij,ji->', ddm, vj).real.get() * .5
+        ecoul += vhf_last.ecoul
+    else:
+        if isinstance(dm_or_wfn, WaveFunction):
+            ddm = dm_or_wfn.make_rdm1()
+        else:
+            ddm = dm_or_wfn
+        ecoul = cp.einsum('ij,ji->', ddm, vj).real.get() * .5
+    return ecoul

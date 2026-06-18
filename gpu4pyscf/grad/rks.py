@@ -28,7 +28,7 @@ from gpu4pyscf.dft import radi
 from gpu4pyscf.dft import gen_grid
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, sandwich_dot,
-    reduce_to_device, take_last2d, ndarray, batched_vec3_norm2)
+    reduce_to_device, take_last2d, ndarray, batched_vec_norm2)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
@@ -170,7 +170,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][0]
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0)[1][0]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 aow = numint._scale_ao(ao_mask[0], wv, out=aow_buf)
                 vtmp = _d1_dot_(ao_mask[1:4], aow.T, out=vtmp_buf)
@@ -185,7 +185,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=aow_buf)[1]
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0, work=aow_buf)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
                 vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow_buf, out=vtmp_buf)
@@ -203,7 +203,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, with_lapl=False, buf=aow_buf)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=aow_buf)[1]
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0, work=aow_buf)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
                 wv[4] *= .5  # for the factor 1/2 in tau
@@ -461,8 +461,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         rho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dms_masked, xctype = xctype, hermi = 1)
     assert g1 == ngrids
 
-    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-    exc = exc[:,0]
+    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0)[:2]
     wv = grids.weights * vxc
     nonzero_weight_mask = cupy.abs(grids.weights) > 1e-14
 
@@ -613,7 +612,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     ngrids = grids_coords.shape[0]
 
     nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     omega_i         = cupy.empty(ngrids)
     domega_drho_i   = cupy.empty(ngrids)

@@ -48,27 +48,21 @@ class Gradients(rhf.GradientsBase):
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
 
         ni = mf._numint
-        j_in_xc = False
+        j_in_xc = isinstance(ni, multigrid_v2.MultiGridNumInt)
         de = 0
         xc = getattr(mf, 'xc', 'HF')
         if xc.upper() == 'HF':
             j_factor = k_sr = k_lr = 1
-            if mf.rsjk is not None or mf.j_engine is not None:
-                j_in_xc = True
             omega = 0
         else:
-            if isinstance(ni, multigrid_v2.MultiGridNumInt):
-                j_in_xc = True
             omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
             j_factor = 1
 
-        j_in_xc = False
-        if isinstance(ni, multigrid_v2.MultiGridNumInt):
+        if j_in_xc:
             de += multigrid_v2.get_veff_ip1(
                 ni, xc, dm, with_j=j_in_xc,
                 with_pseudo_vloc_orbital_derivative=True).get()
-            if j_in_xc:
-                j_factor = 0
+            j_factor = 0
         elif xc.upper() != 'HF':
             from gpu4pyscf.pbc.grad.kuks import get_vxc
             de += get_vxc(ni, mf.cell, mf.grids, xc, dm[:,None], np.zeros((1, 3))) * 2
@@ -141,6 +135,23 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
     assert omega >= 0
     with_df = mf.with_df
     if mf.rsjk is not None:
+        ej = None
+        if j_factor != 0 and not mf.j_engine and isinstance(with_df, GDF):
+            from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
+            from gpu4pyscf.pbc.df.grad.krhf import _jk_energy_per_atom
+            cell = with_df.cell
+            if kpts is None:
+                assert dm.ndim == 3
+                kmesh = None
+            else:
+                assert dm.ndim == 4
+                kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut)
+            rsdf_omega = 0.3
+            int3c2e_opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh).build()
+            hermi = 1
+            ej = _jk_energy_per_atom(int3c2e_opt, dm[0]+dm[1], kpts, hermi, j_factor, 0)
+            j_factor = 0
+
         with_rsjk = mf.rsjk
         assert isinstance(with_rsjk, PBCJKMatrixOpt)
         if with_rsjk.supmol is None:
@@ -153,6 +164,8 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
                 dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
                 lr_factor=lr_factor, sr_factor=sr_factor)
         ejk *= 2
+        if ej is not None:
+            ejk += ej
 
     elif isinstance(with_df, GDF):
         from pyscf.pbc.df.df import make_auxcell
