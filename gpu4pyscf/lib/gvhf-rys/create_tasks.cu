@@ -27,6 +27,9 @@
 __device__ inline
 int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    #endif
     tmp_storage[t_id] = keep;
     __syncthreads();
     for (int offset = 1; offset < threads; offset <<= 1) {
@@ -124,6 +127,18 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                      float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                      RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    int blockDim_x = item.get_local_range(1);
+    int blockDim_y = item.get_local_range(0);
+    #else
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    int blockDim_x = blockDim.x;
+    int blockDim_y = blockDim.y;
+    #endif
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();

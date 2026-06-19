@@ -44,6 +44,9 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int blockDim_y = item.get_local_range(0);
     int blockIdx_x = item.get_group(1);
 
+    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
+    auto c_i_in_fold3idx = s_i_in_fold3idx.get();
+
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -543,6 +546,8 @@ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int blockDim_x = item.get_local_range(1);
     int blockDim_y = item.get_local_range(0);
     int blockIdx_x = item.get_group(1);
+
+    auto c_i_in_fold3idx = s_i_in_fold3idx.get();
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
