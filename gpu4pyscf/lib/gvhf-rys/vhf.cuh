@@ -181,8 +181,8 @@ static inline unsigned get_smid()
 }
 
 // // to ensure that each SM only executes one block
-// #define adjust_threads(kernel, threads) { \
-//     threads *= 2; }
+#define adjust_threads(kernel, threads) { \
+    threads *= 2; }
 
 extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
 extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;

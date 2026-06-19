@@ -14304,6 +14304,7 @@ int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
     auto dev_kmat = *kmat;
     auto dev_bounds = *bounds;
 
+    sycl::queue& stream = *sycl_get_queue();
     sycl::range<2> blocks(1, workers);
     sycl::range<2> threads(gout_stride, nsq_per_block);
     switch (ijkl) {
