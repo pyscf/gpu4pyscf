@@ -52,7 +52,7 @@ void fill_s_estimator_kernel(float *s_estimator, RysIntEnvVars envs,
     double *env = envs.env;
     uint32_t nbas = envs.nbas;
     uint32_t shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
-    uint32_t shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
+    uint32_t shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, (uint32_t)npairs);
 
     float omega2 = omega * omega;
     for (uint32_t pair_ij = shl_pair0+t_id; pair_ij < shl_pair1; pair_ij += THREADS) {
@@ -105,8 +105,8 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
                         int *shl_pair_offsets, int *gout_stride_lookup,
                         double omega, double lr_factor, double sr_factor
                         #ifdef USE_SYCL
-                        , sycl::nd_item<2> &item, char* shm_size
-                        #end
+                        , sycl::nd_item<2> &item, std::byte* shm_mem
+                        #endif
                         )
 {
     #ifdef USE_SYCL
@@ -114,7 +114,7 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
     int thread_id = item.get_local_id(1);
     int threads = item.get_local_range(1);
 
-    float* shared_memory = reinterpret_cast<float*>(shm_size);
+    float* shared_memory = reinterpret_cast<float*>(shm_mem);
 
     auto thread_block = item.get_group();
     int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -464,7 +464,7 @@ int int2e_qcond_estimator(float *q_out, RysIntEnvVars *envs, int shm_size,
     sycl::range<2> blocks(1, nbatches_shl_pair);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class int2e_qcond_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
         int2e_qcond_kernel(q_out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
                            omega, lr_factor, sr_factor,
