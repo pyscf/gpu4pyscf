@@ -11678,10 +11678,14 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+ void rys_k_3020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                     uint32_t *pool, int *head
+                     #ifdef USE_SYCL
+                     , sycl::nd_item<2> &item, double *shared_memory
+                     #endif
+                     )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
