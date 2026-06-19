@@ -14,7 +14,7 @@
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
-add_library(sem SHARED
+set(GPU_SRCS
     ss_kernel.cu
     fock.cu
     eri_1c2e_kernel.cu
@@ -22,7 +22,20 @@ add_library(sem SHARED
     grad_kernel.cu
 )
 
-set_target_properties(sem PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
-)
+if (USE_SYCL)
+    add_library(sem SHARED ${GPU_SRCS})
+
+    set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+
+    set_target_properties(sem PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+    target_compile_options(sem PRIVATE -x c++ -nocudainc -nocudalib)
+    target_link_libraries(sem PRIVATE sycl_compat gsycl)
+else()
+    add_library(sem SHARED ${GPU_SRCS})
+
+    set_target_properties(sem PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
+    )
+endif()

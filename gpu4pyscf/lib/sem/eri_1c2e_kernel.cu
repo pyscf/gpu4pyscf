@@ -36,7 +36,12 @@ __global__ void rsc_kernel(
     const double* __restrict__ b_table,  // Size 30*30 flattened
     double* __restrict__ out_val
 ) {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int idx = item.get_global_id(0);
+#else
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     if (idx >= n_tasks) return;
 
     int k  = k_vec[idx];
@@ -125,6 +130,13 @@ int launch_rsc_kernel_c(
     int threads = 128;
     int blocks = (n_tasks + threads - 1) / threads;
 
+#ifdef USE_SYCL
+    sycl_get_queue()->parallel_for<class rsc_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+        rsc_kernel(n_tasks, hartree2ev, k_vec,
+                   na, ea, nb, eb, nc, ec, nd, ed,
+                   fx_table, b_table, out_val);
+    });
+#else
     rsc_kernel<<<blocks, threads>>>(
         n_tasks, hartree2ev, k_vec,
         na, ea, nb, eb, nc, ec, nd, ed,
@@ -135,6 +147,7 @@ int launch_rsc_kernel_c(
     if (err != cudaSuccess) {
         return 1;
     }
+#endif
     return 0;
 }
 

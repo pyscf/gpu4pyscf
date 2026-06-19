@@ -38,7 +38,12 @@ void build_jk_2c2e_kernel(
     int nao) 
 {
     // Each block processes one pair of interacting atoms (Atom A and Atom B)
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int p = item.get_group(0);
+#else
     int p = blockIdx.x;
+#endif
     if (p >= npairs) return;
     
     int A = pair_i[p];
@@ -59,6 +64,21 @@ void build_jk_2c2e_kernel(
 
     // Allocate shared memory. 
     // In PM6, the maximum number of orbitals per atom is 9 (s, p, d).
+#ifdef USE_SYCL
+    auto thread_block = item.get_group();
+    double (&s_PAA)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(thread_block);
+    double (&s_PBB)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(thread_block);
+    double (&s_PAB)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(thread_block);
+    double (&s_PBA)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(thread_block);
+
+    double (&s_JAA)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(thread_block);
+    double (&s_JBB)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(thread_block);
+    double (&s_KAB)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(thread_block);
+    double (&s_KBA)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(thread_block);
+
+    int tid = item.get_local_id(0);
+    int bdim = item.get_local_range(0);
+#else
     __shared__ double s_PAA[81];
     __shared__ double s_PBB[81];
     __shared__ double s_PAB[81];
@@ -71,6 +91,7 @@ void build_jk_2c2e_kernel(
     
     int tid = threadIdx.x;
     int bdim = blockDim.x;
+#endif
 
     // Initialize shared memory to zero
     for (int i = tid; i < 81; i += bdim) {
@@ -235,17 +256,32 @@ void build_jk_1c2e_kernel(
     int num_d_pairs) 
 {
     // Grid handles 1 atom per block
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int A = item.get_group(0);
+    int threadIdx_x = item.get_local_id(0);
+    int blockDim_x = item.get_local_range(0);
+#else
     int A = blockIdx.x;
+    int threadIdx_x = threadIdx.x;
+    int blockDim_x = blockDim.x;
+#endif
     if (A >= natm) return;
     
     int offset = aoslice[A * 2]; 
     int nao_A = natorb[A];
     
+#ifdef USE_SYCL
+    double (&s_P)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(item.get_group());
+    double (&s_J)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(item.get_group());
+    double (&s_K)[81] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[81]>(item.get_group());
+#else
     __shared__ double s_P[81];
     __shared__ double s_J[81];
     __shared__ double s_K[81];
+#endif
     
-    for (int i = threadIdx.x; i < 81; i += blockDim.x) {
+    for (int i = threadIdx_x; i < 81; i += blockDim_x) {
         s_J[i] = 0.0;
         s_K[i] = 0.0;
         int row = i / 9;
@@ -259,7 +295,7 @@ void build_jk_1c2e_kernel(
     __syncthreads();
     
     // Thread 0 handles the small number of s and p orbital integrals
-    if (threadIdx.x == 0) {
+    if (threadIdx_x == 0) {
         // s-orbital
         apply_eri_1c2e(0, 0, 0, 0, gss[A], s_P, s_J, s_K);
         
@@ -286,7 +322,7 @@ void build_jk_1c2e_kernel(
     
     // All threads cooperatively handle d-orbital combinations
     if (nao_A == 9 && num_d_pairs > 0) {
-        for (int idx = threadIdx.x; idx < num_d_pairs; idx += blockDim.x) {
+        for (int idx = threadIdx_x; idx < num_d_pairs; idx += blockDim_x) {
             int IJ = intij[idx];
             int KL = intkl[idx];
             int rp = intrep[idx];
@@ -309,7 +345,7 @@ void build_jk_1c2e_kernel(
     
     __syncthreads();
     
-    for (int i = threadIdx.x; i < 81; i += blockDim.x) {
+    for (int i = threadIdx_x; i < 81; i += blockDim_x) {
         int row = i / 9;
         int col = i % 9;
         if (row < nao_A && col < nao_A) {
@@ -347,6 +383,15 @@ extern "C" {
         int blocks = npairs;
         int threads = 256;
         
+#ifdef USE_SYCL
+        sycl_get_queue()->parallel_for<class build_jk_2c2e_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            build_jk_2c2e_kernel(w_1d, P, J, K,
+                                 pair_i, pair_j, kr_offsets,
+                                 aoslice, natorb, loc_row, loc_col,
+                                 npairs, nao);
+        });
+        sycl_get_queue()->wait();
+#else
         build_jk_2c2e_kernel<<<blocks, threads>>>(
             w_1d, P, J, K, 
             pair_i, pair_j, kr_offsets, 
@@ -359,6 +404,7 @@ extern "C" {
             return 1;
         }
         cudaDeviceSynchronize();
+#endif
         return 0;
     }
 
@@ -390,6 +436,16 @@ extern "C" {
         // 64 threads per block is sufficient since max d-orbital combinations is 243
         int threads = 64; 
         
+#ifdef USE_SYCL
+        sycl_get_queue()->parallel_for<class build_jk_1c2e_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            build_jk_1c2e_kernel(P, J, K,
+                                 gss, gsp, hsp, gpp, gp2, repd,
+                                 intij, intkl, intrep,
+                                 aoslice, natorb, loc_row, loc_col,
+                                 natm, nao, num_d_pairs);
+        });
+        sycl_get_queue()->wait();
+#else
         build_jk_1c2e_kernel<<<blocks, threads>>>(
             P, J, K, 
             gss, gsp, hsp, gpp, gp2, repd, 
@@ -403,6 +459,7 @@ extern "C" {
             return 1;
         }
         cudaDeviceSynchronize();
+#endif
         return 0;
     }
 }
