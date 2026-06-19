@@ -91,7 +91,7 @@ __global__ void bfn_kernel(
         double pow_minus_x[17];
         pow_minus_x[0] = 1.0;
         double neg_x = -x_val;
-        
+
         for(int m = 1; m < norder_cut_off; ++m){
             pow_minus_x[m] = pow_minus_x[m-1] * neg_x;
         }
@@ -108,8 +108,8 @@ __global__ void bfn_kernel(
 
     double inv_x = 1.0 / x_val;
     double expx = exp(x_val);
-    double expmx = 1.0 / expx; 
-    
+    double expmx = 1.0 / expx;
+
     double val_curr = (expx - expmx) * inv_x;
     out_ptr[0] = val_curr;
 
@@ -146,20 +146,20 @@ __global__ void rotation_transform_kernel(
     // Shell 1 (P): k=1 maps to 2, k=2 maps to 3, k=3 maps to 1
     // Shell 2 (D): k=0..4 maps to 8..4
     const int ival[3][5] = {
-        {0, 0, 0, 0, -1},       
-        {-1, 2, 3, 1, -1},      
-        {8, 7, 6, 5, 4}         
+        {0, 0, 0, 0, -1},
+        {-1, 2, 3, 1, -1},
+        {8, 7, 6, 5, 4}
     };
 
-    const double* s_ptr = S_local + idx * 27; 
-    const double* c_ptr = C_tensor + idx * 75; 
+    const double* s_ptr = S_local + idx * 27;
+    const double* c_ptr = C_tensor + idx * 75;
     double* out_ptr = di_out + idx * 81;
 
-    for (int i = 0; i < 3; ++i) { 
+    for (int i = 0; i < 3; ++i) {
         int k_start = 2 - i;
-        int k_end = 3 + i; 
+        int k_end = 3 + i;
 
-        for (int j = 0; j < 3; ++j) { 
+        for (int j = 0; j < 3; ++j) {
             int l_start = 2 - j;
             int l_end = 3 + j;
 
@@ -178,11 +178,11 @@ __global__ void rotation_transform_kernel(
                     int idx_b = ival[j][l];
                     if (idx_b < 0) continue;
 
-                    double c3_a = c_ptr[i*25 + k*5 + 2]; 
-                    double c4_a = c_ptr[i*25 + k*5 + 3]; 
-                    double c2_a = c_ptr[i*25 + k*5 + 1]; 
-                    double c5_a = c_ptr[i*25 + k*5 + 4]; 
-                    double c1_a = c_ptr[i*25 + k*5 + 0]; 
+                    double c3_a = c_ptr[i*25 + k*5 + 2];
+                    double c4_a = c_ptr[i*25 + k*5 + 3];
+                    double c2_a = c_ptr[i*25 + k*5 + 1];
+                    double c5_a = c_ptr[i*25 + k*5 + 4];
+                    double c1_a = c_ptr[i*25 + k*5 + 0];
 
                     double c3_b = c_ptr[j*25 + l*5 + 2];
                     double c4_b = c_ptr[j*25 + l*5 + 3];
@@ -270,10 +270,10 @@ __global__ void ss_summation_kernel(
                             double b_m6 = binom[IDX2(m, k6)];
                             int ibf_idx = k1 + k2 + k3 + k4 + 2 * k6;
                             double val_bf = bf_row[ibf_idx];
-                            
+
                             double sgn = 1.0 - 2.0 * ((m + k2 + k4 + k5 + k6) & 1);
-                            
-                            total_sum += sgn * b_id * b_ic * b_ib * b_ia 
+
+                            total_sum += sgn * b_id * b_ic * b_ib * b_ia
                                                  * b_m5 * b_m6 * val_af * val_bf;
                         }
                     }
@@ -297,16 +297,14 @@ int launch_ss_kernel_c(
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
 
 #ifdef USE_SYCL
-    sycl::range<1> threads(threads_per_block);
-    sycl::range<1> blocks(blocks_per_grid);
-    sycl_get_queue()->parallel_for<class ss_summation_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+    sycl_get_queue()->parallel_for<class ss_summation_sycl>(sycl::nd_range<1>(blocks_per_grid * threads_per_block, threads_per_block), [=](auto item) [[intel::kernel_args_restrict]] {
         ss_summation_kernel(n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out);
     });
 #else
     ss_summation_kernel<<<blocks_per_grid, threads_per_block>>>(
         n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out
     );
-        
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -323,16 +321,14 @@ int launch_afn_kernel_c(
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
 #ifdef USE_SYCL
-    sycl::range<1> threads(threads_per_block);
-    sycl::range<1> blocks(blocks_per_grid);
-    sycl_get_queue()->parallel_for<class afn_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+    sycl_get_queue()->parallel_for<class afn_sycl>(sycl::nd_range<1>(blocks_per_grid * threads_per_block, threads_per_block), [=](auto item) [[intel::kernel_args_restrict]] {
         afn_kernel(n_pairs, p_vec, af_out);
     });
 #else
     afn_kernel<<<blocks_per_grid, threads_per_block>>>(
         n_pairs, p_vec, af_out
     );
-    
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -350,16 +346,14 @@ int launch_bfn_kernel_c(
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
 #ifdef USE_SYCL
-    sycl::range<1> threads(threads_per_block);
-    sycl::range<1> blocks(blocks_per_grid);
-    sycl_get_queue()->parallel_for<class bfn_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+    sycl_get_queue()->parallel_for<class bfn_sycl>(sycl::nd_range<1>(blocks_per_grid * threads_per_block, threads_per_block), [=](auto item) [[intel::kernel_args_restrict]] {
         bfn_kernel(n_pairs, x, taylor_coeffs, bf_out);
     });
 #else
     bfn_kernel<<<blocks_per_grid, threads_per_block>>>(
         n_pairs, x, taylor_coeffs, bf_out
     );
-    
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -378,16 +372,14 @@ int launch_rotation_transform_kernel(
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
 #ifdef USE_SYCL
-    sycl::range<1> threads(threads_per_block);
-    sycl::range<1> blocks(blocks_per_grid);
-    sycl_get_queue()->parallel_for<class rotation_transform_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+    sycl_get_queue()->parallel_for<class rotation_transform_sycl>(sycl::nd_range<1>(blocks_per_grid * threads_per_block, threads_per_block), [=](auto item) [[intel::kernel_args_restrict]] {
         rotation_transform_kernel(n_pairs, S_local, C_tensor, di_out);
     });
 #else
     rotation_transform_kernel<<<blocks_per_grid, threads_per_block>>>(
         n_pairs, S_local, C_tensor, di_out
     );
-        
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
