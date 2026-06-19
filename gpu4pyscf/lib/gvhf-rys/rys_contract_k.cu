@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cstddef>
+#include <type_traits>
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
@@ -30,13 +32,13 @@ SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_gxyz_offset;
 
 #define GOUT_WIDTH1     81
 
-// gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
+// gout_pattern = ((li == 0) << 3) | ((lj == 0) << 2) | ((lk == 0) << 1) | (ll == 0);
 template <int OFFSET>
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                  uint32_t *pool, int *head_base, GXYZOffset *gxyz_offsets,
+                  uint32_t *pool, int *head_base, const GXYZOffset *p_gxyz_offsets,
                   int gout_pattern, int reserved_shm_size
                   #ifdef USE_SYCL
                   , sycl::nd_item<2> &item, std::byte *shm_mem
@@ -50,10 +52,12 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int blockDim_y = item.get_local_range(0);
     int blockIdx_x = item.get_group(1);
 
-    double *shared_memory = reinterpret_cast<double*>(shm_mem);
+    double *shared_memory = reinterpret_cast<double *>(shm_mem);
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -73,8 +77,9 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int blockDim_y = blockDim.y;
     int blockIdx_x = blockIdx.x;
 
-    __shared__ int ntasks;
     extern __shared__ double shared_memory[];
+
+    __shared__ int ntasks, pair_ij, pair_kl0;
     __shared__ int ish, jsh, i0, j0, nao;
     __shared__ double ri[3];
     __shared__ double rjri[3];
@@ -84,7 +89,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
 
     const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     #endif
-    int *head = head_base + OFFSET / 256;
+    int *head = head_base + OFFSET/256;
     // sq is short for shl_quartet
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -191,7 +196,7 @@ while (1) {
         } else {
             _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
-                              s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                              s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds, shared_memory);
         }
         if (ntasks == 0) {
             continue;
@@ -385,33 +390,6 @@ while (1) {
                             __syncthreads();
                             if (task_id < ntasks) {
                                 int lkl3 = (lkl+1)*3;
-                                //switch (li*5+lj) {
-                                //case 0 : hrr_ij<0,0>(gx, rjri, lkl3, g_size); break;
-                                //case 1 : hrr_ij<0,1>(gx, rjri, lkl3, g_size); break;
-                                //case 2 : hrr_ij<0,2>(gx, rjri, lkl3, g_size); break;
-                                //case 3 : hrr_ij<0,3>(gx, rjri, lkl3, g_size); break;
-                                //case 4 : hrr_ij<0,4>(gx, rjri, lkl3, g_size); break;
-                                //case 5 : hrr_ij<1,0>(gx, rjri, lkl3, g_size); break;
-                                //case 6 : hrr_ij<1,1>(gx, rjri, lkl3, g_size); break;
-                                //case 7 : hrr_ij<1,2>(gx, rjri, lkl3, g_size); break;
-                                //case 8 : hrr_ij<1,3>(gx, rjri, lkl3, g_size); break;
-                                //case 9 : hrr_ij<1,4>(gx, rjri, lkl3, g_size); break;
-                                //case 10: hrr_ij<2,0>(gx, rjri, lkl3, g_size); break;
-                                //case 11: hrr_ij<2,1>(gx, rjri, lkl3, g_size); break;
-                                //case 12: hrr_ij<2,2>(gx, rjri, lkl3, g_size); break;
-                                //case 13: hrr_ij<2,3>(gx, rjri, lkl3, g_size); break;
-                                //case 14: hrr_ij<2,4>(gx, rjri, lkl3, g_size); break;
-                                //case 15: hrr_ij<3,0>(gx, rjri, lkl3, g_size); break;
-                                //case 16: hrr_ij<3,1>(gx, rjri, lkl3, g_size); break;
-                                //case 17: hrr_ij<3,2>(gx, rjri, lkl3, g_size); break;
-                                //case 18: hrr_ij<3,3>(gx, rjri, lkl3, g_size); break;
-                                //case 19: hrr_ij<3,4>(gx, rjri, lkl3, g_size); break;
-                                //case 20: hrr_ij<4,0>(gx, rjri, lkl3, g_size); break;
-                                //case 21: hrr_ij<4,1>(gx, rjri, lkl3, g_size); break;
-                                //case 22: hrr_ij<4,2>(gx, rjri, lkl3, g_size); break;
-                                //case 23: hrr_ij<4,3>(gx, rjri, lkl3, g_size); break;
-                                //case 24: hrr_ij<4,4>(gx, rjri, lkl3, g_size); break;
-                                //default:
                                 for (int m = gout_id; m < lkl3; m += gout_stride) {
                                     int k = m / 3;
                                     int _ix = m % 3;
@@ -427,39 +405,11 @@ while (1) {
                                         }
                                     }
                                 }
-                                //}
                             }
                         }
                         if (ll > 0) {
                             __syncthreads();
                             if (task_id < ntasks) {
-                                //switch (lk*5+ll) {
-                                //case 0 : hrr_kl<0,0>(gx, rlrk, stride_k); break;
-                                //case 1 : hrr_kl<0,1>(gx, rlrk, stride_k); break;
-                                //case 2 : hrr_kl<0,2>(gx, rlrk, stride_k); break;
-                                //case 3 : hrr_kl<0,3>(gx, rlrk, stride_k); break;
-                                //case 4 : hrr_kl<0,4>(gx, rlrk, stride_k); break;
-                                //case 5 : hrr_kl<1,0>(gx, rlrk, stride_k); break;
-                                //case 6 : hrr_kl<1,1>(gx, rlrk, stride_k); break;
-                                //case 7 : hrr_kl<1,2>(gx, rlrk, stride_k); break;
-                                //case 8 : hrr_kl<1,3>(gx, rlrk, stride_k); break;
-                                //case 9 : hrr_kl<1,4>(gx, rlrk, stride_k); break;
-                                //case 10: hrr_kl<2,0>(gx, rlrk, stride_k); break;
-                                //case 11: hrr_kl<2,1>(gx, rlrk, stride_k); break;
-                                //case 12: hrr_kl<2,2>(gx, rlrk, stride_k); break;
-                                //case 13: hrr_kl<2,3>(gx, rlrk, stride_k); break;
-                                //case 14: hrr_kl<2,4>(gx, rlrk, stride_k); break;
-                                //case 15: hrr_kl<3,0>(gx, rlrk, stride_k); break;
-                                //case 16: hrr_kl<3,1>(gx, rlrk, stride_k); break;
-                                //case 17: hrr_kl<3,2>(gx, rlrk, stride_k); break;
-                                //case 18: hrr_kl<3,3>(gx, rlrk, stride_k); break;
-                                //case 19: hrr_kl<3,4>(gx, rlrk, stride_k); break;
-                                //case 20: hrr_kl<4,0>(gx, rlrk, stride_k); break;
-                                //case 21: hrr_kl<4,1>(gx, rlrk, stride_k); break;
-                                //case 22: hrr_kl<4,2>(gx, rlrk, stride_k); break;
-                                //case 23: hrr_kl<4,3>(gx, rlrk, stride_k); break;
-                                //case 24: hrr_kl<4,4>(gx, rlrk, stride_k); break;
-                                //default:
                                 for (int n = gout_id; n < stride_k*3; n += gout_stride) {
                                     int i = n / 3;
                                     int _ix = n % 3;
@@ -475,7 +425,6 @@ while (1) {
                                         }
                                     }
                                 }
-                                //}
                             }
                         }
 
@@ -600,7 +549,7 @@ GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
 #endif
 }
 
-static size_t threads_scheme_for_k(int (&threads)[2], BoundsInfo &bounds,
+static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
                                    int shm_size, int gout_stride_max)
 {
 /*
@@ -650,10 +599,9 @@ static size_t threads_scheme_for_k(int (&threads)[2], BoundsInfo &bounds,
     if (nsq_per_block > 8) {
         nsq_per_block = nsq_per_block / 8 * 8;
     }
-    threads[0] = nsq_per_block;
-    threads[1] = gout_stride;
-    int buflen = nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
-    return buflen;
+    tdims[0] = nsq_per_block;
+    tdims[1] = gout_stride;
+    return nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
 }
 
 extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
@@ -733,11 +681,11 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
 
             #ifdef USE_SYCL
             sycl::range<2> blocks(1, workers);
-            sycl::range<2> threads(tdims[1], tdims[0]);
+            sycl::range<2> cuda_threads(tdims[1], tdims[0]);
             auto dev_envs = *envs;
             sycl_get_queue()->submit([&](sycl::handler &cgh) {
               sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh);
-              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+              cgh.parallel_for(sycl::nd_range<2>(blocks * cuda_threads, cuda_threads), [=](auto item) {
                 rys_k_kernel<OFFSET>(dev_envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                                      s_cond_ij, s_cond_kl, diffuse_exps, pool,
                                      head, p_gxyz_offset,
@@ -746,7 +694,9 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
               });
             });
             #else
-            dim3 threads(tdims[0], tdims[1]);
+            dim3 threads;
+            threads.x = tdims[0];
+            threads.y = tdims[1];
             rys_k_kernel<OFFSET><<<workers, threads, buflen>>>(
                 *envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
@@ -774,7 +724,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
 
 int RYS_build_k_init(int shm_size)
 {
-    cudaFuncSetAttribute(rys_k_kernel<0>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_k_kernel<  0>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_k_kernel<256>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_k_kernel<512>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
