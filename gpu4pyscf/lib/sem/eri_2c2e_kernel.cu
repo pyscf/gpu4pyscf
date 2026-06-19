@@ -775,8 +775,8 @@ __device__ double ccrep_pm6_device(
     enuclr += scale_vdw;
     
     // Short distance repulsion
-    double zi = pow(ele_i, 0.3333); //follow mopac the 1/3 is set to 0.3333
-    double zj = pow(ele_j, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    double zi = pow((double)ele_i, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    double zj = pow((double)ele_j, 0.3333); //follow mopac the 1/3 is set to 0.3333
     // double zi = cbrt((double)ele_i); 
     // double zj = cbrt((double)ele_j); 
     double ax = r_angstrom / (zi + zj);
