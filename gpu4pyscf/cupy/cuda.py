@@ -119,6 +119,10 @@ libgpu.sycl_get_total_memory.argtypes  = []
 libgpu.sycl_get_total_memory.restype   = ctypes.c_size_t
 libgpu.sycl_get_shared_memory.argtypes = []
 libgpu.sycl_get_shared_memory.restype  = ctypes.c_size_t
+libgpu.sycl_get_compute_units.argtypes = []
+libgpu.sycl_get_compute_units.restype  = ctypes.c_int
+libgpu.sycl_get_device_name.argtypes   = [ctypes.c_char_p, ctypes.c_int]
+libgpu.sycl_get_device_name.restype    = None
 libgpu.sycl_get_free_memory.argtypes   = []
 libgpu.sycl_get_free_memory.restype    = ctypes.c_size_t
 libgpu.sycl_memcpy.argtypes            = [ctypes.c_void_p, ctypes.c_void_p,
@@ -590,6 +594,22 @@ def get_total_memory():     return libgpu.sycl_get_total_memory()
 def get_shared_memory():    return libgpu.sycl_get_shared_memory()
 def get_free_memory():      return libgpu.sycl_get_free_memory()
 
+def get_compute_units():
+    """Number of compute units (maps to CUDA multiProcessorCount).
+
+    Queries the registered SYCL queue's device.
+    """
+    return int(libgpu.sycl_get_compute_units())
+
+def get_device_name():
+    """Device name (maps to CUDA cudaDeviceProp::name).
+
+    Queries the registered SYCL queue's device.
+    """
+    buf = ctypes.create_string_buffer(256)
+    libgpu.sycl_get_device_name(buf, ctypes.c_int(len(buf)))
+    return buf.value.decode('utf-8', errors='replace')
+
 
 # =====================================================================
 # Device — singleton per id, backed by the shared _device_cache on _state.
@@ -758,23 +778,27 @@ class _Runtime:
     def getDeviceProperties(device_id: int) -> dict:
         devices = _gpu_devices()
         if not devices or device_id < 0 or device_id >= len(devices):
+            compute_units = get_compute_units()
             return {
                 'totalGlobalMem':         get_total_memory(),
                 'sharedMemPerBlock':      get_shared_memory(),
                 'sharedMemPerBlockOptin': get_shared_memory(),
-                'name':                   'Unknown SYCL Device',
+                'name':                   get_device_name(),
                 'maxThreadsPerBlock':     1024,
                 'maxWorkGroupSize':       1024,
-                'maxComputeUnits':        1,
+                'maxComputeUnits':        compute_units,
                 'major': 8, 'minor': 0,
                 'warpSize':               32,
-                'multiProcessorCount':    1,
+                'multiProcessorCount':    compute_units,
             }
         dev = devices[device_id]
         try:
             warp_size = dev.sub_group_sizes[0] if dev.sub_group_sizes else 32
         except Exception:
             warp_size = 32
+        compute_units = dev.max_compute_units
+        if not compute_units or compute_units < 1:
+            compute_units = get_compute_units()
         return {
             'totalGlobalMem':         dev.global_mem_size,
             'sharedMemPerBlock':      dev.local_mem_size,
@@ -782,10 +806,10 @@ class _Runtime:
             'name':                   dev.name,
             'maxThreadsPerBlock':     dev.max_work_group_size,
             'maxWorkGroupSize':       dev.max_work_group_size,
-            'maxComputeUnits':        dev.max_compute_units,
+            'maxComputeUnits':        compute_units,
             'major': 8, 'minor': 0,
             'warpSize':               warp_size,
-            'multiProcessorCount':    dev.max_compute_units,
+            'multiProcessorCount':    compute_units,
             'localMemSize':           dev.local_mem_size,
             'globalMemSize':          dev.global_mem_size,
         }

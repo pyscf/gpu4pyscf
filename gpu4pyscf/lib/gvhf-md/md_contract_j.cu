@@ -75,7 +75,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      int threadsx, int threadsy, int tilex, int tiley,
                      const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
                      #ifdef USE_SYCL
-                     , sycl::nd_item<2> &item, char *shm_mem
+                     , sycl::nd_item<2> &item, std::byte *shm_mem
                      #endif
                      )
 {
@@ -100,18 +100,9 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
     int bsizey = threadsy * tiley;
-<<<<<<< HEAD
     int task_ij0 = blockIdx_x * bsizex;
     int task_kl0 = blockIdx_y * bsizey;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
-=======
-    int task_ij0 = blockIdx.x * bsizex;
-    int task_kl0 = blockIdx.y * bsizey;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
->>>>>>> origin/master
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -250,15 +241,8 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+threadsx <= task_kl0) {
                 break;
             }
-<<<<<<< HEAD
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
-=======
-            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond_ij[task_ij0] < bounds.cutoff) {
->>>>>>> origin/master
+            if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -410,7 +394,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      int threadsx, int threadsy, int tilex, int tiley, int dm_size,
                      const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
                      #ifdef USE_SYCL
-                     , sycl::nd_item<2> &item, char *shm_mem
+                     , sycl::nd_item<2> &item, std::byte *shm_mem
                      #endif
                      )
 {
@@ -435,18 +419,9 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
     int bsizey = threadsy * tiley;
-<<<<<<< HEAD
     int task_ij0 = blockIdx_x * bsizex;
     int task_kl0 = blockIdx_y * bsizey;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
-=======
-    int task_ij0 = blockIdx.x * bsizex;
-    int task_kl0 = blockIdx.y * bsizey;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
->>>>>>> origin/master
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -597,15 +572,8 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+threadsx <= task_kl0) {
                 break;
             }
-<<<<<<< HEAD
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
-=======
-            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond_ij[task_ij0] < bounds.cutoff) {
->>>>>>> origin/master
+            if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1014,25 +982,21 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             #ifdef USE_SYCL
             sycl_get_queue()->submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<char, 1> local_acc(buflen, cgh);
+              sycl::local_accessor<std::byte, 1> local_acc(buflen, cgh);
               cgh.parallel_for<class md_j_1dm_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
                 const uint16_t *pRt2_kl_ij = Rt2_kl_ij + Rt2_kl_ij_syclonly_offset;
                 const int8_t *efg_phase = c_Rt2_efg_phase + efg_phase_syclonly_offset;
-                md_j_1dm_kernel(dev_envs, jk, bounds, threads_ij, threads_kl, tilex, tiley,
+                md_j_1dm_kernel(dev_envs, jk, bounds, q_cond_ij, q_cond_kl,
+                                threads_ij, threads_kl, tilex, tiley,
                                 pRt2_kl_ij, efg_phase,
                                 item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
               });
             });
             #else
             md_j_1dm_kernel<<<blocks, threads, buflen>>>(
-<<<<<<< HEAD
-                *envs, jk, bounds, threads_ij, threads_kl, tilex, tiley,
-                pRt2_kl_ij, efg_phase);
-            #endif
-=======
                 *envs, jk, bounds, q_cond_ij, q_cond_kl,
                 threads_ij, threads_kl, tilex, tiley, pRt2_kl_ij, efg_phase);
->>>>>>> origin/master
+            #endif
         }
     } else {
         if (!md_j_4dm_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, dm_size)) {
@@ -1044,25 +1008,21 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 jk.n_dm = n_dm - dm_offset;
                 #ifdef USE_SYCL
                 sycl_get_queue()->submit([&](sycl::handler &cgh) {
-                  sycl::local_accessor<char, 1> local_acc(buflen, cgh);
+                  sycl::local_accessor<std::byte, 1> local_acc(buflen, cgh);
                   cgh.parallel_for<class md_j_4dm_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
                     const uint16_t *pRt2_kl_ij = Rt2_kl_ij + Rt2_kl_ij_syclonly_offset;
                     const int8_t *efg_phase = c_Rt2_efg_phase + efg_phase_syclonly_offset;
-                    md_j_4dm_kernel(dev_envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size,
+                    md_j_4dm_kernel(dev_envs, jk, bounds, q_cond_ij, q_cond_kl,
+                                    threads_ij, threads_kl, tilex, tiley, dm_size,
                                     pRt2_kl_ij, efg_phase,
                                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
                   });
                 });
                 #else
                 md_j_4dm_kernel<<<blocks, threads, buflen>>>(
-<<<<<<< HEAD
-                    *envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size,
-                    pRt2_kl_ij, efg_phase);
-                #endif
-=======
                     *envs, jk, bounds, q_cond_ij, q_cond_kl,
                     threads_ij, threads_kl, tilex, tiley, dm_size, pRt2_kl_ij, efg_phase);
->>>>>>> origin/master
+                #endif
             }
         }
     }

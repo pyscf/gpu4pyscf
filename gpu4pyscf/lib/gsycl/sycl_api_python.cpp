@@ -1,3 +1,4 @@
+#include <string>
 #include "sycl_device.hpp"
 
 #define GPU4PYSCF_EXPORT __attribute__((visibility("default")))
@@ -122,6 +123,25 @@ GPU4PYSCF_EXPORT size_t sycl_get_total_memory() {
 GPU4PYSCF_EXPORT size_t sycl_get_shared_memory() {
     auto* q = static_cast<sycl::queue*>(sycl_get_queue_ptr());
     return q->get_device().get_info<sycl::info::device::local_mem_size>();
+}
+
+// Maps to CUDA cudaDeviceProp::multiProcessorCount
+GPU4PYSCF_EXPORT int sycl_get_compute_units() {
+    auto* q = static_cast<sycl::queue*>(sycl_get_queue_ptr());
+    return static_cast<int>(
+        q->get_device().get_info<sycl::info::device::max_compute_units>());
+}
+
+// Maps to CUDA cudaDeviceProp::name. Copies the device name into the
+// caller-provided buffer (NUL-terminated, truncated to buf_size-1).
+GPU4PYSCF_EXPORT void sycl_get_device_name(char* buf, int buf_size) {
+    if (buf == nullptr || buf_size <= 0) return;
+    auto* q = static_cast<sycl::queue*>(sycl_get_queue_ptr());
+    std::string name = q->get_device().get_info<sycl::info::device::name>();
+    int n = static_cast<int>(name.size());
+    if (n > buf_size - 1) n = buf_size - 1;
+    for (int i = 0; i < n; ++i) buf[i] = name[i];
+    buf[n] = '\0';
 }
 
 GPU4PYSCF_EXPORT size_t sycl_get_free_memory() {

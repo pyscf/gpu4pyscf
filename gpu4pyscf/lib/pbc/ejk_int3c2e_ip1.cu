@@ -32,7 +32,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux, double *dm, double *de
                             float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
                             int *head, int sp_blocks, int ksh_blocks
                             #ifdef USE_SYCL
-                            , sycl::nd_item<1> &item, char *shm_mem
+                            , sycl::nd_item<1> &item, std::byte *shm_mem
                             #endif
                             )
 {
@@ -513,11 +513,13 @@ int PBCsr_ejk_int3c2e_ip1(double *ejk, double*ejk_aux, double *dm, double *densi
 {
     cudaMemset(head, 0, sizeof(int));
 
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
     #ifdef USE_SYCL
-    int workers = sycl_get_queue()->get_device().get_info<sycl::info::device::max_compute_units>();
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class ejk_int3c2e_ip1_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
         ejk_int3c2e_ip1_kernel(
             ejk, ejk_aux, dm, density_auxvec, dev_envs, pool, task_pool,
@@ -530,9 +532,6 @@ int PBCsr_ejk_int3c2e_ip1(double *ejk, double*ejk_aux, double *dm, double *densi
     });
     #else
     cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int workers = prop.multiProcessorCount;
     ejk_int3c2e_ip1_kernel<<<workers, THREADS, shm_size>>>(
             ejk, ejk_aux, dm, density_auxvec, *envs, pool, task_pool,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,

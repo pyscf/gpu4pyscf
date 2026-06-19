@@ -33,7 +33,6 @@ static void vv10_fock_eval_UWE_kernel(double* __restrict__ U, double* __restrict
                                       const double* __restrict__ omega, const double* __restrict__ kappa,
                                       const int ngrids)
 {
-<<<<<<< HEAD
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     const int i = item.get_global_id(0);
@@ -48,9 +47,6 @@ static void vv10_fock_eval_UWE_kernel(double* __restrict__ U, double* __restrict
     __shared__ double3 shared_r_j[NG_PER_BLOCK];
 #endif
 
-=======
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
->>>>>>> origin/master
     const bool active = i < ngrids;
 
     double omega_i = NAN;
@@ -68,7 +64,6 @@ static void vv10_fock_eval_UWE_kernel(double* __restrict__ U, double* __restrict
     double W_i = 0;
     double E_i = 0;
 
-<<<<<<< HEAD
     for (int j_block_offset = 0; j_block_offset < ngrids; j_block_offset += NG_PER_BLOCK) {
         const int j = j_block_offset + threadIdx_x;
         if (j < ngrids) {
@@ -78,20 +73,6 @@ static void vv10_fock_eval_UWE_kernel(double* __restrict__ U, double* __restrict
             shared_r_j[threadIdx_x].x = grid_coord[j * 3 + 0];
             shared_r_j[threadIdx_x].y = grid_coord[j * 3 + 1];
             shared_r_j[threadIdx_x].z = grid_coord[j * 3 + 2];
-=======
-    __shared__ double3 shared_omega_kappa_rhow_j[NG_PER_BLOCK];
-    __shared__ double3 shared_r_j[NG_PER_BLOCK];
-
-    for (int j_block_offset = 0; j_block_offset < ngrids; j_block_offset += NG_PER_BLOCK) {
-        const int j = j_block_offset + threadIdx.x;
-        if (j < ngrids) {
-            shared_omega_kappa_rhow_j[threadIdx.x].x = omega[j];
-            shared_omega_kappa_rhow_j[threadIdx.x].y = kappa[j];
-            shared_omega_kappa_rhow_j[threadIdx.x].z = rho_weight[j];
-            shared_r_j[threadIdx.x].x = grid_coord[j * 3 + 0];
-            shared_r_j[threadIdx.x].y = grid_coord[j * 3 + 1];
-            shared_r_j[threadIdx.x].z = grid_coord[j * 3 + 2];
->>>>>>> origin/master
         }
         __syncthreads();
 
@@ -132,16 +113,12 @@ static void vv10_fock_eval_omega_derivative_kernel(double* __restrict__ omega, d
                                                    const double* __restrict__ rho, const double* __restrict__ gamma, const double C_factor,
                                                    const int ngrids)
 {
-<<<<<<< HEAD
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     const int i = item.get_global_id(0);
 #else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
 #endif
-=======
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
->>>>>>> origin/master
     if (i >= ngrids)
         return;
 
@@ -170,7 +147,6 @@ static void vv10_grad_eval_E_grid_response_offdiagonal_kernel(double* __restrict
                                                               const int* __restrict__ grid_associated_atom, const int* __restrict__ grid_offsets_of_atom,
                                                               const int natoms, const int i_grid_begin, const int ngrids)
 {
-<<<<<<< HEAD
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_unoffset = item.get_global_id(1);
@@ -179,10 +155,6 @@ static void vv10_grad_eval_E_grid_response_offdiagonal_kernel(double* __restrict
     const int i_unoffset = blockIdx.x * blockDim.x + threadIdx.x;
     const int B_atom = blockIdx.y;
 #endif
-=======
-    const int i_unoffset = blockIdx.x * blockDim.x + threadIdx.x;
-    const int B_atom = blockIdx.y;
->>>>>>> origin/master
     if (i_unoffset >= ngrids || B_atom >= natoms)
         return;
     const int i = i_unoffset + i_grid_begin;
@@ -306,16 +278,12 @@ static void vv10_hess_eval_omega_derivative_kernel(double* __restrict__ omega, d
                                                    const double* __restrict__ rho, const double* __restrict__ gamma, const double C_factor,
                                                    const int ngrids)
 {
-<<<<<<< HEAD
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     const int i = item.get_global_id(0);
 #else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
 #endif
-=======
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
->>>>>>> origin/master
     if (i >= ngrids)
         return;
 
@@ -446,16 +414,12 @@ static void vv10_hess_eval_f_t_diagonal_kernel(double* __restrict__ f_rho_t, dou
                                                const double* __restrict__ rho_t, const double* __restrict__ gamma_t,
                                                const int ngrids, const int ntrial)
 {
-<<<<<<< HEAD
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     const int i = item.get_global_id(0);
 #else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
 #endif
-=======
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
->>>>>>> origin/master
     if (i >= ngrids)
         return;
 
@@ -505,10 +469,7 @@ static void vv10_hess_eval_EUW_grid_response_offdiagonal_kernel(double* __restri
 #else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int B_atom = blockIdx.y;
-<<<<<<< HEAD
 #endif
-=======
->>>>>>> origin/master
     if (i >= ngrids || B_atom >= natoms)
         return;
     const int i_associated_atom = grid_associated_atom[i];
@@ -662,10 +623,7 @@ static void vv10_hess_eval_D_B_in_double_grid_response_offdiagonal_kernel(double
 #else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int B_atom = blockIdx.y;
-<<<<<<< HEAD
 #endif
-=======
->>>>>>> origin/master
     if (i >= ngrids || B_atom >= natoms)
         return;
     const int i_associated_atom = grid_associated_atom[i];
@@ -756,7 +714,6 @@ int VXC_vv10nlc_fock_eval_UWE(const cudaStream_t stream,
                               const double* omega, const double* kappa,
                               const int ngrids)
 {
-<<<<<<< HEAD
 #ifdef USE_SYCL
     const sycl::range<1> threads(NG_PER_BLOCK);
     const sycl::range<1> blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
@@ -764,8 +721,6 @@ int VXC_vv10nlc_fock_eval_UWE(const cudaStream_t stream,
       vv10_fock_eval_UWE_kernel(U, W, E,
                                 grid_coord, rho_weight, omega, kappa, ngrids); });
 #else
-=======
->>>>>>> origin/master
     const dim3 threads(NG_PER_BLOCK);
     const dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     vv10_fock_eval_UWE_kernel<<<blocks, threads, 0, stream>>>(U, W, E,
@@ -785,7 +740,6 @@ int VXC_vv10nlc_fock_eval_omega_derivative(const cudaStream_t stream,
                                            const double* rho, const double* gamma, const double C_factor,
                                            const int ngrids)
 {
-<<<<<<< HEAD
 #ifdef USE_SYCL
     const sycl::range<1> threads(NG_PER_BLOCK);
     const sycl::range<1> blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
@@ -793,8 +747,6 @@ int VXC_vv10nlc_fock_eval_omega_derivative(const cudaStream_t stream,
       vv10_fock_eval_omega_derivative_kernel(omega, domega_drho, domega_dgamma,
                                              rho, gamma, C_factor, ngrids); });
 #else
-=======
->>>>>>> origin/master
     const dim3 threads(NG_PER_BLOCK);
     const dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     vv10_fock_eval_omega_derivative_kernel<<<blocks, threads, 0, stream>>>(omega, domega_drho, domega_dgamma,
@@ -802,31 +754,6 @@ int VXC_vv10nlc_fock_eval_omega_derivative(const cudaStream_t stream,
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of vv10 fock eval_omega_derivative: %s\n", cudaGetErrorString(err));
-<<<<<<< HEAD
-=======
-        return 1;
-    }
-    return 0;
-}
-
-__host__
-int VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(const cudaStream_t stream,
-                                                      double* Egr,
-                                                      const double* grid_coord, const double* rho_weight,
-                                                      const double* omega, const double* kappa,
-                                                      const int* grid_associated_atom, const int* grid_offsets_of_atom,
-                                                      const int natm, const int i_grid_begin, const int ngrids)
-{
-    constexpr int n_grids_per_block = 128;
-    const dim3 threads(n_grids_per_block, 1);
-    const dim3 blocks((ngrids + n_grids_per_block - 1) / n_grids_per_block, natm);
-    vv10_grad_eval_E_grid_response_offdiagonal_kernel<<<blocks, threads, 0, stream>>>(
-        Egr, grid_coord, rho_weight, omega, kappa, grid_associated_atom, grid_offsets_of_atom, natm, i_grid_begin, ngrids
-    );
-    const cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error of vv10 grad eval_E_grid_response: %s\n", cudaGetErrorString(err));
->>>>>>> origin/master
         return 1;
     }
 #endif
@@ -934,7 +861,6 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
 {
     {
         constexpr int n_trial_per_thread = 6; // Notice: ntrial is likely a multiple of 3
-<<<<<<< HEAD
         #ifdef USE_SYCL
         const sycl::range<2> threads(1, NG_PER_BLOCK);
         const sycl::range<2> blocks((ntrial + n_trial_per_thread - 1) / n_trial_per_thread,
@@ -947,8 +873,6 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
                                                                      );
         });
         #else
-=======
->>>>>>> origin/master
         const dim3 threads(NG_PER_BLOCK, 1);
         const dim3 blocks((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK,
                         (ntrial + n_trial_per_thread - 1) / n_trial_per_thread);
@@ -958,7 +882,6 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
             domega_drho, domega_dgamma, dkappa_drho,
             rho_t, gamma_t, ngrids, ntrial
         );
-<<<<<<< HEAD
         #endif
     }
     {
@@ -975,10 +898,6 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
                                              );
         });
         #else
-=======
-    }
-    {
->>>>>>> origin/master
         const dim3 threads(NG_PER_BLOCK);
         const dim3 blocks((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK);
         vv10_hess_eval_f_t_diagonal_kernel<<<blocks, threads, 0, stream>>> (
@@ -989,10 +908,7 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
             d2omega_drho2, d2omega_dgamma2, d2omega_drho_dgamma, d2kappa_drho2,
             rho_t, gamma_t, ngrids, ntrial
         );
-<<<<<<< HEAD
         #endif
-=======
->>>>>>> origin/master
     }
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1011,7 +927,6 @@ int VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(const cudaStream_t strea
                                                         const int ngrids, const int natm)
 {
     constexpr int n_grids_per_block = 128;
-<<<<<<< HEAD
     #ifdef USE_SYCL
     const sycl::range<2> threads(1, n_grids_per_block);
     const sycl::range<2> blocks(natm, (ngrids + n_grids_per_block - 1) / n_grids_per_block);
@@ -1019,8 +934,6 @@ int VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(const cudaStream_t strea
       vv10_hess_eval_EUW_grid_response_offdiagonal_kernel(Egr, Ugr, Wgr, grid_coord, rho_weight, omega, kappa, grid_associated_atom, grid_offsets_of_atom, ngrids, natm);
     });
     #else
-=======
->>>>>>> origin/master
     const dim3 threads(n_grids_per_block, 1);
     const dim3 blocks((ngrids + n_grids_per_block - 1) / n_grids_per_block, natm);
     vv10_hess_eval_EUW_grid_response_offdiagonal_kernel<<<blocks, threads, 0, stream>>>(
@@ -1078,7 +991,6 @@ int VXC_vv10nlc_hess_eval_D_B_in_double_grid_response_offdiagonal(const cudaStre
                                                       const int ngrids, const int natm)
 {
     constexpr int n_grids_per_block = 128;
-<<<<<<< HEAD
     #ifdef USE_SYCL
     const sycl::range<2> threads(1, n_grids_per_block);
     const sycl::range<2> blocks(natm, (ngrids + n_grids_per_block - 1) / n_grids_per_block);
@@ -1087,8 +999,6 @@ int VXC_vv10nlc_hess_eval_D_B_in_double_grid_response_offdiagonal(const cudaStre
         D_B, grid_coord, rho_weight, omega, kappa, grid_associated_atom, grid_offsets_of_atom, ngrids, natm);
     });
     #else
-=======
->>>>>>> origin/master
     const dim3 threads(n_grids_per_block, 1);
     const dim3 blocks((ngrids + n_grids_per_block - 1) / n_grids_per_block, natm);
     vv10_hess_eval_D_B_in_double_grid_response_offdiagonal_kernel<<<blocks, threads, 0, stream>>>(

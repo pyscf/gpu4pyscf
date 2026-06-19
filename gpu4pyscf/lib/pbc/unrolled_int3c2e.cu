@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
-#include <cuda.h>
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 
@@ -13,7 +11,6 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool,
         int shm_size, int iprim, int jprim, int kprim, uint32_t *bas_ij_idx,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
-<<<<<<< HEAD
         int nauxbas, int naux, int to_sph, double *rw)
 {
 #ifdef USE_SYCL
@@ -22,21 +19,12 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
 #else
     int st_id = threadIdx.x;
 #endif
-=======
-        int nauxbas, int naux, int to_sph)
-{
-    int st_id = threadIdx.x;
->>>>>>> origin/master
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-<<<<<<< HEAD
-=======
-    extern __shared__ double rw[];
->>>>>>> origin/master
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
@@ -133,7 +121,6 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool,
         int shm_size, int iprim, int jprim, int kprim, uint32_t *bas_ij_idx,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
-<<<<<<< HEAD
         int nauxbas, int naux, int to_sph, double *rw)
 {
 #ifdef USE_SYCL
@@ -142,21 +129,12 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
 #else
     int st_id = threadIdx.x;
 #endif
-=======
-        int nauxbas, int naux, int to_sph)
-{
-    int st_id = threadIdx.x;
->>>>>>> origin/master
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-<<<<<<< HEAD
-=======
-    extern __shared__ double rw[];
->>>>>>> origin/master
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
@@ -264,7 +242,6 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool,
         int shm_size, int iprim, int jprim, int kprim, uint32_t *bas_ij_idx,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
-<<<<<<< HEAD
         int nauxbas, int naux, int to_sph, double *rw)
 {
 #ifdef USE_SYCL
@@ -273,21 +250,12 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
 #else
     int st_id = threadIdx.x;
 #endif
-=======
-        int nauxbas, int naux, int to_sph)
-{
-    int st_id = threadIdx.x;
->>>>>>> origin/master
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-<<<<<<< HEAD
-=======
-    extern __shared__ double rw[];
->>>>>>> origin/master
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
@@ -411,7 +379,6 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool,
         int shm_size, int iprim, int jprim, int kprim, uint32_t *bas_ij_idx,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
-<<<<<<< HEAD
         int nauxbas, int naux, int to_sph, double *rw)
 {
 #ifdef USE_SYCL
@@ -420,21 +387,12 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
 #else
     int st_id = threadIdx.x;
 #endif
-=======
-        int nauxbas, int naux, int to_sph)
-{
-    int st_id = threadIdx.x;
->>>>>>> origin/master
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-<<<<<<< HEAD
-=======
-    extern __shared__ double rw[];
->>>>>>> origin/master
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
@@ -542,7 +500,6 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool,
         int shm_size, int iprim, int jprim, int kprim, uint32_t *bas_ij_idx,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
-<<<<<<< HEAD
         int nauxbas, int naux, int to_sph, double *rw)
 {
 #ifdef USE_SYCL
@@ -551,21 +508,12 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
 #else
     int st_id = threadIdx.x;
 #endif
-=======
-        int nauxbas, int naux, int to_sph)
-{
-    int st_id = threadIdx.x;
->>>>>>> origin/master
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-<<<<<<< HEAD
-=======
-    extern __shared__ double rw[];
->>>>>>> origin/master
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
@@ -690,18 +638,13 @@ int int3c2e_unrolled(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                      ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool,
                      int shm_size, int iprim, int jprim, int kprim, int li, int lj, int lk,
                      uint32_t *bas_ij_idx, int *ao_pair_loc,
-<<<<<<< HEAD
                      int ao_pair_offset, int aux_offset, int nauxbas, int naux, int to_sph, double *rw)
-=======
-                     int ao_pair_offset, int aux_offset, int nauxbas, int naux, int to_sph)
->>>>>>> origin/master
 {
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
         int3c2e_000(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size,
             ijk_tasks_info, c2s_pool, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc,
-<<<<<<< HEAD
             ao_pair_offset, aux_offset, nauxbas, naux, to_sph, rw); break;
     case 5: // li=1 lj=0 lk=0
         int3c2e_100(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size,
@@ -719,25 +662,6 @@ int int3c2e_unrolled(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         int3c2e_101(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size,
             ijk_tasks_info, c2s_pool, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc,
             ao_pair_offset, aux_offset, nauxbas, naux, to_sph, rw); break;
-=======
-            ao_pair_offset, aux_offset, nauxbas, naux, to_sph); break;
-    case 5: // li=1 lj=0 lk=0
-        int3c2e_100(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size,
-            ijk_tasks_info, c2s_pool, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc,
-            ao_pair_offset, aux_offset, nauxbas, naux, to_sph); break;
-    case 6: // li=1 lj=1 lk=0
-        int3c2e_110(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size,
-            ijk_tasks_info, c2s_pool, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc,
-            ao_pair_offset, aux_offset, nauxbas, naux, to_sph); break;
-    case 25: // li=0 lj=0 lk=1
-        int3c2e_001(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size,
-            ijk_tasks_info, c2s_pool, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc,
-            ao_pair_offset, aux_offset, nauxbas, naux, to_sph); break;
-    case 30: // li=1 lj=0 lk=1
-        int3c2e_101(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size,
-            ijk_tasks_info, c2s_pool, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc,
-            ao_pair_offset, aux_offset, nauxbas, naux, to_sph); break;
->>>>>>> origin/master
     default: return 0;
     }
     return 1;

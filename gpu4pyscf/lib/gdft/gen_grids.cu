@@ -60,6 +60,7 @@ void GDFTgrid_weight_kernel(double *weight, const double *coords, const double *
 #else
     int tx = threadIdx.x;
     int ty = threadIdx.y;
+    int blockIdx_x = blockIdx.x;
 
     __shared__ double atom_xi[TILE];
     __shared__ double atom_yi[TILE];
@@ -344,12 +345,8 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     const int i_derivative_atom = item.get_global_id(0);
 #else
     const int i_grid = blockIdx.x * blockDim.x + threadIdx.x;
-<<<<<<< HEAD
-    const int i_derivative_atom = blockIdx.y * blockDim.y + threadIdx.y;
-#endif
-=======
     const int i_derivative_atom = blockIdx.y;
->>>>>>> origin/master
+#endif
     if (i_grid >= ngrids || i_derivative_atom >= natm)
         return;
     const int i_associated_atom = atm_idx[i_grid];
@@ -848,7 +845,7 @@ void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const dou
     tile_t& z_atom = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
 #else
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    const int tx = threadIdx_x;
+    const int tx = threadIdx.x;
     const int blockDim_x = blockDim.x;
     double __shared__ x_atom[NATOM_PER_BLOCK];
     double __shared__ y_atom[NATOM_PER_BLOCK];
@@ -959,11 +956,10 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
                                           const double *atm_coords, const double *a_factor, const double *inv_atom_distance, const int *atm_idx, const double *Ar_distance,
                                           const double* PB, const double* invsumPB, const int ngrids, const int natm, const int scheme_id)
 {
-<<<<<<< HEAD
 #ifdef USE_SYCL
-    sycl::range<2> threads(TILE, TILE);
-    sycl::range<2> blocks((natm + TILE - 1) / TILE,
-                          (ngrids + TILE - 1) / TILE);
+    const int n_thread_per_grid = 128;
+    sycl::range<2> threads(1, n_thread_per_grid);
+    sycl::range<2> blocks(natm, (ngrids + n_thread_per_grid - 1) / n_thread_per_grid);
 
     const bool if_radii_adjust = a_factor != NULL;
     const enum GridPartitionScheme scheme = get_grid_partition_sheme(scheme_id);
@@ -972,36 +968,31 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
         if (if_radii_adjust) {
           sycl_get_queue()->parallel_for<class GDFTgrid_weight_derivative_origbeckeA>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::original_becke> (
-                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
           });
         } else {
           sycl_get_queue()->parallel_for<class GDFTgrid_weight_derivative_origbeckeB>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::original_becke> (
-                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
           });
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
           sycl_get_queue()->parallel_for<class GDFTgrid_weight_derivative_stratmannA>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::stratmann> (
-                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
           });
         } else {
           sycl_get_queue()->parallel_for<class GDFTgrid_weight_derivative_stratmannB>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::stratmann> (
-                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
           });
         }
     }
 #else
-    const dim3 threads(TILE, TILE);
-    const dim3 blocks((ngrids + TILE - 1) / TILE,
-                      (natm + TILE - 1) / TILE);
-=======
     const int n_thread_per_grid = 128;
     const dim3 threads(n_thread_per_grid, 1);
     const dim3 blocks((ngrids + n_thread_per_grid - 1) / n_thread_per_grid, natm);
->>>>>>> origin/master
 
     const bool if_radii_adjust = a_factor != NULL;
     const enum GridPartitionScheme scheme = get_grid_partition_sheme(scheme_id);
@@ -1062,13 +1053,13 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
             if (if_radii_adjust) {
               sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_offdiag_syclA>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 GDFTgrid_weight_second_derivative_offdiagonal_kernel< true, GridPartitionScheme::original_becke> (
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
               });
             } else {
               sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_offdiag_syclB>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::original_becke> (
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
               });
             }
@@ -1076,13 +1067,13 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
             if (if_radii_adjust) {
               sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_offdiag_syclC>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 GDFTgrid_weight_second_derivative_offdiagonal_kernel< true, GridPartitionScheme::stratmann> (
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
               });
             } else {
               sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_offdiag_syclD>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::stratmann> (
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
               });
             }
@@ -1132,13 +1123,13 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
             if (if_radii_adjust) {
               sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_diag_origbeckeA>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 GDFTgrid_weight_second_derivative_diagonal_kernel< true, GridPartitionScheme::original_becke> (
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
               });
             } else {
               sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_diag_origbeckeB>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::original_becke> (
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
               });
             }
@@ -1146,13 +1137,13 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
             if (if_radii_adjust) {
               sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_diag_stratmannA>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 GDFTgrid_weight_second_derivative_diagonal_kernel< true, GridPartitionScheme::stratmann> (
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
               });
             } else {
               sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_diag_stratmannB>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::stratmann> (
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
               });
             }
@@ -1216,21 +1207,21 @@ int GDFTbecke_eval_PB(double *PB,
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
           sycl_get_queue()->parallel_for<class GDFTgrid_becke_eval_PB_origbeckeA>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::original_becke> (PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::original_becke> (PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
           });
         } else {
           sycl_get_queue()->parallel_for<class GDFTgrid_becke_eval_PB_origbeckeB>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke> (PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke> (PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
           });
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
           sycl_get_queue()->parallel_for<class GDFTgrid_becke_eval_PB_stratmannA>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::stratmann> (PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::stratmann> (PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
           });
         } else {
           sycl_get_queue()->parallel_for<class GDFTgrid_becke_eval_PB_stratmannB>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann> (PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann> (PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
           });
         }
     }
@@ -1280,7 +1271,7 @@ int GDFTgroup_grids(cudaStream_t stream, int* group_ids, const double* atom_coor
 #ifdef USE_SYCL
     sycl::range<1> threads(NATOM_PER_BLOCK);
     sycl::range<1> blocks((ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
-    sycl_get_queue()->parallel_for<class GDFTgroup_grids_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+    stream.parallel_for<class GDFTgroup_grids_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
 	GDFTgroup_grids_kernel(group_ids, atom_coords, coords, natm, ngrids);
     });
 #else

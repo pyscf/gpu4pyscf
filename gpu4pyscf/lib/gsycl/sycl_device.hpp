@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -191,6 +192,18 @@ static inline int syclGetDevice(int* id) {
 
 static inline void syclSetDevice(int id) {
   sycl_set_device(id);
+}
+
+// --- CUDA-compat device-property helpers ---
+
+struct cudaDeviceProp {
+  int multiProcessorCount;
+};
+
+static inline cudaError_t cudaGetDeviceProperties(cudaDeviceProp* prop, int /*device*/) {
+  prop->multiProcessorCount = static_cast<int>(
+    sycl_get_queue()->get_device().get_info<sycl::info::device::max_compute_units>());
+  return cudaSuccess;
 }
 
 // --- CUDA-compat memory helpers (use current thread's queue) ---

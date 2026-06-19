@@ -37,7 +37,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs,
                                 float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
                                 int *head, int sp_blocks
                                 #ifdef USE_SYCL
-                                , sycl::nd_item<1> &item, char *shm_mem
+                                , sycl::nd_item<1> &item, std::byte *shm_mem
                                 #endif
                                 )
 {
@@ -432,7 +432,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars e
                                     float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
                                     int *head, int npairs_ij, int ksh_blocks
                                     #ifdef USE_SYCL
-                                    , sycl::nd_item<1> &item, char *shm_mem
+                                    , sycl::nd_item<1> &item, std::byte *shm_mem
                                     #endif
                                     )
 {
@@ -828,11 +828,13 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, PBCIntEnvVars *envs,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     cudaMemset(head, 0, sizeof(int));
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
 #ifdef USE_SYCL
-    int workers = sycl_get_queue()->get_device().get_info<sycl::info::device::max_compute_units>();
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class contract_int3c2e_dm_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
         contract_int3c2e_dm_kernel(
             out, dm, dev_envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
@@ -844,10 +846,6 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, PBCIntEnvVars *envs,
     });
 #else
     cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
     contract_int3c2e_dm_kernel<<<workers, THREADS, shm_size>>>(
             out, dm, *envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
@@ -869,12 +867,14 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, PBCIntEnvVars *envs,
                                int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                                float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-#ifdef USE_SYCL
     cudaMemset(head, 0, sizeof(int));
-    int workers = sycl_get_queue()->get_device().get_info<sycl::info::device::max_compute_units>();
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+#ifdef USE_SYCL
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class contract_int3c2e_auxvec_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
         contract_int3c2e_auxvec_kernel(out, auxvec, dev_envs, pool, task_pool, bas_ij_idx, ksh_offsets,
                                        img_idx, img_offsets, gout_stride_lookup, nauxbas,
@@ -885,10 +885,6 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, PBCIntEnvVars *envs,
     });
 #else
     cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
     contract_int3c2e_auxvec_kernel<<<workers, THREADS, shm_size>>>(
             out, auxvec, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,

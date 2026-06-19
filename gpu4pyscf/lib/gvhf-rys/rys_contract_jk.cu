@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cstddef>
 #include <type_traits>
 #include <cuda_runtime.h>
 

@@ -1293,12 +1293,10 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
 
     #ifdef USE_SYCL
     sycl::queue& stream = *sycl_get_queue();
-    int workers = stream.get_device().get_info<sycl::info::device::max_compute_units>();
-    #else
+    #endif
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    #endif
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
@@ -1391,12 +1389,10 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
 
     #ifdef USE_SYCL
     sycl::queue& stream = *sycl_get_queue();
-    int workers = stream.get_device().get_info<sycl::info::device::max_compute_units>();
-    #else
+    #endif
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    #endif
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
@@ -1408,8 +1404,8 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
         int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
         buflen = (reserved_shm_size + ij_prims);
         #ifdef USE_SYCL
-        sycl::range<2> threads(gout_stride, quartets_per_block);
         sycl::range<2> blocks(1, workers);
+        sycl::range<2> threads(gout_stride, quartets_per_block);
         auto dev_envs = *envs;
         stream.submit([&](sycl::handler &cgh) {
           sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);

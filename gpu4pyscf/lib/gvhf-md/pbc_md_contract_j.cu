@@ -17,6 +17,10 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifndef USE_SYCL
+#include <cuda.h>
+#include <cuda_runtime.h>
+#endif
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
@@ -88,13 +92,13 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
 void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
-<<<<<<< HEAD
-                  int threadsx, int threadsy, int tilex, int tiley,
-                  const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
-                  #ifdef USE_SYCL
-                  , sycl::nd_item<2> &item, char *shm_mem
-                  #endif
-                    )
+                     float *q_cond_ij, float *q_cond_kl,
+                     int threadsx, int threadsy, int tilex, int tiley,
+                     const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
+                     #ifdef USE_SYCL
+                     , sycl::nd_item<2> &item, std::byte *shm_mem
+                     #endif
+                     )
 {
 #ifdef USE_SYCL
     int threadIdx_x = item.get_local_id(1);
@@ -113,37 +117,13 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
     int blockDim_y = blockDim.y;
     extern __shared__ double dm_kl_cache[];
 #endif
-    int *pair_ij_mapping = bounds.pair_ij_mapping;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int bsizex = threadsx * tilex;
-    int bsizey = threadsy * tiley;
-    int task_ij0 = blockIdx_x * bsizex;
-    int task_kl0 = blockIdx_y * bsizey;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
-        return;
-    }
-    if (pair_ij_mapping == pair_kl_mapping &&
-        // when ij pattern and kl pattern are identical, the 8-fold permutation
-        // symmetry can be utilized. Tiles on in the upper triangular part can
-        // be skipped. If the last ij task (task_ij0+bsizex-1) is greater than
-        // the first kl task (task_kl0), tile is completely inside the triu part.
-        task_ij0+bsizex <= task_kl0) {
-=======
-                     float *q_cond_ij, float *q_cond_kl,
-                     int threadsx, int threadsy, int tilex, int tiley,
-                     uint16_t *pRt2_kl_ij, int8_t *efg_phase)
-{
     int64_t *pair_ij_mapping = (int64_t*)bounds.pair_ij_mapping;
     int64_t *pair_kl_mapping = (int64_t*)bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
     int bsizey = threadsy * tiley;
-    int pair_ij0 = blockIdx.x * bsizex;
-    int pair_kl0 = blockIdx.y * bsizey;
+    int pair_ij0 = blockIdx_x * bsizex;
+    int pair_kl0 = blockIdx_y * bsizey;
     if (q_cond_ij[pair_ij0] + q_cond_kl[pair_kl0] < bounds.cutoff) {
->>>>>>> origin/master
         return;
     }
 
@@ -186,19 +166,11 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
 
     __syncthreads();
     for (int n = t_id; n < bsizey; n += threads) {
-<<<<<<< HEAD
-        int task_kl = blockIdx_y * bsizey + n;
-        if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int ksh = pair_kl / nbas;
-            int lsh = pair_kl % nbas;
-=======
-        int pair_kl = blockIdx.y * bsizey + n;
+        int pair_kl = blockIdx_y * bsizey + n;
         if (pair_kl < npairs_kl) {
             int64_t bas_kl = pair_kl_mapping[pair_kl];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
->>>>>>> origin/master
             double ak = env[bas[ksh*BAS_SLOTS+PTR_EXP]];
             double al = env[bas[lsh*BAS_SLOTS+PTR_EXP]];
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
@@ -226,28 +198,17 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
             int kl = n / tiley;
             int batch_kl = n  - kl * tiley;
             int sq_kl = ty + batch_kl * threadsy;
-<<<<<<< HEAD
-            int task_kl = blockIdx_y * bsizey + sq_kl;
-            if (task_kl < npairs_kl) {
-                int kl_loc0 = pair_kl_loc[task_kl];
-=======
-            int pair_kl = blockIdx.y * bsizey + sq_kl;
+            int pair_kl = blockIdx_y * bsizey + sq_kl;
             if (pair_kl < npairs_kl) {
                 int kl_loc0 = pair_kl_loc[pair_kl];
->>>>>>> origin/master
                 dm_kl_cache[sq_kl+kl*bsizey] = dm[kl_loc0+kl];
             }
         }
     }
 
     for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
-<<<<<<< HEAD
-        int task_ij0 = (blockIdx_x * tilex + batch_ij) * threadsx;
-        if (task_ij0 >= npairs_ij) {
-=======
-        int pair_ij0 = (blockIdx.x * tilex + batch_ij) * threadsx;
+        int pair_ij0 = (blockIdx_x * tilex + batch_ij) * threadsx;
         if (pair_ij0 >= npairs_ij) {
->>>>>>> origin/master
             break;
         }
         __syncthreads();
@@ -282,23 +243,12 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
             vj_ij[n] = 0.;
         }
         for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
-<<<<<<< HEAD
-            int task_kl0 = (blockIdx_y * tiley + batch_kl) * threadsy;
-            if (task_kl0 >= npairs_kl) {
-                break;
-            }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
-=======
-            int pair_kl0 = (blockIdx.y * tiley + batch_kl) * threadsy;
+            int pair_kl0 = (blockIdx_y * tiley + batch_kl) * threadsy;
             if (pair_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond_kl[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond_ij[pair_ij0] < bounds.cutoff) {
->>>>>>> origin/master
+            if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond_kl[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond_ij[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -468,11 +418,12 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             sycl_get_queue()->submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<char, 1> local_acc(buflen, cgh);
+              sycl::local_accessor<std::byte, 1> local_acc(buflen, cgh);
               cgh.parallel_for<class pbc_md_j_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
                 const uint16_t *pRt2_kl_ij = Rt2_kl_ij + Rt2_kl_ij_syclonly_offset;
                 const int8_t *efg_phase = c_Rt2_efg_phase + efg_phase_syclonly_offset;
-                pbc_md_j_kernel(dev_envs, jmat, bounds, threads_ij, threads_kl, tilex, tiley,
+                pbc_md_j_kernel(dev_envs, jmat, bounds, q_cond_ij, q_cond_kl,
+                                threads_ij, threads_kl, tilex, tiley,
                                 pRt2_kl_ij, efg_phase,
                                 item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
               });
@@ -488,7 +439,6 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
     cudaGetSymbolAddress((void**)&efg_phase, c_Rt2_efg_phase);
     pRt2_kl_ij += offset_for_Rt2_idx(lij, lkl);
     efg_phase += offset_for_Rt2_idx(0, lkl);
-    int dm_size = dm_xyz_size * nimgs_uniq_pair;
     for (int i_dm = 0; i_dm < n_dm; ++i_dm) {
         JKMatrix jmat = {vj+i_dm*dm_size, NULL, dm+i_dm*dm_size, n_dm, 0, omega};
         if (1){//!pbc_md_j_unrolled(envs, &jmat, &bounds, omega)) {

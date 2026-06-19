@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <type_traits>
 
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
@@ -40,10 +41,10 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                   float dm_penalty,
-                  int64_t *pool, int *head, GXYZOffset *gxyz_offsets,
+                  int64_t *pool, int *head_base, const GXYZOffset *p_gxyz_offsets,
                   int gout_pattern, int reserved_shm_size
                   #ifdef USE_SYCL
-                  , sycl::nd_item<2> &item, char *shm_mem
+                  , sycl::nd_item<2> &item, std::byte *shm_mem
                   #endif
                   )
 {
@@ -99,6 +100,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
 
     const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     #endif
+    int *head = head_base + OFFSET/256;
 
     // sq is short for shl_quartet
     int li = bounds.li;
@@ -671,101 +673,57 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     kmat.lr_factor = 0;
     kmat.sr_factor = 1;
 
-    #ifdef USE_SYCL
-    int workers = sycl_get_queue()->get_device().get_info<sycl::info::device::max_compute_units>();
-    #else
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    #endif
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int)*3);
 
-<<<<<<< HEAD
-    if (1){//!rys_k_unrolled(envs, &kmat, &bounds, pool)) {
-      GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
-      int gout_pattern = (((li == 0) >> 3) |
-                          ((lj == 0) >> 2) |
-                          ((lk == 0) >> 1) |
-                          ( ll == 0));
-      int threads[2];
-      int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
-      int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
-
-      auto launch = [&](auto offset, int tile_chunk) {
-        constexpr int OFF = decltype(offset)::value;
-        int buflen = threads_scheme_for_k(threads, bounds, shm_size, tile_chunk);
-        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-
-        #ifdef USE_SYCL
-        sycl::range<2> blocks(1, workers);
-        sycl::range<2> cuda_threads(threads[1], threads[0]);
-        auto dev_envs = *envs;
-        sycl_get_queue()->submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen), cgh);
-          cgh.parallel_for(sycl::nd_range<2>(blocks * cuda_threads, cuda_threads), [=](auto item) {
-            rys_k_kernel<OFF>(dev_envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
-                              nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-                              pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size,
-                              item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-          });
-        });
-        #else
-        dim3 cuda_threads(threads[0], threads[1]);
-        rys_k_kernel<OFF><<<workers, cuda_threads, buflen>>>(
-            *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-            pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
-        #endif
-      };
-
-      launch(std::integral_constant<int, 0>{}, 256);
-      if (n_tiles > 256)  launch(std::integral_constant<int, 256>{}, std::min(256, n_tiles - 256));
-      if (n_tiles > 512)  launch(std::integral_constant<int, 512>{}, std::min(256, n_tiles - 512));
-=======
     if (!PBCrys_k_unrolled(envs, &kmat, &bounds, pair_ij_mapping, pair_kl_mapping,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl,
                            diffuse_exps, dm_penalty, pool, head, workers)) {
-        int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
                             ((lk == 0) >> 1) |
                             ( ll == 0));
-        dim3 threads;
-        int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
         int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
-        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
+        int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
 
-        rys_k_kernel<<<workers, threads, buflen>>>(
-            *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
-            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-            q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-            dm_penalty, pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
-
-        if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
-            buflen = threads_scheme_for_k(threads, bounds, shm_size,
-                                          min(256, n_tiles-256));
+        auto launch = [&](auto offset, int tile_chunk) {
+            constexpr int OFFSET = decltype(offset)::value;
+            int tdims[2];
+            size_t buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            rys_k_kernel<<<workers, threads, buflen>>>(
+
+            #ifdef USE_SYCL
+            sycl::range<2> blocks(1, workers);
+            sycl::range<2> cuda_threads(tdims[1], tdims[0]);
+            auto dev_envs = *envs;
+            sycl_get_queue()->submit([&](sycl::handler &cgh) {
+              sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh);
+              cgh.parallel_for(sycl::nd_range<2>(blocks * cuda_threads, cuda_threads), [=](auto item) {
+                rys_k_kernel<OFFSET>(dev_envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
+                                     supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                                     q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                                     dm_penalty, pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size,
+                                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              });
+            });
+            #else
+            dim3 cuda_threads(tdims[0], tdims[1]);
+            rys_k_kernel<OFFSET><<<workers, cuda_threads, buflen>>>(
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                dm_penalty, pool, head+1, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
-        }
+                dm_penalty, pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
+            #endif
+        };
 
-        if (n_tiles > 512) { // gggg
-            buflen = threads_scheme_for_k(threads, bounds, shm_size,
-                                          min(256, n_tiles-512));
-            int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            rys_k_kernel<<<workers, threads, buflen>>>(
-                *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
-                supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                dm_penalty, pool, head+2, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
-        }
->>>>>>> origin/master
+        launch(std::integral_constant<int,   0>{}, 256);
+        if (n_tiles > 256) launch(std::integral_constant<int, 256>{}, min(256, n_tiles-256));
+        if (n_tiles > 512) launch(std::integral_constant<int, 512>{}, min(256, n_tiles-512));
     }
 
     cudaError_t err = cudaGetLastError();

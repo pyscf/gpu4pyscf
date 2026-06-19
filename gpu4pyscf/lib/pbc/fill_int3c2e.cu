@@ -40,7 +40,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *img_
                                  float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
                                  int *head, int sp_blocks, int ksh_blocks
                                  #ifdef USE_SYCL
-                                 , sycl::nd_item<1> &item, char *shm_mem
+                                 , sycl::nd_item<1> &item, std::byte *shm_mem
                                  #endif
                                  )
 {
@@ -1241,11 +1241,11 @@ int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, uint32_t *pool,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     cudaMemset(head, 0, sizeof(int));
-    #ifndef USE_SYCL
-    cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
+    #ifndef USE_SYCL
+    cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     pbc_int3c2e_latsum23_kernel<<<workers, THREADS, shm_size>>>(
             out, *envs, pool, task_pool, c2s_pool, shm_size,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, sp_img_offsets,
@@ -1259,10 +1259,9 @@ int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, uint32_t *pool,
         return 1;
     }
     #else
-    int workers = sycl_get_queue()->get_device().get_info<sycl::info::device::max_compute_units>();
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class pbc_int3c2e_latsum23_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
         pbc_int3c2e_latsum23_kernel(
             out, dev_envs, pool, task_pool, c2s_pool, shm_size,
