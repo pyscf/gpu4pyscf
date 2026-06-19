@@ -46,7 +46,9 @@ def run(func, args=(), kwargs={}, non_blocking=False):
 
     with ThreadPoolExecutor(max_workers=num_devices) as ex:
         futures = [ex.submit(proc, i) for i in range(num_devices)]
-        return [fut.result() for fut in futures]
+        results = [fut.result() for fut in futures]
+    synchronize()
+    return results
 
 def map(func, tasks, args=(), kwargs={}, schedule='dynamic') -> list:
     '''Distributes tasks to multiple GPU devices for parallel computation.
@@ -139,11 +141,14 @@ def array_reduce(array_list, inplace=False):
     Device = cp.cuda.Device
     array_list = list(array_list)
     for device_id in range(num_devices):
+        Device(device_id).synchronize()
+    for device_id in range(num_devices):
         with Device(device_id):
             if inplace or device_id % 2 == 1:
                 array_list[device_id] = array_list[device_id].ravel()
             else:
                 array_list[device_id] = array_list[device_id].copy().ravel()
+        Device(device_id).synchronize()
 
     Device = cp.cuda.Device
     blksize = 1024*1024*1024 // dtype.itemsize # 1GB
@@ -158,7 +163,13 @@ def array_reduce(array_list, inplace=False):
                     src = array_list[device_id+step]
                     buf = cp.empty_like(dst[:blksize])
                     for p0, p1 in prange(0, size, blksize):
-                        dst[p0:p1] += p2p_transfer(buf[:p1-p0], src[p0:p1])
+                        p2p_transfer(buf[:p1-p0], src[p0:p1])
+                        # P2P transfer may enqueue work on either device's stream.
+                        # Sync both before and after the accumulation to avoid races.
+                        Device(device_id).synchronize()
+                        Device(device_id+step).synchronize()
+                        dst[p0:p1] += buf[:p1-p0]
+                        Device(device_id).synchronize()
         step *= 2
     return array_list[0].reshape(out_shape)
 

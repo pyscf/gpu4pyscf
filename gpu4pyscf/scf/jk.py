@@ -446,6 +446,13 @@ class _VHFOpt:
             t0 = log.init_timer()
             dms = cp.asarray(dms) # transfer to current device
             dm_cond = cp.asarray(dm_cond)
+            # cp.asarray for cross-device arrays can enqueue the P2P copy on an
+            # internal stream that is not the caller's per-thread stream. With ≥3
+            # GPUs the resulting race between the in-flight copy and subsequent
+            # reads (e.g. vstack, bas_pair_cache) causes cudaErrorLaunchFailure.
+            # One global device sync bridges both streams.
+            if num_devices > 1:
+                cp.cuda.Device(device_id).synchronize()
 
             if hermi == 0:
                 # Contract the tril and triu parts separately

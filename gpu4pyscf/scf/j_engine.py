@@ -169,6 +169,8 @@ class _VHFOpt(jk._VHFOpt):
                 _pair_mappings = {k: [cp.asarray(x) for x in v]
                                   for k, v in pair_mappings.items()}
             _pair_loc_gpu = cp.asarray(pair_loc_gpu)
+            if num_devices > 1:
+                cp.cuda.Device(device_id).synchronize()
 
             timing_collection = jk._TimingCollector(log.timer_debug1)
             kern_counts = 0
