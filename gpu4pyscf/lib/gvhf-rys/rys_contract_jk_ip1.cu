@@ -152,11 +152,11 @@ while (1) {
     while (pair_kl0 < bounds.npairs_kl) {
         if (jk.lr_factor != 0) {
             _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                                  q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                                  q_cond_ij, q_cond_kl, dm_penalty, envs, bounds, shared_memory);
         } else {
             _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                      q_cond_ij, q_cond_kl, dm_penalty,
-                                     s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                     s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds, shared_memory);
         }
         if (ntasks == 0) {
             continue;
@@ -664,11 +664,11 @@ while (1) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.lr_factor != 0) {
             _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                            q_cond_ij, q_cond_kl, jk, envs, bounds);
+                            q_cond_ij, q_cond_kl, jk, envs, bounds, shared_memory);
         } else {
             _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                q_cond_ij, q_cond_kl,
-                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds, shared_memory);
         }
         if (ntasks == 0) {
             continue;
@@ -1212,11 +1212,11 @@ while (1) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.lr_factor != 0) {
             _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                            q_cond_ij, q_cond_kl, jk, envs, bounds);
+                            q_cond_ij, q_cond_kl, jk, envs, bounds, shared_memory);
         } else {
             _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                q_cond_ij, q_cond_kl,
-                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds, shared_memory);
         }
         if (ntasks == 0) {
             continue;
@@ -1813,11 +1813,11 @@ while (1) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.lr_factor != 0) {
             _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                            q_cond_ij, q_cond_kl, jk, envs, bounds);
+                            q_cond_ij, q_cond_kl, jk, envs, bounds, shared_memory);
         } else {
             _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                q_cond_ij, q_cond_kl,
-                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds, shared_memory);
         }
         if (ntasks == 0) {
             continue;

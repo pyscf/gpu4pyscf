@@ -181,11 +181,11 @@ while (1) {
     while (pair_kl0 < bounds.npairs_kl) {
         if (jk.omega >= 0) {
             _fill_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                           q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                           q_cond_ij, q_cond_kl, dm_penalty, envs, bounds, shared_memory);
         } else {
             _fill_sr_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
-                              s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                              s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds, shared_memory);
         }
         if (ntasks == 0) {
             continue;
@@ -667,11 +667,11 @@ while (1) {
     while (pair_kl0 < bounds.npairs_kl) {
         if (jk.omega >= 0) {
             _fill_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                           q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                           q_cond_ij, q_cond_kl, dm_penalty, envs, bounds, shared_memory);
         } else {
             _fill_sr_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
-                              s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                              s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds, shared_memory);
         }
         if (ntasks == 0) {
             continue;
