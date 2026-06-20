@@ -17607,6 +17607,8 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     auto dev_envs = *envs;
     auto dev_jk = *jk;
     auto dev_bounds = *bounds;
+
+    sycl::queue& stream = *sycl_get_queue();
     sycl::range<2> blocks(1, workers);
     sycl::range<2> threads(gout_stride, nsq_per_block);
     switch (ijkl) {
