@@ -300,7 +300,7 @@ void rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -647,7 +647,7 @@ void rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -1146,7 +1146,7 @@ void rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -1635,7 +1635,7 @@ void rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -2332,7 +2332,7 @@ void rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -3611,7 +3611,7 @@ void rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -3957,7 +3957,7 @@ void rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -4456,7 +4456,7 @@ void rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -5163,14 +5163,18 @@ __global__ static
 void rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -5860,13 +5864,18 @@ __global__ static
 void rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
+    constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id =item.get_local_id(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -5900,7 +5909,6 @@ void rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -8046,14 +8054,18 @@ __global__ static
 void rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -8535,14 +8547,18 @@ __global__ static
 void rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -9240,14 +9256,18 @@ __global__ static
 void rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id = item.get_local_id(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -11234,13 +11254,18 @@ __global__ static
 void rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
+    constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id = item.get_local_id(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -11274,7 +11299,6 @@ void rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -12734,14 +12758,18 @@ __global__ static
 void rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -13073,14 +13101,18 @@ __global__ static
 void rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -13565,14 +13597,18 @@ __global__ static
 void rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -14282,14 +14318,18 @@ __global__ static
 void rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
-    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -14979,7 +15019,11 @@ __global__ static
 void rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
@@ -17132,7 +17176,11 @@ __global__ static
 void rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -17622,7 +17670,11 @@ __global__ static
 void rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -18335,7 +18387,11 @@ __global__ static
 void rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
@@ -20761,7 +20817,11 @@ __global__ static
 void rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
@@ -23037,7 +23097,11 @@ __global__ static
 void rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -23737,7 +23801,11 @@ __global__ static
 void rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
@@ -23779,7 +23847,6 @@ void rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     int nroots = bounds.nroots;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
@@ -25899,7 +25966,11 @@ __global__ static
 void rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -26382,7 +26453,11 @@ __global__ static
 void rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -27084,7 +27159,11 @@ __global__ static
 void rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
@@ -29021,7 +29100,11 @@ __global__ static
 void rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
@@ -30476,7 +30559,11 @@ __global__ static
 void rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -31176,7 +31263,11 @@ __global__ static
 void rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
@@ -33109,7 +33200,11 @@ __global__ static
 void rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                      )
 {
     constexpr int nsq_per_block = 64;
     #ifdef USE_SYCL
@@ -34698,6 +34793,7 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     auto dev_jk = *jk;
     auto dev_bounds = *bounds;
 
+    sycl::queue& stream = *sycl_get_queue();
     sycl::range<2> blocks(1, workers);
     sycl::range<2> threads(gout_stride, nsq_per_block);
     switch (ijkl) {

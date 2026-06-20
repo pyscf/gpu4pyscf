@@ -27264,6 +27264,7 @@ int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
     auto dev_jk = *jk;
     auto dev_bounds = *bounds;
 
+    sycl::queue& stream = *sycl_get_queue();
     sycl::range<2> blocks(1, workers);
     sycl::range<2> threads(gout_stride, nsq_per_block);
 

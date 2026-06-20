@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
@@ -36,50 +38,6 @@
 #define NBAS_MAX        1048576
 
 __global__ static
-<<<<<<< HEAD
-void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntEnvVars envs,
-                                      float *atom_diffuse_exps, float *s_max_per_atom,
-                                      float log_cutoff, int natm_cell0
-                                      #ifdef USE_SYCL
-                                      , sycl::nd_item<2> &item, float *xyz_cache
-                                      #endif
-                                      )
-{
-#ifdef USE_SYCL
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-#else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    extern __shared__ float xyz_cache[];
-#endif
-    if (blockIdx_y < blockIdx_x) { // i < j
-        return;
-    }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
-    int threads = blockDim_x * blockDim_y;
-    int thread_id = tx + blockDim_x * ty;
-    uint32_t nbas = envs.nbas;
-    int ish0 = blockIdx_y * BLOCK_SIZE + ty;
-    int jsh0 = blockIdx_x * BLOCK_SIZE + tx;
-    int ish1 = min(ish0 + BLOCK_SIZE, static_cast<int>(nbas));
-    int jsh1 = min(jsh0 + BLOCK_SIZE, static_cast<int>(nbas));
-    jsh1 = min(ish1, jsh1);
-
-    int *atm = envs.atm;
-    int *bas = envs.bas;
-    double *env = envs.env;
-    for (int k = thread_id; k < natm_cell0; k += threads) {
-=======
 void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
                       int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                       float *diffuse_exps, float *diffuse_ctr_coef,
@@ -101,7 +59,6 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
     extern __shared__ float shared_memory[];
     float *xyz_cache = shared_memory;
     for (int k = t_id; k < natm_cell0; k += THREADS) {
->>>>>>> origin/master
         double *rk = env + atm[k*ATM_SLOTS+PTR_COORD];
         xyz_cache[k*3+0] = rk[0];
         xyz_cache[k*3+1] = rk[1];
@@ -110,31 +67,6 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
     __syncthreads();
 
     float omega2 = omega * omega;
-<<<<<<< HEAD
-    float *diffuse_exps = s_estimator + nbas*nbas;
-    for (int ish = ish0; ish < ish1; ish += blockDim_y) {
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        float ai = diffuse_exps[ish];
-        float xi = ri[0];
-        float yi = ri[1];
-        float zi = ri[2];
-        for (int jsh = jsh0; jsh < min(ish+1, jsh1); jsh += blockDim_x) {
-            uint32_t bas_ij = ish * nbas + jsh;
-            if (q_cond[bas_ij] < log_cutoff-8.f) {
-                continue;
-            }
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            float aj = diffuse_exps[jsh];
-            float aij = ai + aj;
-            float aj_aij = aj / aij;
-            float theta = (omega2 * aij) / (omega2 + aij);
-            float xj = rj[0];
-            float yj = rj[1];
-            float zj = rj[2];
-            float xjxi = xj - xi;
-            float yjyi = yj - yi;
-            float zjzi = zj - zi;
-=======
     for (uint32_t pair_ij = shl_pair0+t_id; pair_ij < shl_pair1; pair_ij += THREADS) {
         int64_t bas_ij = bas_ij_idx[pair_ij];
         int ish = bas_ij / NBAS_MAX;
@@ -193,21 +125,15 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
         }
 
         if (s_estimator_max > NEGLIGIBLE_VAL) {
->>>>>>> origin/master
             float xpa = xjxi * aj_aij;
             float ypa = yjyi * aj_aij;
             float zpa = zjzi * aj_aij;
             float xij = xi + xpa;
             float yij = yi + ypa;
             float zij = zi + zpa;
-<<<<<<< HEAD
-            float s_ij = s_estimator[bas_ij];
-            float rr_cutoff = s_ij - log_cutoff;
-=======
             float theta = omega2 * aij / (omega2 + aij);
             float s_ij = s_estimator_max;
             float rr_cutoff = s_ij - log_cutoff;  
->>>>>>> origin/master
             int negligible = 1;
             for (int k = 0; k < natm_cell0; ++k) {
                 float dx = xij - xyz_cache[k*3+0];
@@ -535,29 +461,6 @@ __global__ static
 void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
                          int nbas, int tile)
 {
-<<<<<<< HEAD
-    int sh_blocks = (nbas + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    int buflen = natm_cell0 * 3;
-
-    #ifdef USE_SYCL
-    sycl::range<2> threads(16, 16);
-    sycl::range<2> blocks(sh_blocks, sh_blocks);
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<float, 1> local_acc(sycl::range<1>(buflen), cgh);
-      cgh.parallel_for<class filter_q_cond_by_distance_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      filter_q_cond_by_distance_kernel(q_cond, s_estimator, dev_envs, diffuse_exps_per_atom, s_max_per_atom,
-                                       log_cutoff, natm_cell0,
-                                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
-    dim3 threads(16, 16);
-    dim3 blocks(sh_blocks, sh_blocks);
-    filter_q_cond_by_distance_kernel<<<blocks, threads, buflen*sizeof(float)>>>(
-        q_cond, s_estimator, *envs, diffuse_exps_per_atom, s_max_per_atom,
-        log_cutoff, natm_cell0);
-=======
     int t_id = threadIdx.x;
     int threads = blockDim.x;
     int i_tile = blockIdx.x;
@@ -596,7 +499,6 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
         npairs, omega, tril_symmetry, Ecut_mask);
 
->>>>>>> origin/master
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCfill_s_estimator %s\n",
@@ -634,7 +536,6 @@ int PBCsort_pair_ij(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
                 cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 }

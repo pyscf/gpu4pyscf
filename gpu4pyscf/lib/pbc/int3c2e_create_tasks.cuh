@@ -382,6 +382,9 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
 __device__ inline
 int warp_max(int val)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+#endif
     for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
         val = max(val, __shfl_down_sync(0xffffffff, val, offset));
     }

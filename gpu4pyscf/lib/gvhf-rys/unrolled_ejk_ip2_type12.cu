@@ -21,10 +21,13 @@ void rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     #else
     int threadIdx_x = threadIdx.x;
     int threadIdx_y = threadIdx.y;
@@ -14762,6 +14765,7 @@ int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *b
     auto dev_jk = *jk;
     auto dev_bounds = *bounds;
 
+    sycl::queue& stream = *sycl_get_queue();
     sycl::range<2> blocks(1, workers);
     sycl::range<2> threads(gout_stride, nsq_per_block);
 
