@@ -20,10 +20,18 @@ namespace gpu4pyscf::gpbc::multi_grid {
 #ifdef USE_SYCL
 #include <sycl_device.hpp>
 
-extern SYCL_EXTERNAL sycl_device_global<double[9]> lattice_vectors;
-extern SYCL_EXTERNAL sycl_device_global<double[9]> reciprocal_lattice_vectors;
-extern SYCL_EXTERNAL sycl_device_global<double[9]> dxyz_dabc;
-extern SYCL_EXTERNAL sycl_device_global<double[3]> reciprocal_norm;
+extern SYCL_EXTERNAL sycl_device_global<double[9]> s_lattice_vectors;
+extern SYCL_EXTERNAL sycl_device_global<double[9]> s_reciprocal_lattice_vectors;
+extern SYCL_EXTERNAL sycl_device_global<double[9]> s_dxyz_dabc;
+extern SYCL_EXTERNAL sycl_device_global<double[3]> s_reciprocal_norm;
+
+// Bare references in kernels (e.g. dxyz_dabc[i]) resolve to the raw
+// pointer obtained from the device_global, matching the v1 multigrid
+// convention (auto x = s_xxx.get(); x[i]).
+#define lattice_vectors            (s_lattice_vectors.get())
+#define reciprocal_lattice_vectors (s_reciprocal_lattice_vectors.get())
+#define dxyz_dabc                  (s_dxyz_dabc.get())
+#define reciprocal_norm            (s_reciprocal_norm.get())
 #else
 extern __constant__ double lattice_vectors[9];
 extern __constant__ double reciprocal_lattice_vectors[9];

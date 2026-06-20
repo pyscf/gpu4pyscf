@@ -223,41 +223,30 @@ int MG_eval_mat_lda_orth(double *out, double *rho, MGridEnvVars envs,
     };
     uint32_t *batch_head;
 #ifdef USE_SYCL
-    sycl::queue &stream = *sycl_get_queue();
-    batch_head = sycl::malloc_device<uint32_t>(1, stream);
-    stream.memset(batch_head, 0, sizeof(uint32_t)).wait();
-
-    switch (l) {
-    case 0: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(0, 32)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_0_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<0,32> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 1: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(1, 32)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_1_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<1,32> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 2: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(2, 16)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_2_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<2,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 3: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(3, 16)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_3_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<3,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 4: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(4, 16)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_4_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<4,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 5: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(5,  8)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_5_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<5, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 6: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(6,  8)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_6_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<6, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 7: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(7,  8)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_7_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<7, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 8: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(8,  8)), cgh); cgh.parallel_for<class eval_mat_lda_kernel_8_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { eval_mat_lda_kernel<8, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    default:
-      fprintf(stderr, "MG_eval_mat_lda_orth does not support l>8\n");
-      sycl::free(batch_head, stream);
-      return 1;
-    }
-
-    sycl::free(batch_head, stream);
-#else // USE_SYCL
+#define LAUNCH_EVAL_MAT_LDA(L, TILE) \
+    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
+        sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(L, TILE)), cgh); \
+        cgh.parallel_for<class eval_mat_lda_kernel_##L##_##TILE##_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { \
+            eval_mat_lda_kernel<L, TILE>(out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
+        }); \
+    })
+#else
+#define LAUNCH_EVAL_MAT_LDA(L, TILE) \
+    eval_mat_lda_kernel<L, TILE> <<<workers, THREADS, buflen_lda(L, TILE)>>>(out, rho, envs, bounds, pool, batch_head)
+#endif
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
     cudaMemset(batch_head, 0, sizeof(uint32_t));
 
     switch (l) {
-    case 0: eval_mat_lda_kernel<0,32> <<<workers, THREADS, buflen_lda(0,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 1: eval_mat_lda_kernel<1,32> <<<workers, THREADS, buflen_lda(1,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 2: eval_mat_lda_kernel<2,16> <<<workers, THREADS, buflen_lda(2,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 3: eval_mat_lda_kernel<3,16> <<<workers, THREADS, buflen_lda(3,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 4: eval_mat_lda_kernel<4,16> <<<workers, THREADS, buflen_lda(4,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 5: eval_mat_lda_kernel<5, 8> <<<workers, THREADS, buflen_lda(5, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 6: eval_mat_lda_kernel<6, 8> <<<workers, THREADS, buflen_lda(6, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 7: eval_mat_lda_kernel<7, 8> <<<workers, THREADS, buflen_lda(7, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 8: eval_mat_lda_kernel<8, 8> <<<workers, THREADS, buflen_lda(8, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+        case 0: LAUNCH_EVAL_MAT_LDA(0, 32); break;
+        case 1: LAUNCH_EVAL_MAT_LDA(1, 32); break;
+        case 2: LAUNCH_EVAL_MAT_LDA(2, 16); break;
+        case 3: LAUNCH_EVAL_MAT_LDA(3, 16); break;
+        case 4: LAUNCH_EVAL_MAT_LDA(4, 16); break;
+        case 5: LAUNCH_EVAL_MAT_LDA(5, 8); break;
+        case 6: LAUNCH_EVAL_MAT_LDA(6, 8); break;
+        case 7: LAUNCH_EVAL_MAT_LDA(7, 8); break;
+        case 8: LAUNCH_EVAL_MAT_LDA(8, 8); break;
     default:
         fprintf(stderr, "MG_eval_mat_lda_orth does not support l>8\n");
         cudaFree(batch_head);
@@ -271,7 +260,7 @@ int MG_eval_mat_lda_orth(double *out, double *rho, MGridEnvVars envs,
         return 1;
     }
     cudaFree(batch_head);
-#endif // USE_SYCL
+#undef LAUNCH_EVAL_MAT_LDA
     return 0;
 }
 }

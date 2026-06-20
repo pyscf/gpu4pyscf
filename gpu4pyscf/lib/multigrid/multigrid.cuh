@@ -25,7 +25,6 @@
 #define WARP_SIZE       32
 #endif
 #define WARPS           8
-#endif // USE_SYCL
 
 #define THREADS         (WARP_SIZE*WARPS)
 #define LMAX            4

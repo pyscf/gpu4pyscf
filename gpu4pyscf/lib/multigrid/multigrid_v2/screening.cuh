@@ -708,9 +708,16 @@ __global__ void put_pairs_on_blocks_kernel(
     int aggregated_block;
     #ifdef USE_SYCL
     dpct::group::exclusive_scan(item, valid_pairs, exclusive_sum, 0, sycl::plus<>());
-
-    // exclusive_sum = dpct::detail::exclusive_scan(item, valid_pairs,
-    //                                              0, sycl::plus<>(), aggregated_block);
+    // dpct's array-form exclusive_scan does not return the block aggregate
+    // (unlike cub's ExclusiveSum). Recover it as the block-wide sum of the
+    // per-thread valid_pairs counts.
+    int thread_valid_count = 0;
+    #pragma unroll
+    for (int i = 0; i < 4; i++) {
+      thread_valid_count += valid_pairs[i];
+    }
+    aggregated_block = sycl::reduce_over_group(item.get_group(),
+                                               thread_valid_count, sycl::plus<int>());
     #else
     cub::BlockScan<int, n_threads>().ExclusiveSum(valid_pairs, exclusive_sum,
                                                   aggregated_block);

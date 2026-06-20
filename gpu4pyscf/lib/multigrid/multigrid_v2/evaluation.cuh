@@ -54,15 +54,11 @@ __global__ static void evaluate_density_kernel(
   int threadIdx_y = item.get_local_id(1);
   int threadIdx_z = item.get_local_id(0);
   int blockIdx_x = item.get_group(2);
-
-  auto &reduced_density_values = *sycl::ext::oneapi::group_local_memory_for_overwrite<KernelType[n_channels * n_threads]>(item.get_group());
 #else
   int threadIdx_x = threadIdx.x;
   int threadIdx_y = threadIdx.y;
   int threadIdx_z = threadIdx.z;
   int blockIdx_x = blockIdx.x;
-
-  __shared__ KernelType reduced_density_values[n_channels * n_threads];
 #endif
   constexpr int n_i_cartesian_functions = (i_angular + 1) * (i_angular + 2) / 2;
   constexpr int n_j_cartesian_functions = (j_angular + 1) * (j_angular + 2) / 2;
@@ -117,7 +113,11 @@ __global__ static void evaluate_density_kernel(
   // value will make the future HIP/wavefront port a single-point edit.
   constexpr int WARP_SIZE_CT = 32;
   constexpr int n_warps = n_threads / WARP_SIZE_CT;  /*L2*/
+#ifdef USE_SYCL
+  auto &reduced_density_values = *sycl::ext::oneapi::group_local_memory_for_overwrite<KernelType[n_channels * n_warps * n_threads]>(item.get_group());
+#else
   __shared__ KernelType reduced_density_values[n_channels * n_warps * n_threads];
+#endif
 
 #pragma unroll
   for (int i_channel = 0; i_channel < n_channels; i_channel++) {
