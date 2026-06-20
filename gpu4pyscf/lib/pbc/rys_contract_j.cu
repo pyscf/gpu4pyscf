@@ -721,53 +721,39 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                             ((lk == 0) >> 1) |
                             ( ll == 0));
         int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
-        int tdims[2];
-        int buflen = threads_scheme_for_k(tdims, bounds, shm_size, 256);
-        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-#ifdef USE_SYCL
-#define LAUNCH_RYS_J(HEAD, GXYZ) \
-        { \
-            auto dev_envs = *envs; \
-            sycl::range<2> blocks(1, workers); \
-            sycl::range<2> cuda_threads(tdims[1], tdims[0]); \
-            sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-              sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh); \
-              cgh.parallel_for(sycl::nd_range<2>(blocks * cuda_threads, cuda_threads), [=](auto item) { \
-                rys_j_kernel(dev_envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping, \
-                    supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, \
-                    q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps, \
-                    dm_penalty, pool, (HEAD), (GXYZ), gout_pattern, reserved_shm_size, \
-                    item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
-              }); \
-            }); \
-        }
-#else
-#define LAUNCH_RYS_J(HEAD, GXYZ) \
-        { \
-            dim3 threads(tdims[0], tdims[1]); \
-            rys_j_kernel<<<workers, threads, buflen>>>( \
-                *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping, \
-                supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, \
-                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps, \
-                dm_penalty, pool, (HEAD), (GXYZ), gout_pattern, reserved_shm_size); \
-        }
-#endif
-        LAUNCH_RYS_J(head, p_gxyz_offset);
 
-        if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
-            buflen = threads_scheme_for_k(tdims, bounds, shm_size,
-                                          min(256, n_tiles-256));
-            reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            LAUNCH_RYS_J(head+1, p_gxyz_offset+256);
-        }
+        auto launch = [&](int *head_ptr, GXYZOffset *gxyz, int tile_chunk) {
+            int tdims[2];
+            int buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
+            int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
-        if (n_tiles > 512) { // gggg
-            buflen = threads_scheme_for_k(tdims, bounds, shm_size,
-                                          min(256, n_tiles-512));
-            reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            LAUNCH_RYS_J(head+2, p_gxyz_offset+512);
-        }
-#undef LAUNCH_RYS_J
+            #ifdef USE_SYCL
+            auto dev_envs = *envs;
+            sycl::range<2> blocks(1, workers);
+            sycl::range<2> threads(tdims[1], tdims[0]);
+            sycl_get_queue()->submit([&](sycl::handler &cgh) {
+              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen/sizeof(double)), cgh);
+              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                rys_j_kernel(dev_envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
+                    supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                    q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                    dm_penalty, pool, head_ptr, gxyz, gout_pattern, reserved_shm_size,
+                    item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              });
+            });
+            #else
+            dim3 threads(tdims[0], tdims[1]);
+            rys_j_kernel<<<workers, threads, buflen>>>(
+                *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
+                supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                dm_penalty, pool, head_ptr, gxyz, gout_pattern, reserved_shm_size);
+            #endif
+        };
+
+        launch(head, p_gxyz_offset, 256);
+        if (n_tiles > 256) launch(head+1, p_gxyz_offset+256, min(256, n_tiles-256)); // fffg, ffgg, fggg, gggg
+        if (n_tiles > 512) launch(head+2, p_gxyz_offset+512, min(256, n_tiles-512)); // gggg
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -3095,7 +3095,7 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
         sycl::range<2> blocks(1, workers); \
         sycl::range<2> cuda_threads(gout_stride, nsq_per_block); \
         sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-          sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen*sizeof(double)), cgh); \
+          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); \
           cgh.parallel_for(sycl::nd_range<2>(blocks * cuda_threads, cuda_threads), [=](auto item) { \
             KERNEL(dev_envs, dev_kmat, dev_bounds, \
                 pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
