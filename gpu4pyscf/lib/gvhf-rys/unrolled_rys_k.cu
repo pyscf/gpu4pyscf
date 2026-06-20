@@ -1,5 +1,3 @@
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"

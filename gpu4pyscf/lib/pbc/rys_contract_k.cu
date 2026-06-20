@@ -203,7 +203,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) {
             continue;
         }

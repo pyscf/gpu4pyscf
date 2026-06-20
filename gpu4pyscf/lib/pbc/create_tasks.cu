@@ -52,7 +52,8 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                        float *q_cond_ij, float *q_cond_kl,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                        float dm_penalty,
-                       JKMatrix& kmat, RysIntEnvVars& envs, BoundsInfo& bounds)
+                       JKMatrix& kmat, RysIntEnvVars& envs, BoundsInfo& bounds,
+                       double *shared_memory)
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -108,7 +109,6 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
-    extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
     while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
@@ -201,7 +201,8 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                         int *Ts_ij_lookup, int nimgs, int nbas_cell0,
                         float *q_cond_ij, float *q_cond_kl,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                        JKEnergy& jk, RysIntEnvVars& envs, BoundsInfo& bounds)
+                        JKEnergy& jk, RysIntEnvVars& envs, BoundsInfo& bounds,
+                        double *shared_memory)
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -261,7 +262,6 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 
-    extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
     while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {

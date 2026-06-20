@@ -1,5 +1,3 @@
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -13,19 +11,55 @@ void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 4;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -35,12 +69,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -92,7 +120,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -222,19 +250,55 @@ void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 4;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -244,12 +308,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -301,7 +359,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -465,19 +523,55 @@ void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -487,12 +581,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -544,7 +632,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -752,19 +840,55 @@ void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -774,12 +898,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -831,7 +949,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -1145,19 +1263,55 @@ void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -1167,12 +1321,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -1224,7 +1372,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -1410,19 +1558,55 @@ void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -1432,12 +1616,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -1489,7 +1667,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -1803,19 +1981,55 @@ void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -1825,12 +2039,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -1882,7 +2090,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -2077,19 +2285,55 @@ void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -2099,12 +2343,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -2156,7 +2394,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -2443,19 +2681,55 @@ void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head
+                #ifdef USE_SYCL
+                , sycl::nd_item<2> &item, double *shared_memory
+                #endif
+                )
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int t_id = sq_id;
+    int nsq_per_block = item.get_local_range(1);
+    int threads = nsq_per_block;
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int t_id = sq_id;
     int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
+    int blockIdx_x = blockIdx.x;
 
     extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -2465,12 +2739,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -2522,7 +2790,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          dm_penalty, kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds, shared_memory);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -2817,57 +3085,48 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
         break;
     }
 
-    dim3 threads(nsq_per_block, gout_stride);
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
+#ifdef USE_SYCL
+#define LAUNCH_PBC_RYS_K(KERNEL) \
+    { \
+        auto dev_envs = *envs; auto dev_kmat = *kmat; auto dev_bounds = *bounds; \
+        sycl::range<2> blocks(1, workers); \
+        sycl::range<2> cuda_threads(gout_stride, nsq_per_block); \
+        sycl_get_queue()->submit([&](sycl::handler &cgh) { \
+          sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen*sizeof(double)), cgh); \
+          cgh.parallel_for(sycl::nd_range<2>(blocks * cuda_threads, cuda_threads), [=](auto item) { \
+            KERNEL(dev_envs, dev_kmat, dev_bounds, \
+                pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
+                nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
+                s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head, \
+                item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
+          }); \
+        }); \
+    }
+#else
+#define LAUNCH_PBC_RYS_K(KERNEL) \
+    { \
+        dim3 threads(nsq_per_block, gout_stride); \
+        KERNEL<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, \
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); \
+    }
+#endif
     switch (ijkl) {
-    case 0: // (0, 0, 0, 0)
-        rys_k_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
-    case 125: // (1, 0, 0, 0)
-        rys_k_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
-    case 130: // (1, 0, 1, 0)
-        rys_k_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
-    case 131: // (1, 0, 1, 1)
-        rys_k_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
-    case 150: // (1, 1, 0, 0)
-        rys_k_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
-    case 155: // (1, 1, 1, 0)
-        rys_k_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
-    case 250: // (2, 0, 0, 0)
-        rys_k_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
-    case 255: // (2, 0, 1, 0)
-        rys_k_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
-    case 275: // (2, 1, 0, 0)
-        rys_k_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+    case 0:   LAUNCH_PBC_RYS_K(rys_k_0000); break;
+    case 125: LAUNCH_PBC_RYS_K(rys_k_1000); break;
+    case 130: LAUNCH_PBC_RYS_K(rys_k_1010); break;
+    case 131: LAUNCH_PBC_RYS_K(rys_k_1011); break;
+    case 150: LAUNCH_PBC_RYS_K(rys_k_1100); break;
+    case 155: LAUNCH_PBC_RYS_K(rys_k_1110); break;
+    case 250: LAUNCH_PBC_RYS_K(rys_k_2000); break;
+    case 255: LAUNCH_PBC_RYS_K(rys_k_2010); break;
+    case 275: LAUNCH_PBC_RYS_K(rys_k_2100); break;
     default: return 0;
     }
+#undef LAUNCH_PBC_RYS_K
     return 1;
 }

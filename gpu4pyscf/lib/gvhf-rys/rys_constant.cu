@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include <gvhf-rys/vhf.cuh>
 
 __constant__ int _c_cartesian_lexical_xyz[] = {

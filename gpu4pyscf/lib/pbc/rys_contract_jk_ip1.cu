@@ -187,7 +187,7 @@ while (1) {
         _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
                            q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                           jk, envs, bounds);
+                           jk, envs, bounds, shared_memory);
         if (ntasks == 0) {
             continue;
         }
@@ -763,7 +763,7 @@ while (1) {
         _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
                            q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                           jk, envs, bounds);
+                           jk, envs, bounds, shared_memory);
         if (ntasks == 0) {
             continue;
         }
