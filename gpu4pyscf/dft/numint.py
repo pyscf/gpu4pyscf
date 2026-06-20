@@ -1797,6 +1797,16 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
             spin = 0
     xcfuns = ni._init_xcfuns(xc_code, spin)
 
+    if len(xcfuns) == 0: # HF
+        ngrids = rho.shape[-1]
+        out = [None] * 4
+        for m in range(deriv+1):
+            if spin == 0: # RKS
+                out[m] = cupy.zeros([1]*m + [ngrids])
+            else: # UKS
+                out[m] = cupy.zeros([2,1]*m + [ngrids])
+        return out
+
     # Fall back to the libxc library provided by PySCF, evaluate xc on CPUs
     if not all(x.on_gpu for x, w in xcfuns):
         ni_cpu = ni.to_cpu()
@@ -1859,15 +1869,6 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
         xcfun, _ = xcfuns[0]
         xc_res = xcfun.compute(inp, do_exc=True, do_vxc=do_vxc, do_fxc=do_fxc, do_kxc=do_kxc)
         ret_full = xc_res
-    elif len(xcfuns) == 0: # HF
-        ret_full = {}
-        for m in range(deriv+1):
-            k = libxc.LDA_OUTPUT_LABELS[m]
-            if spin == 0: # RKS
-                nvar = 1
-            else: # UKS
-                nvar = m + 1
-            ret_full[k] = cupy.zeros((ngrids, nvar))
     else:
         ret_full = {}
         for xcfun, w in xcfuns:

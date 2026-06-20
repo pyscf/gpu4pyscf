@@ -19,6 +19,7 @@ from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
 from gpu4pyscf.lib.cupy_helper import asarray, batched_vec3_norm2
+from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_weights
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.
@@ -100,32 +101,6 @@ def ifftk(g, mesh, expikr):
     '''
     return ifft(g, mesh) * expikr
 
-def _get_Gv(cell, mesh):
-    assert cell.dimension == 3
-    # Default, the 3D uniform grids
-    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
-    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
-    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
-    b = cp.asarray(cell.reciprocal_vectors())
-    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
-    Gv = (rx[:,None,None,None] * b[0] +
-          ry[:,None,None] * b[1] +
-          rz[:,None] * b[2])
-    return Gv.reshape(-1, 3)
-
-def _get_Gv_with_base(cell, mesh):
-    assert cell.dimension == 3
-    # Default, the 3D uniform grids
-    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
-    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
-    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
-    b = cp.asarray(cell.reciprocal_vectors())
-    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
-    Gv = (rx[:,None,None,None] * b[0] +
-          ry[:,None,None] * b[1] +
-          rz[:,None] * b[2])
-    return Gv.reshape(-1, 3), (rx, ry, rz)
-
 def _Gv_wrap_around(cell, Gv, k, mesh):
     '''wrap around the high frequency k+G vectors into their lower frequency
     counterparts. Important if you want the gamma point and k-point answers to
@@ -186,7 +161,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     if mesh is None:
         mesh = cell.mesh
     if Gv is None:
-        Gv = _get_Gv(cell, mesh)
+        Gv = get_Gv(cell, mesh)
     Gv = asarray(Gv)
 
     if omega is None:

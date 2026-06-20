@@ -555,9 +555,9 @@ def nr_rks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None)
             for i in range(nset):
                 rho1 = ni.eval_rho(cell, ao_ks, dms[i], xctype=xctype, hermi=hermi)
                 if xctype == 'LDA':
-                    wv = cp.einsum('ng,yg->nyg', rho1, wfxc[0])
+                    wv = cp.einsum('g,yg->yg', rho1, wfxc[0])
                 else:
-                    wv = cp.einsum('nxg,xyg->nyg', rho1, wfxc)
+                    wv = cp.einsum('xg,xyg->yg', rho1, wfxc)
                 ni._vxc_mat(ao_ks, wv[:,p0:p1], xctype, v_hermi, vmat[i])
         if v_hermi == 1:
             vmat = transpose_sum(vmat.reshape(-1,nao,nao))
@@ -653,8 +653,7 @@ def nr_uks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None)
         vmat = vmat[:,:,0]
     return vmat
 
-def cache_xc_kernel1(ni, cell, grids, xc_code, dm, spin=0, kpts=None,
-                     is_rhf=None):
+def cache_xc_kernel1(ni, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
     if isinstance(kpts, KPoints):
         raise NotImplementedError
 
