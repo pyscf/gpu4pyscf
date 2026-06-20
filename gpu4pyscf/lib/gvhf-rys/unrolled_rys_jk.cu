@@ -5723,7 +5723,11 @@ __global__ static
 void rys_k_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                    )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -12071,7 +12075,11 @@ __global__ static
 void rys_k_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                    )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -12953,7 +12961,11 @@ __global__ static
 void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                  float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                  float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                 uint32_t *pool, int *head)
+                 uint32_t *pool, int *head
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *shared_memory
+                 #endif
+                 )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -14196,7 +14208,11 @@ __global__ static
 void rys_k_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+                    uint32_t *pool, int *head
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *shared_memory
+                    #endif
+                    )
 {
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -17595,34 +17611,34 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     sycl::range<2> threads(gout_stride, nsq_per_block);
     switch (ijkl) {
     case 0:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_0000(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_0000(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 125:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_1000(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_1000(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 130:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_1010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_1010(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_1010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_1010(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 131:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_1011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_1011(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_1011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_1011(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 150:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_1100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_1100(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_1100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_1100(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 155:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_1110_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_1110(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_1110_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_1110(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 156:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_1111_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_1111(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_1111_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_1111(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 250:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2000(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_2000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_2000(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 255:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2010(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_2010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_2010(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 256:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2011(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_2011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_2011(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 260:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2020(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_2020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_2020(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 261:
       buflen += 4032;
       stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2021_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2021(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 275:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2100(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_2100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_2100(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 280:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2110_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2110(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_2110_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_2110(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 281:
       buflen += 2592;
       stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2111_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2111(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
@@ -17630,26 +17646,26 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
       buflen += 4032;
       stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2120_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2120(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 300:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2200_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2200(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_2200_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_2200(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 305:
       buflen += 4032;
       stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_2210_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_2210(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 375:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_3000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_3000(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_3000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_3000(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 380:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_3010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_3010(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_3010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_3010(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 381:
       buflen += 3648;
       stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_3011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_3011(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 385:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_3020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_3020(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_3020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_3020(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 400:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_3100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_3100(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_3100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_3100(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 405:
       buflen += 3648;
       stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_3110_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_3110(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     case 425:
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_jk_3200_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_jk_3200(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for<class rys_k_3200_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { rys_k_3200(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     default: return 0;
     }
 #else
