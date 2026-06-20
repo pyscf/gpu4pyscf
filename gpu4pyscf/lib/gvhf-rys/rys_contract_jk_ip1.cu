@@ -527,6 +527,8 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &nf = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -534,6 +536,8 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     #else
     int threadIdx_x = threadIdx.x;
     int threadIdx_y = threadIdx.y;
@@ -543,10 +547,11 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
 
     extern __shared__ double shared_memory[];
 
-    __shared__ int ntasks, nf;
+    __shared__ int ntasks, pair_ij, pair_kl0, nf;
     __shared__ int ish, jsh, i0, j0;
     __shared__ double ri[3];
     __shared__ double rjri[3];
+    __shared__ int expi, expj;
     #endif
 
     int sq_id = threadIdx_x;
@@ -591,7 +596,6 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
     const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
 
-    __shared__ int ntasks, pair_ij, pair_kl0, nf;
     if (t_id == 0) {
         nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     }
@@ -1135,7 +1139,6 @@ void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     int idx_k = lex_xyz_offset(lk);
     int idx_l = lex_xyz_offset(ll);
 
-    __shared__ int ntasks, pair_ij, pair_kl0, nf;
     if (t_id == 0) {
         nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     }
