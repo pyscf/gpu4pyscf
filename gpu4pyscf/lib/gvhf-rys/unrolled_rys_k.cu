@@ -12360,8 +12360,8 @@ void rys_k_3100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
-    double *&expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<double*>(thread_block);
-    double *&expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double*>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
