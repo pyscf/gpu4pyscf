@@ -120,7 +120,7 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
     }
     __syncthreads();
     uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim.x + sq_id;
+    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);

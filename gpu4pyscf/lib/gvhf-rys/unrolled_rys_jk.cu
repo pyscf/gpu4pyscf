@@ -5725,18 +5725,44 @@ void rys_k_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                     uint32_t *pool, int *head)
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int nsq_per_block = item.get_local_range(1);
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+
+    extern __shared__ double shared_memory[];
+
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (sq_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -5746,12 +5772,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ish = bas_ij / nbas;
@@ -12053,18 +12073,44 @@ void rys_k_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                     uint32_t *pool, int *head)
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int nsq_per_block = item.get_local_range(1);
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+
+    extern __shared__ double shared_memory[];
+
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (sq_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -12074,12 +12120,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ish = bas_ij / nbas;
@@ -14158,18 +14198,44 @@ void rys_k_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                     uint32_t *pool, int *head)
 {
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int nsq_per_block = item.get_local_range(1);
+    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
+    #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+
+    extern __shared__ double shared_memory[];
+
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+    #endif
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (sq_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -14179,12 +14245,6 @@ while (1) {
         break;
     }
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ish = bas_ij / nbas;

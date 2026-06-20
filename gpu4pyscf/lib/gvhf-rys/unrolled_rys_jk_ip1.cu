@@ -299,7 +299,7 @@ void rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
     int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
@@ -646,7 +646,7 @@ void rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
     int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
@@ -1145,7 +1145,7 @@ void rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
     int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
@@ -1634,7 +1634,7 @@ void rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
     int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
@@ -2331,7 +2331,7 @@ void rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
     int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
@@ -3610,7 +3610,7 @@ void rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
     int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
@@ -3956,7 +3956,7 @@ void rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
     int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
@@ -4455,7 +4455,7 @@ void rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
     int gout_stride = item.get_local_range(0);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = item.get_local_id(0) * nsq_per_block + item.get_local_id(1);
     int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
@@ -4495,8 +4495,6 @@ void rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     int threads = nsq_per_block * gout_stride;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);

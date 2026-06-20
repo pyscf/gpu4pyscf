@@ -103,7 +103,7 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     }
     __syncthreads();
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -596,8 +596,8 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     }
     __syncthreads();
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
@@ -1100,12 +1100,12 @@ void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     __shared__ int expi, expj;
     #endif
 
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     uint32_t nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1140,8 +1140,8 @@ void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
         nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     }
     __syncthreads();
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * dd_cache_size + sq_id;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx_x * dd_cache_size + sq_id;
 while (1) {
     if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
