@@ -320,10 +320,7 @@ class SCF(mol_hf.SCF):
         '''Hartree-Fock potential matrix for the given density matrix.
         See :func:`scf.hf.get_veff` and :func:`scf.hf.RHF.get_veff`
         '''
-        from gpu4pyscf.pbc.scf.khf import KRHF
-        if dm is None: dm = self.make_rdm1()
-        if kpt is None: kpt = self.kpt
-        return KRHF.get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
+        raise NotImplementedError
 
     def energy_nuc(self):
         cell = self.cell
@@ -350,6 +347,7 @@ class SCF(mol_hf.SCF):
     spin_square = NotImplemented
     dip_moment = NotImplemented
     Gradients = NotImplemented
+    gen_response = NotImplemented
     smearing = smearing
 
     def nuc_grad_method(self):
@@ -384,6 +382,13 @@ class KohnShamDFT:
 class RHF(SCF):
 
     energy_elec = mol_hf.RHF.energy_elec
+
+    def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
+                 hermi=1, kpt=None, kpts_band=None):
+        from gpu4pyscf.pbc.scf.khf import _get_veff
+        if dm is None: dm = self.make_rdm1()
+        if kpt is None: kpt = self.kpt
+        return _get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
 
     def density_fit(self, auxbasis=None, with_df=None):
         from gpu4pyscf.pbc.df.df_jk import density_fit
@@ -429,6 +434,19 @@ class RHF(SCF):
             pop = mulliken_pop(cell, dm, s=s, verbose=log)
         dip = None
         return pop, dip
+
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     singlet=None, hermi=0, max_memory=None, with_nlc=False):
+        from gpu4pyscf.pbc.scf.khf import _get_veff
+        cell = self.cell
+        kpt = self.kpt
+        with_j = (singlet is None or singlet) and hermi != 2
+        def vind(dm1, kshift=0):
+            assert kshift == 0
+            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpt,
+                            with_j=with_j, with_ecoul=False)
+            return vhf.view(cp.ndarray)
+        return vind
 
 def normalize_dm_(mf, dm, s1e=None):
     '''

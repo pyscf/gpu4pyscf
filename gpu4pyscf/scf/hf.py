@@ -872,6 +872,7 @@ class SCF(pyscf_lib.StreamObject):
     to_gks                   = NotImplemented
     to_ks                    = NotImplemented
     canonicalize             = NotImplemented
+    gen_response             = NotImplemented
     dump_scf_summary         = hf_cpu.dump_scf_summary
 
     smearing = smearing

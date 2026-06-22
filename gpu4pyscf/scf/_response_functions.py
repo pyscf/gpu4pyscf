@@ -16,8 +16,6 @@ import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, uhf, rohf
-from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
-from gpu4pyscf.hessian.uks import nr_uks_fnlc_mo
 
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                       singlet=None, hermi=0, grids=None, max_memory=None, with_nlc=True):
@@ -29,6 +27,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
             orbital hessian or CPHF will be generated. If singlet is boolean,
             it is used in TDDFT response kernel.
     '''
+    from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ
     if not isinstance(mo_coeff, cupy.ndarray):
@@ -143,6 +142,7 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
     '''Generate a function to compute the product of UHF response function and
     UHF density matrices.
     '''
+    from gpu4pyscf.hessian.uks import nr_uks_fnlc_mo
     assert isinstance(mf, (uhf.UHF, rohf.ROHF))
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ

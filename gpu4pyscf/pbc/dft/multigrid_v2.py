@@ -1574,7 +1574,8 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 
-    def nr_rks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None):
+    def nr_rks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
+                   kpts=None, with_j=False):
         if kpts is None:
             kpts = np.zeros((1,3))
         elif isinstance(kpts, KPoints):
@@ -1605,14 +1606,20 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts, is_rhf=True)[2]
 
         mesh = self.mesh
-        ngrids = np.prod(mesh)
+        Gv = get_Gv(cell, mesh)
+        ngrids = len(Gv)
         rho1 = evaluate_density_on_g_mesh(self, dms, kpts, xctype)
+        if with_j:
+            coulG = pbc_tools.get_coulG(cell, Gv=Gv)
+            coulomb_on_g_mesh = rho1[:,0] * coulG
         rho1 = ifft_in_place(rho1.reshape(-1, *mesh)).real.reshape(nset, -1, ngrids)
         wv = cp.einsum('nxg,xyg->nyg', rho1, fxc)
         wv = fft_in_place(wv.reshape(-1, *mesh)).reshape(wv.shape)
 
+        if with_j:
+            wv[:,0] += coulomb_on_g_mesh
+
         if 'GGA' in xctype:
-            Gv = get_Gv(cell, mesh)
             wv[:,0] -= contract('nxp,xp->np', wv[:,1:4], Gv.T) * 1j
             if xctype == 'GGA':
                 wv = cp.asarray(wv[:,0], order='C')
@@ -1626,7 +1633,20 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             vmat = vmat[:,0]
         return vmat
 
-    def nr_uks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None):
+    def nr_rks_fxc_st(self, cell, grids, xc_code, dm0, dms, hermi=0, singlet=True,
+                      fxc=None, kpts=None, with_j=False):
+        if fxc is None:
+            spin = 1
+            fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
+                                      is_rhf=True)[2]
+        if singlet:
+            fxc = fxc[0,:,0] + fxc[0,:,1]
+        else:
+            fxc = fxc[0,:,0] - fxc[0,:,1]
+        return self.nr_rks_fxc(cell, grids, xc_code, dm0, dms, hermi, fxc, kpts, with_j)
+
+    def nr_uks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
+                   kpts=None, with_j=False):
         if kpts is None:
             kpts = np.zeros((1,3))
         elif isinstance(kpts, KPoints):
@@ -1657,14 +1677,20 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts, is_rhf=False)[2]
 
         mesh = self.mesh
-        ngrids = np.prod(mesh)
+        Gv = get_Gv(cell, mesh)
+        ngrids = len(Gv)
         rho1 = evaluate_density_on_g_mesh(self, dms.reshape(-1,nkpts,nao,nao), kpts, xctype)
+        if with_j:
+            coulG = pbc_tools.get_coulG(cell, Gv=Gv)
+            coulomb_on_g_mesh = rho1[:,:,0].reshape(2, nset, -1, ngrids).sum(axis=0) * coulG
         rho1 = ifft_in_place(rho1.reshape(-1, *mesh)).real.reshape(2, nset, -1, ngrids)
         wv = cp.einsum('anxg,axbyg->bnyg', rho1, fxc)
         wv = fft_in_place(wv.reshape(-1, *mesh)).reshape(wv.shape)
 
+        if with_j:
+            wv[:,:,0] += coulomb_on_g_mesh
+
         if 'GGA' in xctype:
-            Gv = get_Gv(cell, mesh)
             wv[:,:,0] -= contract('anxp,xp->anp', wv[:,:,1:4], Gv.T) * 1j
             if xctype == 'GGA':
                 wv = cp.asarray(wv[:,:,0], order='C')
@@ -1672,6 +1698,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
                 wv = cp.asarray(wv[:,:,[0, 4]], order='C')
 
         wv = wv.reshape(2*nset, -1, ngrids)
+
         with_tau = (xctype == 'MGGA')
         vmat = convert_xc_on_g_mesh_to_fock(self, wv, v_hermi, kpts, with_tau=with_tau)
         vmat = vmat.reshape(dms.shape)
@@ -1680,9 +1707,10 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             vmat = vmat[:,:,0]
         return vmat
 
-    nr_rks_fxc_st = numint.NumInt.nr_rks_fxc_st
-
-    cache_xc_kernel  = NotImplemented
+    def cache_xc_kernel(self, cell, grids, xc_code, mo_coeff, mo_occ, spin=0,
+                        kpts=None, is_rhf=None):
+        dm = make_rdm1(mo_coeff, mo_occ) FIXME
+        return self.cache_xc_kernel1(cell, grids, xc_code, dm, spin, kpts)
 
     def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
         if isinstance(kpts, KPoints):

@@ -502,7 +502,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         vmat = vmat.real
     return nelec, excsum, vmat
 
-def nr_rks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None):
+def nr_rks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None,
+               with_j=False):
+    assert not with_j
     xctype = ni._xc_type(xc_code)
     if xctype == 'LDA':
         ao_deriv = 0
@@ -568,7 +570,7 @@ def nr_rks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None)
     return vmat
 
 def nr_rks_fxc_st(ni, cell, grids, xc_code, dm0, dms_alpha, hermi=0, singlet=True,
-                  fxc=None, kpts=None):
+                  fxc=None, kpts=None, with_j=False):
     if fxc is None:
         spin = 1
         fxc = ni.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
@@ -577,17 +579,12 @@ def nr_rks_fxc_st(ni, cell, grids, xc_code, dm0, dms_alpha, hermi=0, singlet=Tru
         fxc = fxc[0,:,0] + fxc[0,:,1]
     else:
         fxc = fxc[0,:,0] - fxc[0,:,1]
+    return ni.nr_rks_fxc(cell, grids, xc_code, dm0, dms_alpha, hermi=hermi,
+                         fxc=fxc, kpts=kpts, with_j=with_j)
 
-    if kpts is None or is_zero(kpts):
-        # For real orbitals and real matrix, K_{ia,bj} = K_{ia,jb}.
-        # The input dms_alpha must symmetric
-        # The output matrix v = K*x_{ia} is symmetric
-        pass
-    else:
-        assert hermi == 0
-    return ni.nr_rks_fxc(cell, grids, xc_code, dm0, dms_alpha, hermi=hermi, fxc=fxc, kpts=kpts)
-
-def nr_uks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None):
+def nr_uks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None,
+               with_j=False):
+    assert not with_j
     xctype = ni._xc_type(xc_code)
     if xctype == 'LDA':
         ao_deriv = 0
@@ -854,8 +851,12 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     nr_rks_fxc = nr_rks_fxc
     nr_uks_fxc = nr_uks_fxc
     nr_rks_fxc_st = nr_rks_fxc_st
-    cache_xc_kernel  = NotImplemented
     cache_xc_kernel1 = cache_xc_kernel1
+
+    def cache_xc_kernel(self, cell, grids, xc_code, mo_coeff, mo_occ, spin=0,
+                        kpts=None):
+        dm = make_rdm1(mo_coeff, mo_occ) FIXME
+        return self.cache_xc_kernel1(cell, grids, xc_code, dm, spin, kpts)
 
     to_gpu = utils.to_gpu
     device = utils.device

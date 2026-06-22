@@ -51,11 +51,11 @@ class UHF(pbchf.SCF):
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
                  kpt=None, kpts_band=None):
-        from gpu4pyscf.pbc.scf.kuhf import KUHF
+        from gpu4pyscf.pbc.scf.kuhf import _get_veff
         if dm is None: dm = self.make_rdm1()
         if kpt is None: kpt = self.kpt
         assert dm.ndim == 3 and len(dm) == 2
-        return KUHF.get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
+        return _get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
 
     def get_bands(self, kpts_band, cell=None, dm=None, kpt=None):
         if cell is None: cell = self.cell
@@ -178,3 +178,16 @@ class UHF(pbchf.SCF):
             pop = mulliken_pop(cell, dm, s=s, verbose=log)
         dip = None
         return pop, dip
+
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     with_j=True, hermi=0, max_memory=None, with_nlc=False):
+        from gpu4pyscf.pbc.scf.kuhf import _get_veff
+        cell = self.cell
+        kpt = self.kpt
+        with_j = with_j and hermi != 2
+        def vind(dm1, kshift=0):
+            assert kshift == 0
+            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpt,
+                            with_j=with_j, with_ecoul=False)
+            return vhf.view(cp.ndarray)
+        return vind
