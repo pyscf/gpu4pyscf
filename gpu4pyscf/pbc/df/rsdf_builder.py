@@ -837,10 +837,8 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         kpts = kpts.reshape(1, 3)
     if is_gamma_point:
         bvk_kmesh = np.ones(3, dtype=int)
-        bvk_ncells = 1
     else:
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
-        bvk_ncells = np.prod(bvk_kmesh)
 
     fakenuc = _fake_nuc(cell, with_pseudo=with_pseudo)
     int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
