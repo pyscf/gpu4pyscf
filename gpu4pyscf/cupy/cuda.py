@@ -13,10 +13,12 @@ Enforcement layers (defence in depth)
    in-order queue for device `d` on first call, registers its native
    pointer with libgsycl.so, and caches it forever.
 
-2. Global queue-cache replacement — dpctl's `_global_device_queue_cache`
-   is a ContextVar, which does NOT propagate into ThreadPoolExecutor
-   worker threads. We replace the ContextVar object itself with a plain
-   thread-shared shim so every thread sees the master queue.
+2. Global queue-cache replacement — on dpctl/dpnp master,
+   `_global_device_queue_cache` is a plain process-global object whose
+   `get_or_create(key)` returns a SyclQueue. We replace it with a cache
+   that always returns the per-device master queue. Being process-global
+   (not a ContextVar), it is also visible to ThreadPoolExecutor worker
+   threads, so every thread sees the master queue.
 
 3. Creation-API wrappers — every dpnp and dpctl.tensor array-creation
    function is wrapped to inject `sycl_queue=master` unless the caller
@@ -289,54 +291,75 @@ def _same_queue(q1, q2):
 
 
 # =====================================================================
-# Layer 2 — replace dpctl's per-thread queue cache
+# Layer 2 — replace dpctl's process-global queue cache
 # =====================================================================
-class _InOrderQueueCache:
-    """Stand-in for dpctl's internal _DeviceDefaultQueueCache that
-    always returns the master in-order queue for any device query.
+class _MasterQueueCache:
+    """Drop-in replacement for dpctl._DeviceDefaultQueueCache.
 
-    get_or_create(device) must return (SyclQueue, is_newly_created).
-    We always return (master, False) — master pre-existed this call.
+    On dpctl/dpnp master, `_global_device_queue_cache` is a plain
+    process-global object (NOT a ContextVar), and
+    `get_device_cached_queue(key)` calls
+    `_global_device_queue_cache.get_or_create(key)` directly, expecting a
+    bare dpctl.SyclQueue in return.
+
+    We resolve every key to the per-device master in-order queue so all
+    dpnp/dpctl allocations land on the singleton queue for that GPU.
+    Because this object is process-global rather than a ContextVar,
+    ThreadPoolExecutor worker threads observe it too — fixing the
+    worker-thread allocation escape that motivated the original shim.
+
+    Accepted key types (per dpctl): a SyclDevice, a (SyclContext,
+    SyclDevice) 2-tuple, or a oneAPI filter-selector string. Unknown key
+    types or devices not present among the enumerated GPUs raise rather
+    than silently falling back to device 0.
     """
-    __slots__ = ("_q",)
+    __slots__ = ("_lock",)
 
-    def __init__(self, master_queue):
-        self._q = master_queue
+    def __init__(self):
+        self._lock = threading.Lock()
 
-    def get_or_create(self, device):
-        return (self._q, False)
+    def _device_from_key(self, key):
+        if isinstance(key, tuple) and len(key) == 2:
+            return key[1]
+        if isinstance(key, str):
+            return dpctl.SyclDevice(key)            # may raise -> propagate
+        if isinstance(key, dpctl.SyclDevice):
+            return key
+        raise TypeError(
+            f"_MasterQueueCache.get_or_create: unsupported key type "
+            f"{type(key)!r}")
 
+    def _device_id_for(self, dev):
+        devs = _gpu_devices()
+        # Exact device-object match against the same list used to build the
+        # master queues.
+        for i, d in enumerate(devs):
+            try:
+                if d == dev:
+                    return i
+            except Exception:
+                pass
+        # Backup match by oneAPI filter string.
+        for i, d in enumerate(devs):
+            try:
+                if d.filter_string == dev.filter_string:
+                    return i
+            except Exception:
+                pass
+        raise RuntimeError(
+            f"_MasterQueueCache: device {dev} not found among the "
+            f"{len(devs)} enumerated GPU(s); cannot map it to a master queue")
 
-class _GlobalQueueCacheShim:
-    """Thread-shared stand-in for dpctl's ContextVar-based queue cache.
+    def get_or_create(self, key):
+        with self._lock:
+            return _master_queue(self._device_id_for(self._device_from_key(key)))
 
-    A ContextVar set on the main thread is invisible to worker threads
-    spawned by ThreadPoolExecutor — they start in a fresh default
-    context. We replace the ContextVar object itself so every thread
-    resolves `.get()` to the same in-order cache.
+    # dpctl internals may copy/update the cache; keep safe stubs.
+    def _update_map(self, *args, **kwargs):
+        return None
 
-    Mimics the minimum ContextVar surface (get/set/reset) needed by
-    dpctl internals. `set()` returns the OLD value as the token, and
-    `reset()` restores it — this matches how ContextVar is used inside
-    context-manager patterns (token = var.set(x); try: ...; finally:
-    var.reset(token)). A no-op reset would leave the cache permanently
-    overwritten on first scope exit.
-    """
-    __slots__ = ("_cache",)
-
-    def __init__(self, cache):
-        self._cache = cache
-
-    def get(self, *default):
-        return self._cache
-
-    def set(self, value):
-        token = self._cache     # old value IS the token
-        self._cache = value
-        return token
-
-    def reset(self, token):
-        self._cache = token     # LIFO restore
+    def __copy__(self):
+        return self
 
 # =====================================================================
 # Layer 3 — wrap every creation API so sycl_queue=master is injected
@@ -387,14 +410,13 @@ def _bootstrap():
                 f"Failed to install master queue for device {d}: {e}",
                 RuntimeWarning)
 
-    # Layer 2: replace the ContextVar with a thread-shared shim —
-    # but only if not already replaced by a previous load.
+    # Layer 2: replace dpctl's process-global queue cache with one that
+    # always returns the per-device master queue — but only if not already
+    # replaced by a previous load.
     try:
         existing = qmgr._global_device_queue_cache
-        if not isinstance(existing, _GlobalQueueCacheShim):
-            qmgr._global_device_queue_cache = _GlobalQueueCacheShim(
-                _InOrderQueueCache(_master_queue(0))
-            )
+        if not isinstance(existing, _MasterQueueCache):
+            qmgr._global_device_queue_cache = _MasterQueueCache()
         probe = dpnp.zeros(4)
         if not _same_queue(probe.sycl_queue, _master_queue(0)):
             warnings.warn(

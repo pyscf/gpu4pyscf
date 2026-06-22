@@ -194,8 +194,9 @@ else:
 
     # -----------------------------------------------------------------
     # cupy.cuda submodule — creates master queues, installs creation-API
-    # wrappers on dpnp/dpt, patches dpctl's ContextVar cache, installs
-    # in-place op drain. See cupy/cuda.py for details.
+    # wrappers on dpnp/dpt, installs the master queue cache (replacing
+    # dpctl's process-global queue cache), installs in-place op drain.
+    # See cupy/cuda.py for details.
     # -----------------------------------------------------------------
     _cuda_mod = None
     try:
