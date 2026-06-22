@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright 2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,10 +21,13 @@ from pyscf.gto import mole
 from pyscf.data import nist
 from pyscf.x2c import x2c as x2c_cpu
 from gpu4pyscf.lib.cupy_helper import block_diag, asarray, hermi_triu
+from gpu4pyscf.lib.cusolver import eigh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, ghf
 from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.df.int3c2e_bdiv import libvhf_rys, contract_int3c2e_auxvec
+from gpu4pyscf import __config__
+from gpu4pyscf.lib import utils
 
 LINEAR_DEP_THRESHOLD = 1e-9
 
@@ -275,8 +277,10 @@ class X2C1E_GSCF(_X2C_SCF):
     '''
 
     __name_mixin__ = 'X2C1e'
-
     _keys = {'with_x2c'}
+
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     def __init__(self, mf):
         self.__dict__.update(mf.__dict__)
@@ -385,13 +389,13 @@ def _get_hcore_fw(t, v, w, s, x, c):
 def _get_r(s, snesc):
     # R^dag \tilde{S} R = S
     # R = S^{-1/2} [S^{-1/2}\tilde{S}S^{-1/2}]^{-1/2} S^{1/2}
+    # Eq.(193) or (223) in 10.1080/00268971003781571
     w, v = cp.linalg.eigh(s)
     idx = cp.where(w > 1e-14)[0]
     v = v[:,idx]
     w_sqrt = cp.sqrt(w[idx])
     w_invsqrt = 1 / w_sqrt
 
-    # eigenvectors of S as the new basis
     snesc = v.conj().T.dot(snesc).dot(v)
     r_mid = w_invsqrt[:,None] * snesc * w_invsqrt
     w1, v1 = cp.linalg.eigh(r_mid)
@@ -415,25 +419,30 @@ def _x2c1e_xmatrix(t, v, w, s, c):
     h[nao:,nao:] = w * (.25/c**2) - t
     m[:nao,:nao] = s
     m[nao:,nao:] = t * (.5/c**2)
-
-    d, t = cp.linalg.eigh(m)
-    idx = cp.where(d > LINEAR_DEP_THRESHOLD)[0]
-    t = t[:,idx] / cp.sqrt(d[idx])
-    tht = t.conj().T.dot(h).dot(t)
-    e, a = cp.linalg.eigh(tht)
-    a = cp.dot(t, a)
-    idx = cp.where(e > -c**2)[0]
-    cl = a[:nao,idx]
-    cs = a[nao:,idx]
-    # X = B A^{-1} = B (A^T A)^{-1} A^T
-    cl_inv = cp.linalg.solve(cl.conj().T.dot(cl), cl.conj().T)
-    x = cs.dot(cl_inv)
+    try:
+        e, a = eigh(h, m)
+        cl = a[:nao,nao:]
+        cs = a[nao:,nao:]
+        x = cp.linalg.solve(cl.T, cs.T).T  # B = XA
+    except cp.linalg.LinAlgError:
+        d, t = cp.linalg.eigh(m)
+        idx = cp.where(d > LINEAR_DEP_THRESHOLD)[0]
+        t = t[:,idx] / cp.sqrt(d[idx])
+        tht = t.conj().T.dot(h).dot(t)
+        e, a = cp.linalg.eigh(tht)
+        a = cp.dot(t, a)
+        idx = cp.where(e > -c**2)[0]
+        cl = a[:nao,idx]
+        cs = a[nao:,idx]
+        # X = B A^{-1} = B (A^T A)^{-1} A^T
+        cl_inv = cp.linalg.solve(cl.conj().T.dot(cl), cl.conj().T)
+        x = cs.dot(cl_inv)
     return x
 
 def _x2c1e_get_hcore(t, v, w, s, c):
     nao = s.shape[0]
     n2 = nao * 2
-    dtype = np.result_type(t, v, w, s)
+    dtype = cp.result_type(t, v, w, s)
     h = cp.zeros((n2,n2), dtype=dtype)
     m = cp.zeros((n2,n2), dtype=dtype)
     h[:nao,:nao] = v
@@ -443,16 +452,22 @@ def _x2c1e_get_hcore(t, v, w, s, c):
     m[:nao,:nao] = s
     m[nao:,nao:] = t * (.5/c**2)
 
-    d, t = cp.linalg.eigh(m)
-    idx = cp.where(d > LINEAR_DEP_THRESHOLD)[0]
-    t = t[:,idx] / cp.sqrt(d[idx])
-    tht = t.conj().T.dot(h).dot(t)
-    e, a = cp.linalg.eigh(tht)
-    a = cp.dot(t, a)
-    idx = cp.where(e > -c**2)[0]
-    cl = a[:nao,idx]
-    # cs = a[nao:,idx]
-    e = e[idx]
+    try:
+        e, a = eigh(h, m)
+        cl = a[:nao,nao:]
+        # cs = a[nao:,nao:]
+        e = e[nao:]
+    except cp.linalg.LinAlgError:
+        d, t = cp.linalg.eigh(m)
+        idx = cp.where(d > LINEAR_DEP_THRESHOLD)[0]
+        t = t[:,idx] / cp.sqrt(d[idx])
+        tht = t.conj().T.dot(h).dot(t)
+        e, a = cp.linalg.eigh(tht)
+        a = cp.dot(t, a)
+        idx = cp.where(e > -c**2)[0]
+        cl = a[:nao,idx]
+        # cs = a[nao:,idx]
+        e = e[idx]
 
     w, u = cp.linalg.eigh(cl.conj().T.dot(s).dot(cl))
     idx = cp.where(w > 1e-14)[0]
@@ -462,6 +477,7 @@ def _x2c1e_get_hcore(t, v, w, s, c):
     r = (u/cp.sqrt(w[idx])).dot(u.conj().T.dot(cl.conj().T).dot(s))
     h1 = (r.conj().T*e).dot(r)
     return h1
+
 
 def _block_diag(mat):
     '''

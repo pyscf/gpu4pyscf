@@ -143,25 +143,32 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         fermi_b = mo_energy_b[nocc_b-1]
         mo_occ_kpts[1] = (mo_energy_kpts[1] <= fermi_b).astype(np.float64)
 
-    if mf.verbose >= logger.INFO:
+    if nocc_a < nmo and nocc_b < nmo:
+        homo = homo_a = fermi_a
+        homo_b = None
+        if nocc_b > 0:
+            homo = max(homo, fermi_b)
+        lumo = lumo_b = mo_energy_b[nocc_b]
+        lumo_a = None
         if nocc_a < nmo:
             lumo_a = mo_energy_a[nocc_a]
-            logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g',
-                        fermi_a, lumo_a)
-        else:
-            logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', fermi_a)
-        if 0 < nocc_b < nmo:
-            lumo_b = mo_energy_b[nocc_b]
-            logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g',
-                        fermi_b, lumo_b)
-        elif 0 < nocc_b:
-            logger.info(mf, 'beta HOMO = %.12g  (no LUMO because of small basis) ', fermi_b)
-
-        if 0 < nocc_a < nmo and 0 < nocc_b < nmo:
-            homo = max(fermi_a, fermi_b)
-            lumo = min(lumo_a, lumo_b)
-            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g  gap = %.5f eV',
-                        homo, lumo, (lumo-homo)*HARTREE2EV)
+            lumo = min(lumo, lumo_a)
+        gap = (lumo - homo) * HARTREE2EV
+        mf.scf_summary['gap'] = gap
+        if mf.verbose >= logger.INFO:
+            if lumo_a is not None:
+                logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g', homo_a, lumo_a)
+            else:
+                logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', homo_a)
+            if homo_b is not None:
+                logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g', homo_b, lumo_b)
+            else:
+                logger.info(mf, 'beta               LUMO = %.12g', lumo_b)
+            if homo+1e-3 > lumo:
+                logger.warn(mf, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
+            else:
+                logger.info(mf, '  HOMO = %.12g  LUMO = %.12g  gap/eV = %.5f',
+                            homo, lumo, gap)
     return mo_occ_kpts
 
 
@@ -170,19 +177,24 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf_kpts=None):
     '''
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
     if h1e_kpts is None: h1e_kpts = mf.get_hcore()
-    if vhf_kpts is None: vhf_kpts = mf.get_veff(mf.cell, dm_kpts)
+    if vhf_kpts is None or getattr(vhf_kpts, 'ecoul', None) is None:
+        vhf_kpts = mf.get_veff(mf.cell, dm_kpts)
 
     nkpts = len(h1e_kpts)
     e1 = 1./nkpts * cp.einsum('skij,kji->', dm_kpts, h1e_kpts).get()
-    e_coul = 1./nkpts * cp.einsum('skij,skji->', dm_kpts, vhf_kpts).get() * 0.5
+    e2 = 1./nkpts * cp.einsum('skij,skji->', dm_kpts, vhf_kpts).get() * 0.5
+    ecoul = vhf_kpts.ecoul
+    exx = e2 - ecoul
     mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['e2'] = e_coul.real
-    logger.debug(mf, 'E1 = %s  E_coul = %s', e1, e_coul)
-    if abs(e_coul.imag) > mf.cell.precision*10:
+    mf.scf_summary['e2'] = e2.real
+    mf.scf_summary['coul'] = ecoul.real
+    mf.scf_summary['exc'] = exx.real
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exx)
+    if abs(e2.imag) > mf.cell.precision*10:
         logger.warn(mf, "Coulomb energy has imaginary part %s. "
                     "Coulomb integrals (e-e, e-N) may not converge !",
-                    e_coul.imag)
-    return (e1+e_coul).real, e_coul.real
+                    e2.imag)
+    return (e1+e2).real, e2.real
 
 def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
@@ -291,6 +303,13 @@ class KUHF(khf.KSCF):
         if dm_kpts is None: dm_kpts = self.make_rdm1()
         if kpts is None: kpts = self.kpts
 
+        def trace(dm, vj):
+            if kpts_band is not None:
+                return None
+            if vj.ndim == 2:
+                return cp.einsum('nij,ji->', dm_kpts, vj).real.get() * .5
+            return cp.einsum('nKij,Kji->', dm_kpts, vj).real.get() * .5
+
         if self.rsjk or isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
             incremental_veff = dm_last is not None and hasattr(vhf_last, 'sr')
             ddm = dm_kpts
@@ -298,13 +317,24 @@ class KUHF(khf.KSCF):
                 ddm = dm_kpts - dm_last
 
             vj_sr = vk_sr = 0
+            ecoul = ecoul_sr = None
             if isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
                 if self.j_engine.supmol is None:
                     self.j_engine.build(kpts)
                 vj_sr = self.j_engine._get_j_sr(ddm.sum(axis=0), hermi, kpts, kpts_band)
                 vj = self.j_engine._get_j_lr(dm_kpts.sum(axis=0), hermi, kpts, kpts_band)
+                if incremental_veff:
+                    if hasattr(vhf_last, 'ecoul_sr'):
+                        ecoul_sr = trace(dm_last, vj_sr) * 2
+                        ecoul_sr += trace(ddm, vj_sr)
+                        ecoul_sr += vhf_last.ecoul_sr
+                        ecoul = trace(dm_kpts, vj) + ecoul_sr
+                else:
+                    ecoul_sr = trace(dm_kpts, vj_sr)
+                    ecoul = trace(dm_kpts, vj) + ecoul_sr
             else:
                 vj = self.get_j(cell, dm_kpts.sum(axis=0), hermi, kpts, kpts_band)
+                ecoul = trace(dm_kpts, vj)
 
             if self.rsjk:
                 if self.rsjk.supmol is None:
@@ -318,13 +348,19 @@ class KUHF(khf.KSCF):
             if incremental_veff:
                 vhf_sr += vhf_last.sr
             vhf = vj - vk + vhf_sr
-            return tag_array(vhf, sr=vhf_sr)
+            vhf = tag_array(vhf, sr=vhf_sr)
+            if ecoul is not None:
+                vhf.ecoul = ecoul
+                if ecoul_sr is not None:
+                    vhf.ecoul_sr = ecoul_sr
         else:
             vj, vk = self.with_df.get_jk(
                 dm_kpts, hermi, kpts, kpts_band, with_j=True, with_k=True,
                 exxdiv=self.exxdiv)
             vj = vj.sum(axis=0)
-            return vj - vk
+            ecoul = trace(dm_kpts, vj)
+            vhf = tag_array(vj - vk, ecoul=ecoul)
+        return vhf
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
         if fock is None:

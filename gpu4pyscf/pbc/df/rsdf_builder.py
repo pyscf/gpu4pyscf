@@ -866,8 +866,6 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
 
     ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
     nuc_raw = ft_opt.contract_rhoG(ZG, Gv, kpts)
-    if is_gamma_point:
-        nuc_raw = nuc_raw[0]
 
     nuc += nuc_raw
     if is_single_kpt and nuc.ndim == 3:

@@ -25,7 +25,8 @@ from pyscf.gto.eval_gto import NBINS, CUTOFF
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, transpose_sum,
-    grouped_dot, grouped_gemm, reduce_to_device, take_last2d, ndarray, batched_vec3_norm2)
+    grouped_dot, grouped_gemm, reduce_to_device, take_last2d, ndarray,
+    batched_vec_norm2, batched_vec_dot, MEMPOOL_THRESHOLD)
 from gpu4pyscf.dft import xc_deriv, libxc
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.multi_gpu import lru_cache
@@ -347,18 +348,18 @@ def _vv10nlc(rho_drho, coords, weights, nlc_pars):
 
     rho_i = rho_drho[0]
 
-    rho_nonzero_mask = cupy.logical_and(
+    rho_nonzero_mask = cupy.where(cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(weights) > 1e-14,
-    )
+    ))[0]
 
     rho_i = rho_i[rho_nonzero_mask]
     coords = cupy.ascontiguousarray(coords[rho_nonzero_mask])
     weights = weights[rho_nonzero_mask]
     ngrids = coords.shape[0]
 
-    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
     del nabla_rho_i
 
     omega_i         = cupy.empty(ngrids)
@@ -498,10 +499,10 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
         nelec = float(den.sum())
         # libxc calls are still running on default stream
         if xctype != 'HF':
-            exc, vxc = ni.eval_xc_eff(xc_code, rho_tot, deriv=1, xctype=xctype)[:2]
+            exc, vxc = ni.eval_xc_eff(xc_code, rho_tot, deriv=1, xctype=xctype, spin=0)[:2]
             vxc = cupy.asarray(vxc, order='C')
             exc = cupy.asarray(exc, order='C')
-            excsum = float(cupy.dot(den, exc[:,0]))
+            excsum = float(cupy.dot(den, exc).get())
             wv = vxc
             wv *= weights
             if xctype == 'GGA':
@@ -748,15 +749,12 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     wv = []
     for i in range(nset):
-        if xctype == 'LDA':
-            exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i][0], deriv=1, xctype=xctype)[:2]
-        else:
-            exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i], deriv=1, xctype=xctype)[:2]
+        exc, vxc = ni.eval_xc_eff(xc_code, rho_tot[i], deriv=1, xctype=xctype, spin=0)[:2]
         vxc = cupy.asarray(vxc, order='C')
         exc = cupy.asarray(exc, order='C')
         den = rho_tot[i][0] * grids.weights
         nelec[i] = den.sum()
-        excsum[i] = cupy.sum(den * exc[:,0])
+        excsum[i] = cupy.sum(den * exc)
         wv.append(vxc * grids.weights)
         if xctype == 'GGA':
             wv[i][0] *= .5
@@ -917,7 +915,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         dm_mask_buf = mo_buf = mo_coeff = None
         weights = cupy.asarray(grids.weights[grid_start:grid_end])
         nelec = rho_tot[:,:,0].dot(weights).get() # 'sng,g->sn'
-        exc = cupy.empty((nset, ngrids_local, 1))
+        exc = cupy.empty((nset, ngrids_local))
         if xctype == 'LDA':
             vxc = cupy.zeros((nset, 2, 1,  ngrids_local))
         elif xctype == 'GGA':
@@ -926,8 +924,9 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             vxc = cupy.zeros((nset, 2, 5, ngrids_local))
         if xctype != 'HF':
             for i in range(nset):
-                exc[i], vxc[i] = ni.eval_xc_eff(xc_code, rho_tot[:,i,:,:], deriv=1, xctype=xctype)[:2]
-            excsum = cupy.einsum('ijg,g,jg->j', rho_tot[:,:,0], weights, exc[:,:,0]).get()
+                exc[i], vxc[i] = ni.eval_xc_eff(xc_code, rho_tot[:,i,:,:],
+                                                deriv=1, xctype=xctype, spin=1)[:2]
+            excsum = cupy.einsum('ijg,g,jg->j', rho_tot[:,:,0], weights, exc).get()
             wv = vxc * weights
             if xctype == 'GGA':
                 wv[:,:,0] *= .5
@@ -1696,7 +1695,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     den = rho[0] * grids.weights
     nelec = den.sum()
-    excsum = cupy.dot(den, exc)
+    excsum = float(cupy.dot(den, exc).get())
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
     t1 = log.timer_debug1('transform vxc', *t1)
 
@@ -1771,7 +1770,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         rho = cupy.stack([cupy.hstack(rhoa), cupy.hstack(rhob)], axis=0)
         t0 = log.timer_debug1('eval rho in fxc', *t0)
     if xctype != 'HF':
-        vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype)[1:3]
+        vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype, spin=spin)[1:3]
     else:
         vxc = 0
         fxc = 0
@@ -1782,16 +1781,8 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
 def batch_square(a):
     return a[0]**2 + a[1]**2 + a[2]**2
 
-def batch_square_inplace(a, out=None):
-    if out is None:
-        out = cupy.empty_like(a[0])
-    cupy.square(a[0], out=out)
-    out += a[1] * a[1]
-    out += a[2] * a[2]
-    return out
-
 def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
-                verbose=None, spin=None, buf=None):
+                verbose=None, spin=None, work=None):
     '''
     Different from PySCF, this function employ cuda version libxc
     '''
@@ -1810,11 +1801,11 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     if not all(x.on_gpu for x, w in xcfuns):
         ni_cpu = ni.to_cpu()
         ret = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)
-        ret[0] = cupy.asarray(ret[0])[:,None]
-        for i in range(deriv):
-            ret[i+1] = cupy.asarray(ret[i+1])
+        for i in range(deriv+1):
+            ret[i] = cupy.asarray(ret[i])
         return ret
 
+    buf = work
     inp = {}
     if spin == 0:
         assert rho.dtype == np.float64
@@ -1823,49 +1814,33 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
             inp['rho'] = rho.ravel()
         elif xctype in ['GGA', 'MGGA']:
             inp['rho'] = rho[0]
-            sigma1 = ndarray(ngrids, buffer=buf)
-            inp['sigma'] = batch_square_inplace(rho[1:4], out=sigma1)
+            inp['sigma'] = batched_vec_norm2(rho[1:4].T, out=buf)
             if xctype == 'MGGA':
                 inp['tau'] = rho[-1]     # can be 4 (without laplacian) or 5 (with laplacian)
     else:
-        assert rho[0].dtype == np.float64
+        assert rho.dtype == np.float64
         ngrids = rho.shape[-1]
         if xctype == 'LDA' or xctype == 'HF':
-            rho2 = ndarray((ngrids, 2), buffer=buf)
-            rho2[:,0] = rho[0].ravel()
-            rho2[:,1] = rho[1].ravel()
-            inp['rho'] = rho2
+            inp['rho'] = rho2 = ndarray((ngrids, 2), buffer=buf)
+            rho2[:] = rho.reshape(2, ngrids).T
         elif xctype == 'GGA':
             buf = ndarray((5, ngrids), buffer=buf)
-            rho2 = ndarray((ngrids, 2), buffer=buf[:2])
-            sigma3 = ndarray((ngrids, 3), buffer=buf[2:])
-            rho2[:,0] = rho[0,0]
-            rho2[:,1] = rho[1,0]
-            inp['rho'] = rho2
-            batch_square_inplace(rho[0, 1:4], out=sigma3[:, 0])
-            cupy.multiply(rho[0, 1], rho[1, 1], out=sigma3[:, 1])
-            sigma3[:, 1] += rho[0,2]*rho[1,2]
-            sigma3[:, 1] += rho[0,3]*rho[1,3]
-            batch_square_inplace(rho[1, 1:4], out=sigma3[:, 2])
-            inp['sigma'] = sigma3
+            inp['rho'] = rho2 = ndarray((ngrids, 2), buffer=buf[:2])
+            inp['sigma'] = sigma3 = ndarray((ngrids, 3), buffer=buf[2:])
+            sigma3[:, 0] = batched_vec_norm2(rho[0, 1:4].T, out=buf)
+            sigma3[:, 1] = batched_vec_dot(rho[0,1:4].T, rho[1,1:4].T, out=buf)
+            sigma3[:, 2] = batched_vec_norm2(rho[1, 1:4].T, out=buf)
+            rho2[:] = rho[:,0].T
         else: # MGGA
             buf = ndarray((7, ngrids), buffer=buf)
-            rho2 = ndarray((ngrids, 2), buffer=buf[:2])
-            sigma3 = ndarray((ngrids, 3), buffer=buf[2:5])
-            tau2 = ndarray((ngrids, 2), buffer=buf[5:])
-            rho2[:,0] = rho[0,0]
-            rho2[:,1] = rho[1,0]
-            inp['rho'] = rho2
-            batch_square_inplace(rho[0, 1:4], out=sigma3[:, 0])
-            cupy.multiply(rho[0, 1], rho[1, 1], out=sigma3[:, 1])
-            sigma3[:, 1] += rho[0,2]*rho[1,2]
-            sigma3[:, 1] += rho[0,3]*rho[1,3]
-            batch_square_inplace(rho[1, 1:4], out=sigma3[:, 2])
-            inp['sigma'] = sigma3
-            tau2[:, 0] = rho[0,-1]
-            tau2[:, 1] = rho[1,-1]
-            inp['tau'] = tau2     # can be 4 (without laplacian) or 5 (with laplacian)
-
+            inp['rho'] = rho2 = ndarray((ngrids, 2), buffer=buf[:2])
+            inp['sigma'] = sigma3 = ndarray((ngrids, 3), buffer=buf[2:5])
+            inp['tau'] = tau2 = ndarray((ngrids, 2), buffer=buf[5:])
+            sigma3[:, 0] = batched_vec_norm2(rho[0, 1:4].T, out=buf)
+            sigma3[:, 1] = batched_vec_dot(rho[0,1:4].T, rho[1,1:4].T, out=buf)
+            sigma3[:, 2] = batched_vec_norm2(rho[1, 1:4].T, out=buf)
+            rho2[:] = rho[:,0].T
+            tau2[:] = rho[:,-1].T
     do_vxc = True
     do_fxc = deriv > 1
     do_kxc = deriv > 2
@@ -1903,11 +1878,13 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
                     ret_full[label] += val
                 else:
                     ret_full[label] = val
+            val = None
+
     vxc = None
     fxc = None
     kxc = None
 
-    exc = ret_full["zk"]
+    exc = ret_full["zk"].ravel()
     vxc = [ret_full[label] for label in vxc_labels if label in ret_full]
     if do_fxc:
         fxc = [ret_full[label] for label in fxc_labels if label in ret_full]
@@ -1916,8 +1893,9 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     if do_kxc:
         kxc = xc_deriv.transform_kxc(rho, fxc, kxc, xctype, spin)
     if do_fxc:
-        fxc = xc_deriv.transform_fxc(rho, vxc, fxc, xctype, spin)
-    vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin)
+        fxc = xc_deriv.transform_fxc(rho, vxc, fxc, xctype, spin, work)
+    if deriv > 0:
+        vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin, work)
     return exc, vxc, fxc, kxc
 
 @lru_cache(10)
@@ -2218,7 +2196,6 @@ class NumInt(lib.StreamObject, LibXCMixin):
     cache_xc_kernel = cache_xc_kernel
 
     # cannot patch this function
-    eval_xc_eff = eval_xc_eff
     block_loop = _block_loop
     eval_ao = staticmethod(eval_ao)
     eval_rho = staticmethod(eval_rho)
@@ -2239,6 +2216,67 @@ class NumInt(lib.StreamObject, LibXCMixin):
         self.grid_blksize = None
         self.non0ao_idx = {}
         return self
+
+    def eval_xc_eff(self, xc_code, rho, deriv=1, *, omega=None, xctype=None,
+                    spin=None, work=None):
+        if spin is None:
+            if rho.ndim >= 2 and rho.shape[0] == 2:
+                spin = 1
+            else:
+                spin = 0
+
+        if xctype is None:
+            xctype = self._xc_type(xc_code)
+
+        if spin == 0:
+            nvar = 1
+        else:
+            if xctype == 'LDA' or xctype == 'HF':
+                nvar = 2
+            elif xctype == 'GGA':
+                nvar = 5
+            else:
+                nvar = 7
+        if deriv == 3:
+            nvar = 216
+        elif deriv == 2:
+            if spin == 1 and 'GGA' in xctype:
+                nvar = 36
+        elif deriv == 1:
+            if spin == 1 and 'GGA' in xctype:
+                nvar = 10
+
+        ngrids = rho.shape[-1]
+        if work is None:
+            blksize = int(MEMPOOL_THRESHOLD / 8 / nvar)
+            blksize = min(ngrids, blksize // 64 * 64)
+            work = cupy.empty((nvar, blksize))
+        else:
+            blksize = int(work.nbytes / 8 / nvar)
+            blksize = min(ngrids, blksize // 64 * 64)
+            if blksize == 0:
+                work = None # The input workspace is too small
+
+        if xctype == 'LDA' or xctype == 'HF':
+            nvar = 1
+        elif xctype == 'GGA':
+            nvar = 4
+        else:
+            nvar = 5
+        out = [None] * 4
+        for i in range(deriv+1):
+            if spin == 0:
+                out[i] = cupy.empty([nvar] * i + [ngrids])
+            else:
+                out[i] = cupy.empty([2, nvar] * i + [ngrids])
+
+        for p0, p1 in lib.prange(0, ngrids, blksize):
+            rho_sub = cupy.asarray(rho[...,p0:p1], order='C')
+            res = eval_xc_eff(self, xc_code, rho_sub, deriv=deriv,
+                              xctype=xctype, spin=spin, work=work)
+            for i in range(deriv+1):
+                out[i][...,p0:p1] = res[i]
+        return out
 
 def _contract_rho(bra, ket, rho=None):
     nao, ngrids = bra.shape

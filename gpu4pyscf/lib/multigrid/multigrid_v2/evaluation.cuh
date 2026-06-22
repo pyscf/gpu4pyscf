@@ -32,17 +32,17 @@ namespace gpu4pyscf::gpbc::multi_grid {
 template <typename KernelType, int n_channels, int i_angular, int j_angular,
           bool is_non_orthogonal>
 __global__ static void evaluate_density_kernel(
-    KernelType *density, const KernelType *density_matrices,
-    const int *non_trivial_pairs, const int *i_shells, const int *j_shells,
-    const int n_j_shells, const int *shell_to_ao_indices,
+    KernelType *__restrict__ density, const KernelType *__restrict__ density_matrices,
+    const int *__restrict__ non_trivial_pairs, const int *__restrict__ i_shells, const int *__restrict__ j_shells,
+    const int n_j_shells, const int *__restrict__ shell_to_ao_indices,
     const int n_i_functions, const int n_j_functions,
-    const int *sorted_pairs_per_local_grid,
-    const int *accumulated_n_pairs_per_local_grid,
-    const int *sorted_block_index, const int *image_indices,
-    const double *vectors_to_neighboring_images, const int n_images,
-    const int *image_pair_difference_index, const int n_difference_images,
-    const int mesh_a, const int mesh_b, const int mesh_c, const int *atm,
-    const int *bas, const double *env) {
+    const int *__restrict__ sorted_pairs_per_local_grid,
+    const int *__restrict__ accumulated_n_pairs_per_local_grid,
+    const int *__restrict__ sorted_block_index, const int *__restrict__ image_indices,
+    const double *__restrict__ vectors_to_neighboring_images, const int n_images,
+    const int *__restrict__ image_pair_difference_index, const int n_difference_images,
+    const int mesh_a, const int mesh_b, const int mesh_c, const int *__restrict__ atm,
+    const int *__restrict__ bas, const double *__restrict__ env) {
 
   constexpr int n_i_cartesian_functions = (i_angular + 1) * (i_angular + 2) / 2;
   constexpr int n_j_cartesian_functions = (j_angular + 1) * (j_angular + 2) / 2;
@@ -93,12 +93,21 @@ __global__ static void evaluate_density_kernel(
   KernelType
       prefactor[n_channels * n_i_cartesian_functions * n_j_cartesian_functions];
 
-  __shared__ KernelType reduced_density_values[n_channels * n_threads];
+  // Compile-time warp count; `warpSize` is a device-runtime constant
+  // (not constexpr), so we use the literal here. Centralizing the
+  // value will make the future HIP/wavefront port a single-point edit.
+  constexpr int WARP_SIZE_CT = 32;
+  constexpr int n_warps = n_threads / WARP_SIZE_CT;  /*L2*/
+  __shared__ KernelType reduced_density_values[n_channels * n_warps * n_threads];
 
 #pragma unroll
   for (int i_channel = 0; i_channel < n_channels; i_channel++) {
-    reduced_density_values[i_channel * n_threads + thread_id] = 0;
+#pragma unroll
+    for (int _w = 0; _w < n_warps; _w++) {  /*L2: warp-private rows*/
+      reduced_density_values[(i_channel * n_warps + _w) * n_threads + thread_id] = 0;
+    }
   }
+  __syncthreads();  /*WS: init visibility*/
 
   const int start_pair_index = accumulated_n_pairs_per_local_grid[block_index];
   const int end_pair_index =
@@ -294,40 +303,47 @@ __global__ static void evaluate_density_kernel(
           const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
 #pragma unroll
           for (int i_channel = 0; i_channel < n_channels; i_channel++) {
-            KernelType density_value_to_be_shared = 0;
+            /*L1: per-i independent FMA chains expose ILP (break the serial
+               n_i*n_j-deep FP64 accumulation chain; reassociation ~1e-13)*/
+            KernelType _acc[n_i_cartesian_functions];
 #pragma unroll
             for (int i_function_index = 0;
                  i_function_index < n_i_cartesian_functions;
                  i_function_index++) {
+              KernelType _s = 0;
 #pragma unroll
               for (int j_function_index = 0;
                    j_function_index < n_j_cartesian_functions;
                    j_function_index++) {
-                density_value_to_be_shared +=
-                    prefactor[i_channel * n_i_cartesian_functions *
-                                  n_j_cartesian_functions +
-                              i_function_index * n_j_cartesian_functions +
-                              j_function_index] *
-                    i_cartesian[i_function_index] *
-                    j_cartesian[j_function_index];
+                _s += prefactor[i_channel * n_i_cartesian_functions *
+                                    n_j_cartesian_functions +
+                                i_function_index * n_j_cartesian_functions +
+                                j_function_index] *
+                      j_cartesian[j_function_index];
               }
+              _acc[i_function_index] = _s * i_cartesian[i_function_index];
             }
+            KernelType density_value_to_be_shared = 0;
+#pragma unroll
+            for (int i_function_index = 0;
+                 i_function_index < n_i_cartesian_functions;
+                 i_function_index++)
+              density_value_to_be_shared += _acc[i_function_index];
 
             density_value_to_be_shared *= gaussian;
 
-            __syncthreads();
-
-            const KernelType reduced =
-                cub::BlockReduce<KernelType, BLOCK_DIM_XYZ,
-                                 cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY,
-                                 BLOCK_DIM_XYZ, BLOCK_DIM_XYZ>()
-                    .Sum(density_value_to_be_shared);
-
-            if (thread_id == 0) {
-              reduced_density_values[i_channel * n_threads +
+            KernelType _wv = density_value_to_be_shared; /*WS*/
+            // Intra-warp reduction using warpSize (device-runtime
+            // built-in). Stride starts at warpSize/2 and halves.
+#pragma unroll
+            for (int _o = warpSize / 2; _o > 0; _o >>= 1)
+              _wv += __shfl_down_sync(0xffffffffu, _wv, _o);
+            // Warp leader test + warp-index extraction using warpSize.
+            if ((thread_id % warpSize) == 0) {  /*L2: warp-private store, no atomic*/
+              reduced_density_values[(i_channel * n_warps + (thread_id / warpSize)) *
+                                         n_threads +
                                      a_index * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ +
-                                     b_index * BLOCK_DIM_XYZ + c_index] +=
-                  reduced;
+                                     b_index * BLOCK_DIM_XYZ + c_index] += _wv;
             }
           }
 
@@ -364,9 +380,14 @@ __global__ static void evaluate_density_kernel(
   if (a_index < mesh_a && b_index < mesh_b && c_index < mesh_c) {
 #pragma unroll
     for (int i_channel = 0; i_channel < n_channels; i_channel++) {
+      KernelType _v = 0;  /*L2: combine warp-private rows*/
+#pragma unroll
+      for (int _w = 0; _w < n_warps; _w++)
+        _v += reduced_density_values[(i_channel * n_warps + _w) * n_threads +
+                                     thread_id];
       atomicAdd(density + i_channel * mesh_a * mesh_b * mesh_c +
                     a_index * mesh_b * mesh_c + b_index * mesh_c + c_index,
-                reduced_density_values[i_channel * n_threads + thread_id]);
+                _v);
     }
   }
 }

@@ -98,7 +98,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int nsq_per_block = blockDim.x;
     //assert(nsq_per_block == threadsx * threadsy);
     int t_id = gout_id * nsq_per_block + sq_id;
-    int lane_id = t_id % 32;
+    int lane_id = t_id % warpSize;
     int group_id = lane_id / threadsx;
     unsigned int mask = ((1 << threadsx) - 1) << group_id * threadsx;
     int tx = sq_id % threadsx;
@@ -397,7 +397,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int nsq_per_block = blockDim.x;
     //assert(nsq_per_block == threadsx * threadsy);
     int t_id = gout_id * nsq_per_block + sq_id;
-    int lane_id = t_id % 32;
+    int lane_id = t_id % warpSize;
     int group_id = lane_id / threadsx;
     unsigned int mask = ((1 << threadsx) - 1) << group_id * threadsx;
     int tx = sq_id % threadsx;
@@ -891,9 +891,11 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
     int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
     int nf3ijkl = (order+1)*(order+2)*(order+3)/6;
-    // 16x16 threads are applied to all unrolled code
-    float *tile16_qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, 16);
-    float *tile16_qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, 16);
+    // MD_J_TILE_THREADS x MD_J_TILE_THREADS threads are applied to all
+    // unrolled code. The tile width matches the `dim3 threads(16,16)`
+    // launch geometry in unrolled_md_j*.cu and is defined in md_j.cuh.
+    float *tile16_qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, MD_J_TILE_THREADS);
+    float *tile16_qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, MD_J_TILE_THREADS);
     MDBoundsInfo bounds = {li, lj, lk, ll, lij, lkl, order, nf3ij, nf3kl, nf3ijkl,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         pair_ij_loc, pair_kl_loc, tile16_qd_ij_max, tile16_qd_kl_max,

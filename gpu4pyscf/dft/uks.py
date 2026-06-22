@@ -22,18 +22,19 @@ from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 from gpu4pyscf.lib import utils
 
 
-def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     '''Coulomb + XC functional for UKS.  See pyscf/dft/rks.py
     :func:`get_veff` fore more details.
     '''
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
     if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
-        dm = cupy.asarray((dm*.5,dm*.5))
+        dm = cupy.repeat(dm[None]*.5, 2, axis=0)
     else:
         dm = asarray(dm)
     assert dm.ndim == 3
-    t0 = logger.init_timer(ks)
+    log = logger.new_logger(ks)
+    t0 = log.init_timer()
     if ks.grids.coords is None:
         rks.initialize_grids(ks, mol, dm[0]+dm[1])
 
@@ -43,7 +44,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     else:
         max_memory = ks.max_memory - lib.current_memory()[0]
         n, exc, vxc = ni.nr_uks(mol, ks.grids, ks.xc, dm.view(cupy.ndarray), max_memory=max_memory)
-        logger.debug(ks, 'nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
@@ -53,29 +54,37 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             n, enlc, vnlc = ni.nr_nlc_vxc(mol, ks.nlcgrids, xc, dm)
             exc += enlc
             vxc += vnlc
-            logger.debug(ks, 'nelec with nlc grids = %s', n)
-        t0 = logger.timer(ks, 'vxc', *t0)
+            log.debug('nelec with nlc grids = %s', n)
+    t1 = log.timer('vxc', *t0)
 
     dm_orig = dm
     vj_last = getattr(vhf_last, 'vj', None)
     if vj_last is not None:
-        dm = asarray(dm) - asarray(dm_last)
-    vj = ks.get_j(mol, dm[0]+dm[1], hermi)
-    if vj_last is not None:
-        vj += asarray(vj_last)
-    vxc += vj
-    ecoul = float(cupy.einsum('nij,ij->', dm_orig, vj).real) * .5
+        dm_last = asarray(dm_last)
+        dm = dm - dm_last
+    else:
+        dm_last = None
+    vhf = vj = ks.get_j(mol, dm[0]+dm[1], hermi)
+    ecoul = uhf._trace_ecoul(vj, dm, dm_last, vhf_last)
+    cput2 = log.timer_debug1('vj', *t1)
 
-    vk = None
     if ni.libxc.is_hybrid_xc(ks.xc):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         vk = ks.get_k(mol, dm, hermi, omega, alpha, hyb)
+        vhf = vj - vk
         if vj_last is not None:
-            vk += asarray(vhf_last.vk)
-        vxc -= vk
-        exc -= float(cupy.einsum('nij,nij', dm_orig, vk).real) * .5
-    t0 = logger.timer(ks, 'veff', *t0)
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+            vhf += asarray(vhf_last.vj)
+        vxc += vhf
+        exc += float(cupy.einsum('nij,nji->', dm_orig, vhf).real.get()) * .5
+        if ecoul is not None:
+            exc -= ecoul
+        log.timer_debug1('vk', *cput2)
+    else:
+        if vj_last is not None:
+            vhf += asarray(vhf_last.vj)
+        vxc += vhf
+    t0 = log.timer('veff', *t0)
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vhf)
     return vxc
 
 

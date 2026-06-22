@@ -205,10 +205,10 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
                                     mo_occ, mask, xctype, with_lapl=False)
                 if singlet or singlet is None:
-                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=0)[2]
                     wfxc = fxc[0,0] * weight
                 else:
-                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype, spin=1)[2]
                     wfxc = (fxc[0, 0, 0, 0] - fxc[1, 0, 0, 0]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]
@@ -228,10 +228,10 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
                                    mo_occ, mask, xctype, with_lapl=False)
                 if singlet or singlet is None:
-                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=0)[2]
                     wfxc = fxc * weight
                 else:
-                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype, spin=1)[2]
                     wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]
@@ -258,10 +258,10 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
                                    mo_occ, mask, xctype, with_lapl=False)
                 if singlet or singlet is None:
-                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=0)[2]
                     wfxc = fxc * weight
                 else:
-                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho))*0.5, deriv=2, xctype=xctype)[2]
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho))*0.5, deriv=2, xctype=xctype, spin=1)[2]
                     wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
                 orbo_mask = orbo[mask]
                 orbv_mask = orbv[mask]

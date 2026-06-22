@@ -43,7 +43,10 @@ int offset_for_Rt2_idx(int lij, int lkl)
 
 int qd_offset_for_threads(int npairs, int threads)
 {
-    int npairs_aligned = (npairs + 31) & 0xffffffe0; // 32-element aligned
+    // Layered pyramid of warp-aligned npairs strata. Alignment unit is
+    // MD_J_QD_ALIGN (defined in md_j.cuh) -- the host-side mirror of
+    // `warpSize` (which is device-only and cannot be used here).
+    int npairs_aligned = (npairs + (MD_J_QD_ALIGN - 1)) & ~(MD_J_QD_ALIGN - 1);
     int address = 0;
     for (int i = 1; i < threads; i *= 2) {
         address += npairs_aligned;

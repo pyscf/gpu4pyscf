@@ -25,17 +25,13 @@ from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, transpose_sum, reduce_to_device, tag_array, CPArrayWithTag)
-from gpu4pyscf.dft import rks, uks, numint
+from gpu4pyscf.dft import rks, uks, numint, gks
 from gpu4pyscf.scf import hf, uhf, rohf
 from gpu4pyscf.scf.jk import _check_rsh_factors
 from gpu4pyscf.df import df, int3c2e
 from gpu4pyscf.__config__ import num_devices
-
-def _pin_memory(array):
-    mem = cupy.cuda.alloc_pinned_memory(array.nbytes)
-    ret = numpy.frombuffer(mem, array.dtype, array.size).reshape(array.shape)
-    ret[...] = array
-    return ret
+from gpu4pyscf.scf import ghf
+from gpu4pyscf.lib.cupy_helper import asarray
 
 def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
     '''For the given SCF object, update the J, K matrix constructor with
@@ -118,7 +114,7 @@ class _DFHF:
         return super().reset(mol)
 
     def get_j(self, mol=None, dm=None, hermi=1, omega=None):
-        return self.with_df.get_jk(dm, hermi, True, False, self.direct_scf_tol, omega)[0]
+        return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega)[0]
 
     def get_k(self, mol=None, dm=None, hermi=1, omega=None,
               lr_factor=None, sr_factor=None):
@@ -136,18 +132,51 @@ class _DFHF:
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                omega=None):
         if dm is None: dm = self.make_rdm1()
+        
         if self.with_df and self.only_dfj:
             vj = vk = None
+            # 1. Calculate DF J (Density Fitting J)
             if with_j:
-                vj = self.get_j(mol, dm, hermi, omega)
+                if isinstance(self, ghf.GHF):
+                    # GHF: Define local strategy and call GHF adapter for J only
+                    def jkbuild(mol_obj, dm_obj, hermi, omega=None):
+                        nao = mol_obj.nao
+                        dm_obj = dm_obj.reshape(-1, nao, nao)
+                        return self.with_df.get_jk(dm_obj, hermi,
+                                                   direct_scf_tol=self.direct_scf_tol,
+                                                   omega=omega)
+                    # Pass with_k=False to get only DF J
+                    vj, _ = ghf.get_jk(mol, dm, hermi, True, False,
+                                       jkbuild=jkbuild, omega=omega)
+                else:
+                    # Standard RHF/UHF: Use Master's get_j logic
+                    vj = self.get_j(mol, dm, hermi, omega)
+            
+            # 2. Calculate Exact K (because only_dfj is True, we don't use DF for K)
             if with_k:
                 vk = super().get_jk(mol, dm, hermi, False, True, omega)[1]
+
         elif self.with_df:
-            vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k,
-                                         self.direct_scf_tol, omega)
+            # Full DF mode (DF J + DF K)
+            if isinstance(self, ghf.GHF):
+                # GHF: Define local strategy and call GHF adapter
+                def jkbuild(mol_obj, dm_obj, hermi, omega=None):
+                    nao = mol_obj.nao
+                    dm_obj = dm_obj.reshape(-1, nao, nao)
+                    return self.with_df.get_jk(dm_obj, hermi,
+                                               direct_scf_tol=self.direct_scf_tol,
+                                               omega=omega)
+                vj, vk = ghf.get_jk(mol, dm, hermi, with_j, with_k,
+                                    jkbuild=jkbuild, omega=omega)
+            else:
+                # Standard RHF/UHF: Use Master's direct call
+                vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k,
+                                             self.direct_scf_tol, omega)
+                                             
         else:
+            # Error handling from Master
             raise ValueError(f"with_df field not found in a df object (type = {type(self)}) during a get_jk() call.")
-            # vj, vk = super().get_jk(mol, dm, hermi, with_j, with_k, omega)
+            
         return vj, vk
 
     def Gradients(self):
@@ -202,13 +231,14 @@ class _DFHF:
     def auxbasis(self):
         return getattr(self.with_df, 'auxbasis', None)
 
-    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1):
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         '''
         effective potential
         '''
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
         assert not self.direct_scf
+        log = logger.new_logger(self)
 
         if isinstance(self, rohf.ROHF):
             if getattr(dm, 'mo_coeff', None) is not None:
@@ -223,13 +253,13 @@ class _DFHF:
 
         # for DFT
         if isinstance(self, rks.KohnShamDFT):
-            t0 = logger.init_timer(self)
+            t0 = log.init_timer()
             ni = self._numint
             if isinstance(self, (uhf.UHF, rohf.ROHF)): # UKS
                 if self.grids.coords is None:
                     rks.initialize_grids(self, mol, dm[0]+dm[1])
                 n, exc, vxc = ni.nr_uks(mol, self.grids, self.xc, dm)
-                logger.debug(self, 'nelec by numeric integration = %s', n)
+                log.debug('nelec by numeric integration = %s', n)
                 if self.do_nlc():
                     if ni.libxc.is_nlc(self.xc):
                         xc = self.xc
@@ -239,8 +269,8 @@ class _DFHF:
                     n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
                     exc += enlc
                     vxc += vnlc
-                    logger.debug(self, 'nelec with nlc grids = %s', n)
-                t0 = logger.timer(self, 'vxc', *t0)
+                    log.debug('nelec with nlc grids = %s', n)
+                t0 = log.timer('vxc', *t0)
 
                 if not ni.libxc.is_hybrid_xc(self.xc):
                     vj = self.get_j(mol, dm[0]+dm[1], hermi)
@@ -256,13 +286,13 @@ class _DFHF:
                         vklr *= (alpha - hyb)
                         vk += vklr
                     vxc -= vk
-                    exc -= cupy.einsum('sij,sji->', dm, vk).real * .5
-                ecoul = cupy.einsum('sij,ji->', dm, vj).real * .5
+                    exc -= float(cupy.einsum('sij,sji->', dm, vk).real.get()) * .5
+                ecoul = float(cupy.einsum('sij,ji->', dm, vj).real.get()) * .5
 
             elif isinstance(self, hf.RHF):
                 rks.initialize_grids(self, mol, dm)
                 n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
-                logger.debug(self, 'nelec by numeric integration = %s', n)
+                log.debug('nelec by numeric integration = %s', n)
                 if self.do_nlc():
                     if ni.libxc.is_nlc(self.xc):
                         xc = self.xc
@@ -272,8 +302,8 @@ class _DFHF:
                     n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
                     exc += enlc
                     vxc += vnlc
-                    logger.debug(self, 'nelec with nlc grids = %s', n)
-                t0 = logger.timer(self, 'vxc', *t0)
+                    log.debug('nelec with nlc grids = %s', n)
+                t0 = log.timer('vxc', *t0)
 
                 if not ni.libxc.is_hybrid_xc(self.xc):
                     vj = self.get_j(mol, dm, hermi)
@@ -288,26 +318,105 @@ class _DFHF:
                         vklr *= (alpha - hyb)
                         vk += vklr
                     vxc -= vk * .5
-                    exc -= cupy.einsum('ij,ji', dm, vk).real * .25
-                ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
+                    exc -= float(cupy.einsum('ij,ji->', dm, vk).real.get()) * .25
+                ecoul = float(cupy.einsum('ij,ji->', dm, vj).real.get()) * .5
+            elif isinstance(self, ghf.GHF):
+                ground_state = isinstance(dm, cupy.ndarray) and dm.ndim == 2
+                
+                if hermi == 2:  # because rho = 0
+                    n, exc, vxc = 0, 0, 0
+                else:
+                    max_memory = self.max_memory - lib.current_memory()[0]
+                    if ni.collinear[0].lower() != 'm':
+                        raise NotImplementedError('Only multi-colinear GKS is implemented for DF')
+                    if self.grids.coords is None:
+                        self.initialize_grids(mol, dm)
+                    
+                    if self.grids.coords is None:
+                        self.initialize_grids(mol, dm)
+                    
+                    n, exc, vxc = ni.get_vxc(mol, self.grids, self.xc, dm,
+                                             hermi=hermi, max_memory=max_memory)
+                    log.debug('nelec by numeric integration = %s', n)
+                    t0 = log.timer('vxc', *t0)
+                    
+                    if self.do_nlc():
+                        if ni.libxc.is_nlc(self.xc):
+                            xc = self.xc
+                        else:
+                            assert ni.libxc.is_nlc(self.nlc)
+                            xc = self.nlc
+                        n_nlc, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm,
+                                                      hermi=hermi, max_memory=max_memory)
+                        exc += enlc
+                        vxc += vnlc
+                        log.debug('nelec with nlc grids = %s', n_nlc)
 
+                if not ni.libxc.is_hybrid_xc(self.xc):
+                    vk = None
+                    vj = self.get_j(mol, dm, hermi)
+                    vxc += vj
+                else:
+                    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+                    if omega == 0:
+                        vj, vk = self.get_jk(mol, dm, hermi)
+                        vk *= hyb
+                    elif alpha == 0:
+                        vj = self.get_j(mol, dm, hermi)
+                        vk = self.get_k(mol, dm, hermi, omega=-omega)
+                        vk *= hyb
+                    elif hyb == 0:
+                        vj = self.get_j(mol, dm, hermi)
+                        vk = self.get_k(mol, dm, hermi, omega=omega)
+                        vk *= alpha
+                    else:
+                        vj, vk = self.get_jk(mol, dm, hermi)
+                        vk *= hyb
+                        vklr = self.get_k(mol, dm, hermi, omega=omega)
+                        vklr *= (alpha - hyb)
+                        vk += vklr
+                    
+                    vxc += vj - vk
+
+                    if ground_state:
+                        exc -= cupy.einsum('ij,ji', dm, vk).real * .5
+
+                if ground_state:
+                    ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
+                else:
+                    ecoul = None
             else:
                 raise NotImplementedError("DF only supports R/U/RO KS.")
-            t0 = logger.timer(self, 'veff', *t0)
-            return tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
+            t0 = log.timer('veff', *t0)
+            return tag_array(vxc, ecoul=ecoul, exc=exc)
 
         if isinstance(self, (uhf.UHF, rohf.ROHF)):
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
-            return vj[0] + vj[1] - vk
+            vj = vj[0] + vj[1]
+            vhf = vj - vk
+            ecoul = float(cp.einsum('sij,ji->', dm, vj).real.get()) * .5
+            return tag_array(vhf, ecoul=ecoul)
         elif isinstance(self, hf.RHF):
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
-            return vj - vk * .5
+            vhf = vj - vk * .5
+            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
+            return tag_array(vhf, ecoul=ecoul)
+        elif isinstance(self, ghf.GHF): # (New) GHF branch
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            vhf = vj - vk
+            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
+            return tag_array(vhf, ecoul=ecoul)
         else:
-            raise NotImplementedError("DF only supports R/U/RO HF.")
+            raise NotImplementedError("DF only supports R/U/RO/G HF.")
 
     def to_cpu(self):
         obj = self.undo_df().to_cpu().density_fit()
-        return utils.to_cpu(self, obj)
+        obj = utils.to_cpu(self, obj)
+        if hasattr(self, 'collinear'):
+            obj.collinear = self.collinear
+        if hasattr(self, 'spin_samples'):
+            obj.spin_samples = self.spin_samples
+        return obj
 
 def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
                      with_j=True, with_k=True, hermi=0, device_id=0):

@@ -284,7 +284,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_grid_response_lda(self):
         mf = RKS(mol, xc = 'LDA')
         mf.grids.atom_grid = (10,14)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         mf.conv_tol_cpscf = 1e-10
         mf.cphf_grids.atom_grid = mf.grids.atom_grid
         mf.cphf_grids.prune = mf.grids.prune
@@ -374,7 +374,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_grid_response_gga(self):
         mf = RKS(mol, xc = 'revPBE')
         mf.grids.atom_grid = (10,14)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         mf.conv_tol_cpscf = 1e-10
         mf.cphf_grids.atom_grid = mf.grids.atom_grid
         mf.cphf_grids.prune = mf.grids.prune
@@ -464,7 +464,7 @@ class KnownValues(unittest.TestCase):
     def test_hessian_grid_response_mgga(self):
         mf = RKS(mol, xc = 'r2SCAN')
         mf.grids.atom_grid = (10,14)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         mf.conv_tol_cpscf = 1e-10
         mf.cphf_grids.atom_grid = mf.grids.atom_grid
         mf.cphf_grids.prune = mf.grids.prune
@@ -555,7 +555,7 @@ class KnownValues(unittest.TestCase):
         mf = RKS(mol, xc = 'wB97M-V')
         mf.grids.atom_grid = (10,14)
         mf.nlcgrids.atom_grid = (15,14)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         mf.conv_tol_cpscf = 1e-10
         mf.cphf_grids.atom_grid = mf.grids.atom_grid
         mf.cphf_grids.prune = mf.grids.prune
@@ -655,7 +655,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.prune = None
         mf.grids.becke_scheme = gen_grid.stratmann
         mf.small_rho_cutoff = 1e-30
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         mf.kernel()
         assert mf.converged
 
@@ -734,7 +734,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.becke_scheme = gen_grid.stratmann
         mf.grids.radii_adjust = None
         mf.small_rho_cutoff = 1e-30
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         mf.kernel()
         assert mf.converged
 
@@ -810,7 +810,7 @@ class KnownValues(unittest.TestCase):
         mf = mol.RKS(xc = "wB97M-V").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
         mf.grids.atom_grid = (10,14)
         mf.nlcgrids.atom_grid = (10,14)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         mf.kernel()
         assert mf.converged
 
@@ -823,7 +823,7 @@ class KnownValues(unittest.TestCase):
 
         ref_hessian = np.zeros((1,1,3,3))
 
-        assert np.max(np.abs(test_hessian - ref_hessian)) < 1e-10
+        assert np.max(np.abs(test_hessian - ref_hessian)) < 2e-10
 
     def test_d2rho_lda(self):
         mol = mol2

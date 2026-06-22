@@ -404,36 +404,34 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
                 continue
             llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
             scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-            blksize = QUEUE_DEPTH - 512
-            for b0, b1 in lib.prange(0, npairs_kl, blksize):
-                err = kern(
-                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_j_factor.data.ptr, ctypes.c_void_p), j_factor.ctypes,
-                    ctypes.cast(_k_factor.data.ptr, ctypes.c_void_p), k_factor.ctypes,
-                    ctypes.cast(_dm1.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_dm2.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    rys_envs, (ctypes.c_int*2)(*scheme),
-                    (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
-                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.c_float(dm_penalty),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(dd_cache_maxsize),
-                    mol._atm.ctypes, ctypes.c_int(mol.natm),
-                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                if err != 0:
-                    raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
-                kern_counts += 1
+            err = kern(
+                ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                ctypes.cast(_j_factor.data.ptr, ctypes.c_void_p), j_factor.ctypes,
+                ctypes.cast(_k_factor.data.ptr, ctypes.c_void_p), k_factor.ctypes,
+                ctypes.cast(_dm1.data.ptr, ctypes.c_void_p),
+                ctypes.cast(_dm2.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao),
+                rys_envs, (ctypes.c_int*2)(*scheme),
+                (ctypes.c_int*8)(*shls_slice),
+                ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
+                ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.c_float(dm_penalty),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(dd_cache_maxsize),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            if err != 0:
+                raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
+            kern_counts += 1
             if log.verbose >= logger.DEBUG1:
                 ntasks = npairs_ij * npairs_kl
                 msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'

@@ -85,7 +85,7 @@ def nr_rks(ni, mol, grids, xc_code, dms):
     for ao, index, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
         mo_coeff_mask = mo_coeff[index,:]
         rho = numint.eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, xctype)
-        vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
+        vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=0)[1]
         if xctype == 'LDA':
             wv = weight * vxc[0]
             giao = _sorted_mol.eval_gto('GTOval_ig', coords.get(), comp=3)  # (#C(0 1) g) |AO>

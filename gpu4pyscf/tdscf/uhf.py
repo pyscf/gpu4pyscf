@@ -277,7 +277,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                                   ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
                                                mo_occ[1], mask, xctype, with_lapl=False)))
 
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=1)[2]
                 wfxc = fxc[:,0,:,0] * weight
                 orbo_a_mask = orbo_a[mask]
                 orbv_a_mask = orbv_a[mask]
@@ -315,7 +315,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                                                mo_occ[0], mask, xctype, with_lapl=False),
                                   ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
                                                mo_occ[1], mask, xctype, with_lapl=False)))
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=1)[2]
                 wfxc = fxc * weight
                 orbo_a_mask = orbo_a[mask]
                 orbv_a_mask = orbv_a[mask]
@@ -361,7 +361,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                                                mo_occ[0], mask, xctype, with_lapl=False),
                                   ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
                                                mo_occ[1], mask, xctype, with_lapl=False)))
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=1)[2]
                 wfxc = fxc * weight
                 orbo_a_mask = orbo_a[mask]
                 orbv_a_mask = orbv_a[mask]

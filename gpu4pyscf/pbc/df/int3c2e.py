@@ -615,10 +615,9 @@ class SRInt3c2eOpt:
             raise RuntimeError('contract_int3c2e_auxvec failed')
 
         if kpts is None or is_zero(kpts):
-            if bvk_ncells != 1:
-                vj = vj.sum(axis=1)[None]
-            else:
-                vj = vj.transpose(1,0,2)
+            if bvk_ncells == 1:
+                vj = vj.sum(axis=1)
+            vj = vj.reshape(1,nao,nao)
         else:
             nkpts = len(kpts)
             expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))

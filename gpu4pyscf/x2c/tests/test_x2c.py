@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright 2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,10 +17,12 @@ import cupy as cp
 import unittest
 from pyscf import gto
 from pyscf import lib
+from gpu4pyscf import scf
+import scipy.linalg
 from gpu4pyscf.x2c import x2c
 
 def setUpModule():
-    global mol
+    global mol, mol1
     mol = gto.M(
         verbose = 5,
         output = '/dev/null',
@@ -31,11 +32,13 @@ def setUpModule():
             H     0    0.757    0.587''',
         basis = 'cc-pvdz',
     )
-
-def tearDownModule():
-    global mol
-    mol.stdout.close()
-    del mol
+    mol1 = gto.M(
+        verbose = 0,
+        atom = '''
+            Ne     0.    0.    0.
+            ''',
+        basis = 'cc-pvdz',
+    )
 
 def tearDownModule():
     global mol
@@ -58,7 +61,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e, -76.075429682026396, 9)
 
         mf = myx2c.undo_x2c().run()
-        self.assertAlmostEqual(e, -76.075429682026396, 9)
+        self.assertAlmostEqual(mf.e_tot, -76.075429682026396, 9)
 
     def test_sfx2c1e_cart(self):
         pmol = mol.copy()
@@ -95,8 +98,17 @@ class KnownValues(unittest.TestCase):
             self.assertAlmostEqual(mf.e_tot, ref.e_tot, 9)
             self.assertAlmostEqual(abs(ref.mo_energy - mf.mo_energy.get()).max(), 0, 5)
 
+        myx2c = scf.GHF(mol).x2c1e()
+        e_gpu = myx2c.kernel()
+        myx2c_cpu = mol.GHF().x2c1e()
+        e_cpu = myx2c_cpu.kernel()
+        self.assertAlmostEqual(e_gpu, -76.075431226329414, 9)
+        self.assertAlmostEqual(e_cpu, e_gpu, 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -31.811713632863754, 5)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_cpu.mo_energy), 5)
+
     @unittest.skip('pyscf has bugs in ghf atomix-X approximation')
-    def test_ghf(self):
+    def test_ghf_atomX(self):
         with lib.temporary_env(lib.param, LIGHT_SPEED=15):
             ref = mol.GHF().x2c1e()
             ref.with_x2c.approx = 'ATOM1E'
@@ -118,6 +130,11 @@ class KnownValues(unittest.TestCase):
         mf = mf.undo_x2c()
         self.assertEqual(mf.__class__.__name__, 'DFGHF')
 
+        mf = mol.GHF().x2c()
+        self.assertEqual(mf.__class__.__name__, 'X2C1eGHF')
+        mf = mf.undo_x2c()
+        self.assertEqual(mf.__class__.__name__, 'GHF')
+
     def test_recontract_matrix(self):
         mol = gto.M(
             atom='C 0 0 0; C 1.685 1.685 1.685',
@@ -132,6 +149,25 @@ class KnownValues(unittest.TestCase):
         dat = x2c._recontract_matrix(xmol, dat)
         assert abs(ref - dat.get()).max() < 1e-8
 
+    def test_1e_vs_atom1e(self):
+        myx2c = scf.GHF(mol1).x2c1e()
+        e_gpu = myx2c.kernel()
+
+        myx2c_atom = scf.GHF(mol1).x2c1e()
+        myx2c_atom.with_x2c.approx = 'ATOM1E'
+        e_gpu_atom = myx2c_atom.kernel()
+        self.assertAlmostEqual(e_gpu_atom, -128.615723692333, 9)
+        self.assertAlmostEqual(e_gpu, e_gpu_atom, 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -41.15250349727189, 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_atom.mo_energy.get()), 9)
+
+    def test_to_cpu(self):
+        myx2c = scf.GHF(mol).x2c1e()
+        e_gpu = myx2c.kernel()
+
+        mfx2c_cpu = myx2c.to_cpu()
+        e_cpu = mfx2c_cpu.kernel()
+        self.assertAlmostEqual(e_cpu, e_gpu, 9)
 
 if __name__ == "__main__":
     print("Full Tests for x2c")

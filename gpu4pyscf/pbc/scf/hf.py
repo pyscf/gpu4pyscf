@@ -210,7 +210,11 @@ class SCF(mol_hf.SCF):
         if 'kpt' in self.__dict__:
             self.kpt = self.__dict__.pop('kpt')
 
-        if self._numint is None:
+        # FFTDF.get_j is identical to MultiGridNumInt.get_j method.
+        # By initializing self._numint, get_j and get_hcore will use the
+        # MultiGridNumInt integrator to evaluate Coulomb integrals, skipping the
+        # self.with_df code path.
+        if isinstance(self.with_df, df.FFTDF) and self._numint is None:
             from gpu4pyscf.pbc.dft import multigrid_v2
             self._numint = multigrid_v2.MultiGridNumInt(self.cell)
 

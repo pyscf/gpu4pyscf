@@ -59,7 +59,7 @@ def initialize_grids(ks, mol=None, dm=None):
         t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
     return ks
 
-def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     '''Coulomb + XC functionals
     .. note::
         This function will modify the input ks object.
@@ -87,7 +87,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
-    t0 = logger.init_timer(ks)
+    log = logger.new_logger(ks)
+    t0 = log.init_timer()
     initialize_grids(ks, mol, dm)
 
     ni = ks._numint
@@ -105,30 +106,38 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
             exc += enlc
             vxc += vnlc
-        logger.debug(ks, 'nelec by numeric integration = %s', n)
-    t0 = logger.timer(ks, 'vxc', *t0)
+        log.debug('nelec by numeric integration = %s', n)
+    t1 = log.timer('vxc', *t0)
 
-    dm_orig = dm
+    dm_orig = dm = cupy.asarray(dm)
     vj_last = getattr(vhf_last, 'vj', None)
     if vj_last is not None:
-        dm = asarray(dm) - asarray(dm_last)
-    vj = ks.get_j(mol, dm, hermi)
-    if vj_last is not None:
-        vj += asarray(vj_last)
-    vxc += vj
-    ecoul = float(cupy.einsum('ij,ij', dm_orig, vj).real) * .5
+        dm_last = cupy.asarray(dm_last)
+        dm = dm - dm_last
+    else:
+        dm_last = None
+    vhf = vj = ks.get_j(mol, dm, hermi)
+    ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
+    cput2 = log.timer_debug1('vj', *t1)
 
-    vk = None
     if ni.libxc.is_hybrid_xc(ks.xc):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         vk = ks.get_k(mol, dm, hermi, omega, alpha, hyb)
         vk *= .5
+        vhf -= vk
         if vj_last is not None:
-            vk += asarray(vhf_last.vk)
-        vxc -= vk
-        exc -= float(cupy.einsum('ij,ij', dm_orig, vk).real) * .5
-    t0 = logger.timer(ks, 'veff', *t0)
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+            vhf += asarray(vhf_last.vj)
+        vxc += vhf
+        exc += float(cupy.einsum('ij,ji', dm_orig, vhf).real.get()) * .5
+        if ecoul is not None:
+            exc -= ecoul
+        log.timer_debug1('vk', *cput2)
+    else:
+        if vj_last is not None:
+            vhf += asarray(vhf_last.vj)
+        vxc += vhf
+    t0 = log.timer('veff', *t0)
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vhf)
     return vxc
 
 def energy_elec(ks, dm=None, h1e=None, vhf=None):
@@ -149,19 +158,17 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     '''
     if dm is None: dm = ks.make_rdm1()
     if h1e is None: h1e = ks.get_hcore()
-    if vhf is None: vhf = ks.get_veff(ks.mol, dm)
-    e1 = cupy.einsum('ij,ji->', h1e, dm).get()[()].real
+    if vhf is None or getattr(vhf, 'ecoul', None) is None:
+        vhf = ks.get_veff(ks.mol, dm)
+    e1 = float(cupy.einsum('ij,ji->', h1e, dm).real.get())
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
-    if isinstance(ecoul, cupy.ndarray):
-        ecoul = ecoul.get()[()]
-    if isinstance(exc, cupy.ndarray):
-        exc = exc.get()[()]
     e2 = ecoul + exc
     ks.scf_summary['e1'] = e1
+    ks.scf_summary['e2'] = e2
     ks.scf_summary['coul'] = ecoul
     ks.scf_summary['exc'] = exc
-    logger.debug(ks, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
+    logger.debug(ks, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exc)
     return e1+e2, e2
 
 # Inherit pyscf KohnShamDFT class since this is tested in the pyscf dispersion code.

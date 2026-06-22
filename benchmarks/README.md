@@ -1,7 +1,7 @@
 > [!NOTE]
 > If you are using the following data as reference, please check out the settings carefully, such as threshold for integrals, convergence tolerance, cartesian or spherical basis, and grids. The default settings of quantum chemistry package can be significantly different. With different settings, the performances are not comparable.
 
-# Benchmarks of algorithms
+# Benchmarks of molecular DFT computation
 
 Machines and software versions
 - GPU4PySCF on A100-SXM4-80G with Intel(R) Xeon(R) Platinum 8336C CPU @ 2.30GHz
@@ -15,6 +15,10 @@ Find more benchmarks in
 - [DF SCF / Psi4 v1.8](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks/df/df_pyscf_psi4.md)
 - [Direct SCF, Gradient / Q-Chem v6.1](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks/scf/scf_pyscf_qchem.md)
 - [DF SCF, Gradient, Hessian with PCM / Q-Chem v6.1](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks/df/solvent_pyscf_qchem.md)
+
+# Benchmarks of PBC DFT computation
+
+- [DFT SCF](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks/pbc/scf.md)
 
 # Benchmark scripts of applications
 
