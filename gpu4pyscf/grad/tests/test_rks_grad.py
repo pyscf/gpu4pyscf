@@ -260,11 +260,7 @@ class KnownValues(unittest.TestCase):
         )
 
         mf = mol.RKS(xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
-<<<<<<< HEAD
-        mf.grids.atom_grid = (50,194)
-=======
         mf.grids.atom_grid = (99,590)
->>>>>>> origin/master
         mf.grids.prune = None
         mf.grids.radii_adjust = None
         mf.small_rho_cutoff = 0
@@ -295,11 +291,8 @@ class KnownValues(unittest.TestCase):
         # $rem
         # JOBTYPE force
         # METHOD PBE0
-<<<<<<< HEAD
-=======
         # XC_GRID       000099000590
         # BECKE_SHIFT UNSHIFTED
->>>>>>> origin/master
         # BASIS sto-3g
         # SYMMETRY      FALSE
         # SYM_IGNORE    TRUE
@@ -311,17 +304,6 @@ class KnownValues(unittest.TestCase):
         # ri_k        True
         # aux_basis RIJK-def2-TZVP
         # $end
-<<<<<<< HEAD
-        ref_energy = -116.3236952998
-        ref_gradient = numpy.array([
-            [ 0.0000000,  0.0620999, -0.0620999,  0.0000000,  0.0000000, -0.0442314, -0.0442314,  0.0442314,  0.0442314,  0.0000000,  0.0000000],
-            [ 0.0029781,  0.0423106,  0.0423106,  0.0069313,  0.0069313, -0.0257704, -0.0257704, -0.0257704, -0.0257704,  0.0008099,  0.0008099],
-            [-0.0000000, -0.0000000,  0.0000000, -0.0011574,  0.0011574,  0.0261577, -0.0261577,  0.0261577, -0.0261577,  0.0021431, -0.0021431],
-        ]).T
-
-        assert numpy.abs(test_energy - ref_energy) < 1e-6
-        assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 3e-5
-=======
         ref_energy = -116.3235770816
         ref_gradient = numpy.array([
             [-0.0000000,  0.0620765, -0.0620765,  0.0000000,  0.0000000, -0.0442042, -0.0442042,  0.0442042,  0.0442042, -0.0000000,  0.0000000],
@@ -352,7 +334,6 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(test_energy - ref_energy) < 1e-8
         assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 2e-7
 
->>>>>>> origin/master
 
 if __name__ == "__main__":
     print("Full Tests for RKS Gradient")

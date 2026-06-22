@@ -349,6 +349,11 @@ class KnownValues(unittest.TestCase):
         assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
         assert abs(cupy.einsum('ij,ji->', dm, s).get() - 24) < 1e-6
 
+    def test_1e(self):
+        mol = pyscf.M(atom='H', basis='ccpvdz', spin=1)
+        mf = mol.RHF().to_gpu().run()
+        self.assertAlmostEqual(mf.e_tot, -0.499278403419583, 9)
+
     # TODO:
     #test analyze
     #test mulliken_pop

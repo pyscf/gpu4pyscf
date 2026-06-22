@@ -535,11 +535,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     rhoR = cp.asarray(rhoR.reshape(nvar,ngrids), order='C')
     nelec = float(rhoR[0].sum().real.get()) * weight
 
-    if xctype == 'LDA':
-        exc, vxc = ni.eval_xc_eff(xc_code, rhoR[0], deriv=1, xctype=xctype)[:2]
-    else:
-        exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum = float(rhoR[0].dot(exc[:,0]).real.get()) * weight
+    exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype, spin=0)[:2]
+    excsum = float(rhoR[0].dot(exc).real.get()) * weight
     wv = weight * vxc
     wv_freq = tools.fft(wv, mesh).reshape(nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
@@ -637,11 +634,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     rhoR = cp.asarray(rhoR.reshape(2,nvar,ngrids), order='C')
     nelec = rhoR[:,0].sum(axis=-1).get() * weight
 
-    if xctype == 'LDA':
-        exc, vxc = ni.eval_xc_eff(xc_code, rhoR[:,0], deriv=1, xctype=xctype)[:2]
-    else:
-        exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum = float(rhoR[:,0].dot(exc[:,0]).sum().real.get()) * weight
+    exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype, spin=1)[:2]
+    excsum = float(rhoR[:,0].dot(exc).sum().real.get()) * weight
     wv = (weight * vxc).reshape(2*nvar,ngrids)
     wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
@@ -1472,7 +1466,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     nr_uks = nr_uks
     get_vxc = nr_vxc = NotImplemented #numint_cpu.KNumInt.nr_vxc
 
-    eval_xc_eff = numint.eval_xc_eff
+    eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 
     nr_rks_fxc = NotImplemented

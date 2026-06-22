@@ -184,8 +184,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
                 dm_tensor1[:] += dm_tensor
                 cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
                         out=compressed[:,k0:k1])
-
-        #print("value of ksh_offsets_gpu[kbatch:] : ", kbatch, ksh_offsets_gpu[kbatch:])
         err = kern(
             ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
             ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p),
@@ -208,51 +206,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     buf = buf1 = buf2 = compressed = dm_tensor = dm_tensor1 = tmp = None
     if hermi == 1:
-        print("type of ejk: ", type(ejk), ejk.shape, flush=True)
-        ejk_q_int = int(ejk.sycl_queue.addressof_ref())
-        print(f"[ejk debug] ejk.sycl_queue = 0x{ejk_q_int:x}", flush=True)
-
-        import gpu4pyscf.cupy.cuda as _cuda
-        master = _cuda._master_queue()
-        master_int = int(master.addressof_ref())
-        lib_int = int(_cuda.libgpu.sycl_get_queue_ptr())
-        print(f"[ejk debug] master      = 0x{master_int:x}", flush=True)
-        print(f"[ejk debug] libgsycl    = 0x{lib_int:x}", flush=True)
-        print(f"[ejk debug] ejk == master?    {ejk_q_int == master_int}", flush=True)
-        print(f"[ejk debug] master == libgsycl? {master_int == lib_int}", flush=True)
-
-        # Also check contexts
-        ejk_ctx_id = id(ejk.sycl_queue.sycl_context)
-        master_ctx_id = id(master.sycl_context)
-        print(f"[ejk debug] ejk.context_id    = 0x{ejk_ctx_id:x}", flush=True)
-        print(f"[ejk debug] master.context_id = 0x{master_ctx_id:x}", flush=True)
-        try:
-            same_ctx = (ejk.sycl_queue.sycl_context == master.sycl_context)
-            print(f"[ejk debug] ctx equal?         {same_ctx}", flush=True)
-        except Exception as e:
-            print(f"[ejk debug] ctx compare FAILED: {e}", flush=True)
-
-        # CRITICAL: try draining each queue separately
-        try:
-            print("[probe drain-ejk] ejk.sycl_queue.wait() ...", flush=True)
-            ejk.sycl_queue.wait()
-            print("[probe drain-ejk] OK", flush=True)
-        except Exception as e:
-            print(f"[probe drain-ejk] RAISED: {type(e).__name__}: {e}", flush=True)
-
-        try:
-            print("[probe drain-master] master.wait() ...", flush=True)
-            master.wait()
-            print("[probe drain-master] OK", flush=True)
-        except Exception as e:
-            print(f"[probe drain-master] RAISED: {type(e).__name__}: {e}", flush=True)
-
-    # if hermi == 1:
-    #     print("type of ejk: ", type(ejk), ejk.shape)
-    #     print(f"[ejk debug] sycl_queue={ejk.sycl_queue.addressof_ref()}")
-    #     # print(f"[ejk debug] sycl_queue={ejk.sycl_queue.addressof_ref()}, "
-    #     #       f"master={_master_queue().addressof_ref()}, "
-    #     #       f"same={_same_queue(ejk.sycl_queue, _master_queue())}")
         ejk *= 2
         ejk_aux *= 2
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)

@@ -477,32 +477,29 @@ class _VHFOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                blksize = QUEUE_DEPTH - 512
-                for b0, b1 in lib.prange(0, npairs_kl, blksize):
-                    err = kern(
-                        ctypes.cast(vj.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vk.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
-                        ctypes.c_int(SHM_SIZE),
-                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
-                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.c_float(dm_penalty),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err != 0:
-                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
-                    kern_counts += 1
+                err = kern(
+                    ctypes.cast(vj.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(vk.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(SHM_SIZE),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.c_float(dm_penalty),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    mol._bas.ctypes, mol._env.ctypes)
+                if err != 0:
+                    raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -642,31 +639,28 @@ class _VHFOpt:
                     continue
                 scheme = schemes[task]
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                blksize = QUEUE_DEPTH - 512
-                for b0, b1 in lib.prange(0, npairs_kl, blksize):
-                    err = kern(
-                        ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        ctypes.byref(rys_envs), (ctypes.c_int*3)(*scheme),
-                        (ctypes.c_int*8)(*shls_slice),
-                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
-                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.c_float(dm_penalty),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err != 0:
-                        raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
-                    kern_counts += 1
+                err = kern(
+                    ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    ctypes.byref(rys_envs), (ctypes.c_int*3)(*scheme),
+                    (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.c_float(dm_penalty),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    mol._bas.ctypes, mol._env.ctypes)
+                if err != 0:
+                    raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
+                kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -776,33 +770,30 @@ class _VHFOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                blksize = QUEUE_DEPTH - 512
-                for b0, b1 in lib.prange(0, npairs_kl, blksize):
-                    err = kern(
-                        ctypes.cast(vk.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        ctypes.c_double(omega),
-                        ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
-                        ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
-                        ctypes.c_int(SHM_SIZE),
-                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
-                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
-                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
-                        ctypes.c_float(dm_penalty),
-                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    if err != 0:
-                        raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
-                    kern_counts += 1
+                err = kern(
+                    ctypes.cast(vk.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    ctypes.c_double(omega),
+                    ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
+                    ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(SHM_SIZE),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.c_float(dm_penalty),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    mol._bas.ctypes)
+                if err != 0:
+                    raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -868,57 +859,6 @@ def g_pair_idx(ij_inc=None):
     offsets = np.cumsum([0] + [x.size for x in dat]).astype(np.int32)
     return g_idx, offsets
 
-<<<<<<< HEAD
-def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile):
-    n_groups = len(l_ctr_bas_loc) - 1
-    ntiles = tile_q_cond.shape[0]
-    tile_mappings = {}
-    for i in range(n_groups):
-        for j in range(i+1):
-            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-            i0 = ish0 // tile
-            i1 = ish1 // tile
-            j0 = jsh0 // tile
-            j1 = jsh1 // tile
-            sub_tile_q = tile_q_cond[i0:i1,j0:j1]
-            mask = sub_tile_q > cutoff
-            if i == j:
-                mask = cp.tril(mask)
-            t_ij = (cp.arange(i0, i1, dtype=np.int32)[:,None] * ntiles +
-                    cp.arange(j0, j1, dtype=np.int32))
-            idx = cp.argsort(sub_tile_q[mask])[::-1]
-            tile_mappings[i,j] = t_ij[mask][idx]
-    return tile_mappings
-
-def _make_tril_pair_mappings(l_ctr_bas_loc, q_cond, cutoff, tile=4):
-    nbas = q_cond.shape[0]
-    q_cond = q_cond.ravel()
-    n_groups = len(l_ctr_bas_loc) - 1
-    pair_mappings = {}
-    for i in range(n_groups):
-        for j in range(i+1):
-            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-            nish = ish1 - ish0
-            njsh = jsh1 - jsh0
-            ntiles_i = (nish+tile-1) // tile
-            ntiles_j = (njsh+tile-1) // tile
-            ish = cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32).reshape(ntiles_i,tile)
-            jsh = cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32).reshape(ntiles_j,tile)
-            ish = ish[:,None,:,None]
-            jsh = jsh[None,:,None,:]
-            pair_ij = ish * nbas + jsh
-            mask = (ish < ish1) & (jsh < jsh1)
-            if i == j:
-                mask &= ish >= jsh
-            pair_ij = pair_ij[mask]
-            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
-            pair_mappings[i,j] = cp.asarray(pair_ij, dtype=np.int32)
-    return pair_mappings
-
-=======
->>>>>>> origin/master
 def _make_j_engine_pair_locs(mol):
     ls = mol._bas[:,ANG_OF]
     ll = (ls[:,None]+ls).ravel()
@@ -1013,10 +953,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
     Note the high angular momentum bases are excluded.
     '''
     from gpu4pyscf.pbc.gto import int1e
-<<<<<<< HEAD
-=======
     from gpu4pyscf.pbc.scf.rsjk import libpbc, _group_by_split_points
->>>>>>> origin/master
     omega = mol.omega
     ls = np.arange(LMAX+1)
     li = ls[:,None]
@@ -1030,11 +967,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
 
     SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
     gout_width = 29
-<<<<<<< HEAD
-    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
-=======
     unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*2
->>>>>>> origin/master
     shm_size = 1024 * 48 - 1024
     nsp_max = _nearest_power2(shm_size // (unit*SIZEOF_FLOAT))
     gout_size = nfi * nfj
@@ -1044,10 +977,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
     # min(nsp_per_block, nsp_max)
     nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
     gout_stride = THREADS // nsp_per_block
-<<<<<<< HEAD
-=======
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
->>>>>>> origin/master
     shm_size = nsp_per_block * (unit*SIZEOF_FLOAT)
     # (pp|pp) requires more shm than this estimation. 5888 is the required size
     max_shm_size = max(shm_size.max(), 5888*SIZEOF_FLOAT)

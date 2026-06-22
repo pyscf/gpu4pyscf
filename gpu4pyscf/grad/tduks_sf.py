@@ -371,15 +371,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
         )
 
     if td_grad.base.collinear == 'mcol':
-        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
-        if deriv == 3:
-            if whether_use_gpu:
-                eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
-            else:
-                ni_cpu = ni.to_cpu()
-                eval_xc_eff = mcfun_eval_xc_adapter_sf(ni_cpu, xc_code, td_grad.base.collinear_samples)
-        else:
-            eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
+        eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
     elif td_grad.base.collinear == 'ncol':
         raise NotImplementedError('Locally collinear approach is not implemented')
 

@@ -825,8 +825,6 @@ class KnownValues(unittest.TestCase):
 
         assert np.max(np.abs(test_hessian - ref_hessian)) < 2e-10
 
-<<<<<<< HEAD
-=======
     def test_d2rho_lda(self):
         mol = mol2
         cp.random.seed(100)
@@ -1228,7 +1226,6 @@ class KnownValues(unittest.TestCase):
         assert diff_d2EdAdB_orbital < 1e-1 and diff_d2EdAdB_orbital / max_d2EdAdB_full < 1e-7
 
 
->>>>>>> origin/master
 if __name__ == "__main__":
     print("Tests for KS hessian with grid response")
     unittest.main()

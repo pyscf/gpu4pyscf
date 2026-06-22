@@ -297,7 +297,7 @@ class XCfun:
                     setattr(out_params, label, array[0].data.ptr)
                     setattr(buf_params, label, array[1].data.ptr)
             stream = cupy.cuda.get_current_stream()
-            lapl = cupy.empty(1)
+            lapl = cupy.empty(0)
             err = libgdft.GDFT_xc_mgga(
                 stream.ptr,
                 self.xc_func,

@@ -89,7 +89,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
         for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
                                                    sort_grids=True):
             rho = ni.eval_rho(cell, ao_ks[:,0], dm_kpts, xctype=xctype, hermi=hermi)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=0)[1]
             wv = weight * vxc[0]
             aow = cp.einsum('kpi,p->kpi', ao_ks[:,0], wv)
             for kn in range(nkpts):
@@ -100,7 +100,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
         for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
                                                    sort_grids=True):
             rho = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts, xctype=xctype, hermi=hermi)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=0)[1]
             wv = weight * vxc
             wv[0] *= .5
             for kn in range(nkpts):
@@ -111,7 +111,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
         for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
                                                    sort_grids=True):
             rho = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts, xctype=xctype, hermi=hermi)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=0)[1]
             wv = weight * vxc
             wv[0] *= .5
             wv[4] *= .5  # for the factor 1/2 in tau

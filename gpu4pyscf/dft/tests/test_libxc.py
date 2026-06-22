@@ -70,14 +70,14 @@ class KnownValues(unittest.TestCase):
         exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=deriv, xctype=xctype)
         exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=deriv, xctype=xctype)
 
-        print(f"{xc} {spin} exc", _diff(exc_gpu[:,0].get(), exc_cpu).max())
+        print(f"{xc} {spin} exc", _diff(exc_gpu.get(), exc_cpu).max())
         print(f"{xc} {spin} vxc", _diff(vxc_gpu.get(), vxc_cpu).max())
         if fxc_gpu is not None:
             print(f"{xc} {spin} fxc", _diff(fxc_gpu.get(), fxc_cpu).max())
         if kxc_gpu is not None:
             print(f"{xc} {spin} kxc", _diff(kxc_gpu.get(), kxc_cpu).max())
 
-        assert _diff(exc_gpu[:,0].get(), exc_cpu).max() < 1e-10
+        assert _diff(exc_gpu.get(), exc_cpu).max() < 1e-10
         assert _diff(vxc_gpu.get(), vxc_cpu).max() < 1e-10
         if fxc_gpu is not None:
             assert _diff(fxc_gpu.get(), fxc_cpu).max() < fxc_tol
@@ -85,7 +85,7 @@ class KnownValues(unittest.TestCase):
             assert _diff(kxc_gpu.get(), kxc_cpu).max() < kxc_tol
 
     def test_LDA(self):
-        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        whether_use_gpu = True
         if whether_use_gpu:
             deriv = 3
             print("test LDA with deriv 3")
@@ -95,7 +95,7 @@ class KnownValues(unittest.TestCase):
         self._check_xc('LDA_C_VWN', deriv=deriv)
 
     def test_GGA(self):
-        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        whether_use_gpu = True
         if whether_use_gpu:
             deriv = 3
         else:
@@ -105,7 +105,7 @@ class KnownValues(unittest.TestCase):
         self._check_xc('GGA_C_PBE', fxc_tol=1e-4, deriv=deriv, kxc_tol=3e2)
 
     def test_mGGA(self):
-        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        whether_use_gpu = True
         if whether_use_gpu:
             deriv = 3
         else:

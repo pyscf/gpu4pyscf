@@ -18,6 +18,7 @@ import cupy
 from pyscf.scf import rohf as rohf_cpu
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.lib.cupy_helper import tag_array, contract
+from gpu4pyscf.lib import logger
 
 
 def get_roothaan_fock(focka_fockb, dma_dmb, s):
@@ -215,3 +216,32 @@ class ROHF(hf.RHF):
     def newton(self):
         from gpu4pyscf.scf.soscf import newton
         return newton(self)
+
+    def spin_square(self, mo_coeff=None, s=None):
+        '''Spin square and multiplicity of a ROHF determinant'''
+        neleca, nelecb = self.nelec
+        ms = (neleca - nelecb) * .5
+        ss = ms * (ms + 1)
+        return ss, ms*2+1
+
+
+class HF1e(ROHF):
+    def kernel(self, *args):
+        logger.info(self, '\n')
+        logger.info(self, '******** 1 electron system ********')
+        h = self.get_hcore()
+        s = self.get_ovlp()
+        self.mo_energy, self.mo_coeff = self.eig(h, s)
+        self.mo_occ = self.get_occ(self.mo_energy, self.mo_coeff)
+        self.e_tot = self.mo_energy[0].real.get() + self.mol.energy_nuc()
+        if self.chkfile:
+            self.dump_chk({
+                'e_tot': self.e_tot,
+                'mo_energy': self.mo_energy,
+                'mo_coeff': self.mo_coeff,
+                'mo_occ': self.mo_occ
+            })
+        self.converged = True
+        self._finalize()
+        return self.e_tot
+    scf = kernel
