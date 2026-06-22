@@ -58,6 +58,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     if getattr(mf, 'disp', None):
         raise NotImplementedError('dispersion correction')
 
+    if getattr(mf, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
+
     log = logger.new_logger(mf_grad)
     t0 = log.init_timer()
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
@@ -174,6 +177,10 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         kpts = mf_grad.kpts
     else:
         kpts = kpts.reshape(-1, 3)
+
+    if getattr(mf_grad.base, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
+
     h1 = get_hcore(cell, kpts)
 
     aoslices = cell.aoslice_by_atom()

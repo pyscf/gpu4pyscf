@@ -205,8 +205,11 @@ def get_hcore(mf, mol, exclude_ecp=False):
     h = mol.intor('int1e_ipkin', comp=3)
     if mol._pseudo:
         NotImplementedError('Nuclear gradients for GTH PP')
-    else:
-        h += mol.intor('int1e_ipnuc', comp=3)
+
+    if getattr(mf, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
+
+    h += mol.intor('int1e_ipnuc', comp=3)
     h = cupy.asarray(h)
     if not exclude_ecp and len(mol._ecpbas) > 0:
         h += get_ecp_ip(mol).sum(axis=0)
@@ -286,6 +289,9 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     nao = mol.nao
     if mo_coeff is None: mo_coeff = cupy.asarray(mf.mo_coeff)
     if mo_occ is None: mo_occ = mf.mo_occ
+
+    if getattr(mf, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
 
     orbo = mo_coeff[:,mo_occ>0]
     nocc = orbo.shape[1]

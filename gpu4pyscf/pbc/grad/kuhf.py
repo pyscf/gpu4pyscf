@@ -43,6 +43,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     if getattr(mf, 'disp', None):
         raise NotImplementedError('dispersion correction')
 
+    if getattr(mf, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
+
     log = logger.new_logger(mf_grad)
     t0 = log.init_timer()
     log.debug('Computing Gradients of NR-UHF Coulomb repulsion')

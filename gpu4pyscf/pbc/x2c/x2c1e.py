@@ -44,6 +44,7 @@ from gpu4pyscf.gto.mole import SortedGTO, extract_pgto_params
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, hermi_triu, empty_aligned)
+from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import utils
 
@@ -278,10 +279,13 @@ class SpinOrbitalX2C1EHelper(PBCX2CHelper):
 
     to_cpu = utils.to_cpu
 
-def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp'):
+def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
     assert isinstance(cell, SortedGTO)
     cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-    omega = 0.3
+    rsdf_omega = 0.3
+    if omega != 0:
+        # When omega is specified, the short-range Coulomb is evaluated
+        rsdf_omega = min(rsdf_omega, omega)
 
     is_single_kpt = kpts is not None and kpts.ndim == 1
     is_gamma_point = kpts is None or is_zero(kpts)
@@ -298,7 +302,7 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp'):
     # SR part
     fakenuc = aft._fake_nuc(cell, with_pseudo=False)
     int3c2e_opt = int3c2e.SRInt3c2eOpt(
-        cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
+        cell, fakenuc, omega=-rsdf_omega, bvk_kmesh=bvk_kmesh).build()
     charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
 
     cell = int3c2e_opt.cell
@@ -363,55 +367,66 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp'):
 
     ###############################################
     # LR part with AFT
-    ke_cutoff = rsdf_builder.estimate_ke_cutoff_for_omega(cell, omega)
-    mesh = cell.cutoff_to_mesh(ke_cutoff)
-    mesh = cell.symmetrize_mesh(mesh)
-    Gv, _, kws = cell.get_Gv_weights(mesh)
-    ZG = aft._get_ZSI(cell, mesh).conj()
-    ZG *= rsdf_builder._weighted_coulG_LR(cell, Gv, omega, kws)
+    if omega != rsdf_omega:
+        ke_cutoff = rsdf_builder.estimate_ke_cutoff_for_omega(cell, rsdf_omega)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+        mesh = cell.symmetrize_mesh(mesh)
+        Gv, _, kws = cell.get_Gv_weights(mesh)
+        ZG = aft._get_ZSI(cell, mesh).conj()
 
-    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-    cell = ft_opt.cell
-    assert cell is int3c2e_opt.cell
+        kpt_allow = np.zeros(3)
+        wcoulG = get_coulG(cell, kpt_allow, mesh=mesh, Gv=Gv, wrap_around=True,
+                           omega=omega)
+        wcoulG *= kws
+        wcoulG_SR = get_coulG(cell, kpt_allow, mesh=mesh, Gv=Gv,
+                              wrap_around=True, omega=-rsdf_omega)
+        wcoulG_SR[0] += np.pi / rsdf_omega**2
+        wcoulG_SR *= -kws
+        wcoulG += wcoulG_SR
+        ZG *= wcoulG
 
-    if intor == 'nuc':
-        kern = libpbc.contract_ft_aopair
-        nsp_per_block, gout_stride, shm_size = ft_ao.ft_ao_scheme(
-            deriv=(0,0), nGv_per_block=16)
-    elif intor == 'pnucp':
-        kern = libpbc.contract_ft_pdotp
-        nsp_per_block, gout_stride, shm_size = ft_ao.ft_ao_scheme(
-            deriv=(1,1), nGv_per_block=16)
-    else:
-        raise NotImplementedError
-    lmax = cell.uniq_l_ctr[:,0].max()
-    shm_size_max = shm_size[:lmax+1,:lmax+1].max()
-    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(ft_opt.bas_ij_cache, 16)
+        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+        cell = ft_opt.cell
+        assert cell is int3c2e_opt.cell
 
-    aft_envs = ft_opt.aft_envs
-    head = cp.empty(1, dtype=np.int32)
+        if intor == 'nuc':
+            kern = libpbc.contract_ft_aopair
+            nsp_per_block, gout_stride, shm_size = ft_ao.ft_ao_scheme(
+                deriv=(0,0), nGv_per_block=16)
+        elif intor == 'pnucp':
+            kern = libpbc.contract_ft_pdotp
+            nsp_per_block, gout_stride, shm_size = ft_ao.ft_ao_scheme(
+                deriv=(1,1), nGv_per_block=16)
+        else:
+            raise NotImplementedError
+        lmax = cell.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:lmax+1,:lmax+1].max()
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(ft_opt.bas_ij_cache, 16)
 
-    ngrids = len(Gv)
-    GvT = cp.asarray(Gv.T.ravel())
-    pair_blocks = len(shl_pair_offsets) - 1
-    compressing = 0
-    err = kern(
-        ctypes.cast(wj.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ZG.data.ptr, ctypes.c_void_p),
-        ctypes.byref(aft_envs),
-        ctypes.cast(head.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(shm_size_max),
-        ctypes.c_int(pair_blocks),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids),
-        ctypes.c_int(compressing))
-    if err != 0:
-        raise RuntimeError('contract_ft_pdotp kernel failed')
+        aft_envs = ft_opt.aft_envs
+        head = cp.empty(1, dtype=np.int32)
+
+        ngrids = len(Gv)
+        GvT = cp.asarray(Gv.T.ravel())
+        pair_blocks = len(shl_pair_offsets) - 1
+        compressing = 0
+        err = kern(
+            ctypes.cast(wj.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ZG.data.ptr, ctypes.c_void_p),
+            ctypes.byref(aft_envs),
+            ctypes.cast(head.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(shm_size_max),
+            ctypes.c_int(pair_blocks),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids),
+            ctypes.c_int(compressing))
+        if err != 0:
+            raise RuntimeError('contract_ft_pdotp kernel failed')
 
     if is_gamma_point:
         if bvk_ncells != 1:
