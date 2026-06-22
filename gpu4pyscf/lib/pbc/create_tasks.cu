@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 
 #define THREADS         256
@@ -29,6 +28,9 @@
 __device__ inline
 int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     tmp_storage[t_id] = keep;
     __syncthreads();
     for (int offset = 1; offset < threads; offset <<= 1) {

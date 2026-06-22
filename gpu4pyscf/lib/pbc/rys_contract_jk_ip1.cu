@@ -119,7 +119,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int *ao_loc = envs.ao_loc;
     double *dm = jk.dm;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
     int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
 while (1) {
