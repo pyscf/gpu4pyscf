@@ -39,6 +39,14 @@ LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
 MAX_EIGH_DIM = 23150
 
+# Fall back to scipy.linalg.eigh for arrays larger than the onemkl/dpnp eigh
+# limit (see MAX_EIGH_DIM). Referenced by cond() and eigh().
+SCIPY_EIGH_FOR_LARGE_ARRAYS = True
+
+# Threshold (in bytes) above which allocations bypass any pooled allocator.
+# Kept for API parity with cupy_helper; SYCL/USM manages memory automatically.
+MEMPOOL_THRESHOLD = 100000000
+
 _kernel_registery = {}
 
 libdpnp_helper = load_library('libcupy_helper')
@@ -57,7 +65,8 @@ def print_mem_info():
     free_mem = cupy.cuda.get_free_memory()
     used_mem = total_mem - free_mem
     GB = 1024 * 1024 * 1024
-    msg = f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB'
+    msg = (f'mem_avail: {free_mem/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, '
+           f'used_mem: {used_mem/GB:.3f} GB')
     print(msg)
     return msg
 
@@ -1237,6 +1246,14 @@ def grouped_gemm(As, Bs, Cs=None):
 #         out = dpnp.transpose(out)
 #     return out
 
+def absmax(a):
+    '''abs(a).max() while limiting temporary memory use. The optimization is
+    only valid for real-valued arrays.
+    '''
+    if a.dtype == np.complex128 or a.nbytes < MEMPOOL_THRESHOLD:
+        return abs(a).max()
+    return max(a.max(), -a.min())
+
 def condense(opname, a, loc_x, loc_y=None):
     """
     DPNP/SYCL port of condense(): reduce over the last two dims in windows.
@@ -1315,7 +1332,7 @@ def sandwich_dot(a, c, out=None):
         out = out[0]
     return out
 
-def set_conditional_mempool_malloc(threshold=None):
+def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     """No-op: SYCL/USM manages memory automatically.
 
     In CuPy, this sets conditional memory pool allocation based on size.
@@ -1343,51 +1360,60 @@ def set_conditional_mempool_malloc(threshold=None):
 #     cupy.cuda.set_allocator(malloc)
 
 def batched_vec3_norm2(batched_vec3):
-    """
-    Compute per-row squared L2 norm for an (n,3) float64 array on a SYCL device.
+    '''
+    einsum('gx,gx->g', vec3, vec3) for the (N,3)-array vec3
 
-    Parameters
-    ----------
-    batched_vec3 : dpnp.ndarray or array-like
-        Shape (n,3), float64.
-    strict : bool
-        If True, enforce the same assumptions as the CuPy version:
-        - must already be dpnp.ndarray
-        - must be C-contiguous
-        - dtype float64, shape (n,3)
-        If False, the function will convert/copy as needed.
-    device, usm_type, sycl_queue :
-        Optional placement controls for dpnp allocations/conversion.
-    """
-    # if strict:
+    Accepts either C-order (N,3) or F-order (3,N) layout, mirroring the CuPy
+    implementation. All work stays on the device; no host transfers.
+    '''
     assert type(batched_vec3) is dpnp.ndarray
     assert batched_vec3.dtype == dpnp.float64
     assert batched_vec3.ndim == 2
-    assert batched_vec3.shape[1] == 3
+    assert batched_vec3.shape[0] == 3 or batched_vec3.shape[1] == 3
     assert batched_vec3.flags.c_contiguous
-    vec = batched_vec3
-    # else:
-    #     vec = dpnp.asarray(
-    #         batched_vec3,
-    #         dtype=dpnp.float64,
-    #         order="C",
-    #         device=device,
-    #         usm_type=usm_type,
-    #         sycl_queue=sycl_queue,
-    #     )
 
-    if vec.ndim != 2 or vec.shape[1] != 3:
-        raise ValueError(f"Expected shape (n,3); got {vec.shape}")
+    order = "c" if batched_vec3.shape[1] == 3 else "f"
 
-    n = vec.shape[0]
-    if n >= np.iinfo(np.int32).max:
-        raise ValueError("n must fit in int32 (matches original constraint)")
+    n = batched_vec3.shape[0] if order == "c" else batched_vec3.shape[1]
+    assert n != 3, "Ambiguous array order, cannot determine if the array is C or Fortran order from the shape"
+    assert n * 3 < np.iinfo(np.int32).max
 
-    # Preallocate output on the same device/queue by default
-    out = dpnp.zeros(n, dtype=dpnp.float64)
+    if order == "c":
+        return batched_vec_norm2(batched_vec3)
+    else:
+        return batched_vec_norm2(batched_vec3.T)
 
-    # Equivalent to: out[i] = sum_j vec[i,j] * vec[i,j]
+def batched_vec_norm2(vec, out=None):
+    '''
+    einsum('gx,gx->g', vec, vec)
+
+    `vec` is expected to be a device (dpnp) array; dpnp.asarray is a no-op for
+    device arrays, so no host<->device transfer occurs. Both C- and F-contiguous
+    inputs are supported (callers pass transposed views, e.g. nabla_rho_i.T).
+    '''
+    vec = dpnp.asarray(vec)
+    assert vec.dtype == dpnp.float64
+    assert vec.ndim == 2
+    n, x = vec.shape
+    out = ndarray(n, np.float64, out)
     dpnp.einsum("ij,ij->i", vec, vec, out=out)
+    return out
+
+def batched_vec_dot(vec1, vec2, out=None):
+    '''
+    einsum('gx,gx->g', vec1, vec2)
+
+    Both inputs are expected to be device (dpnp) arrays; no host transfers.
+    '''
+    vec1 = dpnp.asarray(vec1)
+    vec2 = dpnp.asarray(vec2)
+    assert vec1.dtype == dpnp.float64
+    assert vec2.dtype == dpnp.float64
+    assert vec1.ndim == 2
+    assert vec1.shape == vec2.shape
+    n, x = vec1.shape
+    out = ndarray(n, np.float64, out)
+    dpnp.einsum("ij,ij->i", vec1, vec2, out=out)
     return out
 
 cholesky = dpnp.linalg.cholesky
