@@ -1,3 +1,4 @@
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "vhf.cuh"
@@ -5,27 +6,41 @@
 #include "create_tasks.cu"
 
 
+#define KERNEL_ARGS \
+    RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, \
+    float *q_cond_ij, float *q_cond_kl, float dm_penalty, \
+    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
+    uint32_t *pool, int *head
+
+#define KERNEL_SETUP() \
+    int sq_id = threadIdx.x; \
+    int nsq_per_block = blockDim.x; \
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH; \
+    extern __shared__ double shared_memory[]; \
+    __shared__ int ntasks, pair_ij, pair_kl0; \
+    __shared__ int ish, jsh; \
+    __shared__ double ri[3]; \
+    __shared__ double rjri[3]; \
+    __shared__ int expi; \
+    __shared__ int expj;
+
+#define LAUNCH_KERNEL(KERNEL) \
+    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
+    *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head)
+
+
 __global__ static
-void rys_k_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_0000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -51,10 +66,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -199,26 +210,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_1000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -244,10 +246,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -433,26 +431,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_1010(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -478,10 +467,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -714,26 +699,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_1011(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -759,10 +735,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -1146,26 +1118,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_1100(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -1191,10 +1154,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -1426,26 +1385,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_1110(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -1471,10 +1421,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -1858,26 +1804,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_1111(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -1903,10 +1840,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -2357,26 +2290,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_2000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -2402,10 +2326,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -2634,26 +2554,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_2010(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -2679,10 +2590,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -3021,26 +2928,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_2011(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -3066,10 +2964,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -3640,26 +3534,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_2020(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -3685,10 +3570,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -4109,13 +3990,18 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_jk_2021(KERNEL_ARGS)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
     constexpr int nsq_per_block = 64;
@@ -4124,19 +4010,14 @@ void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+bounds.nroots*2+8);
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -4161,11 +4042,6 @@ while (1) {
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -4211,9 +4087,9 @@ while (1) {
             double xlxk = env[rl+0] - env[rk+0];
             double ylyk = env[rl+1] - env[rk+1];
             double zlzk = env[rl+2] - env[rk+2];
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double gout[27];
         
@@ -4232,9 +4108,9 @@ while (1) {
                 double al = env[expl+lp];
                 double akl = ak + al;
                 double al_akl = al / akl;
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
@@ -4279,16 +4155,11 @@ while (1) {
                     Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
                     gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                    }
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
                     double rt = rw[irys*128];
-                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double akl = akl_cache[0];
                     double rt_aij = rt_aa * akl;
@@ -4302,7 +4173,7 @@ while (1) {
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
+                        double Rpa = xjxi * aj_aij;
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -4507,14 +4378,14 @@ while (1) {
                 double *dm = jk.dm + i_dm * nao2;
                 double *vk = jk.vk + i_dm * nao2;
                 double *vj = jk.vj + i_dm * nao2;
+                switch (gout_id) {
+                case 0: {
                 double vij_00 = 0;
                 double vij_10 = 0;
                 double vij_20 = 0;
                 double vij_30 = 0;
                 double vij_40 = 0;
                 double vij_50 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vij_00 += gout[0] * dm_lk_00;
                 vij_40 += gout[1] * dm_lk_00;
@@ -4560,8 +4431,20 @@ while (1) {
                 vij_40 += gout[25] * dm_lk_24;
                 double dm_lk_25 = dm[(l0+2)*nao+(k0+5)];
                 vij_20 += gout[26] * dm_lk_25;
+                atomicAdd(vj+(i0+0)*nao+(j0+0), vij_00);
+                atomicAdd(vj+(i0+1)*nao+(j0+0), vij_10);
+                atomicAdd(vj+(i0+2)*nao+(j0+0), vij_20);
+                atomicAdd(vj+(i0+3)*nao+(j0+0), vij_30);
+                atomicAdd(vj+(i0+4)*nao+(j0+0), vij_40);
+                atomicAdd(vj+(i0+5)*nao+(j0+0), vij_50);
                 break; }
                 case 1: {
+                double vij_00 = 0;
+                double vij_10 = 0;
+                double vij_20 = 0;
+                double vij_30 = 0;
+                double vij_40 = 0;
+                double vij_50 = 0;
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vij_10 += gout[0] * dm_lk_00;
                 vij_50 += gout[1] * dm_lk_00;
@@ -4607,8 +4490,20 @@ while (1) {
                 vij_50 += gout[25] * dm_lk_24;
                 double dm_lk_25 = dm[(l0+2)*nao+(k0+5)];
                 vij_30 += gout[26] * dm_lk_25;
+                atomicAdd(vj+(i0+0)*nao+(j0+0), vij_00);
+                atomicAdd(vj+(i0+1)*nao+(j0+0), vij_10);
+                atomicAdd(vj+(i0+2)*nao+(j0+0), vij_20);
+                atomicAdd(vj+(i0+3)*nao+(j0+0), vij_30);
+                atomicAdd(vj+(i0+4)*nao+(j0+0), vij_40);
+                atomicAdd(vj+(i0+5)*nao+(j0+0), vij_50);
                 break; }
                 case 2: {
+                double vij_00 = 0;
+                double vij_10 = 0;
+                double vij_20 = 0;
+                double vij_30 = 0;
+                double vij_40 = 0;
+                double vij_50 = 0;
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vij_20 += gout[0] * dm_lk_00;
                 double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
@@ -4654,8 +4549,20 @@ while (1) {
                 double dm_lk_25 = dm[(l0+2)*nao+(k0+5)];
                 vij_00 += gout[25] * dm_lk_25;
                 vij_40 += gout[26] * dm_lk_25;
+                atomicAdd(vj+(i0+0)*nao+(j0+0), vij_00);
+                atomicAdd(vj+(i0+1)*nao+(j0+0), vij_10);
+                atomicAdd(vj+(i0+2)*nao+(j0+0), vij_20);
+                atomicAdd(vj+(i0+3)*nao+(j0+0), vij_30);
+                atomicAdd(vj+(i0+4)*nao+(j0+0), vij_40);
+                atomicAdd(vj+(i0+5)*nao+(j0+0), vij_50);
                 break; }
                 case 3: {
+                double vij_00 = 0;
+                double vij_10 = 0;
+                double vij_20 = 0;
+                double vij_30 = 0;
+                double vij_40 = 0;
+                double vij_50 = 0;
                 double dm_lk_00 = dm[(l0+0)*nao+(k0+0)];
                 vij_30 += gout[0] * dm_lk_00;
                 double dm_lk_01 = dm[(l0+0)*nao+(k0+1)];
@@ -4701,14 +4608,14 @@ while (1) {
                 double dm_lk_25 = dm[(l0+2)*nao+(k0+5)];
                 vij_10 += gout[25] * dm_lk_25;
                 vij_50 += gout[26] * dm_lk_25;
-                break; }
-                }
                 atomicAdd(vj+(i0+0)*nao+(j0+0), vij_00);
                 atomicAdd(vj+(i0+1)*nao+(j0+0), vij_10);
                 atomicAdd(vj+(i0+2)*nao+(j0+0), vij_20);
                 atomicAdd(vj+(i0+3)*nao+(j0+0), vij_30);
                 atomicAdd(vj+(i0+4)*nao+(j0+0), vij_40);
                 atomicAdd(vj+(i0+5)*nao+(j0+0), vij_50);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
@@ -5075,11 +4982,11 @@ while (1) {
                 atomicAdd(vk+(i0+5)*nao+(k0+5), vik_55);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vjl_00 = 0;
                 double vjl_01 = 0;
                 double vjl_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_00;
                 vjl_01 += gout[9] * dm_ik_00;
@@ -5116,8 +5023,14 @@ while (1) {
                 vjl_00 += gout[7] * dm_ik_44;
                 vjl_01 += gout[16] * dm_ik_44;
                 vjl_02 += gout[25] * dm_ik_44;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
                 break; }
                 case 1: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_10;
                 vjl_01 += gout[9] * dm_ik_10;
@@ -5154,8 +5067,14 @@ while (1) {
                 vjl_00 += gout[7] * dm_ik_54;
                 vjl_01 += gout[16] * dm_ik_54;
                 vjl_02 += gout[25] * dm_ik_54;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
                 break; }
                 case 2: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
                 double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
                 vjl_00 += gout[1] * dm_ik_01;
                 vjl_01 += gout[10] * dm_ik_01;
@@ -5192,8 +5111,14 @@ while (1) {
                 vjl_00 += gout[8] * dm_ik_45;
                 vjl_01 += gout[17] * dm_ik_45;
                 vjl_02 += gout[26] * dm_ik_45;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
                 break; }
                 case 3: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
                 double dm_ik_11 = dm[(i0+1)*nao+(k0+1)];
                 vjl_00 += gout[1] * dm_ik_11;
                 vjl_01 += gout[10] * dm_ik_11;
@@ -5230,19 +5155,19 @@ while (1) {
                 vjl_00 += gout[8] * dm_ik_55;
                 vjl_01 += gout[17] * dm_ik_55;
                 vjl_02 += gout[26] * dm_ik_55;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
                 atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
                 atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                break; }
+                }
+                switch (gout_id) {
+                case 0: {
                 double vjk_00 = 0;
                 double vjk_01 = 0;
                 double vjk_02 = 0;
                 double vjk_03 = 0;
                 double vjk_04 = 0;
                 double vjk_05 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_00 += gout[0] * dm_il_00;
                 vjk_02 += gout[3] * dm_il_00;
@@ -5279,8 +5204,20 @@ while (1) {
                 vjk_00 += gout[19] * dm_il_42;
                 vjk_02 += gout[22] * dm_il_42;
                 vjk_04 += gout[25] * dm_il_42;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+0)*nao+(k0+3), vjk_03);
+                atomicAdd(vk+(j0+0)*nao+(k0+4), vjk_04);
+                atomicAdd(vk+(j0+0)*nao+(k0+5), vjk_05);
                 break; }
                 case 1: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_03 = 0;
+                double vjk_04 = 0;
+                double vjk_05 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_00 += gout[0] * dm_il_10;
                 vjk_02 += gout[3] * dm_il_10;
@@ -5317,8 +5254,20 @@ while (1) {
                 vjk_00 += gout[19] * dm_il_52;
                 vjk_02 += gout[22] * dm_il_52;
                 vjk_04 += gout[25] * dm_il_52;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+0)*nao+(k0+3), vjk_03);
+                atomicAdd(vk+(j0+0)*nao+(k0+4), vjk_04);
+                atomicAdd(vk+(j0+0)*nao+(k0+5), vjk_05);
                 break; }
                 case 2: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_03 = 0;
+                double vjk_04 = 0;
+                double vjk_05 = 0;
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_01 += gout[1] * dm_il_00;
                 vjk_03 += gout[4] * dm_il_00;
@@ -5355,8 +5304,20 @@ while (1) {
                 vjk_01 += gout[20] * dm_il_42;
                 vjk_03 += gout[23] * dm_il_42;
                 vjk_05 += gout[26] * dm_il_42;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+0)*nao+(k0+3), vjk_03);
+                atomicAdd(vk+(j0+0)*nao+(k0+4), vjk_04);
+                atomicAdd(vk+(j0+0)*nao+(k0+5), vjk_05);
                 break; }
                 case 3: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_03 = 0;
+                double vjk_04 = 0;
+                double vjk_05 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_01 += gout[1] * dm_il_10;
                 vjk_03 += gout[4] * dm_il_10;
@@ -5393,14 +5354,14 @@ while (1) {
                 vjk_01 += gout[20] * dm_il_52;
                 vjk_03 += gout[23] * dm_il_52;
                 vjk_05 += gout[26] * dm_il_52;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
                 atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
                 atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
                 atomicAdd(vk+(j0+0)*nao+(k0+3), vjk_03);
                 atomicAdd(vk+(j0+0)*nao+(k0+4), vjk_04);
                 atomicAdd(vk+(j0+0)*nao+(k0+5), vjk_05);
+                break; }
+                }
             }
         }
     }
@@ -5408,26 +5369,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_2100(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -5453,10 +5405,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -5793,26 +5741,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_2110(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -5838,10 +5777,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -6408,13 +6343,18 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_jk_2111(KERNEL_ARGS)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int t_id = 32 * gout_id + sq_id;
     constexpr int threads = 256;
     constexpr int nsq_per_block = 32;
@@ -6423,19 +6363,14 @@ void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+bounds.nroots*2+8);
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -6460,11 +6395,6 @@ while (1) {
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -6510,9 +6440,9 @@ while (1) {
             double xlxk = env[rl+0] - env[rk+0];
             double ylyk = env[rl+1] - env[rk+1];
             double zlzk = env[rl+2] - env[rk+2];
-            rlrk[0] = xlxk;
-            rlrk[32] = ylyk;
-            rlrk[64] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double gout[21];
         
@@ -6531,9 +6461,9 @@ while (1) {
                 double al = env[expl+lp];
                 double akl = ak + al;
                 double al_akl = al / akl;
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[32];
-                double zlzk = rlrk[64];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
@@ -6578,16 +6508,11 @@ while (1) {
                     Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
                     gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                    }
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
                     double rt = rw[irys*64];
-                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double akl = akl_cache[0];
                     double rt_aij = rt_aa * akl;
@@ -6601,7 +6526,7 @@ while (1) {
                         }
                         double *_gx = gx + n * 768;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
+                        double Rpa = xjxi * aj_aij;
                         double c0x = Rpa - rt_aij * Rpq[n*32];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -7135,6 +7060,8 @@ while (1) {
                 atomicAdd(vj+(i0+5)*nao+(j0+2), vij_52);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vkl_00 = 0;
                 double vkl_01 = 0;
                 double vkl_02 = 0;
@@ -7144,8 +7071,6 @@ while (1) {
                 double vkl_20 = 0;
                 double vkl_21 = 0;
                 double vkl_22 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_00 += gout[0] * dm_ji_00;
                 vkl_11 += gout[9] * dm_ji_00;
@@ -7176,8 +7101,26 @@ while (1) {
                 vkl_00 += gout[2] * dm_ji_24;
                 vkl_11 += gout[11] * dm_ji_24;
                 vkl_22 += gout[20] * dm_ji_24;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 1: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_00 += gout[0] * dm_ji_01;
                 vkl_11 += gout[9] * dm_ji_01;
@@ -7208,8 +7151,26 @@ while (1) {
                 vkl_00 += gout[2] * dm_ji_25;
                 vkl_11 += gout[11] * dm_ji_25;
                 vkl_22 += gout[20] * dm_ji_25;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 2: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_10 += gout[2] * dm_ji_00;
                 vkl_21 += gout[11] * dm_ji_00;
@@ -7239,8 +7200,26 @@ while (1) {
                 double dm_ji_24 = dm[(j0+2)*nao+(i0+4)];
                 vkl_10 += gout[4] * dm_ji_24;
                 vkl_21 += gout[13] * dm_ji_24;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 3: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_10 += gout[2] * dm_ji_01;
                 vkl_21 += gout[11] * dm_ji_01;
@@ -7270,8 +7249,26 @@ while (1) {
                 double dm_ji_25 = dm[(j0+2)*nao+(i0+5)];
                 vkl_10 += gout[4] * dm_ji_25;
                 vkl_21 += gout[13] * dm_ji_25;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 4: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_02 += gout[13] * dm_ji_00;
                 vkl_20 += gout[4] * dm_ji_00;
@@ -7301,8 +7298,26 @@ while (1) {
                 double dm_ji_24 = dm[(j0+2)*nao+(i0+4)];
                 vkl_02 += gout[15] * dm_ji_24;
                 vkl_20 += gout[6] * dm_ji_24;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 5: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_02 += gout[13] * dm_ji_01;
                 vkl_20 += gout[4] * dm_ji_01;
@@ -7332,8 +7347,26 @@ while (1) {
                 double dm_ji_25 = dm[(j0+2)*nao+(i0+5)];
                 vkl_02 += gout[15] * dm_ji_25;
                 vkl_20 += gout[6] * dm_ji_25;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 6: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_01 += gout[6] * dm_ji_00;
                 vkl_12 += gout[15] * dm_ji_00;
@@ -7363,8 +7396,26 @@ while (1) {
                 double dm_ji_24 = dm[(j0+2)*nao+(i0+4)];
                 vkl_01 += gout[8] * dm_ji_24;
                 vkl_12 += gout[17] * dm_ji_24;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 7: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_01 += gout[6] * dm_ji_01;
                 vkl_12 += gout[15] * dm_ji_01;
@@ -7394,8 +7445,6 @@ while (1) {
                 double dm_ji_25 = dm[(j0+2)*nao+(i0+5)];
                 vkl_01 += gout[8] * dm_ji_25;
                 vkl_12 += gout[17] * dm_ji_25;
-                break; }
-                }
                 atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
                 atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
                 atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
@@ -7405,6 +7454,8 @@ while (1) {
                 atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
                 atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
@@ -7873,6 +7924,8 @@ while (1) {
                 atomicAdd(vk+(i0+5)*nao+(k0+2), vik_52);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vjl_00 = 0;
                 double vjl_01 = 0;
                 double vjl_02 = 0;
@@ -7882,8 +7935,6 @@ while (1) {
                 double vjl_20 = 0;
                 double vjl_21 = 0;
                 double vjl_22 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_00;
                 vjl_22 += gout[15] * dm_ik_00;
@@ -7914,8 +7965,26 @@ while (1) {
                 double dm_ik_42 = dm[(i0+4)*nao+(k0+2)];
                 vjl_00 += gout[5] * dm_ik_42;
                 vjl_22 += gout[20] * dm_ik_42;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+1)*nao+(l0+1), vjl_11);
+                atomicAdd(vk+(j0+1)*nao+(l0+2), vjl_12);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+2)*nao+(l0+1), vjl_21);
+                atomicAdd(vk+(j0+2)*nao+(l0+2), vjl_22);
                 break; }
                 case 1: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
+                double vjl_10 = 0;
+                double vjl_11 = 0;
+                double vjl_12 = 0;
+                double vjl_20 = 0;
+                double vjl_21 = 0;
+                double vjl_22 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_10;
                 vjl_22 += gout[15] * dm_ik_10;
@@ -7946,8 +8015,26 @@ while (1) {
                 double dm_ik_52 = dm[(i0+5)*nao+(k0+2)];
                 vjl_00 += gout[5] * dm_ik_52;
                 vjl_22 += gout[20] * dm_ik_52;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+1)*nao+(l0+1), vjl_11);
+                atomicAdd(vk+(j0+1)*nao+(l0+2), vjl_12);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+2)*nao+(l0+1), vjl_21);
+                atomicAdd(vk+(j0+2)*nao+(l0+2), vjl_22);
                 break; }
                 case 2: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
+                double vjl_10 = 0;
+                double vjl_11 = 0;
+                double vjl_12 = 0;
+                double vjl_20 = 0;
+                double vjl_21 = 0;
+                double vjl_22 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_12 += gout[14] * dm_ik_00;
                 vjl_21 += gout[8] * dm_ik_00;
@@ -7977,8 +8064,26 @@ while (1) {
                 double dm_ik_42 = dm[(i0+4)*nao+(k0+2)];
                 vjl_12 += gout[19] * dm_ik_42;
                 vjl_21 += gout[13] * dm_ik_42;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+1)*nao+(l0+1), vjl_11);
+                atomicAdd(vk+(j0+1)*nao+(l0+2), vjl_12);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+2)*nao+(l0+1), vjl_21);
+                atomicAdd(vk+(j0+2)*nao+(l0+2), vjl_22);
                 break; }
                 case 3: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
+                double vjl_10 = 0;
+                double vjl_11 = 0;
+                double vjl_12 = 0;
+                double vjl_20 = 0;
+                double vjl_21 = 0;
+                double vjl_22 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_12 += gout[14] * dm_ik_10;
                 vjl_21 += gout[8] * dm_ik_10;
@@ -8008,8 +8113,26 @@ while (1) {
                 double dm_ik_52 = dm[(i0+5)*nao+(k0+2)];
                 vjl_12 += gout[19] * dm_ik_52;
                 vjl_21 += gout[13] * dm_ik_52;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+1)*nao+(l0+1), vjl_11);
+                atomicAdd(vk+(j0+1)*nao+(l0+2), vjl_12);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+2)*nao+(l0+1), vjl_21);
+                atomicAdd(vk+(j0+2)*nao+(l0+2), vjl_22);
                 break; }
                 case 4: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
+                double vjl_10 = 0;
+                double vjl_11 = 0;
+                double vjl_12 = 0;
+                double vjl_20 = 0;
+                double vjl_21 = 0;
+                double vjl_22 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_02 += gout[13] * dm_ik_00;
                 vjl_11 += gout[7] * dm_ik_00;
@@ -8039,8 +8162,26 @@ while (1) {
                 vjl_02 += gout[18] * dm_ik_42;
                 vjl_11 += gout[12] * dm_ik_42;
                 vjl_20 += gout[6] * dm_ik_42;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+1)*nao+(l0+1), vjl_11);
+                atomicAdd(vk+(j0+1)*nao+(l0+2), vjl_12);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+2)*nao+(l0+1), vjl_21);
+                atomicAdd(vk+(j0+2)*nao+(l0+2), vjl_22);
                 break; }
                 case 5: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
+                double vjl_10 = 0;
+                double vjl_11 = 0;
+                double vjl_12 = 0;
+                double vjl_20 = 0;
+                double vjl_21 = 0;
+                double vjl_22 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_02 += gout[13] * dm_ik_10;
                 vjl_11 += gout[7] * dm_ik_10;
@@ -8070,8 +8211,26 @@ while (1) {
                 vjl_02 += gout[18] * dm_ik_52;
                 vjl_11 += gout[12] * dm_ik_52;
                 vjl_20 += gout[6] * dm_ik_52;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+1)*nao+(l0+1), vjl_11);
+                atomicAdd(vk+(j0+1)*nao+(l0+2), vjl_12);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+2)*nao+(l0+1), vjl_21);
+                atomicAdd(vk+(j0+2)*nao+(l0+2), vjl_22);
                 break; }
                 case 6: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
+                double vjl_10 = 0;
+                double vjl_11 = 0;
+                double vjl_12 = 0;
+                double vjl_20 = 0;
+                double vjl_21 = 0;
+                double vjl_22 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_01 += gout[6] * dm_ik_00;
                 vjl_10 += gout[0] * dm_ik_00;
@@ -8101,8 +8260,26 @@ while (1) {
                 double dm_ik_42 = dm[(i0+4)*nao+(k0+2)];
                 vjl_01 += gout[11] * dm_ik_42;
                 vjl_10 += gout[5] * dm_ik_42;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+1)*nao+(l0+1), vjl_11);
+                atomicAdd(vk+(j0+1)*nao+(l0+2), vjl_12);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+2)*nao+(l0+1), vjl_21);
+                atomicAdd(vk+(j0+2)*nao+(l0+2), vjl_22);
                 break; }
                 case 7: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
+                double vjl_10 = 0;
+                double vjl_11 = 0;
+                double vjl_12 = 0;
+                double vjl_20 = 0;
+                double vjl_21 = 0;
+                double vjl_22 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_01 += gout[6] * dm_ik_10;
                 vjl_10 += gout[0] * dm_ik_10;
@@ -8132,8 +8309,6 @@ while (1) {
                 double dm_ik_52 = dm[(i0+5)*nao+(k0+2)];
                 vjl_01 += gout[11] * dm_ik_52;
                 vjl_10 += gout[5] * dm_ik_52;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
                 atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
                 atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
@@ -8143,6 +8318,10 @@ while (1) {
                 atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
                 atomicAdd(vk+(j0+2)*nao+(l0+1), vjl_21);
                 atomicAdd(vk+(j0+2)*nao+(l0+2), vjl_22);
+                break; }
+                }
+                switch (gout_id) {
+                case 0: {
                 double vjk_00 = 0;
                 double vjk_01 = 0;
                 double vjk_02 = 0;
@@ -8152,8 +8331,6 @@ while (1) {
                 double vjk_20 = 0;
                 double vjk_21 = 0;
                 double vjk_22 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_00 += gout[0] * dm_il_00;
                 vjk_11 += gout[3] * dm_il_00;
@@ -8184,8 +8361,26 @@ while (1) {
                 vjk_00 += gout[14] * dm_il_42;
                 vjk_11 += gout[17] * dm_il_42;
                 vjk_22 += gout[20] * dm_il_42;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 1: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_00 += gout[0] * dm_il_10;
                 vjk_11 += gout[3] * dm_il_10;
@@ -8216,8 +8411,26 @@ while (1) {
                 vjk_00 += gout[14] * dm_il_52;
                 vjk_11 += gout[17] * dm_il_52;
                 vjk_22 += gout[20] * dm_il_52;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 2: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_01 += gout[2] * dm_il_00;
                 vjk_12 += gout[5] * dm_il_00;
@@ -8247,8 +8460,26 @@ while (1) {
                 double dm_il_42 = dm[(i0+4)*nao+(l0+2)];
                 vjk_01 += gout[16] * dm_il_42;
                 vjk_12 += gout[19] * dm_il_42;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 3: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_01 += gout[2] * dm_il_10;
                 vjk_12 += gout[5] * dm_il_10;
@@ -8278,8 +8509,26 @@ while (1) {
                 double dm_il_52 = dm[(i0+5)*nao+(l0+2)];
                 vjk_01 += gout[16] * dm_il_52;
                 vjk_12 += gout[19] * dm_il_52;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 4: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_02 += gout[4] * dm_il_00;
                 vjk_20 += gout[1] * dm_il_00;
@@ -8309,8 +8558,26 @@ while (1) {
                 double dm_il_42 = dm[(i0+4)*nao+(l0+2)];
                 vjk_02 += gout[18] * dm_il_42;
                 vjk_20 += gout[15] * dm_il_42;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 5: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_02 += gout[4] * dm_il_10;
                 vjk_20 += gout[1] * dm_il_10;
@@ -8340,8 +8607,26 @@ while (1) {
                 double dm_il_52 = dm[(i0+5)*nao+(l0+2)];
                 vjk_02 += gout[18] * dm_il_52;
                 vjk_20 += gout[15] * dm_il_52;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 6: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_10 += gout[0] * dm_il_00;
                 vjk_21 += gout[3] * dm_il_00;
@@ -8371,8 +8656,26 @@ while (1) {
                 double dm_il_42 = dm[(i0+4)*nao+(l0+2)];
                 vjk_10 += gout[14] * dm_il_42;
                 vjk_21 += gout[17] * dm_il_42;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 7: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_10 += gout[0] * dm_il_10;
                 vjk_21 += gout[3] * dm_il_10;
@@ -8402,8 +8705,6 @@ while (1) {
                 double dm_il_52 = dm[(i0+5)*nao+(l0+2)];
                 vjk_10 += gout[14] * dm_il_52;
                 vjk_21 += gout[17] * dm_il_52;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
                 atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
                 atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
@@ -8413,6 +8714,8 @@ while (1) {
                 atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
                 atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
                 atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
+                break; }
+                }
             }
         }
     }
@@ -8420,13 +8723,18 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_jk_2120(KERNEL_ARGS)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
     constexpr int nsq_per_block = 64;
@@ -8435,19 +8743,14 @@ void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+bounds.nroots*2+8);
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -8472,11 +8775,6 @@ while (1) {
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -8522,9 +8820,9 @@ while (1) {
             double xlxk = env[rl+0] - env[rk+0];
             double ylyk = env[rl+1] - env[rk+1];
             double zlzk = env[rl+2] - env[rk+2];
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double gout[27];
         
@@ -8543,9 +8841,9 @@ while (1) {
                 double al = env[expl+lp];
                 double akl = ak + al;
                 double al_akl = al / akl;
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
@@ -8590,16 +8888,11 @@ while (1) {
                     Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
                     gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                    }
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
                     double rt = rw[irys*128];
-                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double akl = akl_cache[0];
                     double rt_aij = rt_aa * akl;
@@ -8613,7 +8906,7 @@ while (1) {
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
+                        double Rpa = xjxi * aj_aij;
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -8921,14 +9214,14 @@ while (1) {
                 atomicAdd(vj+(i0+5)*nao+(j0+2), vij_52);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vkl_00 = 0;
                 double vkl_10 = 0;
                 double vkl_20 = 0;
                 double vkl_30 = 0;
                 double vkl_40 = 0;
                 double vkl_50 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_00 += gout[0] * dm_ji_00;
                 vkl_20 += gout[9] * dm_ji_00;
@@ -8965,8 +9258,20 @@ while (1) {
                 vkl_00 += gout[4] * dm_ji_24;
                 vkl_20 += gout[13] * dm_ji_24;
                 vkl_40 += gout[22] * dm_ji_24;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+3)*nao+(l0+0), vkl_30);
+                atomicAdd(vj+(k0+4)*nao+(l0+0), vkl_40);
+                atomicAdd(vj+(k0+5)*nao+(l0+0), vkl_50);
                 break; }
                 case 1: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
+                double vkl_30 = 0;
+                double vkl_40 = 0;
+                double vkl_50 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_00 += gout[0] * dm_ji_01;
                 vkl_20 += gout[9] * dm_ji_01;
@@ -9003,8 +9308,20 @@ while (1) {
                 vkl_00 += gout[4] * dm_ji_25;
                 vkl_20 += gout[13] * dm_ji_25;
                 vkl_40 += gout[22] * dm_ji_25;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+3)*nao+(l0+0), vkl_30);
+                atomicAdd(vj+(k0+4)*nao+(l0+0), vkl_40);
+                atomicAdd(vj+(k0+5)*nao+(l0+0), vkl_50);
                 break; }
                 case 2: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
+                double vkl_30 = 0;
+                double vkl_40 = 0;
+                double vkl_50 = 0;
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_10 += gout[4] * dm_ji_00;
                 vkl_30 += gout[13] * dm_ji_00;
@@ -9041,8 +9358,20 @@ while (1) {
                 vkl_10 += gout[8] * dm_ji_24;
                 vkl_30 += gout[17] * dm_ji_24;
                 vkl_50 += gout[26] * dm_ji_24;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+3)*nao+(l0+0), vkl_30);
+                atomicAdd(vj+(k0+4)*nao+(l0+0), vkl_40);
+                atomicAdd(vj+(k0+5)*nao+(l0+0), vkl_50);
                 break; }
                 case 3: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
+                double vkl_30 = 0;
+                double vkl_40 = 0;
+                double vkl_50 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_10 += gout[4] * dm_ji_01;
                 vkl_30 += gout[13] * dm_ji_01;
@@ -9079,22 +9408,22 @@ while (1) {
                 vkl_10 += gout[8] * dm_ji_25;
                 vkl_30 += gout[17] * dm_ji_25;
                 vkl_50 += gout[26] * dm_ji_25;
-                break; }
-                }
                 atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
                 atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
                 atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 atomicAdd(vj+(k0+3)*nao+(l0+0), vkl_30);
                 atomicAdd(vj+(k0+4)*nao+(l0+0), vkl_40);
                 atomicAdd(vj+(k0+5)*nao+(l0+0), vkl_50);
+                break; }
+                }
+                switch (gout_id) {
+                case 0: {
                 double vil_00 = 0;
                 double vil_10 = 0;
                 double vil_20 = 0;
                 double vil_30 = 0;
                 double vil_40 = 0;
                 double vil_50 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vil_00 += gout[0] * dm_jk_00;
                 vil_40 += gout[1] * dm_jk_00;
@@ -9140,8 +9469,20 @@ while (1) {
                 vil_40 += gout[22] * dm_jk_24;
                 double dm_jk_25 = dm[(j0+2)*nao+(k0+5)];
                 vil_20 += gout[26] * dm_jk_25;
+                atomicAdd(vk+(i0+0)*nao+(l0+0), vil_00);
+                atomicAdd(vk+(i0+1)*nao+(l0+0), vil_10);
+                atomicAdd(vk+(i0+2)*nao+(l0+0), vil_20);
+                atomicAdd(vk+(i0+3)*nao+(l0+0), vil_30);
+                atomicAdd(vk+(i0+4)*nao+(l0+0), vil_40);
+                atomicAdd(vk+(i0+5)*nao+(l0+0), vil_50);
                 break; }
                 case 1: {
+                double vil_00 = 0;
+                double vil_10 = 0;
+                double vil_20 = 0;
+                double vil_30 = 0;
+                double vil_40 = 0;
+                double vil_50 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vil_10 += gout[0] * dm_jk_00;
                 vil_50 += gout[1] * dm_jk_00;
@@ -9187,8 +9528,20 @@ while (1) {
                 vil_50 += gout[22] * dm_jk_24;
                 double dm_jk_25 = dm[(j0+2)*nao+(k0+5)];
                 vil_30 += gout[26] * dm_jk_25;
+                atomicAdd(vk+(i0+0)*nao+(l0+0), vil_00);
+                atomicAdd(vk+(i0+1)*nao+(l0+0), vil_10);
+                atomicAdd(vk+(i0+2)*nao+(l0+0), vil_20);
+                atomicAdd(vk+(i0+3)*nao+(l0+0), vil_30);
+                atomicAdd(vk+(i0+4)*nao+(l0+0), vil_40);
+                atomicAdd(vk+(i0+5)*nao+(l0+0), vil_50);
                 break; }
                 case 2: {
+                double vil_00 = 0;
+                double vil_10 = 0;
+                double vil_20 = 0;
+                double vil_30 = 0;
+                double vil_40 = 0;
+                double vil_50 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vil_20 += gout[0] * dm_jk_00;
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
@@ -9234,8 +9587,20 @@ while (1) {
                 double dm_jk_25 = dm[(j0+2)*nao+(k0+5)];
                 vil_00 += gout[25] * dm_jk_25;
                 vil_40 += gout[26] * dm_jk_25;
+                atomicAdd(vk+(i0+0)*nao+(l0+0), vil_00);
+                atomicAdd(vk+(i0+1)*nao+(l0+0), vil_10);
+                atomicAdd(vk+(i0+2)*nao+(l0+0), vil_20);
+                atomicAdd(vk+(i0+3)*nao+(l0+0), vil_30);
+                atomicAdd(vk+(i0+4)*nao+(l0+0), vil_40);
+                atomicAdd(vk+(i0+5)*nao+(l0+0), vil_50);
                 break; }
                 case 3: {
+                double vil_00 = 0;
+                double vil_10 = 0;
+                double vil_20 = 0;
+                double vil_30 = 0;
+                double vil_40 = 0;
+                double vil_50 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vil_30 += gout[0] * dm_jk_00;
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
@@ -9281,14 +9646,14 @@ while (1) {
                 double dm_jk_25 = dm[(j0+2)*nao+(k0+5)];
                 vil_10 += gout[25] * dm_jk_25;
                 vil_50 += gout[26] * dm_jk_25;
-                break; }
-                }
                 atomicAdd(vk+(i0+0)*nao+(l0+0), vil_00);
                 atomicAdd(vk+(i0+1)*nao+(l0+0), vil_10);
                 atomicAdd(vk+(i0+2)*nao+(l0+0), vil_20);
                 atomicAdd(vk+(i0+3)*nao+(l0+0), vil_30);
                 atomicAdd(vk+(i0+4)*nao+(l0+0), vil_40);
                 atomicAdd(vk+(i0+5)*nao+(l0+0), vil_50);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
@@ -9455,11 +9820,11 @@ while (1) {
                 atomicAdd(vk+(i0+5)*nao+(k0+5), vik_55);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vjl_00 = 0;
                 double vjl_10 = 0;
                 double vjl_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_00;
                 vjl_20 += gout[3] * dm_ik_00;
@@ -9505,8 +9870,14 @@ while (1) {
                 vjl_20 += gout[22] * dm_ik_44;
                 double dm_ik_45 = dm[(i0+4)*nao+(k0+5)];
                 vjl_10 += gout[25] * dm_ik_45;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
                 break; }
                 case 1: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_10;
                 vjl_20 += gout[3] * dm_ik_10;
@@ -9552,8 +9923,14 @@ while (1) {
                 vjl_20 += gout[22] * dm_ik_54;
                 double dm_ik_55 = dm[(i0+5)*nao+(k0+5)];
                 vjl_10 += gout[25] * dm_ik_55;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
                 break; }
                 case 2: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_10 += gout[1] * dm_ik_00;
                 double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
@@ -9599,8 +9976,14 @@ while (1) {
                 double dm_ik_45 = dm[(i0+4)*nao+(k0+5)];
                 vjl_00 += gout[23] * dm_ik_45;
                 vjl_20 += gout[26] * dm_ik_45;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
                 break; }
                 case 3: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_10 += gout[1] * dm_ik_10;
                 double dm_ik_11 = dm[(i0+1)*nao+(k0+1)];
@@ -9646,11 +10029,11 @@ while (1) {
                 double dm_ik_55 = dm[(i0+5)*nao+(k0+5)];
                 vjl_00 += gout[23] * dm_ik_55;
                 vjl_20 += gout[26] * dm_ik_55;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
                 atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
                 atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
@@ -9824,26 +10207,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_2200(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -9869,10 +10243,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -10296,13 +10666,18 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_jk_2210(KERNEL_ARGS)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
     constexpr int nsq_per_block = 64;
@@ -10311,19 +10686,14 @@ void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+bounds.nroots*2+8);
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -10348,11 +10718,6 @@ while (1) {
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -10398,9 +10763,9 @@ while (1) {
             double xlxk = env[rl+0] - env[rk+0];
             double ylyk = env[rl+1] - env[rk+1];
             double zlzk = env[rl+2] - env[rk+2];
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double gout[27];
         
@@ -10419,9 +10784,9 @@ while (1) {
                 double al = env[expl+lp];
                 double akl = ak + al;
                 double al_akl = al / akl;
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
@@ -10466,16 +10831,11 @@ while (1) {
                     Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
                     gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                    }
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
                     double rt = rw[irys*128];
-                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double akl = akl_cache[0];
                     double rt_aij = rt_aa * akl;
@@ -10488,7 +10848,7 @@ while (1) {
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
+                        double Rpa = xjxi * aj_aij;
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -10796,11 +11156,11 @@ while (1) {
                 atomicAdd(vj+(i0+5)*nao+(j0+5), vij_55);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vkl_00 = 0;
                 double vkl_10 = 0;
                 double vkl_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_00 += gout[0] * dm_ji_00;
                 vkl_10 += gout[9] * dm_ji_00;
@@ -10837,8 +11197,14 @@ while (1) {
                 vkl_00 += gout[8] * dm_ji_52;
                 vkl_10 += gout[17] * dm_ji_52;
                 vkl_20 += gout[26] * dm_ji_52;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 break; }
                 case 1: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_00 += gout[0] * dm_ji_01;
                 vkl_10 += gout[9] * dm_ji_01;
@@ -10875,8 +11241,14 @@ while (1) {
                 vkl_00 += gout[8] * dm_ji_53;
                 vkl_10 += gout[17] * dm_ji_53;
                 vkl_20 += gout[26] * dm_ji_53;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 break; }
                 case 2: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
                 double dm_ji_02 = dm[(j0+0)*nao+(i0+2)];
                 vkl_00 += gout[0] * dm_ji_02;
                 vkl_10 += gout[9] * dm_ji_02;
@@ -10913,8 +11285,14 @@ while (1) {
                 vkl_00 += gout[8] * dm_ji_54;
                 vkl_10 += gout[17] * dm_ji_54;
                 vkl_20 += gout[26] * dm_ji_54;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 break; }
                 case 3: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
                 double dm_ji_03 = dm[(j0+0)*nao+(i0+3)];
                 vkl_00 += gout[0] * dm_ji_03;
                 vkl_10 += gout[9] * dm_ji_03;
@@ -10951,19 +11329,19 @@ while (1) {
                 vkl_00 += gout[8] * dm_ji_55;
                 vkl_10 += gout[17] * dm_ji_55;
                 vkl_20 += gout[26] * dm_ji_55;
-                break; }
-                }
                 atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
                 atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
                 atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                break; }
+                }
+                switch (gout_id) {
+                case 0: {
                 double vil_00 = 0;
                 double vil_10 = 0;
                 double vil_20 = 0;
                 double vil_30 = 0;
                 double vil_40 = 0;
                 double vil_50 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vil_00 += gout[0] * dm_jk_00;
                 vil_40 += gout[1] * dm_jk_00;
@@ -11009,8 +11387,20 @@ while (1) {
                 vil_20 += gout[17] * dm_jk_51;
                 double dm_jk_52 = dm[(j0+5)*nao+(k0+2)];
                 vil_20 += gout[26] * dm_jk_52;
+                atomicAdd(vk+(i0+0)*nao+(l0+0), vil_00);
+                atomicAdd(vk+(i0+1)*nao+(l0+0), vil_10);
+                atomicAdd(vk+(i0+2)*nao+(l0+0), vil_20);
+                atomicAdd(vk+(i0+3)*nao+(l0+0), vil_30);
+                atomicAdd(vk+(i0+4)*nao+(l0+0), vil_40);
+                atomicAdd(vk+(i0+5)*nao+(l0+0), vil_50);
                 break; }
                 case 1: {
+                double vil_00 = 0;
+                double vil_10 = 0;
+                double vil_20 = 0;
+                double vil_30 = 0;
+                double vil_40 = 0;
+                double vil_50 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vil_10 += gout[0] * dm_jk_00;
                 vil_50 += gout[1] * dm_jk_00;
@@ -11056,8 +11446,20 @@ while (1) {
                 vil_30 += gout[17] * dm_jk_51;
                 double dm_jk_52 = dm[(j0+5)*nao+(k0+2)];
                 vil_30 += gout[26] * dm_jk_52;
+                atomicAdd(vk+(i0+0)*nao+(l0+0), vil_00);
+                atomicAdd(vk+(i0+1)*nao+(l0+0), vil_10);
+                atomicAdd(vk+(i0+2)*nao+(l0+0), vil_20);
+                atomicAdd(vk+(i0+3)*nao+(l0+0), vil_30);
+                atomicAdd(vk+(i0+4)*nao+(l0+0), vil_40);
+                atomicAdd(vk+(i0+5)*nao+(l0+0), vil_50);
                 break; }
                 case 2: {
+                double vil_00 = 0;
+                double vil_10 = 0;
+                double vil_20 = 0;
+                double vil_30 = 0;
+                double vil_40 = 0;
+                double vil_50 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vil_20 += gout[0] * dm_jk_00;
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
@@ -11103,8 +11505,20 @@ while (1) {
                 double dm_jk_52 = dm[(j0+5)*nao+(k0+2)];
                 vil_00 += gout[25] * dm_jk_52;
                 vil_40 += gout[26] * dm_jk_52;
+                atomicAdd(vk+(i0+0)*nao+(l0+0), vil_00);
+                atomicAdd(vk+(i0+1)*nao+(l0+0), vil_10);
+                atomicAdd(vk+(i0+2)*nao+(l0+0), vil_20);
+                atomicAdd(vk+(i0+3)*nao+(l0+0), vil_30);
+                atomicAdd(vk+(i0+4)*nao+(l0+0), vil_40);
+                atomicAdd(vk+(i0+5)*nao+(l0+0), vil_50);
                 break; }
                 case 3: {
+                double vil_00 = 0;
+                double vil_10 = 0;
+                double vil_20 = 0;
+                double vil_30 = 0;
+                double vil_40 = 0;
+                double vil_50 = 0;
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
                 vil_30 += gout[0] * dm_jk_00;
                 double dm_jk_01 = dm[(j0+0)*nao+(k0+1)];
@@ -11150,14 +11564,14 @@ while (1) {
                 double dm_jk_52 = dm[(j0+5)*nao+(k0+2)];
                 vil_10 += gout[25] * dm_jk_52;
                 vil_50 += gout[26] * dm_jk_52;
-                break; }
-                }
                 atomicAdd(vk+(i0+0)*nao+(l0+0), vil_00);
                 atomicAdd(vk+(i0+1)*nao+(l0+0), vil_10);
                 atomicAdd(vk+(i0+2)*nao+(l0+0), vil_20);
                 atomicAdd(vk+(i0+3)*nao+(l0+0), vil_30);
                 atomicAdd(vk+(i0+4)*nao+(l0+0), vil_40);
                 atomicAdd(vk+(i0+5)*nao+(l0+0), vil_50);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_jl_00 = dm[(j0+0)*nao+(l0+0)];
@@ -11264,14 +11678,14 @@ while (1) {
                 atomicAdd(vk+(i0+5)*nao+(k0+2), vik_52);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vjl_00 = 0;
                 double vjl_10 = 0;
                 double vjl_20 = 0;
                 double vjl_30 = 0;
                 double vjl_40 = 0;
                 double vjl_50 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_00;
                 vjl_20 += gout[3] * dm_ik_00;
@@ -11308,8 +11722,20 @@ while (1) {
                 vjl_00 += gout[19] * dm_ik_42;
                 vjl_20 += gout[22] * dm_ik_42;
                 vjl_40 += gout[25] * dm_ik_42;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+3)*nao+(l0+0), vjl_30);
+                atomicAdd(vk+(j0+4)*nao+(l0+0), vjl_40);
+                atomicAdd(vk+(j0+5)*nao+(l0+0), vjl_50);
                 break; }
                 case 1: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
+                double vjl_30 = 0;
+                double vjl_40 = 0;
+                double vjl_50 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_10;
                 vjl_20 += gout[3] * dm_ik_10;
@@ -11346,8 +11772,20 @@ while (1) {
                 vjl_00 += gout[19] * dm_ik_52;
                 vjl_20 += gout[22] * dm_ik_52;
                 vjl_40 += gout[25] * dm_ik_52;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+3)*nao+(l0+0), vjl_30);
+                atomicAdd(vk+(j0+4)*nao+(l0+0), vjl_40);
+                atomicAdd(vk+(j0+5)*nao+(l0+0), vjl_50);
                 break; }
                 case 2: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
+                double vjl_30 = 0;
+                double vjl_40 = 0;
+                double vjl_50 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_10 += gout[1] * dm_ik_00;
                 vjl_30 += gout[4] * dm_ik_00;
@@ -11384,8 +11822,20 @@ while (1) {
                 vjl_10 += gout[20] * dm_ik_42;
                 vjl_30 += gout[23] * dm_ik_42;
                 vjl_50 += gout[26] * dm_ik_42;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                atomicAdd(vk+(j0+3)*nao+(l0+0), vjl_30);
+                atomicAdd(vk+(j0+4)*nao+(l0+0), vjl_40);
+                atomicAdd(vk+(j0+5)*nao+(l0+0), vjl_50);
                 break; }
                 case 3: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
+                double vjl_30 = 0;
+                double vjl_40 = 0;
+                double vjl_50 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_10 += gout[1] * dm_ik_10;
                 vjl_30 += gout[4] * dm_ik_10;
@@ -11422,14 +11872,14 @@ while (1) {
                 vjl_10 += gout[20] * dm_ik_52;
                 vjl_30 += gout[23] * dm_ik_52;
                 vjl_50 += gout[26] * dm_ik_52;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
                 atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
                 atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
                 atomicAdd(vk+(j0+3)*nao+(l0+0), vjl_30);
                 atomicAdd(vk+(j0+4)*nao+(l0+0), vjl_40);
                 atomicAdd(vk+(j0+5)*nao+(l0+0), vjl_50);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
@@ -11603,26 +12053,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_3000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -11648,10 +12089,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -11935,26 +12372,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_3010(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -11980,10 +12408,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -12436,13 +12860,18 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_jk_3011(KERNEL_ARGS)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
     constexpr int nsq_per_block = 64;
@@ -12451,19 +12880,14 @@ void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+bounds.nroots*2+8);
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -12488,11 +12912,6 @@ while (1) {
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -12538,9 +12957,9 @@ while (1) {
             double xlxk = env[rl+0] - env[rk+0];
             double ylyk = env[rl+1] - env[rk+1];
             double zlzk = env[rl+2] - env[rk+2];
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double gout[23];
         
@@ -12559,9 +12978,9 @@ while (1) {
                 double al = env[expl+lp];
                 double akl = ak + al;
                 double al_akl = al / akl;
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
@@ -12606,16 +13025,11 @@ while (1) {
                     Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
                     gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                    }
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
                     double rt = rw[irys*128];
-                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double akl = akl_cache[0];
                     double rt_aij = rt_aa * akl;
@@ -12629,7 +13043,7 @@ while (1) {
                         }
                         double *_gx = gx + n * 1024;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
+                        double Rpa = xjxi * aj_aij;
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -12896,6 +13310,8 @@ while (1) {
                 atomicAdd(vj+(i0+9)*nao+(j0+0), vij_90);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vkl_00 = 0;
                 double vkl_01 = 0;
                 double vkl_02 = 0;
@@ -12905,8 +13321,6 @@ while (1) {
                 double vkl_20 = 0;
                 double vkl_21 = 0;
                 double vkl_22 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_00 += gout[0] * dm_ji_00;
                 vkl_02 += gout[15] * dm_ji_00;
@@ -12935,8 +13349,26 @@ while (1) {
                 vkl_11 += gout[12] * dm_ji_08;
                 vkl_20 += gout[7] * dm_ji_08;
                 vkl_22 += gout[22] * dm_ji_08;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 1: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_00 += gout[0] * dm_ji_01;
                 vkl_02 += gout[15] * dm_ji_01;
@@ -12965,8 +13397,26 @@ while (1) {
                 vkl_11 += gout[12] * dm_ji_09;
                 vkl_20 += gout[7] * dm_ji_09;
                 vkl_22 += gout[22] * dm_ji_09;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 2: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_01 += gout[7] * dm_ji_00;
                 vkl_10 += gout[2] * dm_ji_00;
@@ -12994,8 +13444,26 @@ while (1) {
                 vkl_10 += gout[4] * dm_ji_08;
                 vkl_12 += gout[19] * dm_ji_08;
                 vkl_21 += gout[14] * dm_ji_08;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
+                atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+1)*nao+(l0+1), vkl_11);
+                atomicAdd(vj+(k0+1)*nao+(l0+2), vkl_12);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
+                atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
                 break; }
                 case 3: {
+                double vkl_00 = 0;
+                double vkl_01 = 0;
+                double vkl_02 = 0;
+                double vkl_10 = 0;
+                double vkl_11 = 0;
+                double vkl_12 = 0;
+                double vkl_20 = 0;
+                double vkl_21 = 0;
+                double vkl_22 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_01 += gout[7] * dm_ji_01;
                 vkl_10 += gout[2] * dm_ji_01;
@@ -13023,8 +13491,6 @@ while (1) {
                 vkl_10 += gout[4] * dm_ji_09;
                 vkl_12 += gout[19] * dm_ji_09;
                 vkl_21 += gout[14] * dm_ji_09;
-                break; }
-                }
                 atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
                 atomicAdd(vj+(k0+0)*nao+(l0+1), vkl_01);
                 atomicAdd(vj+(k0+0)*nao+(l0+2), vkl_02);
@@ -13034,6 +13500,8 @@ while (1) {
                 atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 atomicAdd(vj+(k0+2)*nao+(l0+1), vkl_21);
                 atomicAdd(vj+(k0+2)*nao+(l0+2), vkl_22);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
@@ -13318,11 +13786,11 @@ while (1) {
                 atomicAdd(vk+(i0+9)*nao+(k0+2), vik_92);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vjl_00 = 0;
                 double vjl_01 = 0;
                 double vjl_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_00;
                 vjl_02 += gout[15] * dm_ik_00;
@@ -13361,8 +13829,14 @@ while (1) {
                 double dm_ik_82 = dm[(i0+8)*nao+(k0+2)];
                 vjl_00 += gout[7] * dm_ik_82;
                 vjl_02 += gout[22] * dm_ik_82;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
                 break; }
                 case 1: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_10;
                 vjl_02 += gout[15] * dm_ik_10;
@@ -13401,8 +13875,14 @@ while (1) {
                 double dm_ik_92 = dm[(i0+9)*nao+(k0+2)];
                 vjl_00 += gout[7] * dm_ik_92;
                 vjl_02 += gout[22] * dm_ik_92;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
                 break; }
                 case 2: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_01 += gout[7] * dm_ik_00;
                 double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
@@ -13440,8 +13920,14 @@ while (1) {
                 vjl_02 += gout[19] * dm_ik_81;
                 double dm_ik_82 = dm[(i0+8)*nao+(k0+2)];
                 vjl_01 += gout[14] * dm_ik_82;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
+                atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
                 break; }
                 case 3: {
+                double vjl_00 = 0;
+                double vjl_01 = 0;
+                double vjl_02 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_01 += gout[7] * dm_ik_10;
                 double dm_ik_11 = dm[(i0+1)*nao+(k0+1)];
@@ -13479,16 +13965,16 @@ while (1) {
                 vjl_02 += gout[19] * dm_ik_91;
                 double dm_ik_92 = dm[(i0+9)*nao+(k0+2)];
                 vjl_01 += gout[14] * dm_ik_92;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
                 atomicAdd(vk+(j0+0)*nao+(l0+1), vjl_01);
                 atomicAdd(vk+(j0+0)*nao+(l0+2), vjl_02);
+                break; }
+                }
+                switch (gout_id) {
+                case 0: {
                 double vjk_00 = 0;
                 double vjk_01 = 0;
                 double vjk_02 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_00 += gout[0] * dm_il_00;
                 vjk_02 += gout[5] * dm_il_00;
@@ -13527,8 +14013,14 @@ while (1) {
                 double dm_il_82 = dm[(i0+8)*nao+(l0+2)];
                 vjk_00 += gout[17] * dm_il_82;
                 vjk_02 += gout[22] * dm_il_82;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
                 break; }
                 case 1: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_00 += gout[0] * dm_il_10;
                 vjk_02 += gout[5] * dm_il_10;
@@ -13567,8 +14059,14 @@ while (1) {
                 double dm_il_92 = dm[(i0+9)*nao+(l0+2)];
                 vjk_00 += gout[17] * dm_il_92;
                 vjk_02 += gout[22] * dm_il_92;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
                 break; }
                 case 2: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_01 += gout[2] * dm_il_00;
                 double dm_il_01 = dm[(i0+0)*nao+(l0+1)];
@@ -13606,8 +14104,14 @@ while (1) {
                 vjk_02 += gout[14] * dm_il_81;
                 double dm_il_82 = dm[(i0+8)*nao+(l0+2)];
                 vjk_01 += gout[19] * dm_il_82;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
                 break; }
                 case 3: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_01 += gout[2] * dm_il_10;
                 double dm_il_11 = dm[(i0+1)*nao+(l0+1)];
@@ -13645,11 +14149,11 @@ while (1) {
                 vjk_02 += gout[14] * dm_il_91;
                 double dm_il_92 = dm[(i0+9)*nao+(l0+2)];
                 vjk_01 += gout[19] * dm_il_92;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
                 atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
                 atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                break; }
+                }
             }
         }
     }
@@ -13657,26 +14161,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_3020(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -13702,10 +14197,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -14399,26 +14890,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_3100(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -14444,10 +14926,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -14898,13 +15376,18 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_jk_3110(KERNEL_ARGS)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
     constexpr int nsq_per_block = 64;
@@ -14913,19 +15396,14 @@ void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+bounds.nroots*2+8);
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -14950,11 +15428,6 @@ while (1) {
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -15000,9 +15473,9 @@ while (1) {
             double xlxk = env[rl+0] - env[rk+0];
             double ylyk = env[rl+1] - env[rk+1];
             double zlzk = env[rl+2] - env[rk+2];
-            rlrk[0] = xlxk;
-            rlrk[64] = ylyk;
-            rlrk[128] = zlzk;
+            rlrk[0*nsq_per_block] = xlxk;
+            rlrk[1*nsq_per_block] = ylyk;
+            rlrk[2*nsq_per_block] = zlzk;
         }
         double gout[23];
         
@@ -15021,9 +15494,9 @@ while (1) {
                 double al = env[expl+lp];
                 double akl = ak + al;
                 double al_akl = al / akl;
-                double xlxk = rlrk[0];
-                double ylyk = rlrk[64];
-                double zlzk = rlrk[128];
+                double xlxk = rlrk[0*nsq_per_block];
+                double ylyk = rlrk[1*nsq_per_block];
+                double zlzk = rlrk[2*nsq_per_block];
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
@@ -15068,16 +15541,11 @@ while (1) {
                     Rpq[2*nsq_per_block] = zpq;
                     double cicj = cicj_cache[ijp];
                     gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
-                    if (sq_id == 0) {
-                        aij_cache[0] = aij;
-                        aij_cache[1] = aj_aij;
-                    }
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
                     double rt = rw[irys*128];
-                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double akl = akl_cache[0];
                     double rt_aij = rt_aa * akl;
@@ -15090,7 +15558,7 @@ while (1) {
                         }
                         double *_gx = gx + n * 1024;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aij_cache[1];
+                        double Rpa = xjxi * aj_aij;
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -15410,11 +15878,11 @@ while (1) {
                 atomicAdd(vj+(i0+9)*nao+(j0+2), vij_92);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vkl_00 = 0;
                 double vkl_10 = 0;
                 double vkl_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_00 += gout[0] * dm_ji_00;
                 vkl_20 += gout[15] * dm_ji_00;
@@ -15453,8 +15921,14 @@ while (1) {
                 double dm_ji_28 = dm[(j0+2)*nao+(i0+8)];
                 vkl_00 += gout[7] * dm_ji_28;
                 vkl_20 += gout[22] * dm_ji_28;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 break; }
                 case 1: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_00 += gout[0] * dm_ji_01;
                 vkl_20 += gout[15] * dm_ji_01;
@@ -15493,8 +15967,14 @@ while (1) {
                 double dm_ji_29 = dm[(j0+2)*nao+(i0+9)];
                 vkl_00 += gout[7] * dm_ji_29;
                 vkl_20 += gout[22] * dm_ji_29;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 break; }
                 case 2: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
                 double dm_ji_00 = dm[(j0+0)*nao+(i0+0)];
                 vkl_10 += gout[7] * dm_ji_00;
                 double dm_ji_02 = dm[(j0+0)*nao+(i0+2)];
@@ -15532,8 +16012,14 @@ while (1) {
                 vkl_20 += gout[21] * dm_ji_26;
                 double dm_ji_28 = dm[(j0+2)*nao+(i0+8)];
                 vkl_10 += gout[14] * dm_ji_28;
+                atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
+                atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
+                atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
                 break; }
                 case 3: {
+                double vkl_00 = 0;
+                double vkl_10 = 0;
+                double vkl_20 = 0;
                 double dm_ji_01 = dm[(j0+0)*nao+(i0+1)];
                 vkl_10 += gout[7] * dm_ji_01;
                 double dm_ji_03 = dm[(j0+0)*nao+(i0+3)];
@@ -15571,11 +16057,11 @@ while (1) {
                 vkl_20 += gout[21] * dm_ji_27;
                 double dm_ji_29 = dm[(j0+2)*nao+(i0+9)];
                 vkl_10 += gout[14] * dm_ji_29;
-                break; }
-                }
                 atomicAdd(vj+(k0+0)*nao+(l0+0), vkl_00);
                 atomicAdd(vj+(k0+1)*nao+(l0+0), vkl_10);
                 atomicAdd(vj+(k0+2)*nao+(l0+0), vkl_20);
+                break; }
+                }
                 switch (gout_id) {
                 case 0: {
                 double dm_jk_00 = dm[(j0+0)*nao+(k0+0)];
@@ -15804,11 +16290,11 @@ while (1) {
                 atomicAdd(vk+(i0+9)*nao+(k0+2), vik_92);
                 break; }
                 }
+                switch (gout_id) {
+                case 0: {
                 double vjl_00 = 0;
                 double vjl_10 = 0;
                 double vjl_20 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_00;
                 vjl_20 += gout[5] * dm_ik_00;
@@ -15847,8 +16333,14 @@ while (1) {
                 double dm_ik_82 = dm[(i0+8)*nao+(k0+2)];
                 vjl_00 += gout[17] * dm_ik_82;
                 vjl_20 += gout[22] * dm_ik_82;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
                 break; }
                 case 1: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_00 += gout[0] * dm_ik_10;
                 vjl_20 += gout[5] * dm_ik_10;
@@ -15887,8 +16379,14 @@ while (1) {
                 double dm_ik_92 = dm[(i0+9)*nao+(k0+2)];
                 vjl_00 += gout[17] * dm_ik_92;
                 vjl_20 += gout[22] * dm_ik_92;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
                 break; }
                 case 2: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
                 double dm_ik_00 = dm[(i0+0)*nao+(k0+0)];
                 vjl_10 += gout[2] * dm_ik_00;
                 double dm_ik_01 = dm[(i0+0)*nao+(k0+1)];
@@ -15926,8 +16424,14 @@ while (1) {
                 vjl_20 += gout[14] * dm_ik_81;
                 double dm_ik_82 = dm[(i0+8)*nao+(k0+2)];
                 vjl_10 += gout[19] * dm_ik_82;
+                atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
+                atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
+                atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
                 break; }
                 case 3: {
+                double vjl_00 = 0;
+                double vjl_10 = 0;
+                double vjl_20 = 0;
                 double dm_ik_10 = dm[(i0+1)*nao+(k0+0)];
                 vjl_10 += gout[2] * dm_ik_10;
                 double dm_ik_11 = dm[(i0+1)*nao+(k0+1)];
@@ -15965,11 +16469,13 @@ while (1) {
                 vjl_20 += gout[14] * dm_ik_91;
                 double dm_ik_92 = dm[(i0+9)*nao+(k0+2)];
                 vjl_10 += gout[19] * dm_ik_92;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(l0+0), vjl_00);
                 atomicAdd(vk+(j0+1)*nao+(l0+0), vjl_10);
                 atomicAdd(vk+(j0+2)*nao+(l0+0), vjl_20);
+                break; }
+                }
+                switch (gout_id) {
+                case 0: {
                 double vjk_00 = 0;
                 double vjk_01 = 0;
                 double vjk_02 = 0;
@@ -15979,8 +16485,6 @@ while (1) {
                 double vjk_20 = 0;
                 double vjk_21 = 0;
                 double vjk_22 = 0;
-                switch (gout_id) {
-                case 0: {
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_00 += gout[0] * dm_il_00;
                 vjk_02 += gout[15] * dm_il_00;
@@ -16009,8 +16513,26 @@ while (1) {
                 vjk_11 += gout[12] * dm_il_80;
                 vjk_20 += gout[7] * dm_il_80;
                 vjk_22 += gout[22] * dm_il_80;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 1: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_00 += gout[0] * dm_il_10;
                 vjk_02 += gout[15] * dm_il_10;
@@ -16039,8 +16561,26 @@ while (1) {
                 vjk_11 += gout[12] * dm_il_90;
                 vjk_20 += gout[7] * dm_il_90;
                 vjk_22 += gout[22] * dm_il_90;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 2: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_00 = dm[(i0+0)*nao+(l0+0)];
                 vjk_01 += gout[7] * dm_il_00;
                 vjk_10 += gout[2] * dm_il_00;
@@ -16068,8 +16608,26 @@ while (1) {
                 vjk_10 += gout[4] * dm_il_80;
                 vjk_12 += gout[19] * dm_il_80;
                 vjk_21 += gout[14] * dm_il_80;
+                atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
+                atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
+                atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
+                atomicAdd(vk+(j0+1)*nao+(k0+0), vjk_10);
+                atomicAdd(vk+(j0+1)*nao+(k0+1), vjk_11);
+                atomicAdd(vk+(j0+1)*nao+(k0+2), vjk_12);
+                atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
+                atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
+                atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
                 break; }
                 case 3: {
+                double vjk_00 = 0;
+                double vjk_01 = 0;
+                double vjk_02 = 0;
+                double vjk_10 = 0;
+                double vjk_11 = 0;
+                double vjk_12 = 0;
+                double vjk_20 = 0;
+                double vjk_21 = 0;
+                double vjk_22 = 0;
                 double dm_il_10 = dm[(i0+1)*nao+(l0+0)];
                 vjk_01 += gout[7] * dm_il_10;
                 vjk_10 += gout[2] * dm_il_10;
@@ -16097,8 +16655,6 @@ while (1) {
                 vjk_10 += gout[4] * dm_il_90;
                 vjk_12 += gout[19] * dm_il_90;
                 vjk_21 += gout[14] * dm_il_90;
-                break; }
-                }
                 atomicAdd(vk+(j0+0)*nao+(k0+0), vjk_00);
                 atomicAdd(vk+(j0+0)*nao+(k0+1), vjk_01);
                 atomicAdd(vk+(j0+0)*nao+(k0+2), vjk_02);
@@ -16108,6 +16664,8 @@ while (1) {
                 atomicAdd(vk+(j0+2)*nao+(k0+0), vjk_20);
                 atomicAdd(vk+(j0+2)*nao+(k0+1), vjk_21);
                 atomicAdd(vk+(j0+2)*nao+(k0+2), vjk_22);
+                break; }
+                }
             }
         }
     }
@@ -16115,26 +16673,17 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_k_3200(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
+    KERNEL_SETUP();
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (sq_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -16160,10 +16709,6 @@ while (1) {
         continue;
     }
 
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (sq_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -16954,86 +17499,61 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
-        rys_k_0000<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_0000); break;
     case 125: // (1, 0, 0, 0)
-        rys_k_1000<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1000); break;
     case 130: // (1, 0, 1, 0)
-        rys_k_1010<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1010); break;
     case 131: // (1, 0, 1, 1)
-        rys_k_1011<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1011); break;
     case 150: // (1, 1, 0, 0)
-        rys_k_1100<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1100); break;
     case 155: // (1, 1, 1, 0)
-        rys_k_1110<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1110); break;
     case 156: // (1, 1, 1, 1)
-        rys_k_1111<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1111); break;
     case 250: // (2, 0, 0, 0)
-        rys_k_2000<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2000); break;
     case 255: // (2, 0, 1, 0)
-        rys_k_2010<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2010); break;
     case 256: // (2, 0, 1, 1)
-        rys_k_2011<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2011); break;
     case 260: // (2, 0, 2, 0)
-        rys_k_2020<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2020); break;
     case 261: // (2, 0, 2, 1)
         buflen = 4736 + iprim * jprim;
-        rys_jk_2021<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_jk_2021); break;
     case 275: // (2, 1, 0, 0)
-        rys_k_2100<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2100); break;
     case 280: // (2, 1, 1, 0)
-        rys_k_2110<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2110); break;
     case 281: // (2, 1, 1, 1)
         buflen = 2944 + iprim * jprim;
-        rys_jk_2111<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_jk_2111); break;
     case 285: // (2, 1, 2, 0)
         buflen = 4736 + iprim * jprim;
-        rys_jk_2120<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_jk_2120); break;
     case 300: // (2, 2, 0, 0)
-        rys_k_2200<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2200); break;
     case 305: // (2, 2, 1, 0)
         buflen = 4736 + iprim * jprim;
-        rys_jk_2210<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_jk_2210); break;
     case 375: // (3, 0, 0, 0)
-        rys_k_3000<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_3000); break;
     case 380: // (3, 0, 1, 0)
-        rys_k_3010<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_3010); break;
     case 381: // (3, 0, 1, 1)
         buflen = 4352 + iprim * jprim;
-        rys_jk_3011<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_jk_3011); break;
     case 385: // (3, 0, 2, 0)
-        rys_k_3020<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_3020); break;
     case 400: // (3, 1, 0, 0)
-        rys_k_3100<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_3100); break;
     case 405: // (3, 1, 1, 0)
         buflen = 4352 + iprim * jprim;
-        rys_jk_3110<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_jk_3110); break;
     case 425: // (3, 2, 0, 0)
-        rys_k_3200<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_k_3200); break;
     default: return 0;
     }
     return 1;
