@@ -23,7 +23,7 @@ dispersion correction for HF and DFT
 import warnings
 from functools import lru_cache
 from pyscf.lib import logger
-from gpu4pyscf import scf
+from pyscf import scf
 from pyscf import __config__
 
 DFTD4_RECOMMENDATIONS = getattr(__config__, 'DFTD4_RECOMMENDATIONS', False)
