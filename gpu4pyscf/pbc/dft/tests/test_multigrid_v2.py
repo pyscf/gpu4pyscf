@@ -31,7 +31,7 @@ from gpu4pyscf.pbc.dft import numint, UniformGrids
 import pytest
 
 def setUpModule():
-    global cell_orth, cell_nonorth
+    global cell_orth, cell_nonorth, cell_he
     global kpts, dm, dm1
     np.random.seed(2)
     cell_orth = gto.M(
@@ -64,9 +64,16 @@ def setUpModule():
         unit = 'bohr',
         mesh = [18] * 3) # GGA needs dense mesh for derivative in reciprocal space
 
+    cell_he = pyscf.M(atom='He 0 0 0',
+                      basis=[[0, ( 1, 1, .1), (.5, .1, 1)],
+                             [1, (.8, 1)],
+                             [2, (.6, 1)]],
+                      unit='B',
+                      a=np.eye(3)*5)
+
 def tearDownModule():
-    global cell_orth, cell_nonorth
-    del cell_orth, cell_nonorth
+    global cell_orth, cell_nonorth, cell_he
+    del cell_orth, cell_nonorth, cell_he
 
 class KnownValues(unittest.TestCase):
     def test_get_pp(self):
@@ -592,14 +599,9 @@ class KnownValues(unittest.TestCase):
         assert len(inverse) == len(Ls)**2
 
     def test_nr_rks_fxc(self):
-        cell = pyscf.M(atom='He 0 0 0',
-                        basis=[[0, ( 1, 1, .1), (.5, .1, 1)],
-                               [1, (.8, 1)],
-                               [2, (.6, 1)]],
-                        unit='B',
-                        a=np.eye(3)*5)
+        cell = cell_he
         np.random.seed(9)
-        nao = nao = cell.nao
+        nao = cell.nao
         dm_he = np.random.rand(nao, nao)
         dm_he = dm_he + dm_he.T
         dm_he = dm_he * .2 + np.eye(nao)
@@ -657,14 +659,9 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
 
     def test_nr_uks_fxc(self):
-        cell = pyscf.M(atom='He 0 0 0',
-                        basis=[[0, ( 1, 1, .1), (.5, .1, 1)],
-                               [1, (.8, 1)],
-                               [2, (.6, 1)]],
-                        unit='B',
-                        a=np.eye(3)*5)
+        cell = cell_he
         np.random.seed(9)
-        nao = nao = cell.nao
+        nao = cell.nao
         dm_he = np.random.rand(2, nao, nao)
         dm_he = dm_he + dm_he.transpose(0,2,1)
         dm_he = dm_he * .2 + np.eye(nao)

@@ -239,6 +239,10 @@ class SCF(mol_hf.SCF):
         if kpt is None: kpt = self.kpt
         if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
             ni = self._numint
+        elif np.prod(cell.mesh) < 500**3:
+            # In the pseudo and all-electron mixed case, MultiGridNumInt is
+            # still more efficient if Ecut is not too high.
+            ni = multigrid_v2.MultiGridNumInt(cell)
         else:
             ni = self.with_df
         if cell.pseudo:

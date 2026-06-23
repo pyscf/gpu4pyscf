@@ -378,6 +378,10 @@ class KSCF(pbchf.SCF):
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
         if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
             ni = self._numint
+        elif np.prod(cell.mesh) < 500**3:
+            # In the pseudo and all-electron mixed case, MultiGridNumInt is
+            # still more efficient if Ecut is not too high.
+            ni = multigrid_v2.MultiGridNumInt(cell)
         else:
             ni = self.with_df
         if cell.pseudo:

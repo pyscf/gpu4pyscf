@@ -529,11 +529,7 @@ def nr_rks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None,
     elif isinstance(kpts, KPoints):
         kpts = kpts.kpts_ibz
 
-    is_single_kpt = kpts.ndim == 1
-    if is_single_kpt:
-        assert dms.ndim == 3
-        kpts = kpts.reshape(1, 3)
-        dms = dms[:,None]
+    assert kpts.ndim == 2
     assert dms.ndim == 4
     nset, nkpts, nao = dms.shape[:3]
     assert len(kpts) == nkpts
@@ -560,13 +556,10 @@ def nr_rks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None,
                     wv = cp.einsum('g,yg->yg', rho1, wfxc[0])
                 else:
                     wv = cp.einsum('xg,xyg->yg', rho1, wfxc)
-                ni._vxc_mat(ao_ks, wv[:,p0:p1], xctype, v_hermi, vmat[i])
+                ni._vxc_mat(ao_ks, wv, xctype, v_hermi, vmat[i])
         if v_hermi == 1:
             vmat = transpose_sum(vmat.reshape(-1,nao,nao))
             vmat = vmat.reshape(dms.shape)
-
-    if is_single_kpt:
-        vmat = vmat[:,0]
     return vmat
 
 def nr_rks_fxc_st(ni, cell, grids, xc_code, dm0, dms_alpha, hermi=0, singlet=True,
@@ -608,13 +601,10 @@ def nr_uks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None,
     elif isinstance(kpts, KPoints):
         kpts = kpts.kpts_ibz
 
-    is_single_kpt = kpts.ndim == 1
-    if is_single_kpt:
-        assert dms.ndim == 4
-        kpts = kpts.reshape(1, 3)
-        dms = dms[:,:,None]
+    assert kpts.ndim == 2
     assert dms.ndim == 5
     nset, nkpts, nao = dms.shape[1:4]
+    assert len(kpts) == nkpts
 
     dtype = np.complex128
     v_hermi = 0
@@ -640,14 +630,11 @@ def nr_uks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None,
                 else:
                     wv  = cp.einsum('xg,xbyg->byg', rho1a, wfxc[0])
                     wv += cp.einsum('xg,xbyg->byg', rho1b, wfxc[1])
-                ni._vxc_mat(ao_ks, wv[0,:,p0:p1], xctype, v_hermi, vmat[0,i])
-                ni._vxc_mat(ao_ks, wv[1,:,p0:p1], xctype, v_hermi, vmat[1,i])
+                ni._vxc_mat(ao_ks, wv[0], xctype, v_hermi, vmat[0,i])
+                ni._vxc_mat(ao_ks, wv[1], xctype, v_hermi, vmat[1,i])
         if v_hermi == 1:
             vmat = transpose_sum(vmat.reshape(-1,nao,nao))
             vmat = vmat.reshape(dms.shape)
-
-    if is_single_kpt:
-        vmat = vmat[:,:,0]
     return vmat
 
 def cache_xc_kernel1(ni, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
@@ -666,6 +653,7 @@ def cache_xc_kernel1(ni, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=Non
         nvar = 1
 
     kpts, is_single_kpt = _check_kpts(kpts)
+    assert not is_single_kpt
     dms = _format_dms(dm, kpts)
     if is_rhf is None:
         is_rhf = len(dms) == 1

@@ -154,7 +154,9 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         dm0 = self.make_rdm1(mo_coeff, mo_occ)
         rho0, vxc, fxc = ni.cache_xc_kernel1(
             cell, self.grids, self.xc, dm0, spin, kpts)
+        nao = dm0.shape[-1]
         dm0 = None
+        nkpts = len(kpts)
 
         with_j = with_j and hermi != 2
         j_in_xc = isinstance(ni, (multigrid_v2.MultiGridNumInt,
@@ -168,10 +170,11 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
             else:
                 v1 = cp.zeros_like(dm1)
 
-            vj, vk = krks._get_jk(self, cell, dm1, hermi, kpts, with_j=not j_in_xc)[:2]
+            vj, vk = krks._get_jk(self, cell, dm1.reshape(-1,nkpts,nao,nao),
+                                  hermi, kpts, with_j=not j_in_xc)[:2]
             if with_j and not j_in_xc:
-                v1 += vj[0] + vj[1]
+                v1 += vj.reshape(dm1.shape).sum(axis=0)
             if hybrid:
-                v1 -= vk
+                v1 -= vk.reshape(dm1.shape)
             return v1
         return vind

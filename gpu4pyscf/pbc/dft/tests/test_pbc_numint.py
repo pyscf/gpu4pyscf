@@ -25,7 +25,7 @@ from gpu4pyscf.lib.cupy_helper import contract
 
 
 def setUpModule():
-    global cell, grids
+    global cell, grids, cell_he
     cell = pbcgto.Cell()
     cell.verbose = 5
     cell.output = '/dev/null'
@@ -38,29 +38,19 @@ def setUpModule():
     cell.build(False, False)
     grids = gen_grid.UniformGrids(cell).build()
 
-    cell_he = pbcgto.M(atom='He 0 0 0',
-                    basis=[[0, ( 1, 1, .1), (.5, .1, 1)],
-                           [1, (.8, 1)]],
-                    unit='B',
-                    precision = 1e-9,
-                    a=np.eye(3)*5)
-
-    kpts = np.random.random((2,3))
-    kpts[1] = -kpts[0]
-    nao = cell_orth.nao_nr()
-    dm = np.random.random((len(kpts),nao,nao)) * .2
-    dm1 = dm + np.eye(nao)
-    dm = dm1 + dm1.transpose(0,2,1)
-
-    he_nao = cell_he.nao
-    dm_he = np.random.random((len(kpts), he_nao, he_nao))
-    dm_he = dm_he + dm_he.transpose(0,2,1)
-    dm_he = dm_he * .2 + np.eye(he_nao)
+    cell_he = pbcgto.M(
+        atom='He 0 0 0',
+        basis=[[0, ( 1, 1, .1), (.5, .1, 1)],
+               [1, (.8, 1)],
+               [2, (.6, 1)]],
+        unit='B',
+        precision = 1e-9,
+        a=np.eye(3)*5)
 
 def tearDownModule():
-    global cell, grids
+    global cell, grids, cell_he
     cell.stdout.close()
-    del cell, grids
+    del cell, grids, cell_he
 
 
 class KnownValues(unittest.TestCase):
@@ -427,7 +417,14 @@ S
 
     def test_cache_xc_kernel(self):
         np.random.seed(9)
-        dm0 = np.random.random(dm_he.shape) + np.random.random(dm_he.shape)*1j
+        kpts = np.random.random((2,3))
+        kpts[1] = -kpts[0]
+        nao = cell_he.nao
+        dm_he = np.random.random((len(kpts), nao, nao))
+        dm_he = dm_he + dm_he.transpose(0,2,1)
+        dm_he = dm_he * .2 + np.eye(nao)
+
+        dm1 = np.random.random(dm_he.shape) + np.random.random(dm_he.shape)*1j
         dm1 = dm1 + dm1.transpose(0,2,1)
         grids_cpu = dft_cpu.UniformGrids(cell_he)
         grids_cpu.mesh = [11]*3
@@ -440,18 +437,14 @@ S
 
         grids = gen_grid.UniformGrids(cell_he)
         grids.mesh = [11]*3
-        ni = numint.NumInt()
         kni = numint.KNumInt()
-        dat = ni.cache_xc_kernel1(cell_he, grids, xc, cp.array(dm_he[0]), kpts=np.zeros(3))
-        dat = cp.einsum('xg,xyg->', dat[0], dat[2])
-        self.assertAlmostEqual(dat.get(), ref)
         dat = kni.cache_xc_kernel1(cell_he, grids, xc, cp.array(dm_he[:1]))
         dat = cp.einsum('xg,xyg->', dat[0], dat[2])
         self.assertAlmostEqual(dat.get(), ref)
 
         ref = ni_cpu.cache_xc_kernel1(cell_he, grids_cpu, xc, dm_he, spin=1)
         ref = np.einsum('ag,axbyg->', ref[0], ref[2])
-        dat = ni.cache_xc_kernel1(cell_he, grids, xc, cp.array(dm_he), spin=1)
+        dat = kni.cache_xc_kernel1(cell_he, grids, xc, cp.array(dm_he), spin=1)
         dat = cp.einsum('axg,axbyg->', dat[0], dat[2])
         self.assertAlmostEqual(dat.get(), ref)
 
@@ -469,242 +462,118 @@ S
         dat = cp.einsum('axg,axbyg->', dat[0], dat[2])
         self.assertAlmostEqual(dat.get(), ref)
 
+    def test_nr_rks_fxc(self):
+        cell = cell_he
+        np.random.seed(9)
+        nao = cell.nao
+        dm_he = np.random.rand(nao, nao)
+        dm_he = dm_he + dm_he.T
+        dm_he = dm_he * .2 + np.eye(nao)
+
+        dm1 = np.random.rand(2,1,nao,nao)
+        dm1 = dm1 + dm1.transpose(0,1,3,2)
+        grids = gen_grid.UniformGrids(cell)
+
+        grids_cpu = grids.to_cpu()
+        ni_cpu = dft_cpu.numint.NumInt()
+        kni_cpu = dft_cpu.numint.KNumInt()
+        kni = numint.KNumInt()
+
+        xc = 'lda,'
+        ref = ni_cpu.nr_rks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1)
+        v = kni.nr_rks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1)
+        self.assertAlmostEqual(abs(v.get()[:,0]-ref).max(), 0, 10)
+
+        xc = 'b88,'
+        ref = ni_cpu.nr_rks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1)
+        v = kni.nr_rks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1)
+        self.assertAlmostEqual(abs(v.get()[:,0]-ref).max(), 0, 10)
+
+        xc = 'r2scan,'
+        ref = ni_cpu.nr_rks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1)
+        v = kni.nr_rks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1)
+        self.assertAlmostEqual(abs(v.get()[:,0]-ref).max(), 0, 10)
+
+        kpts = cell.make_kpts([3,1,1])
+        dm_he = np.random.rand(len(kpts), nao, nao)
+        dm_he = dm_he + dm_he.transpose(0,2,1)
+        dm_he = dm_he * .2 + np.eye(nao)
+
+        dm1 = np.random.rand(2,len(kpts),nao,nao)
+        dm1 = dm1 + np.random.random(dm1.shape)*1j
+        dm1 = dm1 + dm1.transpose(0,1,3,2).conj()
+
+        xc = 'lda,'
+        ref = kni_cpu.nr_rks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = kni.nr_rks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v.get()-ref).max(), 0, 10)
+
+        xc = 'b88,'
+        ref = kni_cpu.nr_rks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = kni.nr_rks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v.get()-ref).max(), 0, 10)
+
+        xc = 'r2scan,'
+        ref = kni_cpu.nr_rks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = kni.nr_rks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v.get()-ref).max(), 0, 10)
+
+    def test_nr_uks_fxc(self):
+        cell = cell_he
+        np.random.seed(9)
+        nao = nao = cell.nao
+        dm_he = np.random.rand(2, nao, nao)
+        dm_he = dm_he + dm_he.transpose(0,2,1)
+        dm_he = dm_he * .2 + np.eye(nao)
+
+        dm1 = np.random.rand(2,3,1,nao,nao)
+        dm1 = dm1 + dm1.transpose(0,1,2,4,3)
+        grids = gen_grid.UniformGrids(cell)
+
+        grids_cpu = grids.to_cpu()
+        ni_cpu = dft_cpu.numint.NumInt()
+        kni_cpu = dft_cpu.numint.KNumInt()
+        kni = numint.KNumInt()
+
+        xc = 'lda,'
+        ref = ni_cpu.nr_uks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1)
+        v = kni.nr_uks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1)
+        self.assertAlmostEqual(abs(v.get()[:,:,0]-ref).max(), 0, 10)
+
+        xc = 'b88,'
+        ref = ni_cpu.nr_uks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1)
+        v = kni.nr_uks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1)
+        self.assertAlmostEqual(abs(v.get()[:,:,0]-ref).max(), 0, 10)
+
+        xc = 'r2scan,'
+        ref = ni_cpu.nr_uks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1)
+        v = kni.nr_uks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1)
+        self.assertAlmostEqual(abs(v.get()[:,:,0]-ref).max(), 0, 10)
+
+        kpts = cell.make_kpts([3,1,1])
+        dm_he = np.random.rand(2, len(kpts), nao, nao)
+        dm_he = dm_he + dm_he.transpose(0,1,3,2)
+        dm_he = dm_he * .2 + np.eye(nao)
+
+        dm1 = np.random.rand(2,3, len(kpts),nao,nao)
+        dm1 = dm1 + np.random.random(dm1.shape)*1j
+        dm1 = dm1 + dm1.transpose(0,1,2,4,3).conj()
+
+        xc = 'lda,'
+        ref = kni_cpu.nr_uks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = kni.nr_uks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v.get()-ref).max(), 0, 10)
+
+        xc = 'b88,'
+        ref = kni_cpu.nr_uks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = kni.nr_uks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v.get()-ref).max(), 0, 10)
+
+        xc = 'r2scan,'
+        ref = kni_cpu.nr_uks_fxc(cell, grids_cpu, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = kni.nr_uks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v.get()-ref).max(), 0, 10)
+
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.numint")
-    #unittest.main()
-    setUpModule()
-    #np.random.seed(2)
-    #cell_orth = pbcgto.M(
-    #    verbose = 7,
-    #    output = '/dev/null',
-    #    a = np.eye(3)*3.5668,
-    #    atom = '''C     0.      0.      0.
-    #              C     1.8     1.8     1.8   ''',
-    #    basis = 'gth-dzv',
-    #    pseudo = 'gth-pade',
-    #    precision = 1e-9,
-    #    mesh = [48] * 3,
-    #)
-    #cell_nonorth = pbcgto.M(
-    #    a = np.eye(3)*3.5668 + np.random.random((3,3)),
-    #    atom = '''C     0.      0.      0.
-    #              C     0.8917  0.8917  0.8917''',
-    #    basis = 'gth-dzv',
-    #    pseudo = 'gth-pade',
-    #    precision = 1e-9,
-    #    mesh = [44,43,42],
-    #)
-
-    def test_gen_rhf_response(self):
-        np.random.seed(9)
-        nkpts = len(kpts)
-        nao = cell_he.nao
-        mo = np.random.rand(nkpts, nao, 4)
-        mo_occ = np.ones((nkpts, 4))
-        dm0 = np.einsum('kpi,kqi->kpq', mo, mo)
-
-        dm1 = np.random.random(dm0.shape)
-        dm1 = dm1 + dm1.transpose(0,2,1)
-        dm1[1] = dm1[0]
-        mydf = df.FFTDF(cell_he)
-        ni = dft.numint.KNumInt()
-
-        mf = dft.KRKS(cell_he)
-        mf._numint = multigrid.MultiGridNumInt(cell_he)
-        mf.kpts = kpts
-
-        mf.xc = 'lda,'
-        ref = dft.numint.nr_rks_fxc(ni, cell_he, mydf.grids, mf.xc, dm0, dm1,
-                                    hermi=1, kpts=kpts)
-        vj = mydf.get_jk(dm1, with_k=False, kpts=kpts)[0]
-        ref += vj
-        v = mf.gen_response(mo, mo_occ, hermi=1)(dm1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 8)
-
-        mf.xc = 'b88,'
-        ref = dft.numint.nr_rks_fxc(ni, cell_he, mydf.grids, mf.xc, dm0, dm1,
-                                    hermi=1, kpts=kpts)
-        ref += vj
-        v = mf.gen_response(mo, mo_occ, hermi=1)(dm1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 6)
-
-    def test_nr_rks_fxc(self):
-        np.random.seed(9)
-        dm1 = np.random.random(dm_he.shape) + np.random.random(dm_he.shape)*1j
-        dm1 = dm1 + dm1.transpose(0,2,1)
-        mydf = df.FFTDF(cell_he)
-        ni = dft.numint.NumInt()
-        mg_df = multigrid.MultiGridNumInt(cell_he)
-
-        xc = 'lda,'
-        ref = dft.numint.nr_rks_fxc(ni, cell_he, mydf.grids, xc, dm_he[0], dm1,
-                                   hermi=1)
-        v = multigrid.nr_rks_fxc(mg_df, xc, dm_he[0], dm1, hermi=1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 9)
-
-        xc = 'b88,'
-        ref = dft.numint.nr_rks_fxc(ni, cell_he, mydf.grids, xc, dm_he[0], dm1,
-                                    hermi=1)
-        v = multigrid.nr_rks_fxc(mg_df, xc, dm_he[0], dm1, hermi=1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 6)
-
-    def test_nr_rks_fxc_hermi0(self):
-        np.random.seed(9)
-        dm1 = np.random.random(dm_he.shape) + np.random.random(dm_he.shape)*1j
-        mydf = df.FFTDF(cell_he)
-        ni = dft.numint.NumInt()
-        mg_df = multigrid.MultiGridNumInt(cell_he)
-
-        xc = 'lda,'
-        ref = dft.numint.nr_rks_fxc(ni, cell_he, mydf.grids, xc, dm_he[0], dm1, hermi=0)
-        v = multigrid.nr_rks_fxc(mg_df, xc, dm_he[0], dm1, hermi=0)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 9)
-
-        xc = 'b88,'
-        ref = dft.numint.nr_rks_fxc(ni, cell_he, mydf.grids, xc, dm_he[0], dm1, hermi=0)
-        v = multigrid.nr_rks_fxc(mg_df, xc, dm_he[0], dm1, hermi=0)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 6)
-
-    def test_nr_rks_fxc_st(self):
-        np.random.seed(9)
-        nkpts = len(kpts)
-        nao = cell_he.nao
-        mo = np.random.rand(nkpts, nao, 4)
-        mo_occ = np.ones((nkpts, 4))
-        dm0 = np.einsum('kpi,kqi->kpq', mo, mo)
-
-        dm1 = np.random.rand(3,nkpts,nao,nao) + np.random.rand(3,nkpts,nao,nao)*1j
-        dm1 = dm1 + dm1.transpose(0,1,3,2).conj()
-        mydf = df.FFTDF(cell_he)
-        ni = dft.numint.KNumInt()
-        mf = dft.KRKS(cell_he)
-        mf._numint = multigrid.MultiGridNumInt(cell_he)
-        mf.kpts = kpts
-
-        mf.xc = 'lda,'
-        ref = dft.numint.nr_rks_fxc_st(ni, cell_he, mydf.grids, mf.xc, dm0, dm1,
-                                       singlet=True, kpts=kpts)
-        v = multigrid.nr_rks_fxc_st(mf._numint, mf.xc, dm0, dm1, singlet=True, kpts=kpts)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 8)
-
-        mf.xc = 'b88,'
-        ref = dft.numint.nr_rks_fxc_st(ni, cell_he, mydf.grids, mf.xc, dm0, dm1,
-                                       singlet=True, kpts=kpts) * .5
-        ref += mf.with_df.get_jk(dm1, hermi=1, kpts=kpts, with_k=False)[0]
-        v = mf.gen_response(mo, mo_occ, singlet=True, hermi=1)(dm1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 8)
-
-        mf.xc = 'lda,'
-        ref = dft.numint.nr_rks_fxc_st(ni, cell_he, mydf.grids, mf.xc, dm0, dm1,
-                                       singlet=False, kpts=kpts) * .5
-        v = mf.gen_response(mo, mo_occ, singlet=False, hermi=1)(dm1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 8)
-
-        mf.xc = 'b88,'
-        ref = dft.numint.nr_rks_fxc_st(ni, cell_he, mydf.grids, mf.xc, dm0, dm1,
-                                       singlet=False, kpts=kpts) * .5
-        v = mf.gen_response(mo, mo_occ, singlet=False, hermi=1)(dm1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 8)
-
-    def test_gen_uhf_response(self):
-        np.random.seed(9)
-        nkpts = len(kpts)
-        nao = cell_he.nao
-        mo = np.random.rand(2, nao, 4)
-        mo_occ = np.ones((2, 4))
-        dm0 = np.einsum('spi,sqi->spq', mo, mo)
-
-        dm1 = np.random.random(dm0.shape)
-        dm1 = dm1 + dm1.transpose(0,2,1)
-        mydf = df.FFTDF(cell_he)
-        ni = dft.numint.NumInt()
-
-        mf = dft.UKS(cell_he)
-        mf._numint = multigrid.MultiGridNumInt(cell_he)
-
-        mf.xc = 'lda,'
-        ref = dft.numint.nr_uks_fxc(ni, cell_he, mydf.grids, mf.xc, dm0, dm1, hermi=1)
-        vj = mydf.get_jk(dm1, with_k=False)[0]
-        ref += vj[0] + vj[1]
-        v = mf.gen_response(mo, mo_occ, hermi=1)(dm1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 7)
-
-        mf.xc = 'b88,'
-        ref = dft.numint.nr_uks_fxc(ni, cell_he, mydf.grids, mf.xc, dm0, dm1, hermi=1)
-        ref += vj[0] + vj[1]
-        v = mf.gen_response(mo, mo_occ, hermi=1)(dm1)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 7)
-
-    # FIXME: is the discrepancy due to problems in precision or threshold estimation?
-    def test_nr_uks_fxc(self):
-        np.random.seed(9)
-        nkpts = len(kpts)
-        nao = cell_he.nao
-        dm1 = np.random.rand(3,nkpts,nao,nao) + np.random.rand(3,nkpts,nao,nao)*1j
-        dm1 = dm1 + dm1.transpose(0,1,3,2).conj()
-        mydf = df.FFTDF(cell_he)
-        ni = dft.numint.KNumInt()
-        mg_df = multigrid.MultiGridNumInt(cell_he)
-
-        xc = 'lda,'
-        ref = dft.numint.nr_uks_fxc(ni, cell_he, mydf.grids, xc,
-                                    (dm_he, dm_he), (dm1, dm1), hermi=1, kpts=kpts)
-        v = multigrid.nr_uks_fxc(mg_df, xc, (dm_he, dm_he), (dm1, dm1), hermi=1, kpts=kpts)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 8)
-
-        xc = 'b88,'
-        ref = dft.numint.nr_uks_fxc(ni, cell_he, mydf.grids, xc,
-                                    (dm_he, dm_he), (dm1, dm1), hermi=1, kpts=kpts)
-        v = multigrid.nr_uks_fxc(mg_df, xc, (dm_he, dm_he), (dm1, dm1), hermi=1, kpts=kpts)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 8)
-
-    def test_orth_uks_fxc_hermi0(self):
-        np.random.seed(9)
-        dm1 = np.random.random(dm_he.shape) + np.random.random(dm_he.shape)*1j
-        mydf = df.FFTDF(cell_he)
-        ni = dft.numint.KNumInt()
-        mg_df = multigrid.MultiGridNumInt(cell_he)
-
-        xc = 'lda,'
-        ref = dft.numint.nr_uks_fxc(ni, cell_he, mydf.grids, xc,
-                                    (dm_he, dm_he), (dm1, dm1), hermi=0, kpts=kpts)
-        v = multigrid.nr_uks_fxc(mg_df, xc, (dm_he, dm_he), (dm1, dm1), hermi=0, kpts=kpts)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 9)
-
-        xc = 'b88,'
-        ref = dft.numint.nr_uks_fxc(ni, cell_he, mydf.grids, xc,
-                                    (dm_he, dm_he), (dm1, dm1), hermi=0, kpts=kpts)
-        v = multigrid.nr_uks_fxc(mg_df, xc, (dm_he, dm_he), (dm1, dm1), hermi=0, kpts=kpts)
-        self.assertEqual(ref.dtype, v.dtype)
-        self.assertEqual(ref.shape, v.shape)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 8)
+    unittest.main()

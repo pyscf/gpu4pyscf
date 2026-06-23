@@ -1580,11 +1580,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         elif isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
 
-        is_single_kpt = kpts.ndim == 1
-        if is_single_kpt:
-            assert dms.ndim == 3
-            kpts = kpts.reshape(1, 3)
-            dms = dms[:,None]
+        assert kpts.ndim == 2
         assert dms.ndim == 4
         nset, nkpts, nao = dms.shape[:3]
         assert len(kpts) == nkpts
@@ -1627,10 +1623,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
 
         with_tau = (xctype == 'MGGA')
         vmat = convert_xc_on_g_mesh_to_fock(self, wv, v_hermi, kpts, with_tau=with_tau)
-
-        if is_single_kpt:
-            vmat = vmat[:,0]
-        return vmat
+        return vmat.reshape(dms.shape)
 
     def nr_rks_fxc_st(self, cell, grids, xc_code, dm0, dms, hermi=0, singlet=True,
                       fxc=None, kpts=None, with_j=False):
@@ -1651,11 +1644,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         elif isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
 
-        is_single_kpt = kpts.ndim == 1
-        if is_single_kpt:
-            assert dms.ndim == 3
-            kpts = kpts.reshape(1, 3)
-            dms = dms[:,None]
+        assert kpts.ndim == 2
         assert dms.ndim == 5
         nset, nkpts, nao = dms.shape[1:4]
         assert len(kpts) == nkpts
@@ -1681,7 +1670,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         rho1 = evaluate_density_on_g_mesh(self, dms.reshape(-1,nkpts,nao,nao), kpts, xctype)
         if with_j:
             coulG = pbc_tools.get_coulG(cell, Gv=Gv)
-            coulomb_on_g_mesh = rho1[:,:,0].reshape(2, nset, -1, ngrids).sum(axis=0) * coulG
+            coulomb_on_g_mesh = rho1[:,0].reshape(2, nset, ngrids).sum(axis=0) * coulG
         rho1 = ifft_in_place(rho1.reshape(-1, *mesh)).real.reshape(2, nset, -1, ngrids)
         wv = cp.einsum('anxg,axbyg->bnyg', rho1, fxc)
         wv = fft_in_place(wv.reshape(-1, *mesh)).reshape(wv.shape)
@@ -1700,11 +1689,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
 
         with_tau = (xctype == 'MGGA')
         vmat = convert_xc_on_g_mesh_to_fock(self, wv, v_hermi, kpts, with_tau=with_tau)
-        vmat = vmat.reshape(dms.shape)
-
-        if is_single_kpt:
-            vmat = vmat[:,:,0]
-        return vmat
+        return vmat.reshape(dms.shape)
 
     def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
         if isinstance(kpts, KPoints):
