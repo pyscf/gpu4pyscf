@@ -277,7 +277,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                                   ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
                                                mo_occ[1], mask, xctype, with_lapl=False)))
 
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=1)[2]
                 wfxc = fxc[:,0,:,0] * weight
                 orbo_a_mask = orbo_a[mask]
                 orbv_a_mask = orbv_a[mask]
@@ -315,7 +315,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                                                mo_occ[0], mask, xctype, with_lapl=False),
                                   ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
                                                mo_occ[1], mask, xctype, with_lapl=False)))
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=1)[2]
                 wfxc = fxc * weight
                 orbo_a_mask = orbo_a[mask]
                 orbv_a_mask = orbv_a[mask]
@@ -361,7 +361,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
                                                mo_occ[0], mask, xctype, with_lapl=False),
                                   ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b,
                                                mo_occ[1], mask, xctype, with_lapl=False)))
-                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype, spin=1)[2]
                 wfxc = fxc * weight
                 orbo_a_mask = orbo_a[mask]
                 orbv_a_mask = orbv_a[mask]
@@ -1016,11 +1016,7 @@ class SpinFlipTDA(TDBase):
         e_ia = e_ia.ravel()
         nov = e_ia.size
         nstates = min(nstates, nov)
-<<<<<<< HEAD
-        e_threshold = cp.partition(e_ia, nstates-1)[nstates-1]
-=======
         e_threshold = cp.partition(e_ia, nstates - 1)[nstates - 1]
->>>>>>> origin/master
         idx = cp.where(e_ia <= e_threshold)[0]
         nstates = idx.size
         e = e_ia[idx].get()
@@ -1117,11 +1113,7 @@ class SpinFlipTDA(TDBase):
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-<<<<<<< HEAD
-            else: # Reuse the previous step for initial guess 
-=======
             else:  # Reuse the previous step for initial guess
->>>>>>> origin/master
                 x0 = self.xy
 
         if isinstance(x0, list):
@@ -1705,7 +1697,6 @@ class SpinFlipTDHF(TDBase):
         return vind, hdiag
 
     _init_guess = SpinFlipTDA._init_guess
-    _transfer_initial_guess = SpinFlipTDA._transfer_initial_guess
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None):
         if mf is None:
@@ -1720,17 +1711,10 @@ class SpinFlipTDHF(TDBase):
         nvira = nmo - nocca
         nvirb = nmo - noccb
         if self.extype == 0:
-<<<<<<< HEAD
-            y0 = cp.zeros((nx, nocca*nvirb))
-        else:
-            y0 = cp.zeros((nx, noccb*nvira))
-        return cp.hstack([x0.reshape(nx,-1), y0])
-=======
             y0 = cp.zeros((nx, nocca * nvirb))
         else:
             y0 = cp.zeros((nx, noccb * nvira))
         return cp.hstack([x0.reshape(nx, -1), y0])
->>>>>>> origin/master
 
     def gen_pickeig(self, extype=1, real=True):
         '''Selects physical roots based on the norm condition ||X|| > ||Y||.'''
@@ -1780,17 +1764,13 @@ class SpinFlipTDHF(TDBase):
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-<<<<<<< HEAD
-            else: # Reuse the previous step for initial guess 
-=======
             else:  # Reuse the previous step for initial guess
->>>>>>> origin/master
                 x0 = self.xy
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
             x0 = [(x.ravel(), y.ravel()) for x, y in x0]
-            x0 = cp.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
+            x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         real_system = mf.mo_coeff[0].dtype == np.float64 or mf.mo_coeff[0].dtype == cp.float64
         pickeig = self.gen_pickeig(extype=self.extype, real=real_system)
@@ -1818,30 +1798,16 @@ class SpinFlipTDHF(TDBase):
 
         if self.extype == 0:
             def norm_xy(z):
-<<<<<<< HEAD
-                x = z[:noccb*nvira].reshape(noccb,nvira)
-                y = z[noccb*nvira:].reshape(nocca,nvirb)
-                norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
-                #assert norm > 0
-=======
                 x = z[: noccb * nvira].reshape(noccb, nvira)
                 y = z[noccb * nvira :].reshape(nocca, nvirb)
                 norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
->>>>>>> origin/master
                 norm = abs(norm) ** -.5
                 return x*norm, y*norm
         elif self.extype == 1:
             def norm_xy(z):
-<<<<<<< HEAD
-                x = z[:nocca*nvirb].reshape(nocca,nvirb)
-                y = z[nocca*nvirb:].reshape(noccb,nvira)
-                norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
-                #assert norm > 0
-=======
                 x = z[: nocca * nvirb].reshape(nocca, nvirb)
                 y = z[nocca * nvirb :].reshape(noccb, nvira)
                 norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
->>>>>>> origin/master
                 norm = abs(norm) ** -.5
                 return x*norm, y*norm
 

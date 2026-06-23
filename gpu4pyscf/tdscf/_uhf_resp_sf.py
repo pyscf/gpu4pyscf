@@ -179,7 +179,7 @@ def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0, collinear='mcol
 
 # This function is copied from pyscf.dft.numint2c.py
 def __mcfun_fn_eval_xc(ni, xc_code, xctype, rho, deriv):
-    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype)
+    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=1)
     evfk = list(evfk)
     for order in range(1, deriv + 1):
         if evfk[order] is not None:
@@ -194,11 +194,10 @@ def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
     if not isinstance(s, cp.ndarray):
         s = cp.asarray(s)
     rho = cp.stack([(t + s) * 0.5, (t - s) * 0.5])
-    spin = 1
     if isinstance(ni, pyscf_numint.NumInt):
-        evfk = ni.eval_xc_eff(xc_code, rho.get(), deriv=deriv, xctype=xctype)
+        evfk = ni.eval_xc_eff(xc_code, rho.get(), deriv=deriv, xctype=xctype, spin=1)
     else:
-        evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
+        evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=1)
     evfk = list(evfk)
     for order in range(1, deriv + 1):
         if evfk[order] is not None:
@@ -256,11 +255,5 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ, collinear_samp
         vxc, fxc = eval_xc_eff(xc_code, rho_z, deriv=2, xctype=xctype)[1:3]
         return None, vxc, fxc
     elif deriv == 3:
-        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
-        if whether_use_gpu:
-            vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
-        else:
-            ni_cpu = ni.to_cpu()
-            eval_xc_eff = mcfun_eval_xc_adapter_sf(ni_cpu, xc_code, collinear_samples)
-            vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
+        vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
         return None, vxc, fxc, kxc
