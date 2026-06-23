@@ -62,15 +62,6 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             raise NotImplementedError("VV10 not implemented for periodic system")
-            if ni.libxc.is_nlc(ks.xc):
-                xc = ks.xc
-            else:
-                assert ni.libxc.is_nlc(ks.nlc)
-                xc = ks.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm, 0, hermi, kpts)
-            exc += enlc
-            vxc += vnlc
-            log.debug('nelec with nlc grids = %s', n)
         log.timer('vxc', *t0)
 
     vj, vk, vj_sr, vk_sr = _get_jk(

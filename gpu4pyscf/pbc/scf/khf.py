@@ -707,6 +707,10 @@ class KRHF(KSCF):
             return vhf.view(cp.ndarray)
         return vind
 
+    def newton(self):
+        from gpu4pyscf.pbc.scf import newton_ah
+        return newton_ah.newton(self)
+
 def _get_veff(mf, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
               hermi=1, kpts=None, kpts_band=None, with_j=True, with_ecoul=True):
     if dm_kpts is None: dm_kpts = mf.make_rdm1()

@@ -448,6 +448,10 @@ class RHF(SCF):
             return vhf.view(cp.ndarray)
         return vind
 
+    def newton(self):
+        from gpu4pyscf.pbc.scf import newton_ah
+        return newton_ah.newton(self)
+
 def normalize_dm_(mf, dm, s1e=None):
     '''
     Force density matrices integrated to the correct number of electrons.
