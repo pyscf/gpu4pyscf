@@ -29,9 +29,12 @@ Validates:
 
 import unittest
 import numpy as np
+import cupy as cp
 import pyscf
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
 from pyscf.pbc.lib.kpts_helper import gamma_point
+import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
+import gpu4pyscf.pbc.dft.multigrid_v2 as multigrid_v2
 import pytest
 
 disp = 1e-4
@@ -313,6 +316,106 @@ class TestFiniteDifference(unittest.TestCase):
     @pytest.mark.slow
     def test_iron_fd(self):
         self._fd_check(cell_fe, atom_id=1, cart_id=0, places=4)
+
+    def test_pseudo_gradient_term_with_zero_nexp(self):
+        cell = pyscf.M(
+            a = np.array([
+                [3.18693029, 0.0, 0.0],
+                [1.593466157846262, 2.759963819342879, 0.0],
+                [1.5934664345206309, 0.9199872811273334, 2.6021185638285855],
+            ]),
+            atom = """
+                Ga 0 -0 0
+                N 0.27 0.25 0.25
+            """,
+            unit = "Angstrom",
+            fractional = True,
+            basis = {"Ga": """
+                Ga DZVP-MOLOPT-PBE-GTH-q13 DZVP-MOLOPT-GGA-GTH-q13
+                1
+                2 0 3 5 2 2 2 1
+                        3.01656447397946    -1.48615548285917E-02    -4.82983759170633E-02     2.02987429358091E-02    -2.13010036960508E-02    -6.10380904630582E-01    -2.58289780414473E-01     5.55521291693774E-04
+                        1.10154483600156     4.01248950871096E-01     3.52468529188874E-01     1.33450451355874E-01    -1.72653030419605E-01    -4.80974524787380E-01    -2.30702268754674E-01     1.31822285722899E-01
+                        0.40429913834530    -2.68052946527183E-01    -4.34387846771425E-01    -3.62845354157947E-01     5.18953771543878E-01    -3.63556802820521E-01     6.94523681159656E-01     8.93294520205134E-01
+                        0.15745703748705    -8.26716943904166E-01     2.37442900862471E-02    -7.36191953337155E-01     3.01123009465079E-01    -1.38575446856837E-01     5.57839790724372E-01     4.07171709684337E-01
+                        0.05692267130844    -2.88855442630589E-01     8.27121240422123E-01    -5.55101142265710E-01    -7.80864171135513E-01    -4.97947071392160E-02     2.53060753645856E-01     1.37326888851730E-01
+            """, # Largest exponent removed
+            "N": """
+                N DZVP-MOLOPT-PBE-GTH-q5 DZVP-MOLOPT-GGA-GTH-q5
+                1
+                2 0 2 4 2 2 1
+                        2.81966237794259    -1.74044102679302E-01     4.24004069220353E-02    -2.98226721897575E-01     1.34580220978959E-01     1.14821628218594E-01
+                        1.09114390677598     4.41288051809814E-01    -9.13540901978963E-02    -5.60270180894578E-01     2.83662239065009E-01     4.43570475758278E-01
+                        0.43100900982055     8.58813021027908E-01    -6.51904223705357E-02    -6.89335539768301E-01     1.57118280926414E-01     8.82189870978279E-01
+                        0.13893847703177     1.11941135993420E-01     9.91688841490055E-01    -3.33973496542287E-01    -9.35099219564131E-01     8.84793677023504E-02
+            """}, # Largest exponent removed
+            pseudo = {"Ga": """
+                Ga GTH-PBE-q13 GTH-GGA-q13
+                    2    1   10    0
+                    0.49000018487159       0
+                    3
+                    0.41677483095310       3   10.48679119269639   -4.92176814704009    0.87070493953275
+                                                                    7.77018207637078   -2.24815160599927
+                                                                                        1.78441528219626
+                    0.56962661099353       2    1.77860037827899    0.19586036552562
+                                                                -0.23168154587648
+                    0.23814730101676       1  -16.24818353736915
+                """, "N": """
+                    N  GTH-PBE-q5 GTH-GGA-q5
+                        2    3    0    0
+                        0.28382600053810       2  -12.41517350030142    1.86813618209744
+                        1
+                        0.25541754972811       1   13.63124869974610
+                """}, # Unmodified from pyscf/pbc/gto/pseudo/POTENTIAL_UZH, made a copy because it requires a relatively new version of pyscf
+            precision = 1e-6,
+            verbose = 0,
+        )
+
+        kmesh = [1,3,3]
+        kpts = cell.make_kpts(kmesh)
+        mf = cell.KRKS(xc = "pbe", kpts = kpts)
+        mf.conv_tol = 1e-1
+        mf = mf.to_gpu()
+
+        mf = mf.multigrid_numint()
+        mf.kernel()
+
+        ni = mf._numint
+        dm0 = mf.make_rdm1()
+        rho_g = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0, kpts)
+        rho_g = rho_g[0,0]
+
+        dx = 1e-5
+        numerical_gradient = np.zeros([cell.natm, 3])
+
+        def get_pp_local_energy(cell):
+            vpplocG = multigrid_v1.eval_vpplocG(cell, cell.mesh)
+            e_vpplocG = cp.einsum("g,g->", rho_g.conj(), vpplocG) / cell.vol
+            assert abs(e_vpplocG.imag) < 1e-8
+            return float(e_vpplocG.real)
+
+        cell_copy = cell.copy()
+        cell_copy.fractional = False
+        for i_atom in range(cell.natm):
+            for i_xyz in range(3):
+                xyz_p = cell.atom_coords(unit='Bohr')
+                xyz_p[i_atom, i_xyz] += dx
+                cell_copy.set_geom_(xyz_p, unit='Bohr')
+                cell_copy.build()
+                e_p = get_pp_local_energy(cell_copy)
+
+                xyz_m = cell.atom_coords(unit='Bohr')
+                xyz_m[i_atom, i_xyz] -= dx
+                cell_copy.set_geom_(xyz_m, unit='Bohr')
+                cell_copy.build()
+                e_m = get_pp_local_energy(cell_copy)
+
+                numerical_gradient[i_atom, i_xyz] = (e_p - e_m) / (2 * dx)
+
+        analytical_gradient = multigrid_v1.eval_vpplocG_SI_gradient(cell, cell.mesh, rho_g)
+        analytical_gradient = analytical_gradient.get()
+
+        assert np.max(np.abs(numerical_gradient - analytical_gradient)) < 1e-8
 
 
 if __name__ == '__main__':
