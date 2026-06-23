@@ -296,7 +296,7 @@ class AFTDF(lib.StreamObject):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         if is_single_kpt:
             return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                   with_k, exxdiv, omega)
@@ -327,9 +327,15 @@ class AFTDF(lib.StreamObject):
         out = AFTDF(self.cell, kpts=self.kpts)
         return utils.to_cpu(self, out=out)
 
-def _check_kpts(kpts, dm):
+def _check_kpts(kpts, dm=None):
     '''Check if the argument kpts is a single k-point'''
-    is_single_kpt =True
+    if dm is None:
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+        is_single_kpt = kpts.ndim == 1
+        return kpts.reshape(-1, 3), is_single_kpt
+
+    is_single_kpt = True
     if kpts is None:
         kpts = np.zeros((1, 3))
         if (dm.ndim == 2 or # RHF

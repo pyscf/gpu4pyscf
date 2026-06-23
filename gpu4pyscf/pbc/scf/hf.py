@@ -382,6 +382,8 @@ class KohnShamDFT:
 class RHF(SCF):
 
     energy_elec = mol_hf.RHF.energy_elec
+    newton = mol_hf.RHF.newton
+    canonicalize = mol_hf.RHF.canonicalize
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
                  hermi=1, kpt=None, kpts_band=None):
@@ -439,18 +441,16 @@ class RHF(SCF):
                      singlet=None, hermi=0, max_memory=None, with_nlc=False):
         from gpu4pyscf.pbc.scf.khf import _get_veff
         cell = self.cell
-        kpt = self.kpt
+        kpts = self.kpt.reshape(1, 3)
         with_j = (singlet is None or singlet) and hermi != 2
-        def vind(dm1, kshift=0):
-            assert kshift == 0
-            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpt,
+        def vind(dm1):
+            dm1_shape = dm1.shape
+            nao = dm1_shape[-1]
+            dm1 = dm1.reshape(1,1,nao,nao)
+            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpts,
                             with_j=with_j, with_ecoul=False)
-            return vhf.view(cp.ndarray)
+            return vhf.view(cp.ndarray).reshape(dm1_shape)
         return vind
-
-    def newton(self):
-        from gpu4pyscf.pbc.scf import newton_ah
-        return newton_ah.newton(self)
 
 def normalize_dm_(mf, dm, s1e=None):
     '''

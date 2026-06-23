@@ -124,9 +124,10 @@ class UHF(pbchf.SCF):
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
     mulliken_meta_spin = NotImplemented
-    canonicalize = NotImplemented
+    canonicalize = mol_uhf.UHF.canonicalize
     spin_square = mol_uhf.UHF.spin_square
     stability = NotImplemented
+    newton = mol_uhf.UHF.newton
 
     dip_moment = NotImplemented
     to_ks = NotImplemented
@@ -183,11 +184,13 @@ class UHF(pbchf.SCF):
                      with_j=True, hermi=0, max_memory=None, with_nlc=False):
         from gpu4pyscf.pbc.scf.kuhf import _get_veff
         cell = self.cell
-        kpt = self.kpt
+        kpts = self.kpt.reshape(1, 3)
         with_j = with_j and hermi != 2
-        def vind(dm1, kshift=0):
-            assert kshift == 0
-            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpt,
+        def vind(dm1):
+            dm1_shape = dm1.shape
+            nao = dm1_shape[-1]
+            dm1 = dm1.reshape(2,1,1,nao,nao)
+            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpts,
                             with_j=with_j, with_ecoul=False)
-            return vhf.view(cp.ndarray)
+            return vhf.view(cp.ndarray).reshape(dm1_shape)
         return vind

@@ -144,7 +144,7 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
         if mo_coeff is None: mo_coeff = self.mo_coeff
         if mo_occ is None: mo_occ = self.mo_occ
         cell = self.cell
-        kpt = self.kpt
+        kpts = self.kpt.reshape(1, 3)
 
         if with_nlc and self.do_nlc():
             raise NotImplementedError
@@ -155,25 +155,27 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
         spin = 1
         dm0 = self.make_rdm1(mo_coeff, mo_occ)
         rho0, vxc, fxc = ni.cache_xc_kernel1(
-            cell, self.grids, self.xc, dm0, spin, kpt)
+            cell, self.grids, self.xc, dm0[:,None], spin, kpts)
+        nao = dm0.shape[-1]
         dm0 = None
 
         with_j = with_j and hermi != 2
         j_in_xc = isinstance(ni, (multigrid_v2.MultiGridNumInt,
                                   multigrid.MultiGridNumInt))
 
-        def vind(dm1, kshift=0):
-            assert kshift == 0
+        def vind(dm1):
+            dm1_shape = dm1.shape
+            dm1 = dm1.reshape(2,1,1,nao,nao)
             if with_j:
                 v1 = ni.nr_uks_fxc(cell, self.grids, self.xc, dm0, dm1, hermi,
-                                   fxc, kpt, with_j=j_in_xc)
+                                   fxc, kpts, with_j=j_in_xc)
             else:
                 v1 = cp.zeros_like(dm1)
 
-            vj, vk = krks._get_jk(self, cell, dm1, hermi, kpt, with_j=not j_in_xc)[:2]
+            vj, vk = krks._get_jk(self, cell, dm1, hermi, kpts, with_j=not j_in_xc)[:2]
             if with_j and not j_in_xc:
                 v1 += vj[0] + vj[1]
             if hybrid:
                 v1 -= vk
-            return v1
+            return v1.reshape(dm1_shape)
         return vind

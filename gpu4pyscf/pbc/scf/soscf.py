@@ -23,7 +23,7 @@ from gpu4pyscf.scf import soscf as mol_soscf
 from gpu4pyscf.scf.soscf import _CIAH_SOSCF
 
 def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
-    nkpts, nmo = mo_occ.shape
+    nkpts, nao, nmo = mo_coeff.shape
     fock = contract('kpq,kpi->kiq', fock_ao, mo_coeff.conj())
     fock = contract('kiq,kqj->kij', fock, mo_coeff)
 
@@ -33,8 +33,8 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
     nvir = nmo - nocc
     aligned = all(nocc[0] == nocc)
     if aligned:
-        orbo = mo_coeff.transpose(0,2,1)[omask].transpose(0,2,1)
-        orbv = mo_coeff.transpose(0,2,1)[vmask].transpose(0,2,1)
+        orbo = mo_coeff.transpose(0,2,1)[omask].reshape(nkpts,-1,nao).transpose(0,2,1)
+        orbv = mo_coeff.transpose(0,2,1)[vmask].reshape(nkpts,-1,nao).transpose(0,2,1)
     else:
         orbo = [mo_coeff[k][:,omask[k]] for k in range(nkpts)]
         orbv = [mo_coeff[k][:,vmask[k]] for k in range(nkpts)]
@@ -53,10 +53,10 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
     def h_op(x1):
         x1 = _split_matrices(x1, nvir, nocc)
         if aligned:
-            dm1 = contract('kij,qj->kiq', x1*2, orbo.conj())
-            dm1 = contract('kiq,pi->kpq', dm1, orbv)
+            dm1 = contract('kij,kqj->kiq', x1*2, orbo.conj())
+            dm1 = contract('kiq,kpi->kpq', dm1, orbv)
             dm1 = transpose_sum(dm1)
-            v1 = vind(dm1)
+            v1 = vind(dm1.reshape(1,nkpts,nao,nao))[0]
             x2 = contract('kpq,kqj->kpj', v1, orbo)
             x2 = contract('kpj,kpi->kij', x2, orbv.conj()) * 2
             x2 += contract('kps,ksq->kpq', fvv, x1*2)
@@ -66,7 +66,7 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
             dm1 = cp.array([orbv[k].dot(x1[k]*2).dot(orbo[k].conj().T)
                             for k in range(nkpts)])
             dm1 = transpose_sum(dm1)
-            v1 = vind(dm1)
+            v1 = vind(dm1.reshape(1,nkpts,nao,nao))[0]
             x2 = [None] * nkpts
             for k in range(nkpts):
                 x2[k] = orbv[k].conj().T.dot(v1[k].dot(orbo[k])) * 2
@@ -91,10 +91,10 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
 
     aligned = all(nocca[0] == nocca) and all(noccb[0] == noccb)
     if aligned:
-        orboa = mo_coeff[0].transpose(0,2,1)[omaska].transpose(0,2,1)
-        orbva = mo_coeff[0].transpose(0,2,1)[vmaska].transpose(0,2,1)
-        orbob = mo_coeff[1].transpose(0,2,1)[omaskb].transpose(0,2,1)
-        orbvb = mo_coeff[1].transpose(0,2,1)[vmaskb].transpose(0,2,1)
+        orboa = mo_coeff[0].transpose(0,2,1)[omaska].reshape(nkpts,-1,nao).transpose(0,2,1)
+        orbva = mo_coeff[0].transpose(0,2,1)[vmaska].reshape(nkpts,-1,nao).transpose(0,2,1)
+        orbob = mo_coeff[1].transpose(0,2,1)[omaskb].reshape(nkpts,-1,nao).transpose(0,2,1)
+        orbvb = mo_coeff[1].transpose(0,2,1)[vmaskb].reshape(nkpts,-1,nao).transpose(0,2,1)
     else:
         orboa = [mo_coeff[0,k][:,omaska[k]] for k in range(nkpts)]
         orbva = [mo_coeff[0,k][:,vmaska[k]] for k in range(nkpts)]
@@ -106,10 +106,10 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
     foob = _split_matrices(fock[1][omaskb[:,:,None] & omaskb[:,None]], noccb)
     fvvb = _split_matrices(fock[1][vmaskb[:,:,None] & vmaskb[:,None]], nvirb)
 
-    vo_idxa = cp.where(vmaska[:,:,None] & omaska[:,None])[0]
-    vo_idxb = cp.where(vmaskb[:,:,None] & omaskb[:,None])[0]
+    vo_idxa = cp.where((vmaska[:,:,None] & omaska[:,None]).ravel())[0]
+    vo_idxb = cp.where((vmaskb[:,:,None] & omaskb[:,None]).ravel())[0]
     tot_vopair_a = len(vo_idxa)
-    vo_idx = cp.append(vo_idxa, vo_idxb + tot_vopair_a)
+    vo_idx = cp.append(vo_idxa, fock[0].size + vo_idxb)
 
     g = fock.ravel()[vo_idx]
 
@@ -124,27 +124,27 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
         x1b = _split_matrices(x1[tot_vopair_a:], nvirb, noccb)
         dm1 = cp.empty((2,nkpts,nao,nao), dtype=x1.dtype)
         if aligned:
-            dm1a = contract('kij,qj->kiq', x1a*2, orboa.conj())
-            dm1a = contract('kiq,pi->kpq', dm1a, orbva, out=dm1[0])
-            dm1b = contract('kij,qj->kiq', x1b*2, orbob.conj())
-            dm1b = contract('kiq,pi->kpq', dm1b, orbvb, out=dm1[1])
+            dm1a = contract('kij,kqj->kiq', x1a, orboa.conj())
+            dm1a = contract('kiq,kpi->kpq', dm1a, orbva, out=dm1[0])
+            dm1b = contract('kij,kqj->kiq', x1b, orbob.conj())
+            dm1b = contract('kiq,kpi->kpq', dm1b, orbvb, out=dm1[1])
         else:
             for k in range(nkpts):
                 orbva[k].dot(x1a[k]).dot(orboa[k].conj().T, out=dm1[0,k])
                 orbvb[k].dot(x1b[k]).dot(orbob[k].conj().T, out=dm1[1,k])
 
-        transpose_sum(dm1.reshape(2*nkpts,nao,nao), inplace=True)
-        v1 = vind(dm1)
+        dm1 = transpose_sum(dm1.reshape(2*nkpts,nao,nao), inplace=True)
+        v1 = vind(dm1.reshape(2,1,nkpts,nao,nao))[:,0]
 
         if aligned:
             x2a = contract('kpq,kqj->kpj', v1[0], orboa)
-            x2a = contract('kpj,kpi->kij', x2a, orbva.conj()) * 2
-            x2a += contract('kps,ksq->kpq', fvva, x1a*2)
-            x2a -= contract('kps,krp->krs', fooa, x1a*2)
+            x2a = contract('kpj,kpi->kij', x2a, orbva.conj())
+            x2a += contract('kps,ksq->kpq', fvva, x1a)
+            x2a -= contract('kps,krp->krs', fooa, x1a)
             x2b = contract('kpq,kqj->kpj', v1[1], orbob)
-            x2b = contract('kpj,kpi->kij', x2b, orbvb.conj()) * 2
-            x2b += contract('kps,ksq->kpq', fvvb, x1b*2)
-            x2b -= contract('kps,krp->krs', foob, x1b*2)
+            x2b = contract('kpj,kpi->kij', x2b, orbvb.conj())
+            x2b += contract('kps,ksq->kpq', fvvb, x1b)
+            x2b -= contract('kps,krp->krs', foob, x1b)
             x2 = cp.append(x2a.ravel(), x2b.ravel())
         else:
             x2a = [None] * nkpts

@@ -32,7 +32,6 @@ from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
-from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.gto.cell import get_Gv
 from gpu4pyscf.pbc.tools import pbc as pbc_tools
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
@@ -1707,11 +1706,6 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             vmat = vmat[:,:,0]
         return vmat
 
-    def cache_xc_kernel(self, cell, grids, xc_code, mo_coeff, mo_occ, spin=0,
-                        kpts=None, is_rhf=None):
-        dm = make_rdm1(mo_coeff, mo_occ) FIXME
-        return self.cache_xc_kernel1(cell, grids, xc_code, dm, spin, kpts)
-
     def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
         if isinstance(kpts, KPoints):
             raise NotImplementedError
@@ -1743,6 +1737,8 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
 
         vxc, fxc = self.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype, spin=spin)[1:3]
         return rho, vxc, fxc
+
+    cache_xc_kernel = NotImplemented
 
     to_gpu = utils.to_gpu
     device = utils.device

@@ -665,12 +665,8 @@ def cache_xc_kernel1(ni, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=Non
         ao_deriv = 0
         nvar = 1
 
-    kpts, is_single_kpt = _check_kpts(kpts, dm)
+    kpts, is_single_kpt = _check_kpts(kpts)
     dms = _format_dms(dm, kpts)
-    if is_single_kpt:
-        assert isinstance(ni, NumInt)
-    else:
-        assert ni.__class__ == KNumInt
     if is_rhf is None:
         is_rhf = len(dms) == 1
     elif is_rhf:
@@ -852,11 +848,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     nr_uks_fxc = nr_uks_fxc
     nr_rks_fxc_st = nr_rks_fxc_st
     cache_xc_kernel1 = cache_xc_kernel1
-
-    def cache_xc_kernel(self, cell, grids, xc_code, mo_coeff, mo_occ, spin=0,
-                        kpts=None):
-        dm = make_rdm1(mo_coeff, mo_occ) FIXME
-        return self.cache_xc_kernel1(cell, grids, xc_code, dm, spin, kpts)
+    cache_xc_kernel = NotImplemented
 
     to_gpu = utils.to_gpu
     device = utils.device

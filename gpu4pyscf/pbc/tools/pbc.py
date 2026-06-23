@@ -18,7 +18,7 @@ from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
-from gpu4pyscf.lib.cupy_helper import asarray, batched_vec3_norm2
+from gpu4pyscf.lib.cupy_helper import asarray, batched_vec_norm2
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_weights
 
 def fft(f, mesh):
@@ -207,7 +207,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
         kG = Gv
 
     # absG2 = cp.einsum('gi,gi->g', kG, kG)
-    absG2 = batched_vec3_norm2(kG)
+    absG2 = batched_vec_norm2(kG)
     G0_idx = 0
     if not is_gamma_point:
         G0_idx = None

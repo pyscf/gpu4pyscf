@@ -246,7 +246,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
@@ -664,7 +664,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         is_real = True

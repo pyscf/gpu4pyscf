@@ -911,6 +911,9 @@ class SCF(pyscf_lib.StreamObject):
         if dm is None: dm = self.make_rdm1()
         return hf_cpu.quad_moment(mol, cupy.asnumpy(dm), unit, origin, verbose)
 
+    def soscf(self):
+        return self.newton()
+
     def remove_soscf(self):
         if hasattr(self, 'undo_soscf'):
             return self.undo_soscf()

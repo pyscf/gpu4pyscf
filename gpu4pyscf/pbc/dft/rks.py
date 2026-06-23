@@ -288,7 +288,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
         if mo_coeff is None: mo_coeff = self.mo_coeff
         if mo_occ is None: mo_occ = self.mo_occ
         cell = self.cell
-        kpt = self.kpt
+        kpts = self.kpt.reshape(1, 3)
 
         if with_nlc and self.do_nlc():
             raise NotImplementedError
@@ -302,9 +302,10 @@ class RKS(KohnShamDFT, pbchf.RHF):
             spin = 1
         dm0 = self.make_rdm1(mo_coeff, mo_occ)
         rho0, vxc, fxc = ni.cache_xc_kernel1(
-            cell, self.grids, self.xc, dm0, spin, kpt, is_rhf=True)
+            cell, self.grids, self.xc, dm0[None], spin, kpts, is_rhf=True)
         if singlet is not None:
             fxc *= .5
+        nao = dm0.shape[-1]
         dm0 = None
 
         with_j = (singlet is None or singlet) and hermi != 2
@@ -312,20 +313,22 @@ class RKS(KohnShamDFT, pbchf.RHF):
                                   multigrid.MultiGridNumInt))
 
         def vind(dm1):
+            dm1_shape = dm1.shape
+            dm1 = dm1.reshape(1,1,nao,nao)
             if with_j:
                 if singlet is None:
                     v1 = ni.nr_rks_fxc(cell, self.grids, self.xc, dm0, dm1, hermi,
-                                       fxc, kpt, with_j=j_in_xc)
+                                       fxc, kpts, with_j=j_in_xc)
                 else:
                     v1 = ni.nr_rks_fxc(cell, self.grids, self.xc, dm0, dm1, hermi,
-                                       singlet, fxc, kpt, with_j=j_in_xc)
+                                       singlet, fxc, kpts, with_j=j_in_xc)
             else:
                 v1 = cp.zeros_like(dm1)
 
-            vj, vk = _get_jk(self, cell, dm1, hermi, kpt, with_j=not j_in_xc)[:2]
+            vj, vk = _get_jk(self, cell, dm1, hermi, kpts, with_j=not j_in_xc)[:2]
             if with_j and not j_in_xc:
                 v1 += vj
             if hybrid:
                 v1 -= .5 * vk
-            return v1
+            return v1.reshape(dm1_shape)
         return vind
