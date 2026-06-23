@@ -592,7 +592,7 @@ def _orbital_pair_cart2sph(mol, arrays, hermi=1, bas_ij_idx=None):
         ctypes.c_int(naux), ctypes.c_int(mol.nbas),
         ctypes.c_int(nao), ctypes.c_int(compressed))
     if err != 0:
-        raise RuntimeError(f'int3c2e_cart2sph kernel failed')
+        raise RuntimeError('int3c2e_cart2sph kernel failed')
     if is_complex:
         out = out.view(np.complex128)
     out = cp.asarray(out.transpose(2,0,1), order='C')
