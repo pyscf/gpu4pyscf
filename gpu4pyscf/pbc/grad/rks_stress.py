@@ -438,9 +438,9 @@ def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
                             qkl = pseudo.pp._qli(G_rad*rl, l, k)
                             pYlm[k] = pYlm_part.T * qkl
                 if p1 > 0:
-                    SPG_lmi = buf[:p1]
+                    SPG_lmi = asarray(buf[:p1])
                     SPG_lmi *= SI[ia].conj()
-                    SPG_lm_aoGs = asarray(SPG_lmi).dot(aokG)
+                    SPG_lm_aoGs = SPG_lmi.dot(aokG)
                     rho = SPG_lm_aoGs.dot(dm).dot(SPG_lm_aoGs.conj().T).real.get()
                     p1 = 0
                     for l, proj in enumerate(pp[5:]):

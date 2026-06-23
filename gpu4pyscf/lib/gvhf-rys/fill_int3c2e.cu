@@ -1677,7 +1677,7 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
                      int nshl_pair, int naux, int nbas, int nao_sph,
                      int pair_compressed)
 {
-    constexpr int threads = 512;
+    constexpr int threads = 256;
     int aux_batches = (naux + threads - 1) / threads;
     dim3 blocks(nshl_pair, aux_batches);
     cart2sph_kernel<<<blocks, threads>>>(

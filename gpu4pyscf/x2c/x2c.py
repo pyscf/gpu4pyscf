@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+__all__ = [
+    'X2C1E_GSCF',
+]
+
 import ctypes
 import numpy as np
 import cupy as cp
@@ -29,11 +33,9 @@ from gpu4pyscf.df.int3c2e_bdiv import libvhf_rys, contract_int3c2e_auxvec
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import utils
 
-LINEAR_DEP_THRESHOLD = 1e-9
+libvhf_rys.int3c2e_cart2sph.restype = ctypes.c_int
 
-__all__ = [
-    'X2C1E_GSCF',
-]
+LINEAR_DEP_THRESHOLD = 1e-9
 
 class X2CHelperBase(lib.StreamObject):
     '''2-component X2c (including spin-free and spin-dependent terms) in
@@ -579,7 +581,7 @@ def _orbital_pair_cart2sph(mol, arrays, hermi=1, bas_ij_idx=None):
     naux = arrays.shape[2]
     out = cp.zeros((nao, nao, naux))
     compressed = 0
-    libvhf_rys.int3c2e_cart2sph(
+    err = libvhf_rys.int3c2e_cart2sph(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.cast(arrays.data.ptr, ctypes.c_void_p),
         ctypes.byref(rys_envs),
@@ -589,6 +591,8 @@ def _orbital_pair_cart2sph(mol, arrays, hermi=1, bas_ij_idx=None):
         ctypes.c_int(len(bas_ij_idx)),
         ctypes.c_int(naux), ctypes.c_int(mol.nbas),
         ctypes.c_int(nao), ctypes.c_int(compressed))
+    if err != 0:
+        raise RuntimeError(f'int3c2e_cart2sph kernel failed')
     if is_complex:
         out = out.view(np.complex128)
     out = cp.asarray(out.transpose(2,0,1), order='C')
