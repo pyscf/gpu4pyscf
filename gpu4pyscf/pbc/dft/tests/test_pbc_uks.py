@@ -118,7 +118,9 @@ class KnownValues(unittest.TestCase):
     def test_gga_fft_with_kpt(self):
         np.random.seed(1)
         k = np.random.random((1, 3))
-        mf = pbcdft.KUKS(cell, xc='pbe0', kpts=k).run(conv_tol=1e-10)
+        mf = pbcdft.KUKS(cell, xc='pbe0', kpts=k)
+        mf.time_reversal_symmetry = False
+        mf.run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 

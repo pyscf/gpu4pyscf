@@ -952,7 +952,7 @@ class PBCJKMatrixOpt:
             nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
-            # Are dms always real for super-mol?
+            # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
             assert absmax(dms.imag) < cell.precision*5e2
             expLk = None
             dms = dms.real
@@ -1381,7 +1381,7 @@ class PBCJKMatrixOpt:
             nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
-            # Are dms always real for super-mol?
+            # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
             assert absmax(dms.imag) < cell.precision*5e2
             expLk = None
             dms = dms.real

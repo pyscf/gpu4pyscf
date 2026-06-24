@@ -21,11 +21,13 @@ __all__ = [
 ]
 
 import functools
+import itertools
 import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
 from pyscf.pbc import tools
+from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
@@ -37,6 +39,7 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -120,10 +123,17 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         mf.scf_summary['gap'] = gap
         if mf.verbose >= logger.INFO:
             if homo+1e-3 > lumo:
-                logger.warn(mf, 'HOMO %.12g == LUMO %.12g', homo, lumo)
+                logger.warn(mf, 'HOMO %.12g >= LUMO %.12g', homo, lumo)
             else:
                 logger.info(mf, '  HOMO = %.12g  LUMO = %.12g  gap/eV = %.5f',
                             homo, lumo, gap)
+
+        if mf.time_reversal_symmetry and homo+1e-5 > lumo:
+            idx = np.array([(k, k_conj) for k, k_conj in mf.iter_kpt_pairs()
+                            if k_conj is not None])
+            if not cp.array_equal(mo_occ_kpts[idx[:,0]], mo_occ_kpts[idx[:,1]]):
+                logger.warn(mf, 'Time-reversal symmetry in the k-sampling is broken. '
+                            'k/-k pairs have unequal occupations.')
     elif nocc > nmo:
         raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
     return mo_occ_kpts
@@ -134,6 +144,18 @@ def get_grad(mo_coeff_kpts, mo_occ_kpts, fock):
     note that occ and virt indices of different k pts now occur
     in sequential patches of the 1D array
     '''
+    omask = mo_occ_kpts > 0
+    nocc = cp.count_nonzero(omask, axis=1).get()
+    if all(nocc[0] == nocc):
+        vmask = ~omask
+        nkpts, nao = mo_coeff_kpts.shape[:2]
+        o = mo_coeff_kpts.transpose(0,2,1)[omask].reshape(nkpts,-1,nao)
+        v = mo_coeff_kpts.transpose(0,2,1)[vmask].reshape(nkpts,-1,nao)
+        g = contract('kpq,kjq->kpj', fock, o)
+        g = contract('kpj,kip->kij', g, v.conj())
+        g *= 2
+        return g.ravel()
+
     grad_kpts = [pbchf.get_grad(c, o, f).ravel()
                  for c, o, f in zip(mo_coeff_kpts, mo_occ_kpts, fock)]
     return cp.hstack(grad_kpts)
@@ -275,6 +297,7 @@ class KSCF(pbchf.SCF):
             The sampling k-points in Cartesian coordinates, in units of 1/Bohr.
     '''
     conv_tol_grad = khf_cpu.KSCF.conv_tol_grad
+    time_reversal_symmetry = True
 
     # Range separation JK builder
     rsjk = None
@@ -284,7 +307,7 @@ class KSCF(pbchf.SCF):
     _numint = None
 
     _keys = {'cell', 'exx_built', 'exxdiv', 'with_df', 'rsjk', 'j_engine',
-             '_numint', 'kpts'}
+             '_numint', 'kpts', 'time_reversal_symmetry'}
 
     def __init__(self, cell, kpts=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
@@ -450,12 +473,45 @@ class KSCF(pbchf.SCF):
             fock = self.get_hcore(self.cell, self.kpts) + self.get_veff(self.cell, dm1)
         return get_grad(mo_coeff_kpts, mo_occ_kpts, fock)
 
-    def check_linear_dependency(self, s, verbose=None):
+    def iter_kpt_pairs(self, time_reversal_symmetry=None, nkpts=None):
+        '''
+        Iterate over time-reversal-related k-point pairs.
+
+        When self.time_reversal_symmetry is enabled, yields tuples (ik, ik_conj),
+        where ik and ik_conj are both the index of self.kpts. If the -k is not
+        present in self.kpts, ik_conj is None.
+
+        If self.time_reversal_symmetry is disabled, every k-point is yielded
+        once with ik_conj = None.
+        '''
+        cell = self.cell
+        kpts = self.kpts
+
+        if time_reversal_symmetry is None:
+            time_reversal_symmetry = self.time_reversal_symmetry
+
+        if nkpts is None:
+            nkpts = len(kpts)
+
+        if not time_reversal_symmetry:
+            return itertools.zip_longest(range(nkpts), ())
+
+        kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=False)
+        if nkpts == np.prod(kmesh):
+            return [x[:2] for x in kk_adapted_iter(kmesh)]
+        else:
+            return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
+
+    def check_linear_dependency(self, s, verbose=None, time_reversal_symmetry=None):
         log = logger.new_logger(self, verbose)
-        x_kpts = []
+        nkpts = len(s)
+        x_kpts = [None] * nkpts
         cond_kpts = []
         discard = False
-        for k, s_k in enumerate(s):
+        for k, k_conj in self.iter_kpt_pairs(time_reversal_symmetry, nkpts):
+            s_k = s[k]
+            if k == k_conj:
+                s_k = s_k.real
             e, v = eigh(s_k)
             abs_e = abs(e).get()
             emax = abs_e.max()
@@ -472,7 +528,9 @@ class KSCF(pbchf.SCF):
                     discard = True
             else:
                 x = v / cp.sqrt(e)
-            x_kpts.append(x)
+            x_kpts[k] = x
+            if k_conj is not None and k != k_conj:
+                x_kpts[k_conj] = x.conj()
 
         if any(c > 1e10 for c in cond_kpts):
             log.warn('Singularity detected in the overlap matrix. '
@@ -488,17 +546,25 @@ class KSCF(pbchf.SCF):
             x_orth = cp.stack(x_kpts, out=x_orth)
         return x_orth
 
-    def eig(self, h_kpts, s_kpts, overwrite=False, x=None):
+    def eig(self, h_kpts, s_kpts, overwrite=False, x=None, time_reversal_symmetry=None):
         nkpts, nao = h_kpts.shape[:2]
         eig_kpts = cp.empty((nkpts, nao))
         mo_coeff_kpts = cp.empty((nkpts, nao, nao), dtype=h_kpts.dtype)
+
         if x is None:
-            for k in range(nkpts):
+            count = 0
+            for k, k_conj in self.iter_kpt_pairs(time_reversal_symmetry, nkpts):
                 e, c = eigh(h_kpts[k], s_kpts[k], overwrite)
                 eig_kpts[k] = e
                 mo_coeff_kpts[k] = c
+                count += 1
+                if k_conj is not None and k != k_conj:
+                    eig_kpts[k_conj] = e
+                    mo_coeff_kpts[k_conj] = c.conj()
+                    count += 1
         else:
-            for k in range(nkpts):
+            count = 0
+            for k, k_conj in self.iter_kpt_pairs(time_reversal_symmetry, nkpts):
                 xk = x[k]
                 _, nmo_k = xk.shape
                 ek, ck = cp.linalg.eigh(xk.T.conj() @ h_kpts[k] @ xk)
@@ -507,6 +573,12 @@ class KSCF(pbchf.SCF):
                 if nmo_k < nao:
                     eig_kpts[k, nmo_k:] = abs(ek.max()) * 2 + 1e5
                     mo_coeff_kpts[k, :, nmo_k:] = 0
+                count += 1
+                if k_conj is not None and k != k_conj:
+                    eig_kpts[k_conj] = eig_kpts[k]
+                    mo_coeff_kpts[k_conj] = mo_coeff_kpts[k].conj()
+                    count += 1
+        assert count == nkpts, 'mf.kpts and the input h matrices are inconsistent'
         return eig_kpts, mo_coeff_kpts
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):
@@ -548,12 +620,14 @@ class KSCF(pbchf.SCF):
         fock = cp.asarray(self.get_hcore(cell, kpts_band))
         fock += self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
         s1e = self.get_ovlp(cell, kpts_band)
-        mo_energy, mo_coeff = pbchf.eigh_with_canonical_orth(fock, s1e)
+
+        x = self.check_linear_dependency(s1e, time_reversal_symmetry=False)
+        e, c = self.eig(fock, s1e, overwrite=True, x=x, time_reversal_symmetry=False)
 
         if single_kpt_band:
-            mo_energy = mo_energy[0]
-            mo_coeff = mo_coeff[0]
-        return mo_energy, mo_coeff
+            e = e[0]
+            c = c[0]
+        return e, c
 
     get_init_guess = NotImplemented
     init_guess_by_minao = _cast_mol_init_guess(pbchf.SCF.init_guess_by_minao)
