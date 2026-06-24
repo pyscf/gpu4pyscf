@@ -618,17 +618,17 @@ class KnownValues(unittest.TestCase):
         xc = 'lda,'
         ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
         v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         xc = 'b88,'
         ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
         v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         xc = 'r2scan,'
         ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
         v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         kpts = cell.make_kpts([3,1,1])
         dm_he = np.random.rand(len(kpts), nao, nao)
@@ -646,17 +646,17 @@ class KnownValues(unittest.TestCase):
         xc = 'lda,'
         ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
         v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         xc = 'b88,'
         ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
         v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         xc = 'r2scan,'
         ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
         v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
     def test_nr_uks_fxc(self):
         cell = cell_he
@@ -678,17 +678,17 @@ class KnownValues(unittest.TestCase):
         xc = 'lda,'
         ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
         v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         xc = 'b88,'
         ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
         v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         xc = 'r2scan,'
         ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
         v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         kpts = cell.make_kpts([3,1,1])
         dm_he = np.random.rand(2, len(kpts), nao, nao)
@@ -706,17 +706,17 @@ class KnownValues(unittest.TestCase):
         xc = 'lda,'
         ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
         v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         xc = 'b88,'
         ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
         v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
         xc = 'r2scan,'
         ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
         v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(v-ref).max(), 0, 10)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")

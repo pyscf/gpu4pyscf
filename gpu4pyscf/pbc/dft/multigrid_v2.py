@@ -1442,7 +1442,7 @@ def get_rho(ni, dm, kpts=None):
     # computing rhoR with IFFT, the weight factor is not needed.
     rhoR = ifft_in_place(density.reshape(-1, *mesh)).real / weight
     assert rhoR.size == ngrids
-    return rhoR.reval()
+    return rhoR.ravel()
 
 def get_veff_ip1(
     ni,

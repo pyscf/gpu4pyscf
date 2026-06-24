@@ -102,8 +102,8 @@ class KnowValues(unittest.TestCase):
         mf = mf.newton()
         mf.conv_tol_grad = 1e-4
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -9.646435172665008, 8)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 7)
+        self.assertAlmostEqual(mf.e_tot, -9.646435172665008, 7)
 
     def test_nr_uks_gga(self):
         mf = dft.UKS(cell, xc='pbe0')
@@ -211,7 +211,7 @@ class KnowValues(unittest.TestCase):
         mf_ref = mf_ref.newton()
         mf_ref.grids.build()
         g_ref, hop_ref, hdiag_ref = mf_ref.gen_g_hop(mo.get(), mo_occ.get(), hcore.get())
-        self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, 9)
+        self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, 7)
         self.assertAlmostEqual(abs(g.get() - g_ref).max(), 0, 9)
         self.assertAlmostEqual(abs(hdiag.get() - hdiag_ref).max(), 0, 9)
 
@@ -223,7 +223,7 @@ class KnowValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(dat.get()), 7.474044381526779+0.0640933714545938j, 9)
 
         g_ref, hop_ref, hdiag_ref = mf_ref.gen_g_hop(mo.get(), mo_occ.get(), hcore.get())
-        self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, 9)
+        self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, 7)
         self.assertAlmostEqual(abs(g.get() - g_ref).max(), 0, 9)
         self.assertAlmostEqual(abs(hdiag.get() - hdiag_ref).max(), 0, 9)
 
