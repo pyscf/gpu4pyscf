@@ -197,7 +197,9 @@ class KnownValues(unittest.TestCase):
         cell = self.cell
         np.random.seed(1)
         k = np.random.random((1, 3))
-        mf = pbcdft.KRKS(cell, xc='pbe0', kpts=k).run(conv_tol=1e-10)
+        mf = pbcdft.KRKS(cell, xc='pbe0', kpts=k)
+        mf.time_reversal_symmetry = False
+        mf.run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
