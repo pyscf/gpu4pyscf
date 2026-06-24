@@ -29,6 +29,7 @@ from gpu4pyscf.x2c import x2c
 from gpu4pyscf.scf import hf, ghf
 from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec
+from gpu4pyscf.lib import utils
 
 __all__ = [
     'sfx2c1e'
@@ -144,9 +145,12 @@ class SFX2C1E_SCF(hf.SCF):
             dst = dst.sfx2c()
         return hf.SCF._transfer_attrs_(self, dst)
 
+    device = utils.device
+    to_gpu = utils.to_gpu
+
     def to_cpu(self):
         mf = self.undo_x2c().to_cpu().sfx2c1e()
-        return lib.to_cpu(self, mf)
+        return utils.to_cpu(self, mf)
 
 
 class SpinFreeX2CHelper(x2c.X2CHelperBase):

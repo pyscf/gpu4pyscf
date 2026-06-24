@@ -60,8 +60,11 @@ class KnownValues(unittest.TestCase):
         e = myx2c.kernel()
         self.assertAlmostEqual(e, -76.075429682026396, 9)
 
-        mf = myx2c.undo_x2c().run()
+        mf = myx2c.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, -76.075429682026396, 9)
+
+        mf = myx2c.undo_x2c().run()
+        self.assertAlmostEqual(mf.e_tot, mol.RHF().kernel(), 9)
 
     def test_sfx2c1e_cart(self):
         pmol = mol.copy()

@@ -45,6 +45,10 @@ class X2CHelperBase(lib.StreamObject):
     xuncontract = x2c_cpu.X2CHelperBase.xuncontract
     basis = x2c_cpu.X2CHelperBase.basis
 
+    device = utils.device
+    to_gpu = utils.to_gpu
+    to_cpu = utils.to_cpu
+
     __init__ = x2c_cpu.X2CHelperBase.__init__
     dump_flags = x2c_cpu.X2CHelperBase.dump_flags
     reset = x2c_cpu.X2CHelperBase.reset
@@ -355,9 +359,12 @@ class X2C1E_GSCF(_X2C_SCF):
     def to_ks(self, xc='HF'):
         raise NotImplementedError
 
+    device = utils.device
+    to_gpu = utils.to_gpu
+
     def to_cpu(self):
         mf = self.undo_x2c().to_cpu().x2c1e()
-        return lib.to_gpu(self, mf)
+        return utils.to_cpu(self, mf)
 
 
 def _sqrt(a, tol=1e-14):
