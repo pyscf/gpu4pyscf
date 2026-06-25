@@ -575,11 +575,15 @@ class Stream:
         return
 
     @property
-    def ptr(self):          return self._ptr
-    @property
-    def sycl_queue(self):   return self._sycl_queue
+    def ptr(self):
+        return self._ptr
 
-    def __int__(self):      return self._ptr
+    @property
+    def sycl_queue(self):
+        return self._sycl_queue
+
+    def __int__(self):
+        return self._ptr
 
     def __enter__(self):
         libgpu.sycl_set_device(ctypes.c_int(self._device_id))
@@ -611,10 +615,20 @@ def get_current_stream():
     return Stream()
 
 
-def get_device_count():     return len(_gpu_devices())
-def get_total_memory():     return libgpu.sycl_get_total_memory()
-def get_shared_memory():    return libgpu.sycl_get_shared_memory()
-def get_free_memory():      return libgpu.sycl_get_free_memory()
+def get_device_count():
+    return len(_gpu_devices())
+
+
+def get_total_memory():
+    return libgpu.sycl_get_total_memory()
+
+
+def get_shared_memory():
+    return libgpu.sycl_get_shared_memory()
+
+
+def get_free_memory():
+    return libgpu.sycl_get_free_memory()
 
 def get_compute_units():
     """Number of compute units (maps to CUDA multiProcessorCount).

@@ -17,7 +17,6 @@ import dpnp
 import dpctl
 import ctypes
 import os
-import ctypes
 
 # workspace size (lwork) provided by the cusolver*_bufferSize is an 32-bit
 # integer. For arrays above this dimension, the workspace size would overflow.
@@ -128,7 +127,7 @@ def eigh(h, s, overwrite=False):
             fn = libonemkl.onemkl_dsygvd_scratchpad_size
         else:
             fn = libonemkl.onemkl_zhegvd_scratchpad_size
-        status = fn(
+        fn(
             CUSOLVER_EIG_TYPE_1,
             n,
             n,

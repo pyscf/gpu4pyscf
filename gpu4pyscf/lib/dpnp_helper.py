@@ -931,33 +931,33 @@ def empty_mapped(shape, dtype=float, order='C'):
 
 def ndarray(shape, dtype=np.float64, buffer=None):
     # the next if-else logic for shape is required because of this:
-#     gpu4pyscf/scf/tests/test_diffuse_orbital.py:273: 
-# _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-# gpu4pyscf/grad/rhf.py:445: in kernel
-#     de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
-#          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# gpu4pyscf/grad/rhf.py:273: in grad_elec
-#     e2_grad = mf_grad.energy_ee(mol, dm0)
-#               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# gpu4pyscf/df/grad/rhf.py:363: in energy_ee
-#     return self.jk_energy_per_atom(dm, hermi=1)
-#            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# gpu4pyscf/df/grad/rhf.py:378: in jk_energy_per_atom
-#     return _jk_energy_per_atom(
-# gpu4pyscf/df/grad/rhf.py:98: in _jk_energy_per_atom
-#     compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
-#                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# gpu4pyscf/df/int3c2e_bdiv.py:210: in evaluate_j3c
-#     out = ndarray((nao_pair, naux), buffer=out)
-#           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# gpu4pyscf/lib/dpnp_helper.py:931: in ndarray
-#     out = dpnp.ndarray(shape, dtype, buffer=buffer)
-#           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# ../dpnp_sparse/dpnp/dpnp_array.py:145: in __init__
-#     self._array_obj = dpt.usm_ndarray(
-# dpnp/tensor/_usmarray.pyx:354: in dpnp.tensor._usmarray.usm_ndarray.__cinit__
-#     ???
-# E   TypeError: only integer scalar arrays can be converted to a scalar index
+    #     gpu4pyscf/scf/tests/test_diffuse_orbital.py:273:
+    # _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+    # gpu4pyscf/grad/rhf.py:445: in kernel
+    #     de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
+    #          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    # gpu4pyscf/grad/rhf.py:273: in grad_elec
+    #     e2_grad = mf_grad.energy_ee(mol, dm0)
+    #               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    # gpu4pyscf/df/grad/rhf.py:363: in energy_ee
+    #     return self.jk_energy_per_atom(dm, hermi=1)
+    #            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    # gpu4pyscf/df/grad/rhf.py:378: in jk_energy_per_atom
+    #     return _jk_energy_per_atom(
+    # gpu4pyscf/df/grad/rhf.py:98: in _jk_energy_per_atom
+    #     compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
+    #                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    # gpu4pyscf/df/int3c2e_bdiv.py:210: in evaluate_j3c
+    #     out = ndarray((nao_pair, naux), buffer=out)
+    #           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    # gpu4pyscf/lib/dpnp_helper.py:931: in ndarray
+    #     out = dpnp.ndarray(shape, dtype, buffer=buffer)
+    #           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    # ../dpnp_sparse/dpnp/dpnp_array.py:145: in __init__
+    #     self._array_obj = dpt.usm_ndarray(
+    # dpnp/tensor/_usmarray.pyx:354: in dpnp.tensor._usmarray.usm_ndarray.__cinit__
+    #     ???
+    # E   TypeError: only integer scalar arrays can be converted to a scalar index
         
     if isinstance(shape, (list, tuple)):
         shape = tuple(int(s) for s in shape)
@@ -1291,12 +1291,18 @@ def condense(opname, a, loc_x, loc_y=None):
 
     # Helper for a single window reduction
     def _reduce_window(win):
-        if   opname == 'sum':    return dpnp.sum(win)
-        elif opname == 'max':    return dpnp.max(win)
-        elif opname == 'min':    return dpnp.min(win)
-        elif opname == 'abssum': return dpnp.sum(dpnp.abs(win))
-        elif opname == 'absmax': return dpnp.max(dpnp.abs(win))
-        elif opname == 'norm':   return dpnp.sqrt(dpnp.sum(win * win))
+        if opname == 'sum':
+            return dpnp.sum(win)
+        elif opname == 'max':
+            return dpnp.max(win)
+        elif opname == 'min':
+            return dpnp.min(win)
+        elif opname == 'abssum':
+            return dpnp.sum(dpnp.abs(win))
+        elif opname == 'absmax':
+            return dpnp.max(dpnp.abs(win))
+        elif opname == 'norm':
+            return dpnp.sqrt(dpnp.sum(win * win))
         else:
             raise ValueError(opname)
 

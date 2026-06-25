@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import cmath
+import math
 import dpnp
 import ctypes
 
-# Load your custom SYCL-backed shared library
-# Define oneMKL function prototypes
-libonemkl = ctypes.CDLL('/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/gpu4pyscf/lib/libonemkl_helper.so')
+# Load the oneMKL helper shared library from gpu4pyscf/lib/
+_lib_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'lib'))
+libonemkl = ctypes.CDLL(os.path.join(_lib_dir, 'libonemkl_helper.so'))
 
 libonemkl.onemkl_trsm.argtypes = [
     ctypes.c_void_p,  # A
@@ -200,7 +203,6 @@ def lu_solve(lu_and_piv, b, trans=0, overwrite_b=False, check_finite=True):
 
 # Source: https://github.com/cupy/cupy/blob/main/cupyx/scipy/linalg/_matfuncs.py#L45
 
-import math
 th13 = 5.37
 
 b = [64764752532480000.,

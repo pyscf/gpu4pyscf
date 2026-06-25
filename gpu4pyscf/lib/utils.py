@@ -173,7 +173,7 @@ def format_sys_info():
             f'PySCF path  {pyscf_info["path"]}',
             'SYCL / DPNP / DPCTL Environment',
             f'    Device name {dev_name}',
-#            f'    Device platform version {dev_platform_version}',
+            # f'    Device platform version {dev_platform_version}',
             f'    Device driver version {dev_driver_version}',
             f'    Device max alloc size {dev_global_mem_bytes / 1024**3:.2f} GB',
             f'    DPNP version {dpnp.__version__}',
