@@ -64,7 +64,7 @@ def _contract_einsum(pattern, a, b, alpha, beta, out=None, einsum=cupy.einsum):
         tmp = einsum(pattern, a, b)
         tmp *= alpha
         out += tmp
-    return cupy.asarray(out, order='C')
+    return out
 
 def contraction(
     pattern, a, b, alpha, beta,

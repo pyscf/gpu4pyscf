@@ -15,7 +15,9 @@
 import numpy as np
 import cupy as cp
 import pyscf
+from pyscf import lib
 from gpu4pyscf import dft, scf
+from gpu4pyscf.df.grad import rhf as rhf_grad
 import unittest
 
 atom = '''
@@ -40,6 +42,7 @@ def setUpModule():
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
+                C2   0.   .5      .5
         ''',
         basis={'C1': ('ccpvdz',
                       [[3, [1.1, 1.]],
@@ -47,13 +50,13 @@ def setUpModule():
                      ),
                'C2': 'ccpvdz'}
     )
-    auxmol = mol.copy()
+    auxmol = mol.copy(False)
     auxmol.basis = {
         'C1':'''
 C    S
  50.0000000000           1.0000000000
 C    S
- 18.338091700            0.60189974570
+  20.338091700            0.60189974570
 C    S
   9.5470634000           0.19165883840
 C    S
@@ -81,15 +84,16 @@ C    P
 C    P
   0.4000000000           1.0000000000
 C    D
-  0.1995412500           1.0000000000 ''',
-        'C2':[[0, [9.5, 1.]],
+  0.3995412500           1.0000000000 ''',
+        'C2':[
               [0, [3.5, 1.]],
               [0, [1.5, 1.]],
-              [0, [.8, 1.]],
               [0, [.5, 1.]],
-              [0, [.3, 1.]],
               [0, [.2, 1.]],
-              [0, [.1, 1.]]
+              [0, [.1, 1.]],
+              [1, [0.8, 1.]],
+              [1, [0.5, 1.]],
+              [2, [0.3, 1.]],
              ],
     }
     auxmol.build()
@@ -414,6 +418,43 @@ class KnownValues(unittest.TestCase):
         test_hessian_round2 = hobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ)
 
         assert np.max(np.abs(test_hessian_round1 - test_hessian_round2)) < 2e-7
+
+    def test_jk_energy_per_atom(self):
+        np.random.seed(8)
+        nao = mol.nao
+        nocc = 5
+        mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
+        mo_occ = cp.zeros(nao)
+        mo_occ[:nocc] = 2
+        mo_energy = cp.zeros_like(mo_occ)
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
+        dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
+        dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+
+        ref = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1e-20)
+        ej = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=0)
+        assert abs(ej-ref).max() < 1e-8
+
+        ejk = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+        assert abs(ejk.sum(axis=(0,1))).max() < 1e-10
+
+        from gpu4pyscf.df.grad import rhf as rhf_grad
+        disp = .5e-3
+        atom_coords = mol.atom_coords()
+        mol0 = mol.copy()
+        auxmol0 = auxmol.copy()
+        def eval_grad(i, x, disp):
+            atom_coords[i,x] += disp
+            mol1 = mol0.set_geom_(atom_coords, unit='Bohr')
+            auxmol1 = auxmol0.set_geom_(atom_coords, unit='Bohr')
+            opt = int3c2e.Int3c2eOpt(mol1, auxmol1).build()
+            atom_coords[i,x] -= disp
+            return rhf_grad._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_grad(i, x, disp)
+            e2 = eval_grad(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp) - ejk[i,:,x]).max() < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for DF Hessian")

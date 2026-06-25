@@ -486,10 +486,7 @@ class Gradients(GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
-        ejk = self.energy_ee(mol, dm)
-        # Scale .5 to match the value of the contraction of dm and Veff
-        ejk *= .5
-        return ejk
+        raise DeprecationWarning
 
     def energy_ee(self, mol, dm):
         return self.jk_energy_per_atom(dm)

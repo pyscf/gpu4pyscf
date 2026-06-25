@@ -69,7 +69,7 @@ def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True):
     coordinates'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
-    opt = Int2c2eOpt(auxcell, bvk_kmesh).build()
+    opt = Int2c2eOpt(auxcell, bvk_kmesh)
     return opt.int2c2e_ip1(kpts, sort_output=sort_output)
 
 def _estimate_sr_2c2e_rcut(cell, omega, precision=None):

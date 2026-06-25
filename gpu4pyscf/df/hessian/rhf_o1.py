@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,9 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# Author: Qiming Sun <osirpt.sun@gmail.com>
-#  Modified by:   Xiaojie Wu <wxj6000@gmail.com>
 
 '''
 Non-relativistic RHF analytical Hessian with density-fitting approximation
@@ -574,7 +571,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
     h_aux = h_aux + h_aux.transpose(1,0,3,2)
 
-    aux_idx, aux_slices = _argsort_aux_by_atom(auxmol, aux_sorting)
+    aux_idx, aux_slices = _argsort_aux_by_atom(auxmol)
     pqxy = h_aux[aux_idx[:,None], aux_idx].get()
     ej_aux = np.zeros_like(ej)
     for i, (p0, p1) in enumerate(aux_slices):
@@ -680,7 +677,7 @@ def _int3c2e_ip1_evaluator(int3c2e_opt, scheme, batch_size,
     return evaluate_j3c, aux_sorting, aux_offsets
 
 def _argsort_aux_by_atom(auxmol, aux_sorting=None):
-    # groupby atom Id
+    # group AO inidices by atom Id
     aux_idx = auxmol.get_ao_idx()
     if aux_sorting is not None:
         aux_idx = cp.asnumpy(aux_sorting)[aux_idx]
@@ -693,7 +690,7 @@ def _factorize_dm(mol, dm):
     '''Symmetric factorization'''
     dm_factor_l, dm_factor_r = factorize_dm(dm)
     assert dm_factor_r is None
-    # transform to the AO order in sorted_cell
+    # transform orbital basis to the sorted_cell basis
     dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=0)
 
     # dm_factor are sorted and grouped based on atom_id
@@ -1060,7 +1057,7 @@ def _int2c2e_ip2_per_atom(mol, dm):
     '''Second order nuclear derivatives of 2c2e Coulomb integrals.
     '''
     from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt
-    opt = Int2c2eOpt(mol).build()
+    opt = Int2c2eOpt(mol)
     mol = opt.cell
     li = np.arange(L_AUX_MAX+1)[:,None]
     lj = np.arange(L_AUX_MAX+1)
