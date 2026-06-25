@@ -632,6 +632,8 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
 
+        assert n_i_functions * n_j_functions < np.iinfo(np.int32).max
+        # n_channels * n_i_functions * n_j_functions * n_difference_images is allowed to exceed int32
         err = c_driver(
             cast_to_pointer(density),
             cast_to_pointer(density_matrix_with_translation_real_part),
@@ -803,13 +805,12 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
         use_float_precision = ctypes.c_int(0)
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
-        fock_slice = cp.zeros(
-            (n_channels, n_difference_images, n_i_functions, n_j_functions),
-            dtype=xc_weights.dtype,
-        )
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
+
+        assert n_i_functions * n_j_functions < np.iinfo(np.int32).max
+        # n_channels * n_i_functions * n_j_functions * n_difference_images is allowed to exceed int32
         err = c_driver(
-            cast_to_pointer(fock_slice),
+            cast_to_pointer(fock),
             cast_to_pointer(xc_weights),
             ctypes.c_int(i_angular),
             ctypes.c_int(j_angular),
@@ -837,7 +838,6 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
             ctypes.c_int(pairs_info["is_non_orthogonal"]),
             use_float_precision,
         )
-        fock += fock_slice
         if err != 0:
             raise RuntimeError(f'evaluate_xc_driver for li={i_angular} lj={j_angular} failed')
 
@@ -1000,6 +1000,9 @@ def evaluate_xc_gradient_wrapper(
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
+
+        assert n_i_functions * n_j_functions < np.iinfo(np.int32).max
+        # n_channels * n_i_functions * n_j_functions * n_difference_images is allowed to exceed int32
         err = c_driver(
             cast_to_pointer(gradient),
             cast_to_pointer(xc_weights),

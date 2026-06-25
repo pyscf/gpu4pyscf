@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <type_traits>
 
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
@@ -177,7 +178,8 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
     __syncthreads();
 }
 
-// gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
+// gout_pattern = ((li == 0) << 3) | ((lj == 0) << 2) | ((lk == 0) << 1) | (ll == 0);
+template <int OFFSET>
 __global__ static
 void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
                   int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
@@ -186,13 +188,14 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                   float dm_penalty,
-                  int64_t *pool, int *head, GXYZOffset *gxyz_offsets,
+                  int64_t *pool, int *head, const GXYZOffset *p_gxyz_offsets,
                   int gout_pattern, int reserved_shm_size
                   #ifdef USE_SYCL
                   , sycl::nd_item<2> &item, double *shared_memory
                   #endif
                   )
 {
+    const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     // sq is short for shl_quartet
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -628,7 +631,7 @@ while (1) {
 
 extern GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds);
 
-static size_t threads_scheme_for_k(int (&threads)[2], BoundsInfo &bounds,
+static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
                                    int shm_size, int gout_stride_max)
 {
     int ijprim = bounds.iprim * bounds.jprim;
@@ -653,10 +656,9 @@ static size_t threads_scheme_for_k(int (&threads)[2], BoundsInfo &bounds,
     if (nsq_per_block > 8) {
         nsq_per_block = nsq_per_block & 0xfffff8;
     }
-    threads[0] = nsq_per_block;
-    threads[1] = gout_stride;
-    int buflen = nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
-    return buflen;
+    tdims[0] = nsq_per_block;
+    tdims[1] = gout_stride;
+    return nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
 }
 
 extern "C" {
@@ -715,17 +717,18 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
     if (1) {
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
-        int gout_pattern = (((li == 0) >> 3) |
-                            ((lj == 0) >> 2) |
-                            ((lk == 0) >> 1) |
+        int gout_pattern = (((li == 0) << 3) |
+                            ((lj == 0) << 2) |
+                            ((lk == 0) << 1) |
                             ( ll == 0));
         int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
 
-        auto launch = [&](int *head_ptr, GXYZOffset *gxyz, int tile_chunk) {
+        auto launch = [&](auto offset, int tile_chunk) {
+            constexpr int OFFSET = decltype(offset)::value;
             int tdims[2];
-            int buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
+            size_t buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-
+            
             #ifdef USE_SYCL
             auto dev_envs = *envs;
             sycl::range<2> blocks(1, workers);
@@ -736,23 +739,25 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                 rys_j_kernel(dev_envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                     supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                     q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                    dm_penalty, pool, head_ptr, gxyz, gout_pattern, reserved_shm_size,
+                    dm_penalty, pool, head + OFFSET/256, p_gxyz_offset,
+                    gout_pattern, reserved_shm_size,
                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
               });
             });
-            #else
+            #else            
             dim3 threads(tdims[0], tdims[1]);
-            rys_j_kernel<<<workers, threads, buflen>>>(
+            rys_j_kernel<OFFSET><<<workers, threads, buflen>>>(
                 *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                dm_penalty, pool, head_ptr, gxyz, gout_pattern, reserved_shm_size);
+                dm_penalty, pool, head + OFFSET/256, p_gxyz_offset,
+                gout_pattern, reserved_shm_size);
             #endif
         };
 
-        launch(head, p_gxyz_offset, 256);
-        if (n_tiles > 256) launch(head+1, p_gxyz_offset+256, min(256, n_tiles-256)); // fffg, ffgg, fggg, gggg
-        if (n_tiles > 512) launch(head+2, p_gxyz_offset+512, min(256, n_tiles-512)); // gggg
+        launch(std::integral_constant<int,   0>{}, 256);
+        if (n_tiles > 256) launch(std::integral_constant<int, 256>{}, min(256, n_tiles-256));
+        if (n_tiles > 512) launch(std::integral_constant<int, 512>{}, min(256, n_tiles-512));
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -772,7 +777,9 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
 
 int PBC_build_j_init(int shm_size)
 {
-    cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_j_kernel<  0>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_j_kernel<256>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_j_kernel<512>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

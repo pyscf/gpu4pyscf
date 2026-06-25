@@ -891,7 +891,7 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
     coulG = tools.get_coulG(cell, Gv=Gv)
     vlocG = cp.zeros(len(G2), dtype=np.complex128)
 
-    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
+    de = cp.zeros([cell.natm, 3], dtype = cp.complex128)
 
     for ia in range(cell.natm):
         symb = cell.atom_symbol(ia)
@@ -900,8 +900,6 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
 
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
-        if nexp == 0:
-            continue
 
         vlocG.fill(0)
         _append_vpplocG_one_atom_without_gamma(ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, G2, coulG, SIx, SIy, SIz, vlocG)

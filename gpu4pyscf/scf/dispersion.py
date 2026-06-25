@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,12 +20,17 @@
 dispersion correction for HF and DFT
 '''
 
+import warnings
 from functools import lru_cache
 from pyscf.lib import logger
 from pyscf import scf
+from pyscf import __config__
+
+DFTD4_RECOMMENDATIONS = getattr(__config__, 'DFTD4_RECOMMENDATIONS', False)
 
 # supported dispersion corrections
 DISP_VERSIONS = ['d3bj', 'd3zero', 'd3bjm', 'd3zerom', 'd3op', 'd4']
+# XC names for dftd3 and dftd4 inputs
 XC_MAP = {'wb97m-d3bj': 'wb97m',
           'b97m-d3bj': 'b97m',
           'wb97x-d3bj': 'wb97x',
@@ -46,6 +51,9 @@ _white_list = {
     'b97m-d3bj': ('b97m-v', False, 'd3bj'),
     'wb97x-d3bj': ('wb97x-v', False, 'd3bj'),
     'wb97x-3c': ('wb97x-v', False, 'd4:wb97x-3c'),
+    'b97m-d4': ('b97m_v', False, 'd4:b97m'),
+    'wb97m-d4': ('wb97m_v', False, 'd4:wb97m'),
+    'wb97x-d4': ('wb97x_v', False, 'd4:wb97x'),
 }
 
 # These xc functionals are not supported yet
@@ -72,13 +80,39 @@ def parse_dft(xc_code):
     if method_lower in _black_list:
         raise NotImplementedError(f'{method_lower} is not supported yet.')
 
-    if method_lower in _white_list:
-        return _white_list[method_lower]
-
     if method_lower.endswith('-3c'):
         if method_lower == "wb97x-3c":
             return _white_list[method_lower]
         raise NotImplementedError('Only wb97x-3c is supported for now. Other 3c methods are not supported yet.')
+
+    if method_lower == 'wb97x-d4' and not DFTD4_RECOMMENDATIONS:
+        xc, nlc, disp = _white_list[method_lower]
+        warnings.warn('''
+You are seeing this warning because `wb97x-d4` may produce different results from other packages.
+PySCF currently evaluates the XC functional using `wb97x`, following the behavior of PySCF
+v2.13 and earlier releases. This differs from the DFT-D4 recommendation, which uses wb97x_v and 
+replaces the VV10 part with the D4 dispersion correction.
+
+To use the DFT-D4 recommended convention, set
+
+mf.xc = 'wb97x_v'
+mf.nlc = False
+mf.disp = 'd4:wb97x'
+
+or enable it globally via
+
+DFTD4_RECOMMENDATIONS = True
+
+in ~/pyscf_conf.py`, or at runtime via
+
+pyscf.scf.dispersion.DFTD4_RECOMMENDATIONS = True
+
+The default behavior will change to the DFT-D4 recommended convention in PySCF v2.16.
+''', FutureWarning, stacklevel=2)
+        return 'wb97x', False, 'd4:wb97x'
+
+    if method_lower in _white_list:
+        return _white_list[method_lower]
 
     if '-d3' in method_lower or '-d4' in method_lower:
         xc, disp = method_lower.split('-')
@@ -120,11 +154,11 @@ def parse_disp(dft_method=None, disp=None):
         >>> parse_disp(None, 'd4:wb97x-3c')
         ('wb97x-3c', 'd4', True)
     '''
-        
+
     # If anything not specified, return None
     if dft_method is None and disp is None:
         return None, None, False
-    
+
     def process_3body(disp_version):
         if not disp_version:
             return disp_version, False
@@ -141,11 +175,11 @@ def parse_disp(dft_method=None, disp=None):
 
     if dft_method is not None:
         dft_lower = dft_method.lower()
-        xc, _, disp_from_dft = parse_dft(dft_lower)
+        xc, nlc, disp_from_dft = parse_dft(dft_lower)
         if xc in XC_MAP:
             xc = XC_MAP[xc]
 
-    # Use disp if specfied 
+    # Use disp if specified
     # returned method will be the latter part of disp if disp is a string with colon, otherwise, use xc
     if disp is not None:
         if ":" in disp:
@@ -157,16 +191,16 @@ def parse_disp(dft_method=None, disp=None):
             return xc, disp, with_3body
         else:
             raise ValueError(f"the method used in dispersion {disp} is not specified.")
-        
+
     # otherwise, use disp_from_dft
     if disp_from_dft is None:
         return None, None, False
-        
+
     if ":" in disp_from_dft:
         disp_version, method = disp_from_dft.split(':')
         disp_version, with_3body = process_3body(disp_version)
         return method, disp_version, with_3body
-    
+
     disp_from_dft, with_3body = process_3body(disp_from_dft)
     return xc, disp_from_dft, with_3body
 
@@ -180,20 +214,20 @@ def check_disp(mf, disp=None):
 
     Args:
         mf (scf.hf.SCF): The SCF object (HF or DFT).
-        disp (str or bool, optional): Dispersion version to check. 
+        disp (str or bool, optional): Dispersion version to check.
             If None, uses `mf.disp`.
             If False, returns False immediately.
 
     Returns:
-        bool: True if dispersion is enabled and supported. 
+        bool: True if dispersion is enabled and supported.
               False if dispersion is disabled (disp=False) or not specified/implied.
-    
+
     Raises:
         ValueError: If the dispersion version is not supported.
     '''
     if disp is None:
         disp = getattr(mf, 'disp', None)
-    if disp is False:
+    if disp is False or disp == 0:
         return False
 
     # To prevent mf.do_disp() triggering the SCF.__getattr__ method, do not use
@@ -233,7 +267,7 @@ def get_dispersion(mf, disp=None, with_3body=None, verbose=None):
             The dispersion correction energy.
 
     Note:
-        Priority of `disp` and `with_atm`:
+        Priority of `disp` and `with_3body`:
         1. Function arguments (disp, with_3body)
         2. mf.disp (if available)
         3. mf.xc (parsed from the functional name)
