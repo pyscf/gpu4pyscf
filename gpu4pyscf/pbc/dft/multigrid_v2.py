@@ -1157,12 +1157,16 @@ def convert_xc_on_g_mesh_to_fock(
         fock_slice = cp.einsum("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
         fock_slice = cp.einsum("nkiq,qj->nkij", fock_slice, pairs["concatenated_coeff"])
 
-        # Cupy doesn't allow atomic addition for complex128, so we need to add real and imag parts separately.
         def atomic_add_complex128(dst, idx, src):
-            assert dst.dtype == cp.complex128
-            assert src.dtype == cp.complex128
-            cp.add.at(dst.real, idx, src.real)
-            cp.add.at(dst.imag, idx, src.imag)
+            if src.dtype == cp.float64:
+                assert dst.dtype == cp.float64
+                cp.add.at(dst, idx, src)
+            else:
+                assert dst.dtype == cp.complex128
+                assert src.dtype == cp.complex128
+                # Cupy doesn't allow atomic addition for complex128, so we need to add real and imag parts separately.
+                cp.add.at(dst.real, idx, src.real)
+                cp.add.at(dst.imag, idx, src.imag)
 
         atomic_add_complex128(fock,
             (slice(None), slice(None), pairs["ao_indices_in_localized"][:, None], pairs["ao_indices_in_localized"][None, :]),
