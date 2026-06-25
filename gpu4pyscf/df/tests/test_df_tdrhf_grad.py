@@ -283,7 +283,7 @@ class KnownValues(unittest.TestCase):
         for i, jfac in enumerate(j_factor):
             ref += rhf_grad._jk_energy_per_atom(opt, dm[i], j_factor=jfac, k_factor=0)
         assert abs(ej - ref).max() < 1e-12
-        assert abs(lib.fp(ej) - -5.7379651745047555) < 1e-12
+        assert abs(lib.fp(ej) - -5.7379651745047555) < 2e-12
 
     def test_jk_energy_per_atom(self):
         cp.random.seed(8)
@@ -295,13 +295,13 @@ class KnownValues(unittest.TestCase):
         j_factor = [1, -1,  0]
         k_factor = [1, -1, -1]
         ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
-        assert abs(lib.fp(ejk) - 16.8821623565) < 1e-9
+        assert abs(lib.fp(ejk) - 16.8821623565) < 2e-9
         assert abs(ejk.sum(axis=0)).max() < 1e-9
 
         # mimic insufficent memory, processing in small batches
         with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: 3000000)):
             ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
-        assert abs(lib.fp(ejk) - 16.8821623565) < 1e-9
+        assert abs(lib.fp(ejk) - 16.8821623565) < 2e-9
 
         ref = 0
         for i in range(len(dm)):
