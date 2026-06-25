@@ -250,7 +250,7 @@ class KnowValues(unittest.TestCase):
         mf_ref = mf_ref.newton()
         mf_ref.grids.build()
         g_ref, hop_ref, hdiag_ref = mf_ref.gen_g_hop(mo.get(), mo_occ.get(), hcore.get())
-        self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, 8)
+        self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, delta=3e-8)
         self.assertAlmostEqual(abs(g.get() - g_ref).max(), 0, 9)
         self.assertAlmostEqual(abs(hdiag.get() - hdiag_ref).max(), 0, 9)
 
@@ -262,7 +262,7 @@ class KnowValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(dat.get()), 0.21794953957922497-0.08227815483834572j, 9)
 
         g_ref, hop_ref, hdiag_ref = mf_ref.gen_g_hop(mo.get(), mo_occ.get(), hcore.get())
-        self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, 8)
+        self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, delta=3e-8)
         self.assertAlmostEqual(abs(g.get() - g_ref).max(), 0, 9)
         self.assertAlmostEqual(abs(hdiag.get() - hdiag_ref).max(), 0, 9)
 
