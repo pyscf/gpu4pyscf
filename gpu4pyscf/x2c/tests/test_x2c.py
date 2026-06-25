@@ -14,7 +14,9 @@
 
 import numpy as np
 import cupy as cp
+from packaging.version import Version
 import unittest
+import pyscf
 from pyscf import gto
 from pyscf import lib
 from gpu4pyscf import scf
@@ -60,8 +62,9 @@ class KnownValues(unittest.TestCase):
         e = myx2c.kernel()
         self.assertAlmostEqual(e, -76.075429682026396, 9)
 
-        mf = myx2c.to_cpu().run()
-        self.assertAlmostEqual(mf.e_tot, -76.075429682026396, 9)
+        if Version(pyscf.__version__) > Version('2.8'):
+            mf = myx2c.to_cpu().run()
+            self.assertAlmostEqual(mf.e_tot, -76.075429682026396, 9)
 
         mf = myx2c.undo_x2c().run()
         self.assertAlmostEqual(mf.e_tot, mol.RHF().kernel(), 9)
@@ -164,6 +167,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -41.15250349727189, 9)
         self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_atom.mo_energy.get()), 9)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                     'pyscf x2c does not support not reset function')
     def test_to_cpu(self):
         myx2c = scf.GHF(mol).x2c1e()
         e_gpu = myx2c.kernel()
