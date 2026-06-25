@@ -50,7 +50,14 @@ libvhf_rys.RYS_init_constant()
 PTR_BAS_COORD = 7
 LMAX = 4
 TILE = 6
-QUEUE_DEPTH = 262144
+# Host-side task-pool depth used to size the `pool` device buffer and to batch
+# pair_kl (blksize = QUEUE_DEPTH - 512). This MUST match the C-side QUEUE_DEPTH in
+# lib/gvhf-rys/vhf.cuh, which is the per-block pool stride and the offset at which
+# the device kernels carve out the `head` counter:
+#   int *head = (int *)(pool + workers * QUEUE_DEPTH)
+# Keeping them equal guarantees the +1/+3/+n_dm slots reserved by the host pool
+# allocation land exactly on the `head` counter region.
+QUEUE_DEPTH = 65536
 SHM_SIZE = shm_size - 1024
 del shm_size
 GOUT_WIDTH = 42

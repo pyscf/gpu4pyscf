@@ -31,6 +31,15 @@ if (USE_SYCL)
 
   add_compile_definitions(USE_SYCL=1)
 
+  # Force the SYCL build to Release so CMake does NOT inject -g globally.
+  # With AOT (-fsycl-targets=spir64_gen) a -g from RelWithDebInfo is forwarded
+  # into the device path and reaches `ocloc -options "-g"`, which compiles
+  # device code in debug mode (disables optimization). Release keeps the
+  # device backend at its default full optimization. Host-side debug info is
+  # re-added below for the host-only (C/Fortran) translation units, which never
+  # carry SYCL device code.
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+
   add_compile_options(
     -fsycl
     -Wno-ignored-reference-qualifiers
@@ -41,6 +50,15 @@ if (USE_SYCL)
     -fsycl-default-sub-group-size=32
     -fsycl-targets=spir64_gen
     "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
+  )
+
+  # Host-side debug info WITHOUT propagating -g to the SYCL device backend.
+  # Restrict -g to C and Fortran translation units (pure host code). SYCL
+  # device-bearing C++ TUs are intentionally left without -g so `ocloc` does
+  # not receive -options "-g" and the device build stays optimized.
+  add_compile_options(
+    "$<$<COMPILE_LANGUAGE:C>:-g>"
+    "$<$<COMPILE_LANGUAGE:Fortran>:-g>"
   )
 
   add_link_options(

@@ -63,7 +63,7 @@ RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,           \
   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,      \
   float dm_penalty, int64_t *pool, int *head
 
-#define KERNEL_SETUP                                            \
+#define KERNEL_SETUP()                                          \
     int threadIdx_x = threadIdx.x;                              \
     int blockDim_x = blockDim.x;                                \
     int blockIdx_x = blockIdx.x;                                \
@@ -2771,6 +2771,9 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
     case 275: LAUNCH_KERNEL(rys_k_2100); break;
     default: return 0;
     }
-#undef LAUNCH_KERNEL
     return 1;
 }
+
+#undef LAUNCH_KERNEL
+#undef KERNEL_SETUP
+#undef KERNEL_ARGS

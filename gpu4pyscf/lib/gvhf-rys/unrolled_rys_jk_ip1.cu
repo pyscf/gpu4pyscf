@@ -33814,6 +33814,9 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     case 300: LAUNCH_KERNEL(rys_vjk_ip1_2200); break;
     default: return 0;
     }
-#undef LAUNCH_KERNEL
     return 1;
 }
+
+#undef LAUNCH_KERNEL
+#undef KERNEL_SETUP
+#undef KERNEL_ARGS

@@ -16766,6 +16766,10 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     case 425: LAUNCH_KERNEL(rys_k_3200); break;
     default: return 0;
     }
-#undef LAUNCH_KERNEL
     return 1;
 }
+
+#undef LAUNCH_KERNEL
+#undef KERNEL_SETUP
+#undef KERNEL_SETUP_AIJ
+#undef KERNEL_ARGS

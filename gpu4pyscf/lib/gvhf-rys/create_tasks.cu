@@ -1151,3 +1151,8 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     }
     __syncthreads();
 }
+
+// KERNEL_SETUP is local to the task-filling helpers above. Undefine it so that
+// translation units which #include this file can define their own KERNEL_SETUP
+// (e.g. the unrolled_*.cu kernels) without triggering -Wmacro-redefined.
+#undef KERNEL_SETUP

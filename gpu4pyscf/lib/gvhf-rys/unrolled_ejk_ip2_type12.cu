@@ -14561,6 +14561,9 @@ int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *b
     case 156: buflen = 4240 + iprim*jprim; LAUNCH_KERNEL(rys_ejk_ip2_type12_1111); break;
     default: return 0;
     }
-#undef LAUNCH_KERNEL
     return 1;
 }
+
+#undef LAUNCH_KERNEL
+#undef KERNEL_SETUP
+#undef KERNEL_ARGS
