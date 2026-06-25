@@ -89,8 +89,8 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
     }
 }
 
-// gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
-__global__ static
+// gout_pattern = ((li == 0) << 3) | ((lj == 0) << 2) | ((lk == 0) << 1) | (ll == 0);
+__global__
 void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
                      float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley,

@@ -36,9 +36,7 @@
 // when nroots > 5, GWIDTH=57 may be better
 #define GWIDTH          42
 // 2MB per block
-#define QUEUE_DEPTH     262144
-#define TILES_IN_BATCH  (QUEUE_DEPTH/(TILE*TILE*TILE*TILE))
-#define QUEUE_DEPTH1    65536
+#define QUEUE_DEPTH     65536
 
 #define MIN(x, y)       ((x) < (y) ? (x) : (y))
 #define MAX(x, y)       ((x) > (y) ? (x) : (y))

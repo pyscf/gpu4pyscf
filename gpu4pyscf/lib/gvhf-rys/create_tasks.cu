@@ -23,6 +23,25 @@
 
 #define Q_COND_MARGIN   4.f
 
+#ifdef USE_SYCL
+
+#define KERNEL_SETUP()                                  \
+auto item = syclex::this_work_item::get_nd_item<2>();   \
+int threadIdx_x = item.get_local_id(1);                 \
+int threadIdx_y = item.get_local_id(0);                 \
+int blockDim_x = item.get_local_range(1);               \
+int blockDim_y = item.get_local_range(0);
+
+#else // USE_SYCL
+
+#define KERNEL_SETUP()                          \
+  int threadIdx_x = threadIdx.x;                \
+  int threadIdx_y = threadIdx.y;                \
+  int blockDim_x = blockDim.x;                  \
+  int blockDim_y = blockDim.y;
+
+#endif // USE_SYCL
+
 // np.where(threads_mask)[0]
 __device__ inline
 int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
@@ -51,19 +70,7 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
-
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -71,26 +78,31 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
-    uint32_t nbas = envs.nbas;
-    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
-    float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
+    uint32_t nbas = envs.nbas;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
+    float *dm_cond = bounds.dm_cond;
     uint32_t bas_ij = ish * nbas + jsh;
 
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -127,18 +139,7 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                      float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                      RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -146,14 +147,19 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
 
     int *swap = (int *)shared_memory;
 
@@ -161,16 +167,16 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
     #endif
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -214,18 +220,7 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                     RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -233,14 +228,19 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
 
     int *swap = (int *)shared_memory;
 
@@ -248,16 +248,16 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
     #endif
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -295,19 +295,7 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                        RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
-
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -315,6 +303,14 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -341,10 +337,7 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
@@ -357,16 +350,16 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
     #endif
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -439,19 +432,7 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                         RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
-
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -459,6 +440,14 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -485,12 +474,9 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
@@ -502,16 +488,16 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     #endif
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -587,19 +573,7 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                        RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
-
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -607,6 +581,14 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -633,12 +615,9 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
@@ -650,16 +629,16 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
     #endif
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -729,19 +708,7 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                            float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                            RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
-
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -749,13 +716,18 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float d_ij = dm_cond[ish * nbas + jsh];
-    float kl_cutoff = cutoff - q_ij;
 
     int *swap = (int *)shared_memory;
 
@@ -763,16 +735,16 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
     #endif
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff;
             if (keep) {
@@ -817,19 +789,7 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                               float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                               RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
-
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -837,6 +797,14 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -869,11 +837,8 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
     float d_ij = dm_cond[ish * nbas + jsh];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
@@ -885,16 +850,16 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
     #endif
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff;
             if (keep) {
@@ -968,21 +933,9 @@ __device__
 static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                             int pair_ij, int ish, int jsh,
                             float *q_cond_ij, float *q_cond_kl,
-                            JKEnergy &jk, RysIntEnvVars envs, BoundsInfo bounds, double *shared_memory)
+                            JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
-
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -990,14 +943,19 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 
@@ -1007,16 +965,16 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
       if (threadIdx_y == active_y) {
     #endif
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -1056,21 +1014,9 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                                int pair_ij, int ish, int jsh,
                                float *q_cond_ij, float *q_cond_kl,
                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                               JKEnergy &jk, RysIntEnvVars envs, BoundsInfo bounds, double *shared_memory)
+                               JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds, double *shared_memory)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    #endif
-
+    KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     __syncthreads();
@@ -1078,6 +1024,14 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -1104,12 +1058,9 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = jk.omega;
     float omega2 = omega * omega;
@@ -1123,16 +1074,16 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
     #endif
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
