@@ -226,12 +226,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         contract('nikL,nlkL->nil', piL, piL_conj, alpha=sign, beta=1, out=vk)
 
         if kp != kp_conj:
-            if orbr is None:
-                piL = contract('nijL,nil->njlL', pqL, orbl.conj(), out=buf)
-                piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
-            else:
-                piL = contract('nijL,nil->njlL', pqL, orbl.conj(), out=buf)
-                piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
+            piL = contract('nijL,nil->njlL', pqL, orbl.conj(), out=buf)
+            piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
+            if orbr is not None:
                 piL = contract('nijL,nil->njlL', pqL, orbr, out=buf)
             vk[kj_idx] += contract('nklL,njlL->nkj', piL_conj, piL, alpha=sign)
 
