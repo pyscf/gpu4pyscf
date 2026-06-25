@@ -1232,9 +1232,6 @@ while (1) {
     atomicAdd(sigma+8, sigma_zz);
 }
 
-//extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-//                        int *pool, double *dd_pool);
-
 extern "C" {
 int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         double *dm, int n_dm, int nao,

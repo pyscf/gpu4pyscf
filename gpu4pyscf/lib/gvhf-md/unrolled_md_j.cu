@@ -3,6 +3,59 @@
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
+#ifdef USE_SYCL
+
+#define KERNEL_ARGS \
+    RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
+    float *q_cond_ij, float *q_cond_kl, \
+    sycl::nd_item<2> &item, double *vj_kl_cache
+
+#define KERNEL_SETUP() \
+    int blockIdx_x = item.get_group(1); \
+    int blockIdx_y = item.get_group(0); \
+    int threadIdx_x = item.get_local_id(1); \
+    int threadIdx_y = item.get_local_id(0);
+
+#define LAUNCH_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
+    auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds; \
+    sycl::range<2> threads(16, 16); \
+    sycl::range<2> blocks((npairs_kl + (BLOCKS_KL) - 1) / (BLOCKS_KL), \
+                          (npairs_ij + (BLOCKS_IJ) - 1) / (BLOCKS_IJ)); \
+    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
+        sycl::local_accessor<double, 1> local_acc(sycl::range<1>((SHM)+addition_buf), cgh); \
+        cgh.parallel_for<class KERNEL##_sycl>(sycl::nd_range<2>(blocks * threads, threads), \
+            [=](auto item) { \
+                KERNEL(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, \
+                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
+            }); \
+    }); \
+}
+
+#else // USE_SYCL
+
+#define KERNEL_ARGS \
+    RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
+    float *q_cond_ij, float *q_cond_kl
+
+#define KERNEL_SETUP() \
+    int blockIdx_x = blockIdx.x; \
+    int blockIdx_y = blockIdx.y; \
+    int threadIdx_x = threadIdx.x; \
+    int threadIdx_y = threadIdx.y; \
+    extern __shared__ double vj_kl_cache[];
+
+#define LAUNCH_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
+    dim3 threads(16, 16); \
+    dim3 blocks((npairs_ij + (BLOCKS_IJ) - 1) / (BLOCKS_IJ), \
+                (npairs_kl + (BLOCKS_KL) - 1) / (BLOCKS_KL), 1); \
+    cudaFuncSetAttribute(KERNEL, cudaFuncAttributeMaxDynamicSharedMemorySize, \
+                         ((SHM)+addition_buf)*sizeof(double)); \
+    KERNEL<<<blocks, threads, ((SHM)+addition_buf)*sizeof(double)>>>( \
+        *envs, *jk, *bounds, q_cond_ij, q_cond_kl); \
+}
+
+#endif // USE_SYCL
+
 
 // TILEX=30, TILEY=30
 #if CUDA_VERSION >= 12040
@@ -10,25 +63,9 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_0_0(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 480;
@@ -229,25 +266,9 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_1_0(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -447,25 +468,9 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_1_1(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 160;
@@ -726,25 +731,9 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_2_0(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -965,25 +954,9 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_2_1(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -1301,25 +1274,9 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_2_2(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 224;
@@ -1837,25 +1794,9 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_3_0(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -2111,25 +2052,9 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 
 // TILEX=48, TILEY=24
 __global__ static
-void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_3_1(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -2557,25 +2482,9 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 
 // TILEX=48, TILEY=11
 __global__ static
-void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_3_2(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -3334,25 +3243,9 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 
 // TILEX=48, TILEY=36
 __global__ static
-void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_4_0(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -3672,25 +3565,9 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 
 // TILEX=48, TILEY=18
 __global__ static
-void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_4_1(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -4293,25 +4170,9 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 
 // TILEX=48, TILEY=26
 __global__ static
-void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                     float *q_cond_ij, float *q_cond_kl
- #ifdef USE_SYCL
- , sycl::nd_item<2> &item, double *vj_kl_cache
- #endif
- )
+void md_j_5_0(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-#else // USE_SYCL
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    extern __shared__ double vj_kl_cache[];
-#endif // USE_SYCL
+    KERNEL_SETUP()
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx_x * 768;
@@ -4865,149 +4726,35 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
     if (omega < 0) {
         addition_buf = 256;
     }
-    #ifndef USE_SYCL
     switch (ijkl) {
-    case 0: { // lij=0, lkl=0, tilex=30, tiley=30
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 479) / 480, (npairs_kl + 479) / 480, 1);
-        md_j_0_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 11: { // lij=1, lkl=0, tilex=48, tiley=23
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 367) / 368, 1);
-        md_j_1_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 12: { // lij=1, lkl=1, tilex=10, tiley=10
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 159) / 160, (npairs_kl + 159) / 160, 1);
-        md_j_1_1<<<blocks, threads, (2944+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 22: { // lij=2, lkl=0, tilex=48, tiley=16
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 255) / 256, 1);
-        md_j_2_0<<<blocks, threads, (3040+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 23: { // lij=2, lkl=1, tilex=48, tiley=30
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 479) / 480, 1);
-        cudaFuncSetAttribute(md_j_2_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_2_1<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 24: { // lij=2, lkl=2, tilex=14, tiley=14
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 223) / 224, (npairs_kl + 223) / 224, 1);
-        cudaFuncSetAttribute(md_j_2_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        md_j_2_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 33: { // lij=3, lkl=0, tilex=48, tiley=46
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 735) / 736, 1);
-        cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_3_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 34: { // lij=3, lkl=1, tilex=48, tiley=24
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 383) / 384, 1);
-        cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6016+addition_buf)*sizeof(double));
-        md_j_3_1<<<blocks, threads, (6016+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 35: { // lij=3, lkl=2, tilex=48, tiley=11
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 175) / 176, 1);
-        cudaFuncSetAttribute(md_j_3_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        md_j_3_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 44: { // lij=4, lkl=0, tilex=48, tiley=36
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 575) / 576, 1);
-        cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6064+addition_buf)*sizeof(double));
-        md_j_4_0<<<blocks, threads, (6064+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 45: { // lij=4, lkl=1, tilex=48, tiley=18
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 287) / 288, 1);
-        cudaFuncSetAttribute(md_j_4_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6000+addition_buf)*sizeof(double));
-        md_j_4_1<<<blocks, threads, (6000+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
-    case 55: { // lij=5, lkl=0, tilex=48, tiley=26
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 415) / 416, 1);
-        cudaFuncSetAttribute(md_j_5_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_5_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
-    } break;
+    case 0:  // lij=0, lkl=0, tilex=30, tiley=30
+        LAUNCH_KERNEL(md_j_0_0, 2992, 480, 480) break;
+    case 11: // lij=1, lkl=0, tilex=48, tiley=23
+        LAUNCH_KERNEL(md_j_1_0, 2992, 768, 368) break;
+    case 12: // lij=1, lkl=1, tilex=10, tiley=10
+        LAUNCH_KERNEL(md_j_1_1, 2944, 160, 160) break;
+    case 22: // lij=2, lkl=0, tilex=48, tiley=16
+        LAUNCH_KERNEL(md_j_2_0, 3040, 768, 256) break;
+    case 23: // lij=2, lkl=1, tilex=48, tiley=30
+        LAUNCH_KERNEL(md_j_2_1, 6112, 768, 480) break;
+    case 24: // lij=2, lkl=2, tilex=14, tiley=14
+        LAUNCH_KERNEL(md_j_2_2, 5920, 224, 224) break;
+    case 33: // lij=3, lkl=0, tilex=48, tiley=46
+        LAUNCH_KERNEL(md_j_3_0, 6112, 768, 736) break;
+    case 34: // lij=3, lkl=1, tilex=48, tiley=24
+        LAUNCH_KERNEL(md_j_3_1, 6016, 768, 384) break;
+    case 35: // lij=3, lkl=2, tilex=48, tiley=11
+        LAUNCH_KERNEL(md_j_3_2, 5920, 768, 176) break;
+    case 44: // lij=4, lkl=0, tilex=48, tiley=36
+        LAUNCH_KERNEL(md_j_4_0, 6064, 768, 576) break;
+    case 45: // lij=4, lkl=1, tilex=48, tiley=18
+        LAUNCH_KERNEL(md_j_4_1, 6000, 768, 288) break;
+    case 55: // lij=5, lkl=0, tilex=48, tiley=26
+        LAUNCH_KERNEL(md_j_5_0, 6112, 768, 416) break;
     default: return 0;
     }
-    #else
-    sycl::queue& stream = *sycl_get_queue();
-    auto dev_envs = *envs;
-    auto dev_jk = *jk;
-    auto dev_bounds = *bounds;
-
-    sycl::range<2> threads(16, 16);
-
-    switch (ijkl) {
-    case 0: { // lij=0, lkl=0, tilex=30, tiley=30
-      sycl::range<2> blocks((npairs_kl + 479) / 480, (npairs_ij + 479) / 480);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(2992+addition_buf), cgh); cgh.parallel_for<class md_j_0_0_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_0_0(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 11: { // lij=1, lkl=0, tilex=48, tiley=23
-      sycl::range<2> blocks((npairs_kl + 367) / 368, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(2992+addition_buf), cgh); cgh.parallel_for<class md_j_1_0_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_1_0(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 12: { // lij=1, lkl=1, tilex=10, tiley=10
-      sycl::range<2> blocks((npairs_kl + 159) / 160, (npairs_ij + 159) / 160);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(2944+addition_buf), cgh); cgh.parallel_for<class md_j_1_1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_1_1(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 22: { // lij=2, lkl=0, tilex=48, tiley=16
-      sycl::range<2> blocks((npairs_kl + 255) / 256, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(3040+addition_buf), cgh); cgh.parallel_for<class md_j_2_0_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_2_0(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 23: { // lij=2, lkl=1, tilex=48, tiley=30
-      sycl::range<2> blocks((npairs_kl + 479) / 480, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(6112+addition_buf), cgh); cgh.parallel_for<class md_j_2_1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_2_1(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 24: { // lij=2, lkl=2, tilex=14, tiley=14
-      sycl::range<2> blocks((npairs_kl + 223) / 224, (npairs_ij + 223) / 224);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(5920+addition_buf), cgh); cgh.parallel_for<class md_j_2_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_2_2(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 33: { // lij=3, lkl=0, tilex=48, tiley=46
-      sycl::range<2> blocks((npairs_kl + 735) / 736, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(6112+addition_buf), cgh); cgh.parallel_for<class md_j_3_0_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_3_0(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 34: { // lij=3, lkl=1, tilex=48, tiley=24
-      sycl::range<2> blocks((npairs_kl + 383) / 384, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(6016+addition_buf), cgh); cgh.parallel_for<class md_j_3_1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_3_1(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 35: { // lij=3, lkl=2, tilex=48, tiley=11
-      sycl::range<2> blocks((npairs_kl + 175) / 176, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(5920+addition_buf), cgh); cgh.parallel_for<class md_j_3_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_3_2(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 44: { // lij=4, lkl=0, tilex=48, tiley=36
-      sycl::range<2> blocks((npairs_kl + 575) / 576, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(6064+addition_buf), cgh); cgh.parallel_for<class md_j_4_0_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_4_0(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 45: { // lij=4, lkl=1, tilex=48, tiley=18
-      sycl::range<2> blocks((npairs_kl + 287) / 288, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(6000+addition_buf), cgh); cgh.parallel_for<class md_j_4_1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_4_1(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    case 55: { // lij=5, lkl=0, tilex=48, tiley=26
-      sycl::range<2> blocks((npairs_kl + 415) / 416, (npairs_ij + 767) / 768);
-      stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(6112+addition_buf), cgh); cgh.parallel_for<class md_j_5_0_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_5_0(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    default: return 0;
-    }
-    #endif
     return 1;
 }
+#undef LAUNCH_KERNEL
+#undef KERNEL_SETUP
+#undef KERNEL_ARGS
