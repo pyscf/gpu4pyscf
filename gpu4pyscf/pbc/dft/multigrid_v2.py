@@ -528,7 +528,7 @@ def multi_grids_tasks_for_ke_cut_lowmem(cell, fft_mesh=None, verbose=None, gamma
         # At this stage almost no other memory is allocated,
         # and this number can be much lower when the fock matrix is actually built.
         available_gpu_memory = get_avail_mem()
-        available_gpu_memory = int(available_gpu_memory * 0.02)
+        available_gpu_memory = int(available_gpu_memory * 0.2)
 
         n_split = (fock_nbytes + available_gpu_memory - 1) // available_gpu_memory
         if n_split > 1:
