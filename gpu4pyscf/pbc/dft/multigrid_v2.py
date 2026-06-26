@@ -532,9 +532,9 @@ def multi_grids_tasks_for_ke_cut_lowmem(cell, fft_mesh=None, verbose=None, gamma
 
         n_split = (fock_nbytes + available_gpu_memory - 1) // available_gpu_memory
         if n_split > 1:
-            print(f"Warning: at dense shell ke range ({ke0}, {ke1_capped}], "
-                  f"the fock matrix size ({fock_nbytes / 2**30} GiB) is too large, "
-                  f"so the dense shells are split into {n_split} parts")
+            log.warn(f"Warning: at dense shell ke range ({ke0}, {ke1_capped}], "
+                     f"the fock matrix size ({fock_nbytes / 2**30} GiB) is too large, "
+                     f"so the dense shells are split into {n_split} parts")
 
         def split_list_evenly(lst, n_piece):
             N = len(lst)
