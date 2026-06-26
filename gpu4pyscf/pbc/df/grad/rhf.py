@@ -27,7 +27,7 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
 from gpu4pyscf.df.grad.rhf import factorize_dm
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
-from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
+from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, int3c2e_scheme
 from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_kpts
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.gto.mole import groupby
@@ -311,7 +311,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     ################################
     # SR int3c2e response
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+        gout_width=54, deriv=(1,0,0))
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -584,7 +585,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None):
 
     ################################
     # SR int3c2e response
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+        gout_width=54, deriv=(1,0,0))
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -637,29 +639,3 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None):
     ej += ej_sr.get() * 2
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     return ej
-
-def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
-    li = np.arange(LMAX+1)[:,None]
-    lj = np.arange(LMAX+1)
-    lk = np.arange(L_AUX_MAX+1)[:,None,None]
-    order = li + lj + lk + 1
-    nroots = (order//2 + 1)
-    if omega < 0:
-        nroots *= 2
-    g_size = (li+2)*(lj+1)*(lk+1)
-    unit = g_size*3 + nroots*2 + 7
-    nsp_max = _nearest_power2(shm_size // (unit*8))
-    nsp_per_block = THREADS
-    if gout_width is not None:
-        nfi = (li + 1) * (li + 2) // 2
-        nfj = (lj + 1) * (lj + 2) // 2
-        nfk = (lk + 1) * (lk + 2) // 2
-        gout_size = nfi * nfj * nfk
-        gout_stride = (gout_size + gout_width-1) // gout_width
-        # Round up to the next 2^n
-        gout_stride = _nearest_power2(gout_stride, return_leq=False)
-        nsp_per_block = THREADS // gout_stride
-    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
-    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-    shm_size = nsp_per_block * (unit*8)
-    return nsp_per_block, gout_stride, shm_size

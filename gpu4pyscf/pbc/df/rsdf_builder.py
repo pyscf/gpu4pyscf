@@ -16,6 +16,10 @@
 Build GDF tensor using the range-separation integral algorithm.
 '''
 
+__all__ = [
+    'build_cderi',
+]
+
 import os
 import math
 import ctypes
@@ -36,6 +40,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.pbc.df import ft_ao
+from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
@@ -823,21 +828,19 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)
     cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-    omega = 0.2
+    omega = 0.3
     log.debug('omega guess in get_pp_loc_part1 = %g', omega)
 
     is_single_kpt = kpts is not None and kpts.ndim == 1
     is_gamma_point = kpts is None or is_zero(kpts)
-    if is_gamma_point:
-        bvk_kmesh = np.ones(3, dtype=int)
-        bvk_ncells = 1
-    else:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
-        bvk_ncells = np.prod(bvk_kmesh)
     if is_single_kpt:
         kpts = kpts.reshape(1, 3)
+    if is_gamma_point:
+        bvk_kmesh = np.ones(3, dtype=int)
+    else:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
-    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
+    fakenuc = _fake_nuc(cell, with_pseudo=with_pseudo)
     int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
     charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
     nuc = int3c2e_opt.contract_auxvec(charges, kpts)
@@ -845,7 +848,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
     mesh = cell.cutoff_to_mesh(ke_cutoff)
     mesh = cell.symmetrize_mesh(mesh)
-    Gv, (basex, basey, basez), kws = cell.get_Gv_weights(mesh)
+    Gv, _, kws = cell.get_Gv_weights(mesh)
     if with_pseudo:
         #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
         ZG = ft_ao.ft_ao(fakenuc, Gv).conj()
@@ -856,51 +859,11 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
             exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
             ZG[0] -= charges.dot(np.pi/exps) / cell.vol
     else:
-        basex = cp.asarray(basex)
-        basey = cp.asarray(basey)
-        basez = cp.asarray(basez)
-        b = cell.reciprocal_vectors()
-        coords = cell.atom_coords()
-        rb = cp.asarray(coords.dot(b.T))
-        SIx = cp.exp(-1j*rb[:,0,None] * basex)
-        SIy = cp.exp(-1j*rb[:,1,None] * basey)
-        SIz = cp.exp(-1j*rb[:,2,None] * basez)
-        SIx *= cp.asarray(-cell.atom_charges())[:,None]
-        ZG = cp.einsum('qx,qy,qz->xyz', SIx, SIy, SIz).ravel().conj()
+        ZG = _get_ZSI(cell, mesh).conj()
         ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
 
-    ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh).build()
-    cell = ft_opt.cell
-    pair_address = ft_opt.pair_and_diag_indices(cart=True, original_ao_order=False)[0]
-    nao_pairs = len(pair_address)
-
-    eval_ft = ft_opt.ft_evaluator(cart=True, original_ao_order=False)[0]
-
-    mem_free = get_avail_mem(exclude_memory_pool=True)
-    avail_mem = mem_free * .8
-    ngrids = len(Gv)
-    Gblksize = int(avail_mem/(16*nao_pairs)) // 32 * 32
-    if Gblksize == 0:
-        raise RuntimeError('Insufficient GPU memory')
-    log.debug2('ft_ao_iter ngrids = %d Gblksize = %d', ngrids, Gblksize)
-    buf = cp.empty(nao_pairs*Gblksize, dtype=np.complex128)
-    nuc_compressed = 0
-    for p0, p1 in lib.prange(0, ngrids, Gblksize):
-        pqG = eval_ft(Gv[p0:p1], out=buf)
-        nuc_compressed += contract('pG,G->p', pqG, ZG[p0:p1]).real
-    buf = None
-
-    nao = cell.nao
-    nuc_raw = cp.zeros((nao * bvk_ncells * nao))
-    nuc_raw[pair_address] = nuc_compressed
-    nuc_raw = nuc_raw.reshape(nao, bvk_ncells, nao).transpose(1,0,2)
-    nuc_raw = fill_triu_bvk(cp.asarray(nuc_raw, order='C'), nao, bvk_kmesh)
-    nuc_raw = cell.apply_CT_mat_C(nuc_raw)
-
-    if not is_gamma_point:
-        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-        expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
-        nuc_raw = contract('lk,lpq->kpq', expLk, nuc_raw)
+    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+    nuc_raw = ft_opt.contract_rhoG(ZG, Gv, kpts)
 
     nuc += nuc_raw
     if is_single_kpt and nuc.ndim == 3:
@@ -919,7 +882,6 @@ def get_nuc(cell, kpts=None):
 def get_pp(cell, kpts=None):
     '''Get the periodic pseudopotential nuc-el ao matrix, with G=0 removed.
     '''
-    from pyscf.pbc.gto import pseudo
     from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     log = logger.new_logger(cell)
     t0 = log.init_timer()
