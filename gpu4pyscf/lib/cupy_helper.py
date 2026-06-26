@@ -73,14 +73,10 @@ def get_avail_mem(exclude_memory_pool=False):
 
     mempool = cupy.get_default_memory_pool()
     used_mem = mempool.used_bytes()
-    mem_limit = mempool.get_limit()
-    if(mem_limit != 0):
-        return mem_limit - used_mem
-    else:
-        total_mem = mempool.total_bytes()
-        # get memGetInfo() is slow
-        mem_avail = cupy.cuda.runtime.memGetInfo()[0]
-        return mem_avail + total_mem - used_mem
+    total_mem = mempool.total_bytes()
+    # get memGetInfo() is slow
+    mem_avail = cupy.cuda.runtime.memGetInfo()[0]
+    return mem_avail + total_mem - used_mem
 
 def concatenate(array_list):
     ''' Concatenate axis=0 only

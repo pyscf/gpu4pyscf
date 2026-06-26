@@ -28,7 +28,7 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, condense, transpose_sum)
+    contract, asarray, ndarray, transpose_sum, get_avail_mem)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e,
@@ -269,14 +269,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     h_aux = h_aux + h_aux.transpose(1,0,3,2)
     j2c_inv = metric = None
 
-    aux_idx, aux_slices = _argsort_aux_by_atom(auxmol, aux_sorting)
-    pqxy = h_aux[aux_idx[:,None], aux_idx].get()
-    ejk_aux = np.zeros_like(ejk)
-    for i, (p0, p1) in enumerate(aux_slices):
-        for j, (q0, q1) in enumerate(aux_slices):
-            ejk_aux[i,j] = pqxy[p0:p1,q0:q1].sum(axis=(0,1))
+    atm_labels = _auxbas_atom_labels(auxmol, aux_sorting)
+    ejk_aux = _aggregate_to_atoms(h_aux, natm, atm_labels, axis=(0,1)).get()
     ejk += ejk_aux * .5
-    pqxy = None
     dm_aux11 = j3c_oo1 = h_aux = None
     t1 = t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
@@ -376,10 +371,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
         t1 = log.timer_debug1(f'contract int3c2e_ip1 {v0}:{v1}', *t1)
     t0 = log.timer_debug1('int3c2e_ipaux and int2c2e_ip1 cross term', *t0)
 
-    h_ao_aux = h_ao_aux[:,aux_idx].get()
-    ejk_ao_aux = np.zeros_like(ejk)
-    for i, (p0, p1) in enumerate(aux_slices):
-        ejk_ao_aux[:,i] = h_ao_aux[:,p0:p1].sum(axis=1)
+    ejk_ao_aux = _aggregate_to_atoms(h_ao_aux, natm, atm_labels, axis=1).get()
     ejk += ejk_ao_aux
     ejk += ejk_ao_aux.transpose(1,0,3,2)
 
@@ -571,12 +563,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
     h_aux = h_aux + h_aux.transpose(1,0,3,2)
 
-    aux_idx, aux_slices = _argsort_aux_by_atom(auxmol)
-    pqxy = h_aux[aux_idx[:,None], aux_idx].get()
-    ej_aux = np.zeros_like(ej)
-    for i, (p0, p1) in enumerate(aux_slices):
-        for j, (q0, q1) in enumerate(aux_slices):
-            ej_aux[i,j] = pqxy[p0:p1,q0:q1].sum(axis=(0,1))
+    atm_labels = _auxbas_atom_labels(auxmol)
+    ej_aux = _aggregate_to_atoms(h_aux, natm, atm_labels, axis=(0,1)).get()
     ej += ej_aux * .5
     dm_aux11 = h_aux = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -607,10 +595,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     contract('xpt,yrt->prxy', auxvec_100v_atm, j2c_10, alpha=-1, beta=1, out=h_ao_aux)
     t0 = log.timer_debug1('int3c2e_ipaux and int2c2e_ip1 cross term', *t0)
 
-    h_ao_aux = h_ao_aux[:,aux_idx].get()
-    ej_ao_aux = np.zeros_like(ej)
-    for i, (p0, p1) in enumerate(aux_slices):
-        ej_ao_aux[:,i] = h_ao_aux[:,p0:p1].sum(axis=1)
+    ej_ao_aux = _aggregate_to_atoms(h_ao_aux, natm, atm_labels, axis=1).get()
     ej += ej_ao_aux
     ej += ej_ao_aux.transpose(1,0,3,2)
     return ej
@@ -703,6 +688,32 @@ def _factorize_dm(mol, dm):
     dm_factor_l = dm_factor_l[ao_idx]
     return dm_factor_l
 
+def _auxbas_atom_labels(mol, aux_sorting=None):
+    ao_loc = mol.ao_loc
+    atm_labels = np.repeat(mol._bas[:,ATOM_OF], ao_loc[1:]-ao_loc[:-1])
+    if aux_sorting is not None:
+        atm_labels, tmp = np.empty_like(atm_labels), atm_labels
+        atm_labels[cp.asnumpy(aux_sorting)] = tmp
+    return atm_labels
+
+def _aggregate_to_atoms(a, natm, atom_labels, axis):
+    if axis == 0:
+        shape = list(a.shape)
+        shape[0] = natm
+        indices = atom_labels
+    elif axis == 1:
+        shape = list(a.shape)
+        shape[1] = natm
+        indices = (slice(None), atom_labels)
+    elif axis == (0, 1):
+        shape = [natm if i in axis else n for i, n in enumerate(a.shape)]
+        indices = (atom_labels[:,None], atom_labels)
+    else:
+        raise NotImplementedError
+    out = cp.zeros(shape)
+    cp.add.at(out, indices, a)
+    return out
+
 def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=None):
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
@@ -716,35 +727,45 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     nao, nocc = orbo.shape
 
     natm = mol.natm
-    naux = auxmol.nao
+    aux_loc = auxmol.ao_loc
+    naux = int(aux_loc[-1])
     pair_addresses = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=True)[0]
     i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
 
     vhf_atm = cp.zeros((natm,3,nao,nocc))
-    # TODO: estimate memory and enable mem_sufficient
-    mem_sufficient = 0
-    if mem_sufficient:
-        vhf_atm_ao = cp.zeros((natm,3,nao,nao))
     vhf1 = cp.zeros((3, nao, nao))
 
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
-    mem_avail = mem_free - naux*nocc*nao * 8 # cache dm_aux ~ (aux,i,a)
-    mem_avail -= naux*nocc**2 * 8 # cache dm_oo ~ (aux,i,j)
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    mem_avail -= naux*nocc*nao * 8 # dm_aux ~ (aux,i,a)
+    mem_avail -= naux**2 * 3 * 8 # j2c_factor and metric matrix
+    mem_avail -= naux*nocc**2 * 8 # dm_oo ~ (aux,i,j)
     assert mem_avail > 0, 'Insufficient GPU memory'
+
+    mem_sufficient = natm*3*nao**2*8 * 1.5 + 3*nao**2*10*8 < mem_avail
+    if mem_sufficient:
+        vhf_atm_ao = cp.zeros((natm,3,nao,nao))
+        mem_avail -= vhf_atm_ao.nbytes
 
     # size for caching a tensor with the shape (:,nao_pair) or (:,nocc*nao)
     pair_size_max = max(nao_pair, nocc*nao)
-    _unit = 6*(nao_pair+pair_size_max)*8
-    batch_size = max(1, min(naux, int(mem_avail*.7) // _unit))
-    blksize = min(naux, (int(mem_avail*.95 - batch_size*_unit) //
-                         ((nao**2+nao*nocc+nocc**2)*8)))
-    assert blksize > 0, 'Insufficient GPU memory'
+    _unit = 6*pair_size_max*8
+    largest_shell_size = (aux_loc[1:] - aux_loc[:-1]).max()
+    batch_size = int(mem_avail*.7 / _unit)
+    if batch_size < largest_shell_size:
+        mem_req = (largest_shell_size-batch_size) *_unit * 1.5 * 1e-6
+        raise MemoryError(f'Insufficient GPU memory. Need {mem_req} MB more.')
+    batch_size = min(batch_size, max(largest_shell_size, naux))
 
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True)
     aux_batches = len(aux_offsets) - 1
+    batch_size = min(batch_size, (aux_offsets[1:]-aux_offsets[:-1]).max())
+
+    blksize = int((mem_avail*.95 - batch_size*_unit) / ((nao**2+nao*nocc+nocc**2)*8))
+    assert blksize > 1, 'Insufficient GPU memory'
+    blksize = min(max(largest_shell_size, naux), blksize)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
@@ -793,9 +814,15 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     # metric is not symmetric. Its first index is sorted according to the
     # associated atoms. The sorted indices can be sliced by aux_slices.
     metric = j2c_factor.dot(j2c_factor.T)
-    # TODO: update inplace
-    dm_3c = cp.einsum('rs,siq->riq', metric, j3c_00)
-    j3c_00 = metric = None
+
+    if get_avail_mem(exclude_memory_pool=True) > naux*nocc*nao * 10:
+        dm_3c = cp.einsum('rs,siq->riq', metric, j3c_00)
+    else:
+        tmp = cp.empty_like(metric)
+        for i in range(nocc):
+            j3c_00[:,i] = metric.dot(j3c_00[:,i], out=tmp)
+        dm_3c = j3c_00
+    j3c_00 = metric = tmp = None
 
     dm_oo = cp.einsum('riq,qj->rij', dm_3c, orbo)
     if j_factor != 0:
@@ -960,7 +987,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     t0 = log.timer_debug1('fill_int3c2e_ip1 and fill_int3c2e_ipaux', *t0)
 
     if mem_sufficient:
-        vhf_atm_ao = vhf_atm_ao + vhf_atm_ao.transpose(0,1,3,2)
+        transpose_sum(vhf_atm_ao.reshape(-1,nao,nao), inplace=True)
         contract('nxpq,qj->nxpj', vhf_atm_ao, orbo, beta=1, out=vhf_atm)
 
     # (10|0)(0|0)(0|00)
