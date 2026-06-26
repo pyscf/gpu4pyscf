@@ -953,7 +953,11 @@ class PBCJKMatrixOpt:
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
             # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
-            assert absmax(dms.imag) < cell.precision*5e2
+            if absmax(dms.imag) > cell.precision*5e2:
+                raise RuntimeError(
+                    'The density matrix in the BvK supercell is expected to be real for '
+                    'k-point calculations. However, non-negligible imaginary part is detected. '
+                    'This may be caused by time-reversal symmetry breaking.')
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
@@ -1382,7 +1386,11 @@ class PBCJKMatrixOpt:
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
             # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
-            assert absmax(dms.imag) < cell.precision*5e2
+            if absmax(dms.imag) > cell.precision*5e2:
+                raise RuntimeError(
+                    'The density matrix in the BvK supercell is expected to be real for '
+                    'k-point calculations. However, non-negligible imaginary part is detected. '
+                    'This may be caused by time-reversal symmetry breaking.')
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')

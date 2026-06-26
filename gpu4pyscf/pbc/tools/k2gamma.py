@@ -20,6 +20,7 @@ import cupy as cp
 from pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_map
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
@@ -84,3 +85,17 @@ def double_translation_indices(kmesh):
                                 tz[None,None,:,None,None,:]], kmesh)
     nk = np.prod(kmesh)
     return idx.reshape(nk, nk)
+
+def gamma2k_phase(kmesh, with_gamma_point=True):
+    '''
+    The k_phase can transform the k-points MOs to gamma-point MOs:
+    C_gamma = np.einsum('Rk,kum,kh->Ruhm', fft_matrix(kmesh), C_k, k_phase)
+    '''
+    Nk = np.prod(kmesh)
+    k_phase = np.eye(Nk, dtype=np.complex128)
+    r2x2 = np.array([[1., 1j], [1., -1j]]) * .5**.5
+    pairs = [[k, k_conj] for k, k_conj, _, _ in kk_adapted_iter(kmesh, with_gamma_point)
+             if k != k_conj]
+    for idx in np.array(pairs):
+        k_phase[idx[:,None],idx] = r2x2
+    return asarray(k_phase)

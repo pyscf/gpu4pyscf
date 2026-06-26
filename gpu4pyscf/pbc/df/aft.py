@@ -15,7 +15,7 @@
 '''Density expansion on plane waves'''
 
 __all__ = [
-    'get_pp', 'get_nuc', 'AFTDF'
+    'get_pp', 'get_nuc', 'get_SI', 'AFTDF'
 ]
 
 import contextlib
@@ -30,13 +30,14 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.tools.pbc import get_coulG
+from gpu4pyscf.pbc.tools.pbc import get_coulG, _get_Gv_with_base
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
+from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
-                                       get_avail_mem)
+                                       get_avail_mem, asarray)
 
 KE_SCALING = aft_cpu.KE_SCALING
 
@@ -63,10 +64,10 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
 
     if with_pseudo:
         vpplocG = pp_int.get_gth_vlocG_part1(cell, Gv)
-        vpplocG = -np.einsum('ij,ij->j', cell.get_SI(Gv), vpplocG)
+        vpplocG = -np.einsum('ij,ij->j', get_SI(cell, mesh=mesh), vpplocG)
         vpplocG = cp.asarray(vpplocG)
     else:
-        fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
+        fakenuc = _fake_nuc(cell, with_pseudo=with_pseudo)
         aoaux = cp.asarray(ft_ao.ft_ao(fakenuc, Gv))
         charges = cp.asarray(cell.atom_charges(), dtype=np.float64)
         coulG = get_coulG(cell, kpt_allow, mesh=mesh, Gv=Gv)
@@ -350,3 +351,107 @@ def _check_kpts(kpts, dm):
         else: # KUHF
             assert dm.shape[:2] == (2, nkpts), 'KUHF dm incompatible with kpts'
     return kpts, is_single_kpt
+
+def _fake_nuc(cell, with_pseudo=True):
+    '''A fake cell with steep gaussians to mimic nuclear density
+    '''
+    if isinstance(cell, SortedGTO):
+        cell = cell.cell
+    fakenuc = cell.copy(deep=False)
+    natm = cell.natm
+
+    ptr0 = gto.PTR_ENV_START
+    _env = np.append(np.zeros(ptr0), cell.atom_coords().ravel())
+
+    fakenuc._atm = cell._atm.copy()
+    ptr1 = ptr0 + natm * 3
+    fakenuc._atm[:,gto.PTR_COORD] = np.arange(ptr0, ptr1, 3)
+    ptr0 = ptr1
+
+    # point nuclear model
+    eta = np.full(natm, 1e16)
+
+    # Gaussian nuclear model
+    nuc_mod_idx = np.where(cell._atm[:,gto.NUC_MOD_OF] == gto.NUC_GAUSS)[0]
+    eta[nuc_mod_idx] = cell._env[cell._atm[nuc_mod_idx,gto.PTR_ZETA]]
+
+    if with_pseudo:
+        for ia in range(natm):
+            symb = cell.atom_symbol(ia)
+            if symb in cell._pseudo:
+                pp = cell._pseudo[symb]
+                rloc, nexp, cexp = pp[1:3+1]
+                eta[ia] = .5 / rloc**2
+
+    half_sph_norm = .5/np.sqrt(np.pi)
+    norm = half_sph_norm / gto.gaussian_int(2, eta)
+    fakenuc._env = _env = np.hstack([_env, eta, norm])
+
+    fakenuc._bas = _bas = np.zeros((natm, 8), dtype=np.int32)
+    _bas[:,gto.ATOM_OF] = np.arange(natm)
+    _bas[:,gto.NPRIM_OF] = 1
+    _bas[:,gto.NCTR_OF] = 1
+    _bas[:,gto.PTR_EXP] = ptr0 + np.arange(natm)
+    _bas[:,gto.PTR_COEFF] = ptr0 + natm + np.arange(natm)
+
+    fakenuc.rcut = 0.1
+    return fakenuc
+
+def get_SI(cell, Gv=None, mesh=None, atmlst=None):
+    '''Calculate the structure factor (0D, 1D, 2D, 3D) for all atoms; see MH (3.34).
+
+    Args:
+        cell : instance of :class:`Cell`
+
+        Gv : (N,3) array
+            G vectors
+
+        atmlst : list of ints, optional
+            Indices of atoms for which the structure factors are computed.
+
+    Returns:
+        SI : (natm, ngrids) ndarray, dtype=np.complex128
+            The structure factor for each atom at each G-vector.
+    '''
+    coords = cp.asarray(cell.atom_coords())
+    if atmlst is not None:
+        coords = coords[np.asarray(atmlst)]
+    if Gv is None:
+        if mesh is None:
+            mesh = cell.mesh
+        basex, basey, basez = cell.get_Gv_weights(mesh)[1]
+        basex = cp.asarray(basex)
+        basey = cp.asarray(basey)
+        basez = cp.asarray(basez)
+        b = cp.asarray(cell.reciprocal_vectors())
+        rb = coords.dot(b.T)
+        SIx = cp.exp(-1j*rb[:,0,None] * basex)
+        SIy = cp.exp(-1j*rb[:,1,None] * basey)
+        SIz = cp.exp(-1j*rb[:,2,None] * basez)
+        SI = SIx[:,:,None,None] * SIy[:,None,:,None] * SIz[:,None,None,:]
+        natm = coords.shape[0]
+        SI = SI.reshape(natm, -1)
+    else:
+        SI = cp.exp(-1j*coords.dot(cp.asarray(Gv).T))
+    return SI
+
+def _get_ZSI(cell, mesh=None):
+    '''
+    Calculate the product of nuclear charges and structure factor
+
+    einsum('i,ij->j', Z, SI)
+    '''
+    assert cell.dimension == 3
+    if mesh is None:
+        mesh = cell.mesh
+    Gv, (basex, basey, basez) = _get_Gv_with_base(cell, mesh)
+    b = cell.reciprocal_vectors()
+    coords = cell.atom_coords()
+    Z = asarray(-cell.atom_charges())
+    rb = asarray(coords.dot(b.T))
+    SIx = cp.exp(-1j*rb[:,0,None] * basex)
+    SIy = cp.exp(-1j*rb[:,1,None] * basey)
+    SIz = cp.exp(-1j*rb[:,2,None] * basez)
+    SIx *= Z[:,None]
+    ZG = cp.einsum('qx,qy,qz->xyz', SIx, SIy, SIz).ravel()
+    return ZG
