@@ -35,6 +35,7 @@ from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import utils
+from gpu4pyscf import scf
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
     _nearest_power2, _cache_q_cond_and_non0pairs, _check_rsh_factors,
@@ -940,6 +941,7 @@ class Hessian(HessianBase):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
     def __init__(self, scf_method):
+        assert isinstance(scf_method, scf.hf.SCF)
         self.verbose = scf_method.verbose
         self.stdout = scf_method.stdout
         self.mol = scf_method.mol
