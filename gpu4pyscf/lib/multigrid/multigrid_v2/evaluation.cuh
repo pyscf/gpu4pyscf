@@ -49,8 +49,7 @@ __global__ static void evaluate_density_kernel(
   constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
 
   const int density_matrix_stride = n_i_functions * n_j_functions;
-  const int density_matrix_channel_stride =
-      density_matrix_stride * n_difference_images;
+  const int64_t density_matrix_channel_stride = ((int64_t) density_matrix_stride) * ((int64_t) n_difference_images);
 
   const int block_index = sorted_block_index[blockIdx.x];
   const int n_blocks_b = (mesh_b + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
@@ -124,7 +123,7 @@ __global__ static void evaluate_density_kernel(
     const int image_index = image_indices[i_pair];
     const int image_index_i = image_index / n_images;
     const int image_index_j = image_index % n_images;
-    const int image_difference_index = image_pair_difference_index[image_index];
+    const int64_t image_difference_index = (int64_t) image_pair_difference_index[image_index];
 
     const int shell_pair_index = non_trivial_pairs[i_pair];
     const int i_shell_index = shell_pair_index / n_j_shells;
@@ -484,7 +483,7 @@ __global__ static void evaluate_xc_kernel(
 
   const int xc_weights_stride = mesh_a * mesh_b * mesh_c;
   const int fock_stride = n_i_functions * n_j_functions;
-  const int fock_channel_stride = fock_stride * n_difference_images;
+  const int64_t fock_channel_stride = ((int64_t) fock_stride) * ((int64_t) n_difference_images);
 
   const int block_index = sorted_block_index[blockIdx.x];
 
@@ -565,7 +564,7 @@ __global__ static void evaluate_xc_kernel(
     const int image_index = image_indices[i_pair];
     const int image_index_i = image_index / n_images;
     const int image_index_j = image_index % n_images;
-    const int image_difference_index = image_pair_difference_index[image_index];
+    const int64_t image_difference_index = (int64_t) image_pair_difference_index[image_index];
 
     const int shell_pair_index = non_trivial_pairs[i_pair];
     const int i_shell_index = shell_pair_index / n_j_shells;
@@ -893,8 +892,7 @@ __global__ static void evaluate_density_tau_kernel(
   constexpr int n_dimensions = 3;
 
   const int density_matrix_stride = n_i_functions * n_j_functions;
-  const int density_matrix_channel_stride =
-      density_matrix_stride * n_difference_images;
+  const int64_t density_matrix_channel_stride = ((int64_t) density_matrix_stride) * ((int64_t) n_difference_images);
 
   const int block_index = sorted_block_index[blockIdx.x];
   const int n_blocks_b = (mesh_b + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
@@ -959,7 +957,7 @@ __global__ static void evaluate_density_tau_kernel(
     const int image_index = image_indices[i_pair];
     const int image_index_i = image_index / n_images;
     const int image_index_j = image_index % n_images;
-    const int image_difference_index = image_pair_difference_index[image_index];
+    const int64_t image_difference_index = (int64_t) image_pair_difference_index[image_index];
 
     const int shell_pair_index = non_trivial_pairs[i_pair];
     const int i_shell_index = shell_pair_index / n_j_shells;
@@ -1356,7 +1354,7 @@ __global__ static void evaluate_xc_with_tau_kernel(
 
   const int xc_weights_stride = mesh_a * mesh_b * mesh_c;
   const int fock_stride = n_i_functions * n_j_functions;
-  const int fock_channel_stride = fock_stride * n_difference_images;
+  const int64_t fock_channel_stride = ((int64_t) fock_stride) * ((int64_t) n_difference_images);
 
   const int block_index = sorted_block_index[blockIdx.x];
 
@@ -1446,7 +1444,7 @@ __global__ static void evaluate_xc_with_tau_kernel(
     const int image_index = image_indices[i_pair];
     const int image_index_i = image_index / n_images;
     const int image_index_j = image_index % n_images;
-    const int image_difference_index = image_pair_difference_index[image_index];
+    const int64_t image_difference_index = (int64_t) image_pair_difference_index[image_index];
 
     const int shell_pair_index = non_trivial_pairs[i_pair];
     const int i_shell_index = shell_pair_index / n_j_shells;

@@ -134,6 +134,7 @@ class UHF(pbchf.SCF):
     convert_from_ = NotImplemented
 
     density_fit = pbchf.RHF.density_fit
+    x2c = x2c1e = sfx2c1e = pbchf.RHF.sfx2c1e
 
     def get_fermi(self):
         nocc_a, nocc_b = self.nelec
