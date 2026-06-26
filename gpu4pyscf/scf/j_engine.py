@@ -43,7 +43,7 @@ THREADS = 256
 
 libvhf_md = load_library('libgvhf_md')
 libvhf_md.MD_build_j.restype = ctypes.c_int
-libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
+libvhf_md.init_mdj_constant.restype = ctypes.c_int
 
 def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     '''Compute J matrix
@@ -161,6 +161,9 @@ class _VHFOpt(jk._VHFOpt):
             stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(self.mol, verbose)
             t1 = log.init_timer()
+            err = libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError('MD-J CUDA kernel initialization failed')
             dm_xyz = asarray(dm_xyz) # transfer to current device
             vj_xyz = cp.zeros_like(dm_xyz)
 
