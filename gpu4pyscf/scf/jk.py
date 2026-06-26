@@ -58,8 +58,8 @@ THREADS = 256
 GROUP_SIZE = 256
 Q_COND_MARGIN = 4.
 
-libvhf_rys.RYS_build_k_init(ctypes.c_int(SHM_SIZE))
-libvhf_rys.RYS_build_jk_init(ctypes.c_int(SHM_SIZE))
+libvhf_rys.RYS_build_k_init.restype = ctypes.c_int
+libvhf_rys.RYS_build_jk_init.restype = ctypes.c_int
 
 def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None):
     '''Compute J, K matrices
@@ -444,6 +444,9 @@ class _VHFOpt:
             stream = cp.cuda.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
+            err = libvhf_rys.RYS_build_jk_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError('RYS build_jk CUDA kernel initialization failed')
             dms = cp.asarray(dms) # transfer to current device
             dm_cond = cp.asarray(dm_cond)
 
@@ -739,6 +742,9 @@ class _VHFOpt:
             stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
+            err = libvhf_rys.RYS_build_k_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError('RYS build_k CUDA kernel initialization failed')
             dms = cp.asarray(dms) # transfer to current device
             dm_cond = cp.asarray(dm_cond)
 

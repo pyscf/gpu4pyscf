@@ -363,6 +363,9 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         device_id = cp.cuda.device.get_device_id()
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
+        err = libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
+        if err != 0:
+            raise RuntimeError('RYS build_vjk_ip1 CUDA kernel initialization failed')
 
         timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0

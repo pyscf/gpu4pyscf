@@ -55,8 +55,9 @@ __all__ = [
 ]
 
 libpbc.PBC_build_k.restype = ctypes.c_int
-libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
-libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+libpbc.PBC_build_k_init.restype = ctypes.c_int
+libpbc.PBC_build_jk_ip1_init.restype = ctypes.c_int
+libpbc.PBC_build_j_init.restype = ctypes.c_int
 libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
 libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 
@@ -349,6 +350,9 @@ class PBCJKMatrixOpt:
 
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_k kernel init failed on Device {device_id}')
             kern = libpbc.PBC_build_k
             rys_envs = self.rys_envs
             rsjk_omega = -self.omega
@@ -711,7 +715,6 @@ class PBCJKMatrixOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
-        libpbc.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
         libpbc.PBC_build_j.restype = ctypes.c_int
 
         uniq_l_ctr = cell.uniq_l_ctr
@@ -747,6 +750,9 @@ class PBCJKMatrixOpt:
 
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_j kernel init failed on Device {device_id}')
             kern = libpbc.PBC_build_j
             rys_envs = self.rys_envs
             rsjk_omega = -self.omega
@@ -1003,6 +1009,9 @@ class PBCJKMatrixOpt:
             t1 = log.timer_debug1(f'ejk_sr initialization on Device {device_id}', *t0)
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_jk_ip1 kernel init failed on Device {device_id}')
             kern = libpbc.PBC_per_atom_jk_ip1
             rys_envs = self.rys_envs
             omega = -self.omega
@@ -1433,6 +1442,9 @@ class PBCJKMatrixOpt:
             t1 = log.timer_debug1(f'ejk_sr_strain_deriv initialization on Device {device_id}', *t0)
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_jk_ip1 kernel init failed on Device {device_id}')
             kern = libpbc.PBC_jk_strain_deriv
             rys_envs = self.rys_envs
             omega = -self.omega
