@@ -143,7 +143,7 @@ class Int3c2eOpt:
         if self._int3c2e_envs is None:
             self.build()
         mol = self.mol
-        assert all(mol.recontract_coef == 1.), \
+        assert all(cp.asnumpy(mol.recontract_coef) == 1.), \
                 'int3c2e for general-contraction basis not supported'
         auxmol = self.auxmol
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)

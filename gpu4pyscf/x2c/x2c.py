@@ -626,17 +626,20 @@ def _recontract_matrix(mol, mat):
                 'Input matrix must be transformed into spherical GTOs'
         c_ao_loc = cp.asarray(mol.c_ao_loc, dtype=np.int32)
         p_ao_loc = cp.asarray(p_ao_loc, dtype=np.int32)
+    recontract_coef = cp.asarray(mol.recontract_coef)
+    recontract_bas = cp.asarray(mol.recontract_bas)
+    recontraction_idx = cp.asarray(mol.recontraction_idx)
     nao = mol.mol.nao
     tmp = cp.zeros((counts, nao, ncol))
     err = libvhf_rys.bra_from_sorted(
         ctypes.cast(tmp.data.ptr, ctypes.c_void_p),
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-        ctypes.cast(mol.recontract_coef.data.ptr, ctypes.c_void_p),
-        ctypes.cast(mol.recontract_bas.data.ptr, ctypes.c_void_p),
-        ctypes.cast(mol.recontraction_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(recontract_coef.data.ptr, ctypes.c_void_p),
+        ctypes.cast(recontract_bas.data.ptr, ctypes.c_void_p),
+        ctypes.cast(recontraction_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
         ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(len(mol.recontract_bas)), ctypes.c_int(mol.nbas),
+        ctypes.c_int(len(recontract_bas)), ctypes.c_int(mol.nbas),
         ctypes.c_int(ncol), ctypes.c_int(counts),
         ctypes.c_int(cart))
     assert err == 0
@@ -645,12 +648,12 @@ def _recontract_matrix(mol, mat):
     err = libvhf_rys.ket_from_sorted(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.cast(tmp.data.ptr, ctypes.c_void_p),
-        ctypes.cast(mol.recontract_coef.data.ptr, ctypes.c_void_p),
-        ctypes.cast(mol.recontract_bas.data.ptr, ctypes.c_void_p),
-        ctypes.cast(mol.recontraction_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(recontract_coef.data.ptr, ctypes.c_void_p),
+        ctypes.cast(recontract_bas.data.ptr, ctypes.c_void_p),
+        ctypes.cast(recontraction_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
         ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(len(mol.recontract_bas)), ctypes.c_int(mol.nbas),
+        ctypes.c_int(len(recontract_bas)), ctypes.c_int(mol.nbas),
         ctypes.c_int(nao*counts),
         ctypes.c_int(cart))
     assert err == 0

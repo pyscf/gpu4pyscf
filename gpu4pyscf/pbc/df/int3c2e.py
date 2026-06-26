@@ -376,7 +376,7 @@ class SRInt3c2eOpt:
             self.build()
 
         cell = self.cell
-        assert all(cell.recontract_coef == 1.), \
+        assert all(cp.asnumpy(cell.recontract_coef) == 1.), \
                 'int3c2e for general-contraction basis not supported'
         auxcell = self.auxcell
         bvk_ncells = np.prod(self.bvk_kmesh)
