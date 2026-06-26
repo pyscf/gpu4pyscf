@@ -55,6 +55,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF, ft_ao
+from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.grad import rks as rks_grad
 from gpu4pyscf.pbc.gto import int1e
@@ -357,12 +358,10 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
             Ene += cp.einsum('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
             Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm)
         else:
-            charge = -cell.atom_charges()
             # SI corresponds to Fourier components of the fractional atomic
             # positions within the cell. It does not respond to the strain
             # transformation
-            SI = cell.get_SI(mesh=mesh)
-            ZG = asarray(np.dot(charge, SI))
+            ZG = _get_ZSI(cell, mesh)
             vR = pbctools.ifft(ZG * coulG_0, mesh).real
             Ene = cp.einsum('xyg,g->xy', rho1[:,:,0], vR).real.get()
             Ene += cp.einsum('xyg,g,g->xy', coulG_1, rhoG.conj(), ZG).real.get() * (1./ngrids)
@@ -373,7 +372,7 @@ def _get_vpplocG_strain_derivatives(cell, mesh):
     disp = 1e-5
     ngrids = np.prod(mesh)
     v1 = cp.empty((3,3, ngrids), dtype=np.complex128)
-    SI = cell.get_SI(mesh=mesh)
+    SI = get_SI(cell, mesh=mesh)
     for x in range(3):
         for y in range(3):
             cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
@@ -410,7 +409,7 @@ def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
         vol = cell.vol
         b = cell.reciprocal_vectors(norm_to=1)
         Gv = cell.get_Gv(mesh)
-        SI = cell.get_SI(mesh=mesh)
+        SI = get_SI(cell, mesh=mesh)
         # buf for SPG_lmi upto l=0..3 and nl=3
         vppnl = 0
         for k, dm in enumerate(dm_kpts):
@@ -439,9 +438,9 @@ def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
                             qkl = pseudo.pp._qli(G_rad*rl, l, k)
                             pYlm[k] = pYlm_part.T * qkl
                 if p1 > 0:
-                    SPG_lmi = buf[:p1]
+                    SPG_lmi = asarray(buf[:p1])
                     SPG_lmi *= SI[ia].conj()
-                    SPG_lm_aoGs = asarray(SPG_lmi).dot(aokG)
+                    SPG_lm_aoGs = SPG_lmi.dot(aokG)
                     rho = SPG_lm_aoGs.dot(dm).dot(SPG_lm_aoGs.conj().T).real.get()
                     p1 = 0
                     for l, proj in enumerate(pp[5:]):

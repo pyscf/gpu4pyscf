@@ -56,7 +56,8 @@ class KnownValues(unittest.TestCase):
         L = 5.
         n = 11
         cell1 = pgto.Cell()
-        cell1.a = np.eye(3) * L
+        np.random.seed(9)
+        cell1.a = np.eye(3) * L + np.random.rand(3,3) - .5
         cell1.mesh = [n] * 3
         cell1.atom = '''C    3.    2.       3.
                         C    1.    1.       1.'''

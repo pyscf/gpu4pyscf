@@ -420,6 +420,7 @@ class KUHF(khf.KSCF):
     convert_from_ = NotImplemented
 
     density_fit = khf.KRHF.density_fit
+    x2c = x2c1e = sfx2c1e = khf.KRHF.sfx2c1e
 
     def Gradients(self):
         from gpu4pyscf.pbc.grad.kuhf import Gradients

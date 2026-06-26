@@ -30,7 +30,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.df.fft import get_SI, _check_kpts
+from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
 from gpu4pyscf.__config__ import shm_size
@@ -891,7 +891,7 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
     coulG = tools.get_coulG(cell, Gv=Gv)
     vlocG = cp.zeros(len(G2), dtype=np.complex128)
 
-    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
+    de = cp.zeros([cell.natm, 3], dtype = cp.complex128)
 
     for ia in range(cell.natm):
         symb = cell.atom_symbol(ia)
@@ -900,8 +900,6 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
 
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
-        if nexp == 0:
-            continue
 
         vlocG.fill(0)
         _append_vpplocG_one_atom_without_gamma(ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, G2, coulG, SIx, SIy, SIz, vlocG)
