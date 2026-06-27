@@ -17,13 +17,7 @@ import numpy as np
 import cupy as cp
 from gpu4pyscf.gto.mole import Cell, SortedCell
 
-def get_Gv_weights(cell, mesh=None):
-    '''Calculate G-vectors and weights.
-
-    Returns:
-        Gv : (ngris, 3) ndarray of floats
-            The array of G-vectors.
-    '''
+def get_Gv_base(cell, mesh=None):
     if mesh is None:
         mesh = cell.mesh
 
@@ -31,13 +25,21 @@ def get_Gv_weights(cell, mesh=None):
     rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
     ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
     rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
-    b = cell.reciprocal_vectors()
-    weights = abs(np.linalg.det(b)) / (2*np.pi)**3
+    return rx, ry, rz
 
+def get_Gv_weights(cell, mesh=None):
+    '''Calculate G-vectors and weights.
+
+    Returns:
+        Gv : (ngris, 3) ndarray of floats
+            The array of G-vectors.
+    '''
     if cell.dimension <= 2 and cell.low_dim_ft_type == 'inf_vacuum':
         raise NotImplementedError
 
-    Gvbase = (rx, ry, rz)
+    rx, ry, rz = Gvbase = get_Gv_base(cell, mesh)
+    b = cell.reciprocal_vectors()
+    weights = abs(np.linalg.det(b)) / (2*np.pi)**3
 
     #:Gv = lib.cartesian_prod(Gvbase).dot(b)
     b = cp.asarray(b)

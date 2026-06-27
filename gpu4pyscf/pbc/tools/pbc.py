@@ -19,7 +19,7 @@ from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
 from gpu4pyscf.lib.cupy_helper import asarray, batched_vec_norm2
-from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_weights
+from gpu4pyscf.pbc.gto.cell import get_Gv
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.

@@ -30,7 +30,8 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.tools.pbc import get_coulG, get_Gv_weights
+from gpu4pyscf.pbc.tools.pbc import get_coulG
+from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
@@ -425,7 +426,7 @@ def get_SI(cell, Gv=None, mesh=None, atmlst=None):
     if Gv is None:
         if mesh is None:
             mesh = cell.mesh
-        basex, basey, basez = get_Gv_weights(cell, mesh)[1]
+        basex, basey, basez = get_Gv_base(cell, mesh)
         basex = cp.asarray(basex)
         basey = cp.asarray(basey)
         basez = cp.asarray(basez)
@@ -450,7 +451,7 @@ def _get_ZSI(cell, mesh=None):
     assert cell.dimension == 3
     if mesh is None:
         mesh = cell.mesh
-    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)
+    basex, basey, basez = get_Gv_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     Z = asarray(-cell.atom_charges())
