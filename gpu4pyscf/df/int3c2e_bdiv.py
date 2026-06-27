@@ -148,7 +148,8 @@ class Int3c2eOpt:
         auxmol = self.auxmol
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(omega, gout_width=54)
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            short_range=omega<0, gout_width=54, cache_cart_idx=True)
         gout_stride = cp.asarray(gout_stride, dtype=np.int32)
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
@@ -276,7 +277,8 @@ class Int3c2eOpt:
             dm = dm[None]
         n_dm = len(dm)
 
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega)
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            short_range=mol.omega<0, cache_cart_idx=True)
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -316,7 +318,8 @@ class Int3c2eOpt:
         assert auxvec.ndim == 1
         auxvec = cp.asarray(auxvec)
 
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, gout_width=30)
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            short_range=mol.omega<0, gout_width=30, cache_cart_idx=True)
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -458,24 +461,37 @@ class Int3c2eEnvVars(ctypes.Structure):
         return Int3c2eEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc,
                                   self.log_cutoff)
 
-def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
+def int3c2e_scheme(*, short_range=False, shm_size=SHM_SIZE, gout_width=None,
+                   gout_ndim='ijk', deriv=None, cache_cart_idx=False,
+                   angular_inc=None):
+    if deriv is None:
+        deriv = (0, 0, 0)
+    if angular_inc is None:
+        angular_inc = sum(deriv)
+    i_inc, j_inc, k_inc = deriv
+
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     lk = np.arange(L_AUX_MAX+1)[:,None,None]
     nfi = (li + 1) * (li + 2) // 2
     nfj = (lj + 1) * (lj + 2) // 2
     nfk = (lk + 1) * (lk + 2) // 2
-    order = li + lj + lk
+    order = angular_inc + li + lj + lk
     nroots = order//2 + 1
-    if omega < 0:
-        nroots *= 2 # for short-range
-    g_size = (li+1)*(lj+1)*(lk+1)
+    if short_range < 0:
+        nroots *= 2
+    g_size = (li+1+i_inc)*(lj+1+j_inc)*(lk+1+k_inc)
     unit = g_size*3 + nroots*2 + 7
-    shm_size = shm_size - (nfi + nfj + nfk) * 3 * 4
+    shm_size = shm_size - 1024
     nsp_max = _nearest_power2(shm_size // (unit*8))
     nsp_per_block = THREADS
     if gout_width is not None:
-        gout_size = nfi * nfj * nfk
+        if gout_ndim == 'ij':
+            gout_size = nfi * nfj
+        elif gout_ndim == 'k':
+            gout_size = nfk
+        else:
+            gout_size = nfi * nfj * nfk
         gout_stride = (gout_size + gout_width-1) // gout_width
         # Round up to the next 2^n
         gout_stride = _nearest_power2(gout_stride, return_leq=False)
@@ -483,7 +499,8 @@ def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
-    shm_size += (nfi + nfj + nfk) * 3 * 4
+    if cache_cart_idx:
+        shm_size += (nfi + nfj + nfk) * 3 * 4
     return nsp_per_block, gout_stride, shm_size
 
 def estimate_shl_ovlp(mol):

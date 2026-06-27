@@ -20,7 +20,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, get_avail_mem
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.df.grad.rhf import (
-    int3c2e_scheme, _j_energy_per_atom, _factorize_dm, _gen_metric_solver)
+    int3c2e_scheme, _factorize_dm, _gen_metric_solver)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
@@ -39,6 +39,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
+        from gpu4pyscf.df.grad.uhf import _j_energy_per_atom
         return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
                                   auxbasis_response, verbose) * j_factor
 
@@ -106,7 +107,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         auxvec = dm_oo.trace(axis1=2, axis2=3).sum(axis=0)
 
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+        short_range=mol.omega<0, gout_width=54, deriv=(1,0,0))
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
     lmax = mol.uniq_l_ctr[:,0].max()
     laux = auxmol.uniq_l_ctr[:,0].max()

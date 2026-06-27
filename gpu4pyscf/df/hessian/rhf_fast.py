@@ -32,7 +32,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e,
-    int2c2e_ip1)
+    int2c2e_ip1, int3c2e_scheme)
 from gpu4pyscf.df import df
 from gpu4pyscf.df.df_jk import factorize_dm
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
@@ -1019,83 +1019,18 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     vhf_atm = contract('nxpj,pi->nxij', vhf_atm, mo_coeff)
     return vhf_atm
 
-def int3c2e_scheme_ip2(omega=0, gout_width=None, shm_size=SHM_SIZE):
-    li = np.arange(LMAX+1)[:,None]
-    lj = np.arange(LMAX+1)
-    lk = np.arange(L_AUX_MAX+1)[:,None,None]
-    order = li + lj + lk + 2
-    nroots = (order//2 + 1)
-    if omega < 0:
-        nroots *= 2
-    g_size = (li+2)*(lj+2)*(lk+3)
-    unit = g_size*3 + nroots*2 + 7
-    nsp_max = _nearest_power2(shm_size // (unit*8))
-    nsp_per_block = THREADS
-    if gout_width is not None:
-        nfi = (li + 1) * (li + 2) // 2
-        nfj = (lj + 1) * (lj + 2) // 2
-        nfk = (lk + 1) * (lk + 2) // 2
-        gout_size = nfi * nfj * nfk
-        gout_stride = (gout_size + gout_width-1) // gout_width
-        # Round up to the next 2^n
-        gout_stride = _nearest_power2(gout_stride, return_leq=False)
-        nsp_per_block = THREADS // gout_stride
-    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
-    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-    shm_size = nsp_per_block * (unit*8)
-    return nsp_per_block, gout_stride, shm_size
+def int3c2e_scheme_ip2(omega=0, gout_width=None):
+    return int3c2e_scheme(
+        short_range=omega<0, gout_width=gout_width, deriv=(1,1,2),
+        angular_inc=2)
 
-def int3c2e_scheme_ip1(omega=0, gout_width=None, shm_size=SHM_SIZE):
-    li = np.arange(LMAX+1)[:,None]
-    lj = np.arange(LMAX+1)
-    lk = np.arange(L_AUX_MAX+1)[:,None,None]
-    order = li + lj + lk + 1
-    nroots = (order//2 + 1)
-    if omega < 0:
-        nroots *= 2
-    g_size = (li+2)*(lj+2)*(lk+1)
-    unit = g_size*3 + nroots*2 + 7
-    nsp_max = _nearest_power2(shm_size // (unit*8))
-    nsp_per_block = THREADS
-    if gout_width is not None:
-        nfi = (li + 1) * (li + 2) // 2
-        nfj = (lj + 1) * (lj + 2) // 2
-        nfk = (lk + 1) * (lk + 2) // 2
-        gout_size = nfi * nfj * nfk
-        gout_stride = (gout_size + gout_width-1) // gout_width
-        # Round up to the next 2^n
-        gout_stride = _nearest_power2(gout_stride, return_leq=False)
-        nsp_per_block = THREADS // gout_stride
-    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
-    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-    shm_size = nsp_per_block * (unit*8)
-    return nsp_per_block, gout_stride, shm_size
+def int3c2e_scheme_ip1(omega=0, gout_width=None):
+    return int3c2e_scheme(
+        short_range=omega<0, gout_width=gout_width, deriv=(1,0,0))
 
-def int3c2e_scheme_ipaux(omega=0, gout_width=None, shm_size=SHM_SIZE):
-    li = np.arange(LMAX+1)[:,None]
-    lj = np.arange(LMAX+1)
-    lk = np.arange(L_AUX_MAX+1)[:,None,None]
-    order = li + lj + lk + 1
-    nroots = (order//2 + 1)
-    if omega < 0:
-        nroots *= 2
-    g_size = (li+1)*(lj+1)*(lk+2)
-    unit = g_size*3 + nroots*2 + 7
-    nsp_max = _nearest_power2(shm_size // (unit*8))
-    nsp_per_block = THREADS
-    if gout_width is not None:
-        nfi = (li + 1) * (li + 2) // 2
-        nfj = (lj + 1) * (lj + 2) // 2
-        nfk = (lk + 1) * (lk + 2) // 2
-        gout_size = nfi * nfj * nfk
-        gout_stride = (gout_size + gout_width-1) // gout_width
-        # Round up to the next 2^n
-        gout_stride = _nearest_power2(gout_stride, return_leq=False)
-        nsp_per_block = THREADS // gout_stride
-    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
-    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-    shm_size = nsp_per_block * (unit*8)
-    return nsp_per_block, gout_stride, shm_size
+def int3c2e_scheme_ipaux(omega=0, gout_width=None):
+    return int3c2e_scheme(
+        short_range=omega<0, gout_width=gout_width, deriv=(0,0,1))
 
 def _int2c2e_ip2_per_atom(mol, dm):
     '''Second order nuclear derivatives of 2c2e Coulomb integrals.
