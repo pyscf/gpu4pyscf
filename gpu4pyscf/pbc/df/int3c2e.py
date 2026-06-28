@@ -251,7 +251,8 @@ class SRInt3c2eOpt:
         Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
-        logger.debug(cell, 'int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
+        logger.debug(cell, 'int3c2e_kernel omega = %g, rcut = %g, nimgs = %d',
+                     omega, rcut, nimgs)
 
         _atm, _bas, _env = conc_env(
             bvkcell._atm, bvkcell._bas, _scale_sp_ctr_coeff(bvkcell),

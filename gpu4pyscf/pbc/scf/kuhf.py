@@ -310,67 +310,7 @@ class KUHF(khf.KSCF):
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None):
-        if dm_kpts is None: dm_kpts = self.make_rdm1()
-        if kpts is None: kpts = self.kpts
-
-        def trace(dm, vj):
-            if kpts_band is not None:
-                return None
-            if vj.ndim == 2:
-                return cp.einsum('nij,ji->', dm_kpts, vj).real.get() * .5
-            return cp.einsum('nKij,Kji->', dm_kpts, vj).real.get() * .5
-
-        if self.rsjk or isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
-            incremental_veff = dm_last is not None and hasattr(vhf_last, 'sr')
-            ddm = dm_kpts
-            if incremental_veff:
-                ddm = dm_kpts - dm_last
-
-            vj_sr = vk_sr = 0
-            ecoul = ecoul_sr = None
-            if isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
-                if self.j_engine.supmol is None:
-                    self.j_engine.build(kpts)
-                vj_sr = self.j_engine._get_j_sr(ddm.sum(axis=0), hermi, kpts, kpts_band)
-                vj = self.j_engine._get_j_lr(dm_kpts.sum(axis=0), hermi, kpts, kpts_band)
-                if incremental_veff:
-                    if hasattr(vhf_last, 'ecoul_sr'):
-                        ecoul_sr = trace(dm_last, vj_sr) * 2
-                        ecoul_sr += trace(ddm, vj_sr)
-                        ecoul_sr += vhf_last.ecoul_sr
-                        ecoul = trace(dm_kpts, vj) + ecoul_sr
-                else:
-                    ecoul_sr = trace(dm_kpts, vj_sr)
-                    ecoul = trace(dm_kpts, vj) + ecoul_sr
-            else:
-                vj = self.get_j(cell, dm_kpts.sum(axis=0), hermi, kpts, kpts_band)
-                ecoul = trace(dm_kpts, vj)
-
-            if self.rsjk:
-                if self.rsjk.supmol is None:
-                    self.rsjk.build(kpts)
-                vk_sr = self.rsjk._get_k_sr(ddm, hermi, kpts, kpts_band, self.exxdiv)
-                vk = self.rsjk._get_k_lr(dm_kpts, hermi, kpts, kpts_band, self.exxdiv)
-            else:
-                vk = self.get_k(cell, dm_kpts, hermi, kpts, kpts_band)
-
-            vhf_sr = vj_sr - vk_sr
-            if incremental_veff:
-                vhf_sr += vhf_last.sr
-            vhf = vj - vk + vhf_sr
-            vhf = tag_array(vhf, sr=vhf_sr)
-            if ecoul is not None:
-                vhf.ecoul = ecoul
-                if ecoul_sr is not None:
-                    vhf.ecoul_sr = ecoul_sr
-        else:
-            vj, vk = self.with_df.get_jk(
-                dm_kpts, hermi, kpts, kpts_band, with_j=True, with_k=True,
-                exxdiv=self.exxdiv)
-            vj = vj.sum(axis=0)
-            ecoul = trace(dm_kpts, vj)
-            vhf = tag_array(vj - vk, ecoul=ecoul)
-        return vhf
+        return _get_veff(self, cell, dm_kpts, dm_last, vhf_last, hermi, kpts, kpts_band)
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
         if fock is None:
@@ -486,3 +426,103 @@ class KUHF(khf.KSCF):
         pop, chg = mulliken_meta(cell, dm, kpts=kpts, s=s, verbose=verbose)
         dip = None
         return (pop, chg), dip
+
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     with_j=True, hermi=0, max_memory=None, with_nlc=False):
+        cell = self.cell
+        kpts = self.kpts
+        with_j = with_j and hermi != 2
+        def vind(dm1, kshift=0):
+            assert kshift == 0
+            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpts,
+                            with_j=with_j, with_ecoul=False)
+            return vhf.view(cp.ndarray)
+        return vind
+
+    def newton(self):
+        from gpu4pyscf.pbc.scf import soscf
+        return soscf.newton(self)
+
+def _get_veff(mf, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
+              hermi=1, kpts=None, kpts_band=None, with_j=True, with_ecoul=True):
+    if dm_kpts is None: dm_kpts = mf.make_rdm1()
+    if kpts is None: kpts = mf.kpts
+
+    def get_vhf_(vj, vk):
+        vk *= -1.
+        if with_j and vj is not None:
+            vk += vj
+        return vk
+
+    def trace(dm, vj):
+        if kpts_band is not None:
+            return None
+        if not with_ecoul:
+            return None
+        if vj.ndim == 2:
+            return cp.einsum('nij,ji->', dm_kpts, vj).real.get() * .5
+        return cp.einsum('nKij,Kji->', dm_kpts, vj).real.get() * .5
+
+    j_engine = None
+    if with_j:
+        j_engine = mf.j_engine
+
+    if mf.rsjk or isinstance(j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
+        incremental_veff = dm_last is not None and hasattr(vhf_last, 'sr')
+        ddm = dm_kpts
+        if incremental_veff:
+            ddm = dm_kpts - dm_last
+
+        vk_sr = 0
+        vj = vj_sr = None
+        ecoul = ecoul_sr = None
+        if with_j:
+            if isinstance(j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
+                if j_engine.supmol is None:
+                    j_engine.build(kpts)
+                vj_sr = j_engine._get_j_sr(ddm.sum(axis=0), hermi, kpts, kpts_band)
+                vj = j_engine._get_j_lr(dm_kpts.sum(axis=0), hermi, kpts, kpts_band)
+                if with_ecoul:
+                    if incremental_veff:
+                        if hasattr(vhf_last, 'ecoul_sr'):
+                            ecoul_sr = trace(dm_last, vj_sr) * 2
+                            ecoul_sr += trace(ddm, vj_sr)
+                            ecoul_sr += vhf_last.ecoul_sr
+                            ecoul = trace(dm_kpts, vj) + ecoul_sr
+                    else:
+                        ecoul_sr = trace(dm_kpts, vj_sr)
+                        ecoul = trace(dm_kpts, vj) + ecoul_sr
+            else:
+                vj = mf.get_j(cell, dm_kpts.sum(axis=0), hermi, kpts, kpts_band)
+                if with_ecoul:
+                    ecoul = trace(dm_kpts, vj)
+
+        if mf.rsjk:
+            if mf.rsjk.supmol is None:
+                mf.rsjk.build(kpts)
+            vk_sr = mf.rsjk._get_k_sr(ddm, hermi, kpts, kpts_band, mf.exxdiv)
+            vk = mf.rsjk._get_k_lr(dm_kpts, hermi, kpts, kpts_band, mf.exxdiv)
+        else:
+            vk = mf.get_k(cell, dm_kpts, hermi, kpts, kpts_band)
+
+        vhf_sr = get_vhf_(vj_sr, vk_sr)
+        if incremental_veff:
+            vhf_sr += vhf_last.sr
+        vhf = get_vhf_(vj, vk) + vhf_sr
+        vhf = tag_array(vhf, sr=vhf_sr)
+
+        if with_ecoul and ecoul is not None:
+            vhf.ecoul = ecoul
+            if ecoul_sr is not None:
+                vhf.ecoul_sr = ecoul_sr
+    else:
+        vj, vk = mf.with_df.get_jk(
+            dm_kpts, hermi, kpts, kpts_band, with_j=with_j, with_k=True,
+            exxdiv=mf.exxdiv)
+        vj = vj.sum(axis=0)
+        if with_j and with_ecoul:
+            ecoul = trace(dm_kpts, vj)
+            vhf = tag_array(get_vhf_(vj, vk), ecoul=ecoul)
+        else:
+            vhf = get_vhf_(vj, vk)
+    return vhf
