@@ -150,7 +150,7 @@ class PBCJMatrixOpt:
             dms = transpose_sum(dms)
             dms *= .5
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             if is_single_kpt:

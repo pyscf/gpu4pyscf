@@ -28,11 +28,16 @@ def contract_int3c2e_dm(mol, auxmol, dm):
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     return int3c2e_opt.contract_dm(dm)
 
+def contract_int3c2e_auxvec(mol, auxmol, auxvec):
+    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    return int3c2e_opt.contract_auxvec(auxvec)
+
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
         self.mol = mol
         self.auxmol = auxmol
         self.sorted_mol = None
+        self.sorted_auxmol = None
 
     def build(self, cutoff=1e-12):
         mol = self.mol
@@ -90,26 +95,24 @@ class Int3c2eOpt:
             self.build()
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
-        int3c2e_envs = self.int3c2e_envs
         mol = self.sorted_mol
+        auxmol = self.sorted_auxmol
         ao_loc = mol.ao_loc
-        naux = self.sorted_auxmol.nao_nr(cart=True)
+        naux = auxmol.nao_nr(cart=True)
 
-        nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
         lmax = mol.uniq_l_ctr[:,0].max()
-        lmax_aux = self.sorted_auxmol._bas[:,ANG_OF].max()
-        shm_size = 0
-        for lk in range(lmax_aux+1):
-            for li in range(lmax*2+1):
-                order = li + lk
-                nf3k = (lk + 1) * (lk + 2) * (lk + 3) // 6
-                nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
-                unit = order+1 + nf3ijkl + nf3ijkl*order//(order+3)
-                nsp_per_block = (SHM_SIZE - nf3k*8) //(unit*8)
-                nsp_per_block = min(THREADS, _nearest_power2(nsp_per_block))
-                nsp_lookup[li,lk] = nsp_per_block
-                shm_size = max(shm_size, nsp_per_block * unit + nf3k)
-        shm_size *= 8 # doubles
+        lmax_aux = auxmol._bas[:,ANG_OF].max()
+        li = np.arange(lmax*2+1)
+        lk = np.arange(lmax_aux+1)
+        order = li[:,None] + lk
+        nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
+        unit = order+1 + nf3ijkl + nf3ijkl*order//(order+3)
+        nsp_per_block = SHM_SIZE //(unit*8)
+        nsp_per_block = _nearest_power2(nsp_per_block)
+        nsp_per_block[nsp_per_block>THREADS] = THREADS
+        shm_size = (nsp_per_block * unit).max() * 8
+        nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
+        nsp_lookup[:lmax*2+1,:lmax_aux+1] = nsp_per_block
         nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
 
         # Adjust the number of shell-pairs in each group for better balance.
@@ -134,11 +137,11 @@ class Int3c2eOpt:
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
             ao_loc.ctypes, self.pair_loc.ctypes,
             shl_pair_idx_cpu.ctypes, ctypes.c_int(len(shl_pair_idx_cpu)),
-            ctypes.c_int(mol.nbas),
-            mol._bas.ctypes, _env.ctypes)
+            ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
         dm_xyz = asarray(dm_xyz)
         pair_loc = asarray(self.pair_loc)
 
+        int3c2e_envs = self.int3c2e_envs
         vj_aux = cp.zeros(naux)
         err = libvhf_md.contract_int3c2e_dm(
             ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
@@ -146,7 +149,7 @@ class Int3c2eOpt:
             ctypes.c_int(n_dm), ctypes.c_int(naux),
             ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
             ctypes.c_int(sp_blocks),
-            ctypes.c_int(self.sorted_auxmol.nbas),
+            ctypes.c_int(auxmol.nbas),
             ctypes.cast(pair_ij_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
@@ -157,6 +160,107 @@ class Int3c2eOpt:
         if log.verbose >= logger.DEBUG1:
             log.timer_debug1('processing contract_int3c2e_dm', *t0)
 
-        if not self.auxmol.cart:
-            vj_aux = self.sorted_auxmol.apply_CT_dot(vj_aux)
+        vj_aux = auxmol.apply_CT_dot(vj_aux)
         return vj_aux
+
+    def contract_auxvec(self, auxvec):
+        if self.sorted_mol is None:
+            self.build()
+        log = logger.new_logger(self.mol)
+        t0 = log.init_timer()
+        mol = self.sorted_mol
+        auxmol = self.sorted_auxmol
+        assert auxvec.ndim == 1
+        n_dm = 1
+        auxvec = auxmol.apply_C_dot(cp.asarray(auxvec))
+        aux_loc = auxmol.ao_loc
+        naux = aux_loc[-1]
+
+        l = auxmol._bas[:,ANG_OF]
+        nf3 = (l+1)*(l+2)*(l+3)//6
+        aux_xyz_loc = np.asarray(np.append(0, np.cumsum(nf3)), dtype=np.int32)
+
+        Et_auxvec = np.empty(aux_xyz_loc[-1])
+        auxvec_cpu = auxvec.get()
+        _env = _scale_sp_ctr_coeff(auxmol)
+        libvhf_md.Et_dot_auxvec(
+            Et_auxvec.ctypes, auxvec_cpu.ctypes, ctypes.c_int(n_dm),
+            aux_xyz_loc.ctypes, aux_loc.ctypes,
+            ctypes.c_int(auxmol.nbas), auxmol._bas.ctypes, _env.ctypes)
+
+        lmax = mol.uniq_l_ctr[:,0].max()
+        lmax_aux = auxmol._bas[:,ANG_OF].max()
+        li = np.arange(lmax*2+1)
+        lk = np.arange(lmax_aux+1)
+        order = li[:,None] + lk
+        nf2 = (order + 1) * (order + 2) // 2
+        unit = order+1 + nf2 * (order + 3) // 3 + order * nf2 // 3
+        # Due to the limited number of registers (11) to store the ouput, the
+        # contract_int3c2e_auxvec kernel does not support large shm size.
+        shm_size = min(SHM_SIZE, 1024 * 47)
+        nsp_per_block = shm_size //(unit*8)
+        nsp_per_block = _nearest_power2(nsp_per_block)
+        nsp_per_block[nsp_per_block>THREADS] = THREADS
+        shm_size = (nsp_per_block * unit).max() * 8
+        nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
+        nsp_lookup[:lmax*2+1,:lmax_aux+1] = nsp_per_block
+        nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
+
+        # Adjust the number of shell-pairs in each group for better balance.
+        shl_pair_idx_cpu = np.asarray(self.shl_pair_idx, dtype=np.int32)
+        shl_pair_idx = asarray(self.shl_pair_idx, dtype=np.int32)
+        pair_ij_offsets = cp.asarray(self.shl_pair_offsets, dtype=np.int32)
+        sp_blocks = len(pair_ij_offsets) - 1
+
+        # Split auxbasis into small batches for load balance
+        ksh_offsets = []
+        k0 = k1 = mol.nbas
+        for n in auxmol.l_ctr_counts:
+            k0, k1 = k1, k1 + n
+            ksh_offsets.append(cp.arange(k0, k1, 16, dtype=np.int32))
+        ksh_offsets.append(np.int32(k1))
+        ksh_offsets = cp.hstack(ksh_offsets, dtype=np.int32)
+        ksh_blocks = len(ksh_offsets) - 1
+
+        log.debug1('sp_blocks = %d, ksh_blocks = %d, shm_size = %d B',
+                   sp_blocks, ksh_blocks, shm_size)
+
+        vj_xyz_size = self.pair_loc[-1]
+        vj_xyz = cp.zeros(vj_xyz_size)
+        auxvec = asarray(Et_auxvec)
+        int3c2e_envs = self.int3c2e_envs
+        aux_xyz_loc = asarray(aux_xyz_loc)
+        pair_loc = asarray(self.pair_loc)
+        err = libvhf_md.contract_int3c2e_auxvec(
+            ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
+            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_dm), ctypes.c_int(naux),
+            ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
+            ctypes.c_int(sp_blocks),
+            ctypes.c_int(ksh_blocks),
+            ctypes.cast(pair_ij_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(aux_xyz_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(nsp_lookup.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(mol.omega))
+        if err != 0:
+            raise RuntimeError('contract_int3c2e_auxvec kernel failed')
+        if log.verbose >= logger.DEBUG1:
+            log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
+
+        ao_loc = mol.ao_loc
+        nao = ao_loc[-1]
+        vj_xyz = vj_xyz.get()
+        vj = np.zeros((nao, nao))
+        _env = _scale_sp_ctr_coeff(mol)
+        libvhf_md.jengine_dot_Et(
+            vj.ctypes, vj_xyz.ctypes,
+            ctypes.c_int(n_dm), ctypes.c_int(vj_xyz_size),
+            ao_loc.ctypes, self.pair_loc.ctypes,
+            shl_pair_idx_cpu.ctypes, ctypes.c_int(len(shl_pair_idx_cpu)),
+            ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
+        vj = transpose_sum(asarray(vj))
+        vj = mol.apply_CT_mat_C(vj)
+        return vj

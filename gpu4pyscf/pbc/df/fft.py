@@ -250,7 +250,7 @@ class FFTDF(lib.StreamObject):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         if is_single_kpt:
             vj, vk = fft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band,
                                    with_j, with_k, exxdiv)

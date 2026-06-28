@@ -27,7 +27,7 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import contract, unpack_tril, ndarray
-from gpu4pyscf.df.df_jk import factorize_dm
+from gpu4pyscf.df.df_jk import factorize_dm as _factorize_dm
 from gpu4pyscf.pbc.df.fft_jk import _ewald_exxdiv_for_G0, _format_dms, _format_jks
 from gpu4pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.lib.kpts_helper import (
@@ -234,13 +234,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     def proc():
         orbl, orbr = factorize_dm(dm_kpts)
-        if orbl.ndim == 2:
-            orbl = orbl[None,None]
-        elif orbl.ndim == 3:
-            orbl = orbl[None]
-        if orbr is not None:
-            orbr = orbr.reshape(orbl.shape)
-        else:
+        if orbr is None:
             orbr = [None] * nset # to support indexing orbr[i] below
         vk = cp.zeros(dms.shape, dtype=dtype)
         buf = cp.empty((3, nkpts*blksize*nao**2), dtype=dtype)
@@ -296,3 +290,15 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         if with_j:
             vj = get_j_kpts(mydf, dm, hermi, kpts, kpts_band)
         return vj, vk
+
+def factorize_dm(dm_kpts):
+    orbl, orbr = _factorize_dm(dm_kpts)
+    if orbl.ndim == 2:
+        orbl = orbl[None,None]
+    elif orbl.ndim == 3:
+        orbl = orbl[None]
+    elif orbl.ndim > 4:
+        orbl = orbl.reshape((-1,) + orbl.shape[-3:])
+    if orbr is not None:
+        orbr = orbr.reshape(orbl.shape)
+    return orbl, orbr

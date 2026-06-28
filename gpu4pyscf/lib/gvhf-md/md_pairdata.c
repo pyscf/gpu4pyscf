@@ -2,6 +2,8 @@
 #include <math.h>
 #include "gvhf-rys/vhf.cuh"
 
+#define L_AUX_MAX 6
+
 #define Ex_at(i,j,t)    Ex[(i)*stride1+(j)*stride2+t]
 #define Ey_at(i,j,t)    Ey[(i)*stride1+(j)*stride2+t]
 #define Ez_at(i,j,t)    Ez[(i)*stride1+(j)*stride2+t]
@@ -172,6 +174,38 @@ void Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
         }
         free(Et);
 }
+}
+
+void Et_dot_auxvec(double *Et_auxvec, double *auxvec, int n_dm, int *aux_xyz_loc,
+                   int *aux_loc, int nbas, int *bas, double *env)
+{
+        int Et_size = (L_AUX_MAX+1)*(L_AUX_MAX+2)*(L_AUX_MAX+3)/6*NCART_MAX*NCART_MAX;
+        int Ex_size = (2*L_AUX_MAX+1)*(L_AUX_MAX+1)*(L_AUX_MAX+1);
+        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *buf = Et + Et_size;
+        int naux = aux_loc[nbas];
+        int Et_auxvec_size = aux_xyz_loc[nbas];
+        for (int ish = 0; ish < nbas; ish++) {
+                int li = bas[ish*BAS_SLOTS+ANG_OF];
+                double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+                double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+                double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+                int nfi = (li + 1) * (li + 2) / 2;
+                int Et_len = nfi * (li + 3) / 3;
+                get_E_tensor(Et, 0, li, 0, ai, ri, ri, buf);
+                double *pauxvec = auxvec + aux_loc[ish];
+                double *rho = Et_auxvec + aux_xyz_loc[ish];
+                for (int i_dm = 0; i_dm < n_dm; i_dm++) {
+                        for (int n = 0, t = 0; t < Et_len; t++) {
+                                double rho_t = 0.;
+                                for (int i = 0; i < nfi; i++, n++) {
+                                        rho_t += Et[n] * ci * pauxvec[i_dm*naux+i];
+                                }
+                                rho[i_dm*Et_auxvec_size+t] = rho_t;
+                        }
+                }
+        }
+        free(Et);
 }
 
 void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
