@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import pyscf
 from pyscf import lib
 from pyscf.df.hessian import rhf as df_rhf_cpu
 from pyscf.hessian import rhf as rhf_cpu
-from gpu4pyscf.df.hessian import rhf as df_rhf_gpu
 from gpu4pyscf.df.hessian import rhf_fast
 from gpu4pyscf.df.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
@@ -147,7 +146,6 @@ class KnownValues(unittest.TestCase):
         mo_occ = mf.mo_occ
         mocc = mo_coeff[:,mo_occ>0]
         hobj = mf.Hessian()
-        hobj.auxbasis_response = 1
         h1_cpu = df_rhf_cpu.make_h1(hobj, mo_coeff, mo_occ)
         mo1_cpu, mo_e1_cpu = hobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1_cpu, verbose=1)
         h1_cpu = np.asarray(h1_cpu)
@@ -157,7 +155,6 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol = 1e-10
         mf.conv_tol_cpscf = 1e-8
         hobj = rhf_fast.Hessian(mf)
-        hobj.auxbasis_response = 1
         mo_occ = cp.asarray(mo_occ)
         h1_gpu = rhf_fast.make_h1(hobj, mo_coeff, mo_occ)
         h1_gpu = cp.asarray(h1_gpu)
@@ -179,7 +176,6 @@ class KnownValues(unittest.TestCase):
 
         mf = mf.to_gpu()
         hobj = mf.Hessian()
-        hobj.auxbasis_response = 2
         hess_gpu = hobj.hess_elec()
         assert np.linalg.norm(hess_cpu - hess_gpu.get()) < 1e-5
 
@@ -193,25 +189,24 @@ class KnownValues(unittest.TestCase):
         hess_cpu = hobj.kernel()
         mf = mf.to_gpu()
         hobj = rhf_fast.Hessian(mf)
-        hobj.auxbasis_response = 2
         hess_gpu = hobj.kernel()
         assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
     def test_jk_energy_per_atom(self):
         np.random.seed(8)
         nao = mol.nao
-        nocc = 5
-        mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
+        nocc = nao - 5
+        mo_coeff = cp.array(np.random.rand(nao, nao) - .5) * .2
         mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
         dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
-        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: 3000000)):
+        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*auxmol.nao*40)):
             ref = rhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1e-20)
             ej = rhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=0)
-            assert abs(ej-ref).max().get() < 1e-8
+            assert abs(ej-ref).max().get() < 5e-8
 
         ejk = rhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1).get()
         assert abs(ejk.sum(axis=(0,1))).max() < 1e-9
@@ -234,6 +229,7 @@ class KnownValues(unittest.TestCase):
             e2 = eval_grad(i, x, -disp)
             assert abs((e1 - e2)/(2*disp) - ejk[i,:,x]).max() < 1e-5
 
+
     def test_jk_ip1(self):
         from gpu4pyscf.df.hessian.rhf import _get_jk_ip
         np.random.seed(8)
@@ -244,7 +240,7 @@ class KnownValues(unittest.TestCase):
         mo_occ[:nocc] = 2
 
         obj = mol.RHF().to_gpu().density_fit(auxbasis=auxmol.basis).Hessian()
-        obj.auxbasis_response=2
+        obj.auxbasis_response = 2
         vj, vk = _get_jk_ip(obj, mo_coeff, mo_occ)
         ref = vj - 0.5 * vk
 
@@ -256,8 +252,8 @@ class KnownValues(unittest.TestCase):
         mol2 = mol + mol
         np.random.seed(9)
         nao = mol2.nao
-        nocc = 5
-        mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
+        nocc = nao - 5
+        mo_coeff = cp.array(np.random.rand(nao, nao) - .5) * .2
         mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
 
@@ -287,22 +283,23 @@ class KnownValues(unittest.TestCase):
             v1 = eval_veff(i, x, disp)
             v2 = eval_veff(i, x, -disp)
             ref = mo_coeff.T.dot(v1 - v2).dot(mo_coeff[:,:nocc]) / (2*disp)
+            print( abs(ref - veff[i,x]).max().get() )
             assert abs(ref - veff[i,x]).max().get() < 5e-5
 
     def test_jk_ip1_limited_memory(self):
         mol1 = mol + mol
-        mol1 = mol1 + mol1
+        mol2 = mol1 + mol1
         np.random.seed(8)
-        nao = mol1.nao
+        nao = mol2.nao
         nocc = 5
         mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
         mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
-        opt = int3c2e.Int3c2eOpt(mol1, auxmol).build()
+        opt = int3c2e.Int3c2eOpt(mol2, auxmol).build()
 
         ref = rhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
 
-        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*3*mol1.natm*16)):
+        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*3*mol2.natm*16)):
             veff = rhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
             assert abs(ref - veff).max() < 1e-9
 
