@@ -872,6 +872,7 @@ class SCF(pyscf_lib.StreamObject):
     to_gks                   = NotImplemented
     to_ks                    = NotImplemented
     canonicalize             = NotImplemented
+    gen_response             = NotImplemented
     dump_scf_summary         = hf_cpu.dump_scf_summary
 
     smearing = smearing
@@ -909,6 +910,9 @@ class SCF(pyscf_lib.StreamObject):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
         return hf_cpu.quad_moment(mol, cupy.asnumpy(dm), unit, origin, verbose)
+
+    def soscf(self):
+        return self.newton()
 
     def remove_soscf(self):
         if hasattr(self, 'undo_soscf'):
