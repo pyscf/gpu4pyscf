@@ -1029,7 +1029,7 @@ int RYS_init_rysj_constant(int shm_size)
     }
     #ifdef USE_SYCL
     sycl_get_queue()->memcpy(s_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
-    sycl_get_queue()->memcpy(s_i_in_fold3idx, i_in_fold3idx, 493*sizeof(Fold3Index)).wait();
+    sycl_get_queue()->memcpy(s_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();
     #else
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));

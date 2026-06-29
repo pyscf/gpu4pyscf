@@ -306,8 +306,8 @@ class KnownValues(unittest.TestCase):
         mf_copy = scf.UHF(mol).density_fit()
         mf_copy.chkfile = ftmp.name
         dma_loaded, dmb_loaded = mf_copy.init_guess_by_chkfile()
-        assert np.allclose(dma_stored, dma_loaded, atol = 1e-14) # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
-        assert np.allclose(dmb_stored, dmb_loaded, atol = 1e-14)
+        assert cupy.allclose(dma_stored, dma_loaded, atol = 1e-14) # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
+        assert cupy.allclose(dmb_stored, dmb_loaded, atol = 1e-14)
 
     def test_initial_guess_tag(self):
         mf = mol.UHF().to_gpu()

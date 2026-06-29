@@ -7,6 +7,21 @@
 #define POOL_SIZE       25600
 
 
+#ifdef USE_SYCL
+
+#define KERNEL_SETUP()                                          \
+    auto item = syclex::this_work_item::get_nd_item<2>();       \
+    int st_id = item.get_local_id(1);                           \
+    int nst_per_block = item.get_local_range(1);
+
+#else // USE_SYCL
+
+#define KERNEL_SETUP()                          \
+    int st_id = threadIdx.x;                    \
+    int nst_per_block = blockDim.x;
+
+#endif // USE_SYCL
+
 __device__ inline
 void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
                     double omega, double lr_factor, double sr_factor,
@@ -16,14 +31,7 @@ void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -120,14 +128,7 @@ void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -235,14 +236,7 @@ void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -366,14 +360,7 @@ void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1070,14 +1057,7 @@ void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1185,14 +1165,7 @@ void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2114,14 +2087,7 @@ void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;

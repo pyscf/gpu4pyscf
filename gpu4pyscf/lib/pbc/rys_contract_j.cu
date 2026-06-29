@@ -191,11 +191,10 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
                   int64_t *pool, int *head, const GXYZOffset *p_gxyz_offsets,
                   int gout_pattern, int reserved_shm_size
                   #ifdef USE_SYCL
-                  , sycl::nd_item<2> &item, double *shared_memory
+                  , sycl::nd_item<2> &item, std::byte *shm_mem
                   #endif
                   )
 {
-    const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     // sq is short for shl_quartet
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
@@ -204,6 +203,8 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
     int gout_stride = item.get_local_range(0);
     int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
     int blockIdx_x = item.get_group(1);
+
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -219,6 +220,8 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
     double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
     int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    auto gxyz_offsets = s_gxyz_offset.get() + OFFSET;
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -235,6 +238,8 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+
+    const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     #endif
     int li = bounds.li;
     int lj = bounds.lj;
@@ -728,13 +733,13 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
             int tdims[2];
             size_t buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            
+
             #ifdef USE_SYCL
             auto dev_envs = *envs;
             sycl::range<2> blocks(1, workers);
             sycl::range<2> threads(tdims[1], tdims[0]);
             sycl_get_queue()->submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen/sizeof(double)), cgh);
+              sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh);
               cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
                 rys_j_kernel<OFFSET>(dev_envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                     supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
@@ -744,7 +749,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
               });
             });
-            #else            
+            #else
             dim3 threads(tdims[0], tdims[1]);
             rys_j_kernel<OFFSET><<<workers, threads, buflen>>>(
                 *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
