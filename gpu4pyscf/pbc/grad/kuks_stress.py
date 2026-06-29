@@ -23,7 +23,9 @@ from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.dft.numint import KNumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
-from gpu4pyscf.pbc.grad.krks_stress import get_ovlp, _get_first_order_local_orbitals
+from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.pbc.grad.krks_stress import (
+    get_ovlp, _get_first_order_local_orbitals, _contract_coulomb_and_nuc)
 from gpu4pyscf.pbc.grad import kuks as kuks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -47,27 +49,34 @@ def get_veff(mf_grad, cell, dm, kpts, with_j=False, with_nuc=False):
     mf = mf_grad.base
     with_rsjk = mf.rsjk
     ni = mf._numint
+    is_hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
-    if with_rsjk is not None:
-        assert isinstance(with_rsjk, PBCJKMatrixOpt)
-        if with_rsjk.supmol is None:
-            with_rsjk.build()
-        # TODO: with_nuc should be disabled for all-electron calculations
-        sigma = get_vxc(mf_grad, cell, dm, kpts, with_j=False, with_nuc=with_nuc)
-        if not ni.libxc.is_hybrid_xc(mf.xc):
-            return sigma
-        j_factor = 1
-        omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
-        sigma += with_rsjk._get_ejk_sr_strain_deriv(
-            dm, kpts, exxdiv=mf.exxdiv, omega=omega,
-            j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
-        sigma += with_rsjk._get_ejk_lr_strain_deriv(
-            dm, kpts, exxdiv=mf.exxdiv, omega=omega,
-            j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+    j_factor = 1 if with_j else 0
+    if is_hybrid and with_rsjk is not None:
+        with_j = False
+
+    # TODO: with_nuc should be disabled for all-electron calculations
+    if isinstance(ni, MultiGridNumInt):
+        sigma = _uks_exc_strain_deriv(ni, mf.xc, dm, kpts, with_j, with_nuc)
+    elif isinstance(ni, KNumInt):
+        sigma = get_vxc(mf_grad, cell, dm, kpts, with_j, with_nuc)
     else:
-        if not ni.libxc.is_hybrid_xc(mf.xc):
-            return get_vxc(mf_grad, cell, dm, kpts, with_j, with_nuc)
-        raise NotImplementedError(f'Stress tensor for KHF for {mf.with_df}')
+        raise NotImplementedError(f'KUKS stress tensor for {mf.xc}')
+
+    if is_hybrid:
+        if with_rsjk is not None:
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if with_rsjk.supmol is None:
+                with_rsjk.build()
+            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+            sigma += with_rsjk._get_ejk_sr_strain_deriv(
+                dm, kpts, exxdiv=mf.exxdiv, omega=omega,
+                j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+            sigma += with_rsjk._get_ejk_lr_strain_deriv(
+                dm, kpts, exxdiv=mf.exxdiv, omega=omega,
+                j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+        else:
+            raise NotImplementedError(f'KUKS stress tensor for {mf.xc}')
     return sigma
 
 def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
@@ -211,40 +220,13 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
     rho0, rho1 = rho0_fft_order, rho1_fft_order
 
     exc, vxc = ni.eval_xc_eff(xc_code, rho0, 1, xctype=xctype, spin=1)[:2]
-    out += contract('xysng,sng->xy', rho1, vxc).real.get() * weight_0
+    out += cp.einsum('xysng,sng->xy', rho1, vxc).real.get() * weight_0
     rho0 = rho0[:,0].sum(axis=0)
     rho1 = rho1[:,:,:,0].sum(axis=2)
-    out += contract('g,g->', rho0, exc.ravel()).real.get() * weight_1
+    out += cp.einsum('g,g->', rho0, exc.ravel()).real.get() * weight_1
 
-    Gv = cell.get_Gv(mesh)
-    coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
-    rhoG = pbctools.fft(rho0, mesh)
-    if with_j:
-        vR = pbctools.ifft(rhoG * coulG_0, mesh)
-        EJ = contract('xyg,g->xy', rho1, vR).real.get() * weight_0 * 2
-        EJ += contract('g,g->', rho0, vR).real.get() * weight_1
-        EJ += contract('xyg,g->xy', coulG_1, rhoG.conj()*rhoG).real.get() * (weight_0/ngrids)
-        out += .5 * EJ
-
-    if with_nuc:
-        if cell._pseudo:
-            vpplocG_0, vpplocG_1 = _get_vpplocG_strain_derivatives(cell, mesh)
-            vpplocR = pbctools.ifft(vpplocG_0, mesh).real
-            Ene = contract('xyg,g->xy', rho1, vpplocR).real.get()
-            Ene += contract('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
-            Ene += _get_pp_nonloc_strain_derivatives(cell, mesh,
-                                                     dm_kpts.sum(axis=0), kpts)
-        else:
-            charge = -cell.atom_charges()
-            # SI corresponds to Fourier components of the fractional atomic
-            # positions within the cell. It does not respond to the strain
-            # transformation
-            SI = cell.get_SI(mesh=mesh)
-            ZG = asarray(np.dot(charge, SI))
-            vR = pbctools.ifft(ZG * coulG_0, mesh).real
-            Ene = contract('xyg,g->xy', rho1, vR).real.get()
-            Ene += contract('xyg,g->xy', coulG_1, rhoG.conj()*ZG).real.get() * (1./ngrids)
-        out += Ene
+    out += _contract_coulomb_and_nuc(cell, mesh, dm_kpts.sum(axis=0), kpts,
+                                     rho0, rho1, grids, with_j, with_nuc)
     return out
 
 def kernel(mf_grad):
