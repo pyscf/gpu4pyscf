@@ -238,8 +238,7 @@ class _VHFOpt(jk._VHFOpt):
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
             ao_loc.ctypes, pair_loc.ctypes,
             pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
-            ctypes.c_int(mol.nbas),
-            mol._bas.ctypes, _env.ctypes)
+            ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
         vj = transpose_sum(asarray(vj))
         vj *= 2.
 

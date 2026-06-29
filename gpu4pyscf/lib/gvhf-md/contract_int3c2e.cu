@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
@@ -24,6 +25,7 @@
 #include "gvhf-md/md_j.cuh"
 
 #define RT2_MAX 9
+#define IJ_SIZE 11
 #define THREADS 256
 #define L_AUX_MAX 6
 
@@ -380,13 +382,13 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     int li = bas[ANG_OF + ish0*BAS_SLOTS];
     int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
     int lij = li + lj;
-    __shared__ int order, nf3ij, nf3ijkl, kprim;
+    __shared__ int order, nf3ij, nf3ijk, kprim;
     __shared__ int nsp_per_block, Rt_stride;
     __shared__ double rk[3];
     if (thread_id == 0) {
         order = lij + lk;
         nf3ij = (lij+1)*(lij+2)*(lij+3) / 6;
-        nf3ijkl = (order+1)*(order+2)*(order+3) / 6;
+        nf3ijk = (order+1)*(order+2)*(order+3) / 6;
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
         int rk_ptr = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         rk[0] = env[rk_ptr+0];
@@ -399,14 +401,11 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
 
-    extern __shared__ double phase[];
-    double *gamma_inc = phase + nf3k + sp_id;
-    double *Rt_buf = phase + nf3k + (order+1) * nsp_per_block;
+    extern __shared__ double shared_memory[];
+    double *gamma_inc = shared_memory + sp_id;
+    double *Rt_buf = shared_memory + (order+1) * nsp_per_block;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
-    if (thread_id < nf3k) {
-        phase[thread_id] = efg_phase[thread_id];
-    }
     for (int kp = 0; kp < kprim; ++kp) {
         __syncthreads();
         __shared__ double ak, ck;
@@ -437,19 +436,19 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
             double xij = (ai * ri[0] + aj * rj[0]) / aij;
             double yij = (ai * ri[1] + aj * rj[1]) / aij;
             double zij = (ai * ri[2] + aj * rj[2]) / aij;
-            double *Rt, *buf;
-            if (order % 2 == 0) {
-                Rt = Rt_buf + sp_id;
-                buf = Rt + nf3ijkl * nsp_per_block;
-            } else {
-                buf = Rt_buf + sp_id;
-                Rt = buf + nf3ijkl * nsp_per_block;
-            }
             double xpq = xij - rk[0];
             double ypq = yij - rk[1];
             double zpq = zij - rk[2];
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             double theta = aij * ak / (aij + ak);
+            double *Rt, *buf;
+            if (order % 2 == 0) {
+                Rt = Rt_buf + sp_id;
+                buf = Rt + nf3ijk * nsp_per_block;
+            } else {
+                buf = Rt_buf + sp_id;
+                Rt = buf + nf3ijk * nsp_per_block;
+            }
             if (Rt_id == 0) {
                 double fac = ck/(aij*ak*sqrt(aij+ak));
                 if (pair_ij >= shl_pair1) {
@@ -501,17 +500,20 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
             if (pair_ij < shl_pair1) {
                 int ij_loc0 = pair_ij_loc[pair_ij];
                 double *dm = jk.dm + ij_loc0;
-                Rt = Rt_buf;
                 for (int i = Rt_id; i < nf3ij; i += Rt_stride) {
                     double dm_ij = dm[i];
 #pragma unroll
                     for (int k = 0; k < nf3k; k++) {
                         int off = k * nf3ij;
-                        double s = Rt[sp_id+p1_ij[off+i]*nsp_per_block];
-                        vj_xyz[k] += phase[k] * s * dm_ij;
+                        double s = Rt[p1_ij[off+i]*nsp_per_block];
+                        vj_xyz[k] += s * dm_ij;
                     }
                 }
             }
+        }
+#pragma unroll
+        for (int k = 0; k < nf3k; k++) {
+            vj_xyz[k] *= efg_phase[k];
         }
 
         __syncthreads();
@@ -525,7 +527,6 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
         int lane = thread_id % warpSize;
         int wid  = thread_id / warpSize;
-        double *shared = phase + nf3k;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
             double val = vj_aux[k];
@@ -533,12 +534,12 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
                 val += __shfl_down_sync(0xffffffff, val, offset);
             }
             if (lane == 0) {
-                shared[wid] = val;
+                shared_memory[wid] = val;
             }
             __syncthreads();
 
             if (thread_id < 8) {
-                val = shared[lane];
+                val = shared_memory[lane];
             }
             for (int offset = 4; offset > 0; offset >>= 1) {
                 val += __shfl_down_sync(0xff, val, offset);
@@ -569,6 +570,165 @@ void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
     }
 }
 
+__global__ static
+void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
+                            int *shl_pair_offsets, int *ksh_offsets,
+                            uint32_t *bas_ij_idx, int *pair_ij_loc,
+                            int *aux_loc, int *nsp_lookup)
+{
+    int thread_id = threadIdx.x;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    __shared__ int shl_pair0, shl_pair1;
+    __shared__ int ksh0, ksh1;
+    if (thread_id == 0) {
+        int sp_block_id = gridDim.x - blockIdx.x - 1;
+        int ksh_block_id = gridDim.y - blockIdx.y - 1;
+        ksh0 = ksh_offsets[ksh_block_id];
+        ksh1 = ksh_offsets[ksh_block_id+1];
+        shl_pair0 = shl_pair_offsets[sp_block_id];
+        shl_pair1 = shl_pair_offsets[sp_block_id+1];
+    }
+    __syncthreads();
+    int bas_ij0 = bas_ij_idx[shl_pair0];
+    int ish0 = bas_ij0 / envs.nbas;
+    int jsh0 = bas_ij0 % envs.nbas;
+    int li = bas[ANG_OF + ish0*BAS_SLOTS];
+    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    int lk = bas[ksh0*BAS_SLOTS+ANG_OF];
+    int lij = li + lj;
+    int order = lij + lk;
+    int nfk = (lk + 1) * (lk + 2) / 2;
+    int nf3k = nfk * (lk + 3) / 3;
+    int nf3ij = (lij+1)*(lij+2)*(lij+3) / 6;
+    int nf3ijk = (order+1)*(order+2)*(order+3) / 6;
+    __shared__ int nsp_per_block, Rt_stride;
+    if (thread_id == 0) {
+        nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
+        Rt_stride = blockDim.x / nsp_per_block;
+    }
+    __syncthreads();
+    int sp_id = thread_id % nsp_per_block;
+    int Rt_id = thread_id / nsp_per_block;
+    extern __shared__ double shared_memory[];
+    double *gamma_inc = shared_memory + sp_id;
+    double *Rt_buf = shared_memory + (order+1) * nsp_per_block;
+    uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
+    int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
+    double *auxvec = jk.dm;
+
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
+        double vj_xyz[IJ_SIZE];
+#pragma unroll
+        for (int n = 0; n < IJ_SIZE; ++n) {
+            vj_xyz[n] = 0;
+        }
+        int bas_ij;
+        if (pair_ij < shl_pair1) {
+            bas_ij = bas_ij_idx[pair_ij];
+        } else {
+            bas_ij = bas_ij_idx[shl_pair0];
+        }
+        int ish = bas_ij / envs.nbas;
+        int jsh = bas_ij % envs.nbas;
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double aij = ai + aj;
+        double xij = (ai * ri[0] + aj * rj[0]) / aij;
+        double yij = (ai * ri[1] + aj * rj[1]) / aij;
+        double zij = (ai * ri[2] + aj * rj[2]) / aij;
+        for (int ksh = ksh0; ksh < ksh1; ++ksh) {
+            __syncthreads();
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq*xpq + ypq*ypq + zpq*zpq;
+            int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+            int k_loc0 = aux_loc[ksh - envs.nbas];
+            double ak = env[expk];
+            double theta = aij * ak / (aij + ak);
+            double *Rt, *buf;
+            if (order % 2 == 0) {
+                Rt = Rt_buf + sp_id;
+                buf = Rt + nf3ijk * nsp_per_block;
+            } else {
+                buf = Rt_buf + sp_id;
+                Rt = buf + nf3ijk * nsp_per_block;
+            }
+            if (Rt_id == 0) {
+                double fac = PI_FAC/(aij*ak*sqrt(aij+ak));
+                if (pair_ij >= shl_pair1) {
+                    fac = 0;
+                }
+                boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, 0, nsp_per_block);
+                Rt[0] = gamma_inc[order*nsp_per_block];
+            }
+            for (int n = 1; n <= order; ++n) {
+                __syncthreads();
+                // swap input and output
+                double *tmp = buf;
+                buf = Rt;
+                Rt = tmp;
+                if (n == 1) {
+                    if (Rt_id == 0) {
+                        double _Rt_0 = buf[0];
+                        Rt[1*nsp_per_block] = zpq * _Rt_0;
+                        Rt[2*nsp_per_block] = ypq * _Rt_0;
+                        Rt[3*nsp_per_block] = xpq * _Rt_0;
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
+                    }
+                } else if (n == 2) {
+                    if (Rt_id == 0) {
+                        double _Rt_0 = buf[0];
+                        double _Rt_1 = buf[1*nsp_per_block];
+                        double _Rt_2 = buf[2*nsp_per_block];
+                        double _Rt_3 = buf[3*nsp_per_block];
+                        Rt[1*nsp_per_block] = zpq * _Rt_0;
+                        Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                        Rt[3*nsp_per_block] = ypq * _Rt_0;
+                        Rt[4*nsp_per_block] = ypq * _Rt_1;
+                        Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
+                        Rt[6*nsp_per_block] = xpq * _Rt_0;
+                        Rt[7*nsp_per_block] = xpq * _Rt_1;
+                        Rt[8*nsp_per_block] = xpq * _Rt_2;
+                        Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
+                    }
+                } else {
+                    iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                    if (Rt_id == 0) {
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
+                    }
+                }
+            }
+            __syncthreads();
+            if (pair_ij < shl_pair1) {
+                for (int k = 0; k < nf3k; ++k) {
+                    double rho = efg_phase[k] * auxvec[k_loc0+k];
+                    int off = k * nf3ij;
+#pragma unroll
+                    for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {
+                        if (i >= nf3ij) break;
+                        double s = Rt[p1_ij[off+i]*nsp_per_block];
+                        vj_xyz[n] += s * rho;
+                    }
+                }
+            }
+        }
+        if (pair_ij < shl_pair1) {
+#pragma unroll
+            for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {
+                if (i >= nf3ij) break;
+                int ij_loc0 = pair_ij_loc[pair_ij];
+                atomicAdd(jk.vj+ij_loc0+i, vj_xyz[n]);
+            }
+        }
+    }
+}
+
 extern "C" {
 // contract('ijP,ji->P', int3c2e, dm)
 int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
@@ -577,8 +737,9 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
                         int *shl_pair_offsets, uint32_t *bas_ij_idx,
                         int *pair_ij_loc, int *nsp_lookup, double omega)
 {
+    assert(n_dm == 1);
     cudaFuncSetAttribute(contract_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    JKMatrix jk = {vj, NULL, dm, 1, 0, omega};
+    JKMatrix jk = {vj, NULL, dm, n_dm, 0, omega};
     dim3 threads(THREADS);
     dim3 blocks(nksh, nbatches_shl_pair);
     contract_int3c2e_kernel<<<blocks, threads, shm_size>>>(
@@ -586,6 +747,29 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm, error message = %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+// contract('ijP,P->ij', int3c2e, auxvec)
+int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
+                            RysIntEnvVars *envs, int shm_size,
+                            int nbatches_shl_pair, int nbatches_ksh,
+                            int *shl_pair_offsets, int *ksh_offsets,
+                            uint32_t *bas_ij_idx, int *pair_ij_loc, int *aux_loc,
+                            int *nsp_lookup, double omega)
+{
+    assert(n_dm == 1);
+    JKMatrix jk = {vj, NULL, auxvec, n_dm, 0, omega};
+    dim3 threads(THREADS);
+    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
+    contract_auxvec_kernel<<<blocks, threads, shm_size>>>(
+        *envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
+        aux_loc, nsp_lookup);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

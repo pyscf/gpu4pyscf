@@ -270,7 +270,7 @@ def test_int3c2e_sparse1():
 
 def test_contract_int3c2e():
     from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec, contract_int3c2e_dm
-    from gpu4pyscf.df.j_engine_3c2e import contract_int3c2e_dm as j_engine
+    from gpu4pyscf.df import j_engine_3c2e
     mol = pyscf.M(
         atom = '''
         O   0.000   -0.    0.1174
@@ -289,7 +289,7 @@ def test_contract_int3c2e():
     dm = dm.dot(dm.T)
     eri3c = incore.aux_e2(mol, auxmol)
 
-    dat = j_engine(mol, auxmol, dm)
+    dat = j_engine_3c2e.contract_int3c2e_dm(mol, auxmol, dm)
     ref = np.einsum('ijP,ji->P', eri3c, dm)
     assert abs(dat.get() - ref).max() < 1e-9
 
@@ -301,6 +301,9 @@ def test_contract_int3c2e():
     ref = np.einsum('ijP,P->ij', eri3c, auxvec)
     assert abs(dat.get() - ref).max() < 1e-9
 
+    dat = j_engine_3c2e.contract_int3c2e_auxvec(mol, auxmol, auxvec)
+    assert abs(dat.get() - ref).max() < 1e-9
+
     dm = np.random.rand(6, nao, nao)
     dat = contract_int3c2e_dm(mol, auxmol, dm)
     ref = np.einsum('ijP,nji->nP', eri3c, dm)
@@ -308,7 +311,7 @@ def test_contract_int3c2e():
 
 def test_contract_int3c2e_irregular_angular_momemtum():
     from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec, contract_int3c2e_dm
-    from gpu4pyscf.df.j_engine_3c2e import contract_int3c2e_dm as j_engine
+    from gpu4pyscf.df import j_engine_3c2e
     mol = pyscf.M(
         atom = '''
         O   0.000   -0.    0.1174
@@ -328,7 +331,7 @@ def test_contract_int3c2e_irregular_angular_momemtum():
     dm = dm.dot(dm.T)
     eri3c = incore.aux_e2(mol, auxmol)
 
-    dat = j_engine(mol, auxmol, dm)
+    dat = j_engine_3c2e.contract_int3c2e_dm(mol, auxmol, dm)
     ref = np.einsum('ijP,ji->P', eri3c, dm)
     assert abs(dat.get() - ref).max() < 1e-9
 
@@ -338,6 +341,9 @@ def test_contract_int3c2e_irregular_angular_momemtum():
     auxvec = np.random.rand(auxmol.nao)
     dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)
     ref = np.einsum('ijP,P->ij', eri3c, auxvec)
+    assert abs(dat.get() - ref).max() < 1e-9
+
+    dat = j_engine_3c2e.contract_int3c2e_auxvec(mol, auxmol, auxvec)
     assert abs(dat.get() - ref).max() < 1e-9
 
     dm = np.random.rand(6, nao, nao)

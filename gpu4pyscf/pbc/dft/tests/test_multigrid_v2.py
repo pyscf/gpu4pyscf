@@ -27,12 +27,14 @@ else:
     MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
 from gpu4pyscf.pbc.tools import ifft, fft
+from gpu4pyscf.pbc.dft import numint, UniformGrids
 from gpu4pyscf.pbc.dft import KRKS as KRKS_gpu
 from gpu4pyscf.pbc.dft import KUKS as KUKS_gpu
+
 import pytest
 
 def setUpModule():
-    global cell_orth, cell_nonorth
+    global cell_orth, cell_nonorth, cell_he
     global kpts, dm, dm1
     np.random.seed(2)
     cell_orth = gto.M(
@@ -65,9 +67,16 @@ def setUpModule():
         unit = 'bohr',
         mesh = [18] * 3) # GGA needs dense mesh for derivative in reciprocal space
 
+    cell_he = pyscf.M(atom='He 0 0 0',
+                      basis=[[0, ( 1, 1, .1), (.5, .1, 1)],
+                             [1, (.8, 1)],
+                             [2, (.6, 1)]],
+                      unit='B',
+                      a=np.eye(3)*5)
+
 def tearDownModule():
-    global cell_orth, cell_nonorth
-    del cell_orth, cell_nonorth
+    global cell_orth, cell_nonorth, cell_he
+    del cell_orth, cell_nonorth, cell_he
 
 class KnownValues(unittest.TestCase):
     def test_get_pp(self):
@@ -591,6 +600,126 @@ class KnownValues(unittest.TestCase):
         difference_images, inverse = multigrid.image_pair_to_difference(Ls, cell.lattice_vectors())
         assert difference_images.shape == (25, 3)
         assert len(inverse) == len(Ls)**2
+
+    def test_nr_rks_fxc(self):
+        cell = cell_he
+        np.random.seed(9)
+        nao = cell.nao
+        dm_he = np.random.rand(nao, nao)
+        dm_he = dm_he + dm_he.T
+        dm_he = dm_he * .2 + np.eye(nao)
+        dm_he = cp.asarray(dm_he)
+
+        dm1 = np.random.rand(2,1,nao,nao)
+        dm1 = dm1 + dm1.transpose(0,1,3,2)
+        dm1 = cp.asarray(dm1)
+        grids = UniformGrids(cell)
+
+        ni = numint.NumInt()
+        mg = multigrid.MultiGridNumInt(cell)
+
+        xc = 'lda,'
+        ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        xc = 'b88,'
+        ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        xc = 'r2scan,'
+        ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        kpts = cell.make_kpts([3,1,1])
+        dm_he = np.random.rand(len(kpts), nao, nao)
+        dm_he = dm_he + dm_he.transpose(0,2,1)
+        dm_he = dm_he * .2 + np.eye(nao)
+        dm_he = cp.asarray(dm_he)
+
+        dm1 = np.random.rand(2,len(kpts),nao,nao)
+        dm1 = dm1 + np.random.random(dm1.shape)*1j
+        dm1 = dm1 + dm1.transpose(0,1,3,2).conj()
+        dm1 = cp.asarray(dm1)
+
+        ni = numint.KNumInt()
+
+        xc = 'lda,'
+        ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        xc = 'b88,'
+        ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        xc = 'r2scan,'
+        ref = ni.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = mg.nr_rks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+    def test_nr_uks_fxc(self):
+        cell = cell_he
+        np.random.seed(9)
+        nao = cell.nao
+        dm_he = np.random.rand(2, nao, nao)
+        dm_he = dm_he + dm_he.transpose(0,2,1)
+        dm_he = dm_he * .2 + np.eye(nao)
+        dm_he = cp.asarray(dm_he)
+
+        dm1 = np.random.rand(2,3,1,nao,nao)
+        dm1 = dm1 + dm1.transpose(0,1,2,4,3)
+        dm1 = cp.asarray(dm1)
+        grids = UniformGrids(cell)
+
+        ni = numint.NumInt()
+        mg = multigrid.MultiGridNumInt(cell)
+
+        xc = 'lda,'
+        ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        xc = 'b88,'
+        ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        xc = 'r2scan,'
+        ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        kpts = cell.make_kpts([3,1,1])
+        dm_he = np.random.rand(2, len(kpts), nao, nao)
+        dm_he = dm_he + dm_he.transpose(0,1,3,2)
+        dm_he = dm_he * .2 + np.eye(nao)
+        dm_he = cp.asarray(dm_he)
+
+        dm1 = np.random.rand(2,3, len(kpts),nao,nao)
+        dm1 = dm1 + np.random.random(dm1.shape)*1j
+        dm1 = dm1 + dm1.transpose(0,1,2,4,3).conj()
+        dm1 = cp.asarray(dm1)
+
+        ni = numint.KNumInt()
+
+        xc = 'lda,'
+        ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        xc = 'b88,'
+        ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
+
+        xc = 'r2scan,'
+        ref = ni.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
     def test_shell_splitting_for_large_fock_in_imagediff_space_gamma(self):
         cell = gto.M(

@@ -26,13 +26,13 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
-    dist_matrix, batched_vec3_norm2)
+    dist_matrix, batched_vec_norm2)
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.df.fft import get_SI, _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
+from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.__config__ import shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -682,7 +682,7 @@ def get_rho(ni, dm, kpts=None):
 def eval_nucG(cell, mesh):
     '''Nuclear attraction potential on Gv'''
     assert cell.dimension == 3
-    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -700,7 +700,7 @@ def eval_nucG_SI_gradient(cell, mesh, rho_g):
     assert rho_g.shape == (ngrids,)
 
     assert cell.dimension == 3
-    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -843,7 +843,7 @@ def eval_vpplocG(cell, mesh):
     '''PRB, 58, 3641 Eq (5)
     '''
     assert cell.dimension == 3
-    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -851,7 +851,7 @@ def eval_vpplocG(cell, mesh):
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
     # G2 = contract('px,px->p', Gv, Gv)
-    G2 = batched_vec3_norm2(Gv)
+    G2 = batched_vec_norm2(Gv)
     charges = cell.atom_charges()
 
     coulG = tools.get_coulG(cell, Gv=Gv)
@@ -877,7 +877,7 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
     ngrids = np.prod(mesh)
     assert rho_g.shape == (ngrids,)
 
-    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -885,7 +885,7 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
     dSI_prefactor = -1j * Gv.T * rho_g.conj()
-    G2 = batched_vec3_norm2(Gv)
+    G2 = batched_vec_norm2(Gv)
     charges = cell.atom_charges()
 
     coulG = tools.get_coulG(cell, Gv=Gv)

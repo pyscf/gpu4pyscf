@@ -11,3 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+'''
+General Hartree-Fock for extended systems with k-point sampling
+'''
+
+__all__ = [
+    'KGHF'
+]
+
+class KGHF:
+    pass

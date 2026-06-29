@@ -25,7 +25,7 @@
 #include "int3c2e_create_tasks.cuh"
 
 #define NF_AUX_MAX      28
-#define GOUT_WIDTH      30
+#define GOUT_WIDTH      29
 
 // lattice sum over j and k for (ij|k)
 __global__ static
@@ -314,7 +314,7 @@ while (shl_pair0 < shl_pair1) {
                                         double *_gx = gx + (_ix*g_size + k*stride_k)
                                             * nst_per_block;
                                         for (int j = 0; j < lj; ++j) {
-                                            int ij = lij + j*li; // = (lij-j) + j*stride_j;
+                                            int ij = (lij-j) + j*stride_j;
                                             s1x = _gx[ij*nst_per_block];
                                             for (--ij; ij >= j*stride_j; --ij) {
                                                 s0x = _gx[ij*nst_per_block];
@@ -417,7 +417,6 @@ while (1) {
     __shared__ int gout_stride, nst_per_block;
     __shared__ int expi, expj, ci, cj;
     __shared__ double xi, yi, zi, xjxi, yjyi, zjzi;
-    __shared__ double fac;
     if (thread_id == 0) {
         int bvk_nbas = envs.nbas * ncells;
         ksh0_cell0 = ksh_offsets[ksh_block_id];
@@ -445,18 +444,15 @@ while (1) {
         xjxi = rj[0] - xi;
         yjyi = rj[1] - yi;
         zjzi = rj[2] - zi;
-        int ish_cell0 = ish;
-        int jsh_cell0 = jsh % envs.nbas;
-        fac = PI_FAC;
-        if (ish_cell0 < jsh_cell0) {
-            fac = 0;
-        } else if (ish_cell0 == jsh_cell0) {
-            fac *= .5;
-        }
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
     }
     __syncthreads();
+    int ish_cell0 = ish;
+    int jsh_cell0 = jsh % envs.nbas;
+    if (ish_cell0 < jsh_cell0) {
+        continue;
+    }
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
 
@@ -557,7 +553,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                             double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                             double theta_ij = ai * aj_aij;
                             double Kab = theta_ij * rr_ij;
-                            double cicj = fac * env[ci+ip] * env[cj+jp];
+                            double cicj = PI_FAC * env[ci+ip] * env[cj+jp];
                             fac_ij = exp(-Kab) * cicj;
                         }
                         double xij = xjLxi * aj_aij + xi;
@@ -660,7 +656,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                                         double xjxi = rjri[_ix*nst_per_block];
                                         double *_gx = gx + (_ix*g_size + k*stride_k) * nst_per_block;
                                         for (int j = 0; j < lj; ++j) {
-                                            int ij = lij + j*li; // = (lij-j) + j*stride_j;
+                                            int ij = (lij-j) + j*stride_j;
                                             s1x = _gx[ij*nst_per_block];
                                             for (--ij; ij >= j*stride_j; --ij) {
                                                 s0x = _gx[ij*nst_per_block];
@@ -697,7 +693,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                 }
             }
         }
-    } // while (img_not_processed > 0) {
+    } // while (img_not_processed > 0)
     _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
     } // while (num_ijk_tasks > 0)
     if (thread_id == 0) {
@@ -767,7 +763,7 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, PBCIntEnvVars *envs,
             head, npairs, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

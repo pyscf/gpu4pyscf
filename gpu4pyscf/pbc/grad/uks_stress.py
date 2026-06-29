@@ -21,6 +21,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF
+from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.grad import uks as uks_grad
 from gpu4pyscf.pbc.gto import int1e
@@ -223,12 +224,10 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
             Ene += contract('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
             Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm.sum(axis=0))
         else:
-            charge = -cell.atom_charges()
             # SI corresponds to Fourier components of the fractional atomic
             # positions within the cell. It does not respond to the strain
             # transformation
-            SI = cell.get_SI(mesh=mesh)
-            ZG = asarray(np.dot(charge, SI))
+            ZG = _get_ZSI(cell, mesh)
             vR = pbctools.ifft(ZG * coulG_0, mesh).real
             Ene = contract('xyg,g->xy', rho1, vR).real.get()
             Ene += contract('xyg,g->xy', coulG_1, rhoG.conj()*ZG).real.get() * (1./ngrids)
