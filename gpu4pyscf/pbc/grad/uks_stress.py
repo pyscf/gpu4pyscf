@@ -54,9 +54,9 @@ def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
 
     # TODO: with_nuc should be disabled for all-electron calculations
     if isinstance(ni, MultiGridNumInt):
-        return _uks_exc_strain_deriv(ni, mf.xc, dm[:,None], None, with_j, with_nuc)
+        sigma = _uks_exc_strain_deriv(ni, mf.xc, dm[:,None], None, with_j, with_nuc)
     elif isinstance(ni, NumInt):
-        return get_vxc(mf_grad, cell, dm, with_j, with_nuc)
+        sigma = get_vxc(mf_grad, cell, dm, with_j, with_nuc)
     else:
         raise NotImplementedError(f'UKS stress tensor for {mf.xc}')
 

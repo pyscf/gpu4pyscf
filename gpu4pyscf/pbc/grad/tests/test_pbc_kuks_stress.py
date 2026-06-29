@@ -27,6 +27,7 @@ from gpu4pyscf.pbc.grad.kuks_stress import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.dft.multigrid_v2 import _uks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.lib.multi_gpu import num_devices
 import pytest
 
 class KnownValues(unittest.TestCase):
@@ -37,12 +38,13 @@ class KnownValues(unittest.TestCase):
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
                      basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
         kmesh = [3, 1, 1]
+        kpts = cell.make_kpts(kmesh)
         nao = cell.nao
         dm = np.random.rand(2,np.prod(kmesh), nao, nao) - (.5+.1j)
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'lda,'
-        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu())
-        dat = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=cell.make_kpts(kmesh))
+        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=kpts).to_gpu())
+        dat = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -64,12 +66,13 @@ class KnownValues(unittest.TestCase):
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
                      basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
         kmesh = [3, 1, 1]
+        kpts = cell.make_kpts(kmesh)
         nao = cell.nao
         dm = np.random.rand(2,np.prod(kmesh), nao, nao) - (.5+.1j)
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'pbe,'
-        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu())
-        dat = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=cell.make_kpts(kmesh))
+        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=kpts).to_gpu())
+        dat = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -91,12 +94,13 @@ class KnownValues(unittest.TestCase):
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
                      basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
         kmesh = [3, 1, 1]
+        kpts = cell.make_kpts(kmesh)
         nao = cell.nao
         dm = np.random.rand(2,np.prod(kmesh), nao, nao) - (.5+.1j)
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'm06,'
-        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu())
-        dat = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=cell.make_kpts(kmesh))
+        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=kpts).to_gpu())
+        dat = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
