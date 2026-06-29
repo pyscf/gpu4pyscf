@@ -31,7 +31,6 @@ from pyscf.pbc.dft import gen_grid as pbc_gen_grid_cpu
 from pyscf.pbc import tools as pbc_tools_cpu
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
 from pyscf.pbc.lib.kpts_helper import is_gamma_point
-from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
