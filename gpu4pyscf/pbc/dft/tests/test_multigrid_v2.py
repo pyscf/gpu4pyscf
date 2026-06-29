@@ -27,6 +27,8 @@ else:
     MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
 from gpu4pyscf.pbc.tools import ifft, fft
+from gpu4pyscf.pbc.dft import KRKS as KRKS_gpu
+from gpu4pyscf.pbc.dft import KUKS as KUKS_gpu
 import pytest
 
 def setUpModule():
@@ -589,6 +591,163 @@ class KnownValues(unittest.TestCase):
         difference_images, inverse = multigrid.image_pair_to_difference(Ls, cell.lattice_vectors())
         assert difference_images.shape == (25, 3)
         assert len(inverse) == len(Ls)**2
+
+    def test_shell_splitting_for_large_fock_in_imagediff_space_gamma(self):
+        cell = gto.M(
+            a = np.eye(3)*3.5668,
+            atom = '''
+                C     0.      0.      0.
+                C     0.8817  0.8917  0.8917
+                C     1.7834  1.7834  0.
+                C     2.6751  2.6751  0.8917
+                C     1.7834  0.      1.7834
+                C     2.6751  0.8917  2.6751
+                C     0.      1.7834  1.7834
+                C     0.8917  2.6751  2.6751
+            ''',
+            basis = "gth-dzvp",
+            pseudo = 'gth-pbe',
+            precision = 1e-8,
+            verbose = 0,
+        )
+
+        kpts = cell.make_kpts([1,1,1])
+        mf = KRKS_gpu(cell, xc = 'pbe', kpts = kpts)
+        mf.conv_tol = 1e-10
+
+        # mf = mf.multigrid_numint()
+        # assert type(mf._numint) is multigrid.MultiGridNumInt
+
+        # ref_energy = mf.kernel()
+        # assert mf.converged
+        # ref_gradient = mf.Gradients().kernel()
+        # print(repr(ref_energy))
+        # print(repr(ref_gradient))
+
+        with lib.temporary_env(multigrid, get_avail_mem=(lambda **kw: 2**28)):
+            mf = mf.multigrid_numint()
+            assert type(mf._numint) is multigrid.MultiGridNumInt
+
+            test_energy = mf.kernel()
+            assert mf.converged
+            test_gradient = mf.Gradients().kernel()
+
+        ref_energy = -44.93180128532909
+        ref_gradient = np.array([
+            [ 2.87614262e-03,  1.33298682e-03,  1.33298682e-03],
+            [-8.42690061e-03,  1.01735391e-05,  1.01735391e-05],
+            [ 2.82851274e-03,  1.28135252e-03, -1.28134877e-03],
+            [-1.00471252e-04, -8.51551903e-06,  8.51502092e-06],
+            [ 2.82851274e-03, -1.28134877e-03,  1.28135252e-03],
+            [-1.00471252e-04,  8.51502093e-06, -8.51551903e-06],
+            [ 2.87618947e-03, -1.33322853e-03, -1.33322853e-03],
+            [-2.78640919e-03, -8.51738633e-06, -8.51738633e-06],
+        ])
+
+        assert abs(test_energy - ref_energy) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-8
+
+    def test_shell_splitting_for_large_fock_in_imagediff_space_k(self):
+        cell = gto.M(
+            a = np.eye(3)*3.5668,
+            atom = '''
+                C     0.      0.      0.
+                C     0.8817  0.8917  0.8917
+                C     1.7834  1.7834  0.
+                C     2.6751  2.6751  0.8917
+                C     1.7834  0.      1.7834
+                C     2.6751  0.8917  2.6751
+                C     0.      1.7834  1.7834
+                C     0.8917  2.6751  2.6751
+            ''',
+            basis = "gth-dzvp",
+            pseudo = 'gth-pbe',
+            precision = 1e-8,
+            verbose = 5,
+        )
+
+        kpts = cell.make_kpts([1,1,3])
+        mf = KRKS_gpu(cell, xc = 'pbe', kpts = kpts)
+        mf.conv_tol = 1e-10
+
+        # mf = mf.multigrid_numint()
+        # assert type(mf._numint) is multigrid.MultiGridNumInt
+
+        # ref_energy = mf.kernel()
+        # assert mf.converged
+        # ref_gradient = mf.Gradients().kernel()
+        # print(repr(ref_energy))
+        # print(repr(ref_gradient))
+
+        with lib.temporary_env(multigrid, get_avail_mem=(lambda **kw: 2**28)):
+            mf = mf.multigrid_numint()
+            assert type(mf._numint) is multigrid.MultiGridNumInt
+
+            test_energy = mf.kernel()
+            assert mf.converged
+            test_gradient = mf.Gradients().kernel()
+
+        ref_energy = -45.30199423477792
+        ref_gradient = np.array([
+            [ 2.36897360e-03,  1.19228739e-03,  6.67961844e-04],
+            [-9.11593616e-03,  1.03369618e-05,  8.42224689e-06],
+            [ 2.32829121e-03,  1.14450844e-03, -6.20435413e-04],
+            [ 2.38310045e-04, -8.52269883e-06,  6.81929906e-06],
+            [ 2.32828725e-03, -1.14450700e-03,  6.20436720e-04],
+            [ 1.14957254e-03,  8.52837460e-06, -6.81790444e-06],
+            [ 2.36729361e-03, -1.19142895e-03, -6.64432085e-04],
+            [-1.66792993e-03, -8.52961493e-06, -6.81679641e-06],
+        ])
+
+        assert abs(test_energy - ref_energy) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-8
+
+    def test_shell_splitting_for_large_fock_in_imagediff_space_unrestricted(self):
+        cell = gto.M(
+            a = '''
+                0.000000000, 3.370137329, 3.370137329
+                3.370137329, 0.000000000, 3.370137329
+                3.370137329, 3.370137329, 0.000000000
+            ''',
+            atom = '''
+                C 0 0 0
+                C 1.675068664391 1.685068664391 1.685068664391
+            ''',
+            basis = "gth-dzvp",
+            pseudo = 'gth-pbe',
+            precision = 1e-8,
+            verbose = 5,
+        )
+
+        kpts = cell.make_kpts([1,1,3])
+        mf = KUKS_gpu(cell, xc = 'pbe', kpts = kpts)
+        mf.conv_tol = 1e-10
+
+        # mf = mf.multigrid_numint()
+        # assert type(mf._numint) is multigrid.MultiGridNumInt
+
+        # ref_energy = mf.kernel()
+        # assert mf.converged
+        # ref_gradient = mf.Gradients().kernel()
+        # print(repr(ref_energy))
+        # print(repr(ref_gradient))
+
+        with lib.temporary_env(multigrid, get_avail_mem=(lambda **kw: 2**25)):
+            mf = mf.multigrid_numint()
+            assert type(mf._numint) is multigrid.MultiGridNumInt
+
+            test_energy = mf.kernel()
+            assert mf.converged
+            test_gradient = mf.Gradients().kernel()
+
+        ref_energy = -10.82283467913058
+        ref_gradient = np.array([
+            [-0.00776978, -0.00816341,  0.00816341],
+            [ 0.00777063,  0.00816369, -0.00816369],
+        ])
+
+        assert abs(test_energy - ref_energy) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")

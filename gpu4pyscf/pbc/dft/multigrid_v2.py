@@ -26,7 +26,7 @@ from pyscf import lib
 from pyscf.pbc.dft.multigrid import multigrid
 
 from pyscf.pbc.df.df_jk import _format_kpts_band
-from pyscf.gto.mole import ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF
+from pyscf.gto.mole import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF
 from pyscf.pbc.dft import gen_grid as pbc_gen_grid_cpu
 from pyscf.pbc import tools as pbc_tools_cpu
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
@@ -538,6 +538,8 @@ def multi_grids_tasks_for_ke_cut_lowmem(cell, fft_mesh=None, verbose=None, gamma
 
         def split_list_evenly(lst, n_piece):
             N = len(lst)
+            if n_piece >= N:
+                n_piece = N
             q, r = divmod(N, n_piece)
             out = []
             offset = 0
@@ -585,8 +587,30 @@ def multi_grids_tasks_for_ke_cut_lowmem(cell, fft_mesh=None, verbose=None, gamma
                     grids_lower_triangular = pbc_gen_grid_cpu.UniformGrids(cell_dense_cross)
                     grids_lower_triangular.ao_idx = ao_idx_dense_cross
                 else:
-                    grids_lower_triangular = pbc_gen_grid_cpu.UniformGrids(cell_sparse + cell_dense_cross)
-                    grids_lower_triangular.ao_idx = np.concatenate((ao_idx_sparse, ao_idx_dense_cross))
+                    cell_lower_triangular = cell_sparse + cell_dense_cross
+                    cell_lower_triangular._bas[cell_sparse.nbas:, ATOM_OF] -= len(cell_sparse._atm)
+
+                    # Sort by atom first (later index has higher priority) to make aoslices work
+                    bas_sort_by_atom_index = np.lexsort((cell_lower_triangular._bas[:,ANG_OF], cell_lower_triangular._bas[:,ATOM_OF]))
+
+                    reverse_sort = np.argsort(bas_sort_by_atom_index)
+                    ao_sort_by_atom_index = [[] for _ in range(cell_lower_triangular.nbas)]
+                    ao_offset = 0
+                    for i in range(cell_lower_triangular.nbas):
+                        L = cell_lower_triangular._bas[i, ANG_OF]
+                        nL = ((L+1)*(L+2)//2) if cell_lower_triangular.cart else (2*L+1)
+                        nctr = cell_lower_triangular._bas[i, NCTR_OF]
+                        ao_sort_by_atom_index[reverse_sort[i]] = np.arange(nL * nctr) + ao_offset
+                        ao_offset += nL * nctr
+
+                    ao_sort_by_atom_index = [int(item) for row in ao_sort_by_atom_index for item in row]
+                    assert len(ao_sort_by_atom_index) == cell_lower_triangular.nao
+
+                    cell_lower_triangular._bas = cell_lower_triangular._bas[bas_sort_by_atom_index]
+                    ao_idx_lower_triangular = np.concatenate((ao_idx_sparse, ao_idx_dense_cross))
+                    ao_idx_lower_triangular = ao_idx_lower_triangular[ao_sort_by_atom_index]
+                    grids_lower_triangular = pbc_gen_grid_cpu.UniformGrids(cell_lower_triangular)
+                    grids_lower_triangular.ao_idx = ao_idx_lower_triangular
 
                 tasks.append([grids_dense, grids_lower_triangular])
             else:
@@ -674,7 +698,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA", gamma_point=False, unrestricted=Fal
 
             grouped_cell = equivalent_cell_in_localized + equivalent_cell_in_diffused
 
-            grouped_cell._bas[n_primitive_gtos_in_localized:, 0] -= len(
+            grouped_cell._bas[n_primitive_gtos_in_localized:, ATOM_OF] -= len(
                 subcell_in_localized_region._atm
             )
 
