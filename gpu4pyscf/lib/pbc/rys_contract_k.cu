@@ -49,6 +49,16 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -58,7 +68,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int stride_l = bounds.stride_l;
     int g_size = bounds.g_size;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
@@ -90,9 +99,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     if (t_id < ntiles_l * 9) {
         idx_l[t_id] = lex_xyz_address(ll, t_id) * stride_l * nsq_per_block;
     }
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -110,18 +116,12 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) {
         continue;
     }
 
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {

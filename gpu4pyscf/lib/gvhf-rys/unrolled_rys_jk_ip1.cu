@@ -1,34 +1,51 @@
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
 
+#define KERNEL_ARGS \
+    RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, \
+    float *q_cond_ij, float *q_cond_kl, float dm_penalty, \
+    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
+    uint32_t *pool, int *head
+
+#define KERNEL_SETUP() \
+    int sq_id = threadIdx.x; \
+    int gout_id = threadIdx.y; \
+    int _nsq_per_block = blockDim.x; \
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH; \
+    extern __shared__ double shared_memory[]; \
+    __shared__ int ntasks, pair_ij, pair_kl0; \
+    __shared__ int ish, jsh; \
+    __shared__ double ri[3]; \
+    __shared__ double rjri[3]; \
+    __shared__ double aij_cache[3]; \
+    __shared__ int expi; \
+    __shared__ int expj;
+
+#define LAUNCH_KERNEL(KERNEL) \
+    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
+    *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head)
+
 
 __global__ static
-void rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -44,20 +61,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -174,16 +188,17 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += 1 *  fy  * wt;
                     goutz[0] += 1 * 1 *  fz ;
@@ -259,29 +274,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0010(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -297,20 +304,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -428,37 +432,38 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_01x = cpx * 1;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += trr_01x *  fy  * wt;
                     goutz[0] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double trr_01y = cpy * 1;
                     goutx[1] +=  fx  * trr_01y * wt;
                     gouty[1] += 1 *  fy  * wt;
                     goutz[1] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[2] +=  fx  * 1 * trr_01z;
                     gouty[2] += 1 *  fy  * trr_01z;
@@ -577,29 +582,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0011(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -615,20 +612,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -746,6 +740,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -756,81 +751,81 @@ while (1) {
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
                     double hrr_1011x = trr_12x - xlxk * trr_11x;
-                    fx = aij_cache[2] * hrr_1011x;
+                    fx = ai2 * hrr_1011x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double hrr_0011x = trr_02x - xlxk * trr_01x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0011x *  fy  * wt;
                     goutz[0] += hrr_0011x * 1 *  fz ;
                     double hrr_1001x = trr_11x - xlxk * trr_10x;
-                    fx = aij_cache[2] * hrr_1001x;
+                    fx = ai2 * hrr_1001x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0001x = trr_01x - xlxk * 1;
                     double trr_01y = cpy * 1;
                     goutx[1] +=  fx  * trr_01y * wt;
                     gouty[1] += hrr_0001x *  fy  * wt;
                     goutz[1] += hrr_0001x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[2] +=  fx  * 1 * trr_01z;
                     gouty[2] += hrr_0001x *  fy  * trr_01z;
                     goutz[2] += hrr_0001x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double hrr_1001y = trr_11y - ylyk * trr_10y;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_10z;
                     double hrr_0001y = trr_01y - ylyk * 1;
                     goutx[3] +=  fx  * hrr_0001y * wt;
                     gouty[3] += trr_01x *  fy  * wt;
                     goutz[3] += trr_01x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
                     double hrr_1011y = trr_12y - ylyk * trr_11y;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * trr_10z;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     double hrr_0011y = trr_02y - ylyk * trr_01y;
                     goutx[4] +=  fx  * hrr_0011y * wt;
                     gouty[4] += 1 *  fy  * wt;
                     goutz[4] += 1 * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_11z;
                     goutx[5] +=  fx  * hrr_0001y * trr_01z;
                     gouty[5] += 1 *  fy  * trr_01z;
                     goutz[5] += 1 * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double hrr_1001z = trr_11z - zlzk * trr_10z;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fz = ai2 * hrr_1001z;
                     double hrr_0001z = trr_01z - zlzk * wt;
                     goutx[6] +=  fx  * 1 * hrr_0001z;
                     gouty[6] += trr_01x *  fy  * hrr_0001z;
                     goutz[6] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1001z;
                     goutx[7] +=  fx  * trr_01y * hrr_0001z;
                     gouty[7] += 1 *  fy  * hrr_0001z;
                     goutz[7] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
                     double hrr_1011z = trr_12z - zlzk * trr_11z;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fz = ai2 * hrr_1011z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     double hrr_0011z = trr_02z - zlzk * trr_01z;
                     goutx[8] +=  fx  * 1 * hrr_0011z;
@@ -1047,29 +1042,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0020(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -1085,20 +1072,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -1216,6 +1200,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -1225,53 +1210,53 @@ while (1) {
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                    fx = aij_cache[2] * trr_12x;
+                    fx = ai2 * trr_12x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += trr_02x *  fy  * wt;
                     goutz[0] += trr_02x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double trr_01y = cpy * 1;
                     goutx[1] +=  fx  * trr_01y * wt;
                     gouty[1] += trr_01x *  fy  * wt;
                     goutz[1] += trr_01x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[2] +=  fx  * 1 * trr_01z;
                     gouty[2] += trr_01x *  fy  * trr_01z;
                     goutz[2] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * trr_10z;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     goutx[3] +=  fx  * trr_02y * wt;
                     gouty[3] += 1 *  fy  * wt;
                     goutz[3] += 1 * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_11z;
                     goutx[4] +=  fx  * trr_01y * trr_01z;
                     gouty[4] += 1 *  fy  * trr_01z;
                     goutz[4] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = aij_cache[2] * trr_12z;
+                    fz = ai2 * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     goutx[5] +=  fx  * 1 * trr_02z;
                     gouty[5] += 1 *  fy  * trr_02z;
@@ -1507,29 +1492,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0021(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -1545,20 +1522,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -1676,6 +1650,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -1688,145 +1663,145 @@ while (1) {
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double trr_13x = cpx * trr_12x + 2*b01 * trr_11x + 1*b00 * trr_02x;
                     double hrr_1021x = trr_13x - xlxk * trr_12x;
-                    fx = aij_cache[2] * hrr_1021x;
+                    fx = ai2 * hrr_1021x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_03x = cpx * trr_02x + 2*b01 * trr_01x;
                     double hrr_0021x = trr_03x - xlxk * trr_02x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0021x *  fy  * wt;
                     goutz[0] += hrr_0021x * 1 *  fz ;
                     double hrr_1011x = trr_12x - xlxk * trr_11x;
-                    fx = aij_cache[2] * hrr_1011x;
+                    fx = ai2 * hrr_1011x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0011x = trr_02x - xlxk * trr_01x;
                     double trr_01y = cpy * 1;
                     goutx[1] +=  fx  * trr_01y * wt;
                     gouty[1] += hrr_0011x *  fy  * wt;
                     goutz[1] += hrr_0011x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1011x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[2] +=  fx  * 1 * trr_01z;
                     gouty[2] += hrr_0011x *  fy  * trr_01z;
                     goutz[2] += hrr_0011x * 1 *  fz ;
                     double hrr_1001x = trr_11x - xlxk * trr_10x;
-                    fx = aij_cache[2] * hrr_1001x;
+                    fx = ai2 * hrr_1001x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * trr_10z;
                     double hrr_0001x = trr_01x - xlxk * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     goutx[3] +=  fx  * trr_02y * wt;
                     gouty[3] += hrr_0001x *  fy  * wt;
                     goutz[3] += hrr_0001x * trr_02y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_11z;
                     goutx[4] +=  fx  * trr_01y * trr_01z;
                     gouty[4] += hrr_0001x *  fy  * trr_01z;
                     goutz[4] += hrr_0001x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = aij_cache[2] * trr_12z;
+                    fz = ai2 * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     goutx[5] +=  fx  * 1 * trr_02z;
                     gouty[5] += hrr_0001x *  fy  * trr_02z;
                     goutz[5] += hrr_0001x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_12x;
+                    fx = ai2 * trr_12x;
                     double hrr_1001y = trr_11y - ylyk * trr_10y;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_10z;
                     double hrr_0001y = trr_01y - ylyk * 1;
                     goutx[6] +=  fx  * hrr_0001y * wt;
                     gouty[6] += trr_02x *  fy  * wt;
                     goutz[6] += trr_02x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double hrr_1011y = trr_12y - ylyk * trr_11y;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * trr_10z;
                     double hrr_0011y = trr_02y - ylyk * trr_01y;
                     goutx[7] +=  fx  * hrr_0011y * wt;
                     gouty[7] += trr_01x *  fy  * wt;
                     goutz[7] += trr_01x * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_11z;
                     goutx[8] +=  fx  * hrr_0001y * trr_01z;
                     gouty[8] += trr_01x *  fy  * trr_01z;
                     goutz[8] += trr_01x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_13y = cpy * trr_12y + 2*b01 * trr_11y + 1*b00 * trr_02y;
                     double hrr_1021y = trr_13y - ylyk * trr_12y;
-                    fy = aij_cache[2] * hrr_1021y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1021y;
+                    fz = ai2 * trr_10z;
                     double trr_03y = cpy * trr_02y + 2*b01 * trr_01y;
                     double hrr_0021y = trr_03y - ylyk * trr_02y;
                     goutx[9] +=  fx  * hrr_0021y * wt;
                     gouty[9] += 1 *  fy  * wt;
                     goutz[9] += 1 * hrr_0021y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * trr_11z;
                     goutx[10] +=  fx  * hrr_0011y * trr_01z;
                     gouty[10] += 1 *  fy  * trr_01z;
                     goutz[10] += 1 * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_12z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_12z;
                     goutx[11] +=  fx  * hrr_0001y * trr_02z;
                     gouty[11] += 1 *  fy  * trr_02z;
                     goutz[11] += 1 * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * trr_10y;
                     double hrr_1001z = trr_11z - zlzk * trr_10z;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fz = ai2 * hrr_1001z;
                     double hrr_0001z = trr_01z - zlzk * wt;
                     goutx[12] +=  fx  * 1 * hrr_0001z;
                     gouty[12] += trr_02x *  fy  * hrr_0001z;
                     goutz[12] += trr_02x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1001z;
                     goutx[13] +=  fx  * trr_01y * hrr_0001z;
                     gouty[13] += trr_01x *  fy  * hrr_0001z;
                     goutz[13] += trr_01x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double hrr_1011z = trr_12z - zlzk * trr_11z;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fz = ai2 * hrr_1011z;
                     double hrr_0011z = trr_02z - zlzk * trr_01z;
                     goutx[14] +=  fx  * 1 * hrr_0011z;
                     gouty[14] += trr_01x *  fy  * hrr_0011z;
                     goutz[14] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * hrr_1001z;
                     goutx[15] +=  fx  * trr_02y * hrr_0001z;
                     gouty[15] += 1 *  fy  * hrr_0001z;
                     goutz[15] += 1 * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1011z;
                     goutx[16] +=  fx  * trr_01y * hrr_0011z;
                     gouty[16] += 1 *  fy  * hrr_0011z;
                     goutz[16] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
                     double hrr_1021z = trr_13z - zlzk * trr_12z;
-                    fz = aij_cache[2] * hrr_1021z;
+                    fz = ai2 * hrr_1021z;
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
                     double hrr_0021z = trr_03z - zlzk * trr_02z;
                     goutx[17] +=  fx  * 1 * hrr_0021z;
@@ -2175,29 +2150,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0022(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -2213,20 +2180,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -2344,6 +2308,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -2360,13 +2325,13 @@ while (1) {
                     double hrr_1031x = trr_14x - xlxk * trr_13x;
                     double hrr_1021x = trr_13x - xlxk * trr_12x;
                     double hrr_1022x = hrr_1031x - xlxk * hrr_1021x;
-                    fx = aij_cache[2] * hrr_1022x;
+                    fx = ai2 * hrr_1022x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_04x = cpx * trr_03x + 3*b01 * trr_02x;
                     double hrr_0031x = trr_04x - xlxk * trr_03x;
                     double hrr_0021x = trr_03x - xlxk * trr_02x;
@@ -2376,135 +2341,135 @@ while (1) {
                     goutz[0] += hrr_0022x * 1 *  fz ;
                     double hrr_1011x = trr_12x - xlxk * trr_11x;
                     double hrr_1012x = hrr_1021x - xlxk * hrr_1011x;
-                    fx = aij_cache[2] * hrr_1012x;
+                    fx = ai2 * hrr_1012x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0011x = trr_02x - xlxk * trr_01x;
                     double hrr_0012x = hrr_0021x - xlxk * hrr_0011x;
                     double trr_01y = cpy * 1;
                     goutx[1] +=  fx  * trr_01y * wt;
                     gouty[1] += hrr_0012x *  fy  * wt;
                     goutz[1] += hrr_0012x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1012x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1012x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[2] +=  fx  * 1 * trr_01z;
                     gouty[2] += hrr_0012x *  fy  * trr_01z;
                     goutz[2] += hrr_0012x * 1 *  fz ;
                     double hrr_1001x = trr_11x - xlxk * trr_10x;
                     double hrr_1002x = hrr_1011x - xlxk * hrr_1001x;
-                    fx = aij_cache[2] * hrr_1002x;
+                    fx = ai2 * hrr_1002x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * trr_10z;
                     double hrr_0001x = trr_01x - xlxk * 1;
                     double hrr_0002x = hrr_0011x - xlxk * hrr_0001x;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     goutx[3] +=  fx  * trr_02y * wt;
                     gouty[3] += hrr_0002x *  fy  * wt;
                     goutz[3] += hrr_0002x * trr_02y *  fz ;
-                    fx = aij_cache[2] * hrr_1002x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1002x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_11z;
                     goutx[4] +=  fx  * trr_01y * trr_01z;
                     gouty[4] += hrr_0002x *  fy  * trr_01z;
                     goutz[4] += hrr_0002x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1002x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1002x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = aij_cache[2] * trr_12z;
+                    fz = ai2 * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     goutx[5] +=  fx  * 1 * trr_02z;
                     gouty[5] += hrr_0002x *  fy  * trr_02z;
                     goutz[5] += hrr_0002x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1021x;
+                    fx = ai2 * hrr_1021x;
                     double hrr_1001y = trr_11y - ylyk * trr_10y;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_10z;
                     double hrr_0001y = trr_01y - ylyk * 1;
                     goutx[6] +=  fx  * hrr_0001y * wt;
                     gouty[6] += hrr_0021x *  fy  * wt;
                     goutz[6] += hrr_0021x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
+                    fx = ai2 * hrr_1011x;
                     double hrr_1011y = trr_12y - ylyk * trr_11y;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * trr_10z;
                     double hrr_0011y = trr_02y - ylyk * trr_01y;
                     goutx[7] +=  fx  * hrr_0011y * wt;
                     gouty[7] += hrr_0011x *  fy  * wt;
                     goutz[7] += hrr_0011x * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1011x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_11z;
                     goutx[8] +=  fx  * hrr_0001y * trr_01z;
                     gouty[8] += hrr_0011x *  fy  * trr_01z;
                     goutz[8] += hrr_0011x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
+                    fx = ai2 * hrr_1001x;
                     double trr_13y = cpy * trr_12y + 2*b01 * trr_11y + 1*b00 * trr_02y;
                     double hrr_1021y = trr_13y - ylyk * trr_12y;
-                    fy = aij_cache[2] * hrr_1021y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1021y;
+                    fz = ai2 * trr_10z;
                     double trr_03y = cpy * trr_02y + 2*b01 * trr_01y;
                     double hrr_0021y = trr_03y - ylyk * trr_02y;
                     goutx[9] +=  fx  * hrr_0021y * wt;
                     gouty[9] += hrr_0001x *  fy  * wt;
                     goutz[9] += hrr_0001x * hrr_0021y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * trr_11z;
                     goutx[10] +=  fx  * hrr_0011y * trr_01z;
                     gouty[10] += hrr_0001x *  fy  * trr_01z;
                     goutz[10] += hrr_0001x * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_12z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_12z;
                     goutx[11] +=  fx  * hrr_0001y * trr_02z;
                     gouty[11] += hrr_0001x *  fy  * trr_02z;
                     goutz[11] += hrr_0001x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * hrr_1021x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1021x;
+                    fy = ai2 * trr_10y;
                     double hrr_1001z = trr_11z - zlzk * trr_10z;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fz = ai2 * hrr_1001z;
                     double hrr_0001z = trr_01z - zlzk * wt;
                     goutx[12] +=  fx  * 1 * hrr_0001z;
                     gouty[12] += hrr_0021x *  fy  * hrr_0001z;
                     goutz[12] += hrr_0021x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * hrr_1011x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1001z;
                     goutx[13] +=  fx  * trr_01y * hrr_0001z;
                     gouty[13] += hrr_0011x *  fy  * hrr_0001z;
                     goutz[13] += hrr_0011x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1011x;
+                    fy = ai2 * trr_10y;
                     double hrr_1011z = trr_12z - zlzk * trr_11z;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fz = ai2 * hrr_1011z;
                     double hrr_0011z = trr_02z - zlzk * trr_01z;
                     goutx[14] +=  fx  * 1 * hrr_0011z;
                     gouty[14] += hrr_0011x *  fy  * hrr_0011z;
                     goutz[14] += hrr_0011x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * hrr_1001z;
                     goutx[15] +=  fx  * trr_02y * hrr_0001z;
                     gouty[15] += hrr_0001x *  fy  * hrr_0001z;
                     goutz[15] += hrr_0001x * trr_02y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1011z;
                     goutx[16] +=  fx  * trr_01y * hrr_0011z;
                     gouty[16] += hrr_0001x *  fy  * hrr_0011z;
                     goutz[16] += hrr_0001x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_10y;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
                     double hrr_1021z = trr_13z - zlzk * trr_12z;
-                    fz = aij_cache[2] * hrr_1021z;
+                    fz = ai2 * hrr_1021z;
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
                     double hrr_0021z = trr_03z - zlzk * trr_02z;
                     goutx[17] +=  fx  * 1 * hrr_0021z;
@@ -2914,6 +2879,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -2923,7 +2889,7 @@ while (1) {
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                    fx = aij_cache[2] * trr_12x;
+                    fx = ai2 * trr_12x;
                     double cpy = yqc + ypq*rt_akl;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
@@ -2933,10 +2899,10 @@ while (1) {
                     double hrr_1011y = trr_12y - ylyk * trr_11y;
                     double hrr_1001y = trr_11y - ylyk * trr_10y;
                     double hrr_1002y = hrr_1011y - ylyk * hrr_1001y;
-                    fy = aij_cache[2] * hrr_1002y;
+                    fy = ai2 * hrr_1002y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     double hrr_0011y = trr_02y - ylyk * trr_01y;
@@ -2945,137 +2911,137 @@ while (1) {
                     goutx[0] +=  fx  * hrr_0002y * wt;
                     gouty[0] += trr_02x *  fy  * wt;
                     goutz[0] += trr_02x * hrr_0002y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_13y = cpy * trr_12y + 2*b01 * trr_11y + 1*b00 * trr_02y;
                     double hrr_1021y = trr_13y - ylyk * trr_12y;
                     double hrr_1012y = hrr_1021y - ylyk * hrr_1011y;
-                    fy = aij_cache[2] * hrr_1012y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1012y;
+                    fz = ai2 * trr_10z;
                     double trr_03y = cpy * trr_02y + 2*b01 * trr_01y;
                     double hrr_0021y = trr_03y - ylyk * trr_02y;
                     double hrr_0012y = hrr_0021y - ylyk * hrr_0011y;
                     goutx[1] +=  fx  * hrr_0012y * wt;
                     gouty[1] += trr_01x *  fy  * wt;
                     goutz[1] += trr_01x * hrr_0012y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1002y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1002y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[2] +=  fx  * hrr_0002y * trr_01z;
                     gouty[2] += trr_01x *  fy  * trr_01z;
                     goutz[2] += trr_01x * hrr_0002y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_14y = cpy * trr_13y + 3*b01 * trr_12y + 1*b00 * trr_03y;
                     double hrr_1031y = trr_14y - ylyk * trr_13y;
                     double hrr_1022y = hrr_1031y - ylyk * hrr_1021y;
-                    fy = aij_cache[2] * hrr_1022y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1022y;
+                    fz = ai2 * trr_10z;
                     double trr_04y = cpy * trr_03y + 3*b01 * trr_02y;
                     double hrr_0031y = trr_04y - ylyk * trr_03y;
                     double hrr_0022y = hrr_0031y - ylyk * hrr_0021y;
                     goutx[3] +=  fx  * hrr_0022y * wt;
                     gouty[3] += 1 *  fy  * wt;
                     goutz[3] += 1 * hrr_0022y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1012y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1012y;
+                    fz = ai2 * trr_11z;
                     goutx[4] +=  fx  * hrr_0012y * trr_01z;
                     gouty[4] += 1 *  fy  * trr_01z;
                     goutz[4] += 1 * hrr_0012y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1002y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1002y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = aij_cache[2] * trr_12z;
+                    fz = ai2 * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     goutx[5] +=  fx  * hrr_0002y * trr_02z;
                     gouty[5] += 1 *  fy  * trr_02z;
                     goutz[5] += 1 * hrr_0002y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * hrr_1001y;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * hrr_1001y;
                     double hrr_1001z = trr_11z - zlzk * trr_10z;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fz = ai2 * hrr_1001z;
                     double hrr_0001z = trr_01z - zlzk * wt;
                     goutx[6] +=  fx  * hrr_0001y * hrr_0001z;
                     gouty[6] += trr_02x *  fy  * hrr_0001z;
                     goutz[6] += trr_02x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * hrr_1001z;
                     goutx[7] +=  fx  * hrr_0011y * hrr_0001z;
                     gouty[7] += trr_01x *  fy  * hrr_0001z;
                     goutz[7] += trr_01x * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1001y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1001y;
                     double hrr_1011z = trr_12z - zlzk * trr_11z;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fz = ai2 * hrr_1011z;
                     double hrr_0011z = trr_02z - zlzk * trr_01z;
                     goutx[8] +=  fx  * hrr_0001y * hrr_0011z;
                     gouty[8] += trr_01x *  fy  * hrr_0011z;
                     goutz[8] += trr_01x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1021y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1021y;
+                    fz = ai2 * hrr_1001z;
                     goutx[9] +=  fx  * hrr_0021y * hrr_0001z;
                     gouty[9] += 1 *  fy  * hrr_0001z;
                     goutz[9] += 1 * hrr_0021y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * hrr_1011z;
                     goutx[10] +=  fx  * hrr_0011y * hrr_0011z;
                     gouty[10] += 1 *  fy  * hrr_0011z;
                     goutz[10] += 1 * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1001y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1001y;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
                     double hrr_1021z = trr_13z - zlzk * trr_12z;
-                    fz = aij_cache[2] * hrr_1021z;
+                    fz = ai2 * hrr_1021z;
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
                     double hrr_0021z = trr_03z - zlzk * trr_02z;
                     goutx[11] +=  fx  * hrr_0001y * hrr_0021z;
                     gouty[11] += 1 *  fy  * hrr_0021z;
                     goutz[11] += 1 * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * trr_10y;
                     double hrr_1002z = hrr_1011z - zlzk * hrr_1001z;
-                    fz = aij_cache[2] * hrr_1002z;
+                    fz = ai2 * hrr_1002z;
                     double hrr_0002z = hrr_0011z - zlzk * hrr_0001z;
                     goutx[12] +=  fx  * 1 * hrr_0002z;
                     gouty[12] += trr_02x *  fy  * hrr_0002z;
                     goutz[12] += trr_02x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1002z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1002z;
                     goutx[13] +=  fx  * trr_01y * hrr_0002z;
                     gouty[13] += trr_01x *  fy  * hrr_0002z;
                     goutz[13] += trr_01x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double hrr_1012z = hrr_1021z - zlzk * hrr_1011z;
-                    fz = aij_cache[2] * hrr_1012z;
+                    fz = ai2 * hrr_1012z;
                     double hrr_0012z = hrr_0021z - zlzk * hrr_0011z;
                     goutx[14] +=  fx  * 1 * hrr_0012z;
                     gouty[14] += trr_01x *  fy  * hrr_0012z;
                     goutz[14] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * hrr_1002z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * hrr_1002z;
                     goutx[15] +=  fx  * trr_02y * hrr_0002z;
                     gouty[15] += 1 *  fy  * hrr_0002z;
                     goutz[15] += 1 * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1012z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1012z;
                     goutx[16] +=  fx  * trr_01y * hrr_0012z;
                     gouty[16] += 1 *  fy  * hrr_0012z;
                     goutz[16] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_14z = cpz * trr_13z + 3*b01 * trr_12z + 1*b00 * trr_03z;
                     double hrr_1031z = trr_14z - zlzk * trr_13z;
                     double hrr_1022z = hrr_1031z - zlzk * hrr_1021z;
-                    fz = aij_cache[2] * hrr_1022z;
+                    fz = ai2 * hrr_1022z;
                     double trr_04z = cpz * trr_03z + 3*b01 * trr_02z;
                     double hrr_0031z = trr_04z - zlzk * trr_03z;
                     double hrr_0022z = hrr_0031z - zlzk * hrr_0021z;
@@ -3425,29 +3391,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0100(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -3463,20 +3421,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -3593,37 +3548,38 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0100x *  fy  * wt;
                     goutz[0] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[1] +=  fx  * hrr_0100y * wt;
                     gouty[1] += 1 *  fy  * wt;
                     goutz[1] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[2] +=  fx  * 1 * hrr_0100z;
                     gouty[2] += 1 *  fy  * hrr_0100z;
@@ -3742,29 +3698,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0110(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -3780,20 +3728,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -3911,6 +3856,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
@@ -3921,82 +3867,82 @@ while (1) {
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
-                    fx = aij_cache[2] * hrr_1110x;
+                    fx = ai2 * hrr_1110x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_01x = cpx * 1;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0110x *  fy  * wt;
                     goutz[0] += hrr_0110x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[1] +=  fx  * hrr_0100y * wt;
                     gouty[1] += trr_01x *  fy  * wt;
                     goutz[1] += trr_01x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[2] +=  fx  * 1 * hrr_0100z;
                     gouty[2] += trr_01x *  fy  * hrr_0100z;
                     goutz[2] += trr_01x * 1 *  fz ;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double trr_01y = cpy * 1;
                     goutx[3] +=  fx  * trr_01y * wt;
                     gouty[3] += hrr_0100x *  fy  * wt;
                     goutz[3] += hrr_0100x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     goutx[4] +=  fx  * hrr_0110y * wt;
                     gouty[4] += 1 *  fy  * wt;
                     goutz[4] += 1 * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1100z;
                     goutx[5] +=  fx  * trr_01y * hrr_0100z;
                     gouty[5] += 1 *  fy  * hrr_0100z;
                     goutz[5] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[6] +=  fx  * 1 * trr_01z;
                     gouty[6] += hrr_0100x *  fy  * trr_01z;
                     goutz[6] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_11z;
                     goutx[7] +=  fx  * hrr_0100y * trr_01z;
                     gouty[7] += 1 *  fy  * trr_01z;
                     goutz[7] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fz = ai2 * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     goutx[8] +=  fx  * 1 * hrr_0110z;
                     gouty[8] += 1 *  fy  * hrr_0110z;
@@ -4212,29 +4158,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0111(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -4250,20 +4188,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -4381,6 +4316,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -4397,33 +4333,33 @@ while (1) {
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
                     double hrr_1011x = trr_12x - xlxk * trr_11x;
                     double hrr_1111x = hrr_2011x - rjri[0] * hrr_1011x;
-                    fx = aij_cache[2] * hrr_1111x;
+                    fx = ai2 * hrr_1111x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double hrr_0011x = trr_02x - xlxk * trr_01x;
                     double hrr_0111x = hrr_1011x - rjri[0] * hrr_0011x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0111x *  fy  * wt;
                     goutz[0] += hrr_0111x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
+                    fx = ai2 * hrr_1011x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[1] +=  fx  * hrr_0100y * wt;
                     gouty[1] += hrr_0011x *  fy  * wt;
                     goutz[1] += hrr_0011x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1011x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[2] +=  fx  * 1 * hrr_0100z;
                     gouty[2] += hrr_0011x *  fy  * hrr_0100z;
@@ -4431,190 +4367,190 @@ while (1) {
                     double hrr_2001x = trr_21x - xlxk * trr_20x;
                     double hrr_1001x = trr_11x - xlxk * trr_10x;
                     double hrr_1101x = hrr_2001x - rjri[0] * hrr_1001x;
-                    fx = aij_cache[2] * hrr_1101x;
+                    fx = ai2 * hrr_1101x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0001x = trr_01x - xlxk * 1;
                     double hrr_0101x = hrr_1001x - rjri[0] * hrr_0001x;
                     double trr_01y = cpy * 1;
                     goutx[3] +=  fx  * trr_01y * wt;
                     gouty[3] += hrr_0101x *  fy  * wt;
                     goutz[3] += hrr_0101x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
+                    fx = ai2 * hrr_1001x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     goutx[4] +=  fx  * hrr_0110y * wt;
                     gouty[4] += hrr_0001x *  fy  * wt;
                     goutz[4] += hrr_0001x * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1100z;
                     goutx[5] +=  fx  * trr_01y * hrr_0100z;
                     gouty[5] += hrr_0001x *  fy  * hrr_0100z;
                     goutz[5] += hrr_0001x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1101x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1101x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[6] +=  fx  * 1 * trr_01z;
                     gouty[6] += hrr_0101x *  fy  * trr_01z;
                     goutz[6] += hrr_0101x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_11z;
                     goutx[7] +=  fx  * hrr_0100y * trr_01z;
                     gouty[7] += hrr_0001x *  fy  * trr_01z;
                     goutz[7] += hrr_0001x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fz = ai2 * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     goutx[8] +=  fx  * 1 * hrr_0110z;
                     gouty[8] += hrr_0001x *  fy  * hrr_0110z;
                     goutz[8] += hrr_0001x * 1 *  fz ;
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
-                    fx = aij_cache[2] * hrr_1110x;
+                    fx = ai2 * hrr_1110x;
                     double hrr_1001y = trr_11y - ylyk * trr_10y;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_10z;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
                     double hrr_0001y = trr_01y - ylyk * 1;
                     goutx[9] +=  fx  * hrr_0001y * wt;
                     gouty[9] += hrr_0110x *  fy  * wt;
                     goutz[9] += hrr_0110x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double hrr_2001y = trr_21y - ylyk * trr_20y;
                     double hrr_1101y = hrr_2001y - rjri[1] * hrr_1001y;
-                    fy = aij_cache[2] * hrr_1101y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1101y;
+                    fz = ai2 * trr_10z;
                     double hrr_0101y = hrr_1001y - rjri[1] * hrr_0001y;
                     goutx[10] +=  fx  * hrr_0101y * wt;
                     gouty[10] += trr_01x *  fy  * wt;
                     goutz[10] += trr_01x * hrr_0101y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * hrr_1100z;
                     goutx[11] +=  fx  * hrr_0001y * hrr_0100z;
                     gouty[11] += trr_01x *  fy  * hrr_0100z;
                     goutz[11] += trr_01x * hrr_0001y *  fz ;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
                     double hrr_1011y = trr_12y - ylyk * trr_11y;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     double hrr_0011y = trr_02y - ylyk * trr_01y;
                     goutx[12] +=  fx  * hrr_0011y * wt;
                     gouty[12] += hrr_0100x *  fy  * wt;
                     goutz[12] += hrr_0100x * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
                     double hrr_2011y = trr_22y - ylyk * trr_21y;
                     double hrr_1111y = hrr_2011y - rjri[1] * hrr_1011y;
-                    fy = aij_cache[2] * hrr_1111y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1111y;
+                    fz = ai2 * trr_10z;
                     double hrr_0111y = hrr_1011y - rjri[1] * hrr_0011y;
                     goutx[13] +=  fx  * hrr_0111y * wt;
                     gouty[13] += 1 *  fy  * wt;
                     goutz[13] += 1 * hrr_0111y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * hrr_1100z;
                     goutx[14] +=  fx  * hrr_0011y * hrr_0100z;
                     gouty[14] += 1 *  fy  * hrr_0100z;
                     goutz[14] += 1 * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_11z;
                     goutx[15] +=  fx  * hrr_0001y * trr_01z;
                     gouty[15] += hrr_0100x *  fy  * trr_01z;
                     goutz[15] += hrr_0100x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1101y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1101y;
+                    fz = ai2 * trr_11z;
                     goutx[16] +=  fx  * hrr_0101y * trr_01z;
                     gouty[16] += 1 *  fy  * trr_01z;
                     goutz[16] += 1 * hrr_0101y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * hrr_1110z;
                     goutx[17] +=  fx  * hrr_0001y * hrr_0110z;
                     gouty[17] += 1 *  fy  * hrr_0110z;
                     goutz[17] += 1 * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1110x;
+                    fy = ai2 * trr_10y;
                     double hrr_1001z = trr_11z - zlzk * trr_10z;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fz = ai2 * hrr_1001z;
                     double hrr_0001z = trr_01z - zlzk * wt;
                     goutx[18] +=  fx  * 1 * hrr_0001z;
                     gouty[18] += hrr_0110x *  fy  * hrr_0001z;
                     goutz[18] += hrr_0110x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1001z;
                     goutx[19] +=  fx  * hrr_0100y * hrr_0001z;
                     gouty[19] += trr_01x *  fy  * hrr_0001z;
                     goutz[19] += trr_01x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double hrr_2001z = trr_21z - zlzk * trr_20z;
                     double hrr_1101z = hrr_2001z - rjri[2] * hrr_1001z;
-                    fz = aij_cache[2] * hrr_1101z;
+                    fz = ai2 * hrr_1101z;
                     double hrr_0101z = hrr_1001z - rjri[2] * hrr_0001z;
                     goutx[20] +=  fx  * 1 * hrr_0101z;
                     gouty[20] += trr_01x *  fy  * hrr_0101z;
                     goutz[20] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1001z;
                     goutx[21] +=  fx  * trr_01y * hrr_0001z;
                     gouty[21] += hrr_0100x *  fy  * hrr_0001z;
                     goutz[21] += hrr_0100x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * hrr_1001z;
                     goutx[22] +=  fx  * hrr_0110y * hrr_0001z;
                     gouty[22] += 1 *  fy  * hrr_0001z;
                     goutz[22] += 1 * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1101z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1101z;
                     goutx[23] +=  fx  * trr_01y * hrr_0101z;
                     gouty[23] += 1 *  fy  * hrr_0101z;
                     goutz[23] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
                     double hrr_1011z = trr_12z - zlzk * trr_11z;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fz = ai2 * hrr_1011z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     double hrr_0011z = trr_02z - zlzk * trr_01z;
                     goutx[24] +=  fx  * 1 * hrr_0011z;
                     gouty[24] += hrr_0100x *  fy  * hrr_0011z;
                     goutz[24] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1011z;
                     goutx[25] +=  fx  * hrr_0100y * hrr_0011z;
                     gouty[25] += 1 *  fy  * hrr_0011z;
                     goutz[25] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
                     double hrr_2011z = trr_22z - zlzk * trr_21z;
                     double hrr_1111z = hrr_2011z - rjri[2] * hrr_1011z;
-                    fz = aij_cache[2] * hrr_1111z;
+                    fz = ai2 * hrr_1111z;
                     double hrr_0111z = hrr_1011z - rjri[2] * hrr_0011z;
                     goutx[26] +=  fx  * 1 * hrr_0111z;
                     gouty[26] += 1 *  fy  * hrr_0111z;
@@ -4901,29 +4837,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0120(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -4939,20 +4867,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -5070,6 +4995,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -5084,148 +5010,148 @@ while (1) {
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
                     double hrr_1120x = trr_22x - rjri[0] * trr_12x;
-                    fx = aij_cache[2] * hrr_1120x;
+                    fx = ai2 * hrr_1120x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double hrr_0120x = trr_12x - rjri[0] * trr_02x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0120x *  fy  * wt;
                     goutz[0] += hrr_0120x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_12x;
+                    fx = ai2 * trr_12x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[1] +=  fx  * hrr_0100y * wt;
                     gouty[1] += trr_02x *  fy  * wt;
                     goutz[1] += trr_02x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[2] +=  fx  * 1 * hrr_0100z;
                     gouty[2] += trr_02x *  fy  * hrr_0100z;
                     goutz[2] += trr_02x * 1 *  fz ;
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
-                    fx = aij_cache[2] * hrr_1110x;
+                    fx = ai2 * hrr_1110x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
                     double trr_01y = cpy * 1;
                     goutx[3] +=  fx  * trr_01y * wt;
                     gouty[3] += hrr_0110x *  fy  * wt;
                     goutz[3] += hrr_0110x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     goutx[4] +=  fx  * hrr_0110y * wt;
                     gouty[4] += trr_01x *  fy  * wt;
                     goutz[4] += trr_01x * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1100z;
                     goutx[5] +=  fx  * trr_01y * hrr_0100z;
                     gouty[5] += trr_01x *  fy  * hrr_0100z;
                     goutz[5] += trr_01x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1110x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[6] +=  fx  * 1 * trr_01z;
                     gouty[6] += hrr_0110x *  fy  * trr_01z;
                     goutz[6] += hrr_0110x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_11z;
                     goutx[7] +=  fx  * hrr_0100y * trr_01z;
                     gouty[7] += trr_01x *  fy  * trr_01z;
                     goutz[7] += trr_01x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fz = ai2 * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     goutx[8] +=  fx  * 1 * hrr_0110z;
                     gouty[8] += trr_01x *  fy  * hrr_0110z;
                     goutz[8] += trr_01x * 1 *  fz ;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     goutx[9] +=  fx  * trr_02y * wt;
                     gouty[9] += hrr_0100x *  fy  * wt;
                     goutz[9] += hrr_0100x * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
                     double hrr_1120y = trr_22y - rjri[1] * trr_12y;
-                    fy = aij_cache[2] * hrr_1120y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1120y;
+                    fz = ai2 * trr_10z;
                     double hrr_0120y = trr_12y - rjri[1] * trr_02y;
                     goutx[10] +=  fx  * hrr_0120y * wt;
                     gouty[10] += 1 *  fy  * wt;
                     goutz[10] += 1 * hrr_0120y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * hrr_1100z;
                     goutx[11] +=  fx  * trr_02y * hrr_0100z;
                     gouty[11] += 1 *  fy  * hrr_0100z;
                     goutz[11] += 1 * trr_02y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_11z;
                     goutx[12] +=  fx  * trr_01y * trr_01z;
                     gouty[12] += hrr_0100x *  fy  * trr_01z;
                     goutz[12] += hrr_0100x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_11z;
                     goutx[13] +=  fx  * hrr_0110y * trr_01z;
                     gouty[13] += 1 *  fy  * trr_01z;
                     goutz[13] += 1 * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1110z;
                     goutx[14] +=  fx  * trr_01y * hrr_0110z;
                     gouty[14] += 1 *  fy  * hrr_0110z;
                     goutz[14] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = aij_cache[2] * trr_12z;
+                    fz = ai2 * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     goutx[15] +=  fx  * 1 * trr_02z;
                     gouty[15] += hrr_0100x *  fy  * trr_02z;
                     goutz[15] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_12z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_12z;
                     goutx[16] +=  fx  * hrr_0100y * trr_02z;
                     gouty[16] += 1 *  fy  * trr_02z;
                     goutz[16] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
                     double hrr_1120z = trr_22z - rjri[2] * trr_12z;
-                    fz = aij_cache[2] * hrr_1120z;
+                    fz = ai2 * hrr_1120z;
                     double hrr_0120z = trr_12z - rjri[2] * trr_02z;
                     goutx[17] +=  fx  * 1 * hrr_0120z;
                     gouty[17] += 1 *  fy  * hrr_0120z;
@@ -5573,35 +5499,26 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0121(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
     constexpr int g_size = 24;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * 80 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (80+nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -5617,20 +5534,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -7844,29 +7758,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0200(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -7882,20 +7788,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -8012,6 +7915,7 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
@@ -8021,58 +7925,58 @@ while (1) {
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     double hrr_1200x = hrr_2100x - rjri[0] * hrr_1100x;
-                    fx = aij_cache[2] * hrr_1200x;
+                    fx = ai2 * hrr_1200x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0200x *  fy  * wt;
                     goutz[0] += hrr_0200x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[1] +=  fx  * hrr_0100y * wt;
                     gouty[1] += hrr_0100x *  fy  * wt;
                     goutz[1] += hrr_0100x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[2] +=  fx  * 1 * hrr_0100z;
                     gouty[2] += hrr_0100x *  fy  * hrr_0100z;
                     goutz[2] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = aij_cache[2] * hrr_1200y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1200y;
+                    fz = ai2 * trr_10z;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     goutx[3] +=  fx  * hrr_0200y * wt;
                     gouty[3] += 1 *  fy  * wt;
                     goutz[3] += 1 * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1100z;
                     goutx[4] +=  fx  * hrr_0100y * hrr_0100z;
                     gouty[4] += 1 *  fy  * hrr_0100z;
                     goutz[4] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fz = ai2 * hrr_1200z;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     goutx[5] +=  fx  * 1 * hrr_0200z;
                     gouty[5] += 1 *  fy  * hrr_0200z;
@@ -8308,29 +8212,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0210(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -8346,20 +8242,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -8477,6 +8370,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
@@ -8491,59 +8385,59 @@ while (1) {
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
                     double hrr_1210x = hrr_2110x - rjri[0] * hrr_1110x;
-                    fx = aij_cache[2] * hrr_1210x;
+                    fx = ai2 * hrr_1210x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_01x = cpx * 1;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
                     double hrr_0210x = hrr_1110x - rjri[0] * hrr_0110x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0210x *  fy  * wt;
                     goutz[0] += hrr_0210x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
+                    fx = ai2 * hrr_1110x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[1] +=  fx  * hrr_0100y * wt;
                     gouty[1] += hrr_0110x *  fy  * wt;
                     goutz[1] += hrr_0110x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1110x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[2] +=  fx  * 1 * hrr_0100z;
                     gouty[2] += hrr_0110x *  fy  * hrr_0100z;
                     goutz[2] += hrr_0110x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = aij_cache[2] * hrr_1200y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1200y;
+                    fz = ai2 * trr_10z;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     goutx[3] +=  fx  * hrr_0200y * wt;
                     gouty[3] += trr_01x *  fy  * wt;
                     goutz[3] += trr_01x * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1100z;
                     goutx[4] +=  fx  * hrr_0100y * hrr_0100z;
                     gouty[4] += trr_01x *  fy  * hrr_0100z;
                     goutz[4] += trr_01x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fz = ai2 * hrr_1200z;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     goutx[5] +=  fx  * 1 * hrr_0200z;
                     gouty[5] += trr_01x *  fy  * hrr_0200z;
@@ -8551,96 +8445,96 @@ while (1) {
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     double hrr_1200x = hrr_2100x - rjri[0] * hrr_1100x;
-                    fx = aij_cache[2] * hrr_1200x;
+                    fx = ai2 * hrr_1200x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
                     double trr_01y = cpy * 1;
                     goutx[6] +=  fx  * trr_01y * wt;
                     gouty[6] += hrr_0200x *  fy  * wt;
                     goutz[6] += hrr_0200x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     goutx[7] +=  fx  * hrr_0110y * wt;
                     gouty[7] += hrr_0100x *  fy  * wt;
                     goutz[7] += hrr_0100x * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1100z;
                     goutx[8] +=  fx  * trr_01y * hrr_0100z;
                     gouty[8] += hrr_0100x *  fy  * hrr_0100z;
                     goutz[8] += hrr_0100x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
                     double hrr_2110y = trr_31y - rjri[1] * trr_21y;
                     double hrr_1210y = hrr_2110y - rjri[1] * hrr_1110y;
-                    fy = aij_cache[2] * hrr_1210y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1210y;
+                    fz = ai2 * trr_10z;
                     double hrr_0210y = hrr_1110y - rjri[1] * hrr_0110y;
                     goutx[9] +=  fx  * hrr_0210y * wt;
                     gouty[9] += 1 *  fy  * wt;
                     goutz[9] += 1 * hrr_0210y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * hrr_1100z;
                     goutx[10] +=  fx  * hrr_0110y * hrr_0100z;
                     gouty[10] += 1 *  fy  * hrr_0100z;
                     goutz[10] += 1 * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1200z;
                     goutx[11] +=  fx  * trr_01y * hrr_0200z;
                     gouty[11] += 1 *  fy  * hrr_0200z;
                     goutz[11] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1200x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1200x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[12] +=  fx  * 1 * trr_01z;
                     gouty[12] += hrr_0200x *  fy  * trr_01z;
                     goutz[12] += hrr_0200x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_11z;
                     goutx[13] +=  fx  * hrr_0100y * trr_01z;
                     gouty[13] += hrr_0100x *  fy  * trr_01z;
                     goutz[13] += hrr_0100x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fz = ai2 * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     goutx[14] +=  fx  * 1 * hrr_0110z;
                     gouty[14] += hrr_0100x *  fy  * hrr_0110z;
                     goutz[14] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1200y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1200y;
+                    fz = ai2 * trr_11z;
                     goutx[15] +=  fx  * hrr_0200y * trr_01z;
                     gouty[15] += 1 *  fy  * trr_01z;
                     goutz[15] += 1 * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1110z;
                     goutx[16] +=  fx  * hrr_0100y * hrr_0110z;
                     gouty[16] += 1 *  fy  * hrr_0110z;
                     goutz[16] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
                     double hrr_2110z = trr_31z - rjri[2] * trr_21z;
                     double hrr_1210z = hrr_2110z - rjri[2] * hrr_1110z;
-                    fz = aij_cache[2] * hrr_1210z;
+                    fz = ai2 * hrr_1210z;
                     double hrr_0210z = hrr_1110z - rjri[2] * hrr_0110z;
                     goutx[17] +=  fx  * 1 * hrr_0210z;
                     gouty[17] += 1 *  fy  * hrr_0210z;
@@ -8988,35 +8882,26 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0211(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
     constexpr int g_size = 24;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * 80 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (80+nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -9032,20 +8917,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -11067,29 +10949,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_0220(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -11105,20 +10979,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -11236,6 +11107,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -11255,59 +11127,59 @@ while (1) {
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
                     double hrr_1120x = trr_22x - rjri[0] * trr_12x;
                     double hrr_1220x = hrr_2120x - rjri[0] * hrr_1120x;
-                    fx = aij_cache[2] * hrr_1220x;
+                    fx = ai2 * hrr_1220x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double hrr_0120x = trr_12x - rjri[0] * trr_02x;
                     double hrr_0220x = hrr_1120x - rjri[0] * hrr_0120x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_0220x *  fy  * wt;
                     goutz[0] += hrr_0220x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1120x;
+                    fx = ai2 * hrr_1120x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[1] +=  fx  * hrr_0100y * wt;
                     gouty[1] += hrr_0120x *  fy  * wt;
                     goutz[1] += hrr_0120x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1120x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1120x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[2] +=  fx  * 1 * hrr_0100z;
                     gouty[2] += hrr_0120x *  fy  * hrr_0100z;
                     goutz[2] += hrr_0120x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_12x;
+                    fx = ai2 * trr_12x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = aij_cache[2] * hrr_1200y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1200y;
+                    fz = ai2 * trr_10z;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     goutx[3] +=  fx  * hrr_0200y * wt;
                     gouty[3] += trr_02x *  fy  * wt;
                     goutz[3] += trr_02x * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1100z;
                     goutx[4] +=  fx  * hrr_0100y * hrr_0100z;
                     gouty[4] += trr_02x *  fy  * hrr_0100z;
                     goutz[4] += trr_02x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fz = ai2 * hrr_1200z;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     goutx[5] +=  fx  * 1 * hrr_0200z;
                     gouty[5] += trr_02x *  fy  * hrr_0200z;
@@ -11315,96 +11187,96 @@ while (1) {
                     double hrr_2110x = trr_31x - rjri[0] * trr_21x;
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
                     double hrr_1210x = hrr_2110x - rjri[0] * hrr_1110x;
-                    fx = aij_cache[2] * hrr_1210x;
+                    fx = ai2 * hrr_1210x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
                     double hrr_0210x = hrr_1110x - rjri[0] * hrr_0110x;
                     double trr_01y = cpy * 1;
                     goutx[6] +=  fx  * trr_01y * wt;
                     gouty[6] += hrr_0210x *  fy  * wt;
                     goutz[6] += hrr_0210x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
+                    fx = ai2 * hrr_1110x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     goutx[7] +=  fx  * hrr_0110y * wt;
                     gouty[7] += hrr_0110x *  fy  * wt;
                     goutz[7] += hrr_0110x * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * hrr_1110x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1100z;
                     goutx[8] +=  fx  * trr_01y * hrr_0100z;
                     gouty[8] += hrr_0110x *  fy  * hrr_0100z;
                     goutz[8] += hrr_0110x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
                     double hrr_2110y = trr_31y - rjri[1] * trr_21y;
                     double hrr_1210y = hrr_2110y - rjri[1] * hrr_1110y;
-                    fy = aij_cache[2] * hrr_1210y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1210y;
+                    fz = ai2 * trr_10z;
                     double hrr_0210y = hrr_1110y - rjri[1] * hrr_0110y;
                     goutx[9] +=  fx  * hrr_0210y * wt;
                     gouty[9] += trr_01x *  fy  * wt;
                     goutz[9] += trr_01x * hrr_0210y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * hrr_1100z;
                     goutx[10] +=  fx  * hrr_0110y * hrr_0100z;
                     gouty[10] += trr_01x *  fy  * hrr_0100z;
                     goutz[10] += trr_01x * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1200z;
                     goutx[11] +=  fx  * trr_01y * hrr_0200z;
                     gouty[11] += trr_01x *  fy  * hrr_0200z;
                     goutz[11] += trr_01x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1210x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1210x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[12] +=  fx  * 1 * trr_01z;
                     gouty[12] += hrr_0210x *  fy  * trr_01z;
                     goutz[12] += hrr_0210x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1110x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_11z;
                     goutx[13] +=  fx  * hrr_0100y * trr_01z;
                     gouty[13] += hrr_0110x *  fy  * trr_01z;
                     goutz[13] += hrr_0110x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1110x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fz = ai2 * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     goutx[14] +=  fx  * 1 * hrr_0110z;
                     gouty[14] += hrr_0110x *  fy  * hrr_0110z;
                     goutz[14] += hrr_0110x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1200y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1200y;
+                    fz = ai2 * trr_11z;
                     goutx[15] +=  fx  * hrr_0200y * trr_01z;
                     gouty[15] += trr_01x *  fy  * trr_01z;
                     goutz[15] += trr_01x * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1110z;
                     goutx[16] +=  fx  * hrr_0100y * hrr_0110z;
                     gouty[16] += trr_01x *  fy  * hrr_0110z;
                     goutz[16] += trr_01x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
                     double hrr_2110z = trr_31z - rjri[2] * trr_21z;
                     double hrr_1210z = hrr_2110z - rjri[2] * hrr_1110z;
-                    fz = aij_cache[2] * hrr_1210z;
+                    fz = ai2 * hrr_1210z;
                     double hrr_0210z = hrr_1110z - rjri[2] * hrr_0110z;
                     goutx[17] +=  fx  * 1 * hrr_0210z;
                     gouty[17] += trr_01x *  fy  * hrr_0210z;
@@ -11813,6 +11685,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
@@ -11822,7 +11695,7 @@ while (1) {
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     double hrr_1200x = hrr_2100x - rjri[0] * hrr_1100x;
-                    fx = aij_cache[2] * hrr_1200x;
+                    fx = ai2 * hrr_1200x;
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpy = yqc + ypq*rt_akl;
@@ -11831,161 +11704,161 @@ while (1) {
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
                     double trr_01y = cpy * 1;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = aij_cache[2] * trr_12y;
+                    fy = ai2 * trr_12y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     goutx[0] +=  fx  * trr_02y * wt;
                     gouty[0] += hrr_0200x *  fy  * wt;
                     goutz[0] += hrr_0200x * trr_02y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
                     double hrr_1120y = trr_22y - rjri[1] * trr_12y;
-                    fy = aij_cache[2] * hrr_1120y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1120y;
+                    fz = ai2 * trr_10z;
                     double hrr_0120y = trr_12y - rjri[1] * trr_02y;
                     goutx[1] +=  fx  * hrr_0120y * wt;
                     gouty[1] += hrr_0100x *  fy  * wt;
                     goutz[1] += hrr_0100x * hrr_0120y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_12y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_12y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[2] +=  fx  * trr_02y * hrr_0100z;
                     gouty[2] += hrr_0100x *  fy  * hrr_0100z;
                     goutz[2] += hrr_0100x * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
                     double trr_32y = cpy * trr_31y + 1*b01 * trr_30y + 3*b00 * trr_21y;
                     double hrr_2120y = trr_32y - rjri[1] * trr_22y;
                     double hrr_1220y = hrr_2120y - rjri[1] * hrr_1120y;
-                    fy = aij_cache[2] * hrr_1220y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1220y;
+                    fz = ai2 * trr_10z;
                     double hrr_0220y = hrr_1120y - rjri[1] * hrr_0120y;
                     goutx[3] +=  fx  * hrr_0220y * wt;
                     gouty[3] += 1 *  fy  * wt;
                     goutz[3] += 1 * hrr_0220y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1120y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1120y;
+                    fz = ai2 * hrr_1100z;
                     goutx[4] +=  fx  * hrr_0120y * hrr_0100z;
                     gouty[4] += 1 *  fy  * hrr_0100z;
                     goutz[4] += 1 * hrr_0120y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_12y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_12y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fz = ai2 * hrr_1200z;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     goutx[5] +=  fx  * trr_02y * hrr_0200z;
                     gouty[5] += 1 *  fy  * hrr_0200z;
                     goutz[5] += 1 * trr_02y *  fz ;
-                    fx = aij_cache[2] * hrr_1200x;
-                    fy = aij_cache[2] * trr_11y;
+                    fx = ai2 * hrr_1200x;
+                    fy = ai2 * trr_11y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     double trr_01z = cpz * wt;
                     goutx[6] +=  fx  * trr_01y * trr_01z;
                     gouty[6] += hrr_0200x *  fy  * trr_01z;
                     goutz[6] += hrr_0200x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_11z;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_11z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     goutx[7] +=  fx  * hrr_0110y * trr_01z;
                     gouty[7] += hrr_0100x *  fy  * trr_01z;
                     goutz[7] += hrr_0100x * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_11y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_11y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fz = ai2 * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     goutx[8] +=  fx  * trr_01y * hrr_0110z;
                     gouty[8] += hrr_0100x *  fy  * hrr_0110z;
                     goutz[8] += hrr_0100x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double hrr_2110y = trr_31y - rjri[1] * trr_21y;
                     double hrr_1210y = hrr_2110y - rjri[1] * hrr_1110y;
-                    fy = aij_cache[2] * hrr_1210y;
-                    fz = aij_cache[2] * trr_11z;
+                    fy = ai2 * hrr_1210y;
+                    fz = ai2 * trr_11z;
                     double hrr_0210y = hrr_1110y - rjri[1] * hrr_0110y;
                     goutx[9] +=  fx  * hrr_0210y * trr_01z;
                     gouty[9] += 1 *  fy  * trr_01z;
                     goutz[9] += 1 * hrr_0210y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * hrr_1110z;
                     goutx[10] +=  fx  * hrr_0110y * hrr_0110z;
                     gouty[10] += 1 *  fy  * hrr_0110z;
                     goutz[10] += 1 * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
                     double hrr_2110z = trr_31z - rjri[2] * trr_21z;
                     double hrr_1210z = hrr_2110z - rjri[2] * hrr_1110z;
-                    fz = aij_cache[2] * hrr_1210z;
+                    fz = ai2 * hrr_1210z;
                     double hrr_0210z = hrr_1110z - rjri[2] * hrr_0110z;
                     goutx[11] +=  fx  * trr_01y * hrr_0210z;
                     gouty[11] += 1 *  fy  * hrr_0210z;
                     goutz[11] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1200x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1200x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = aij_cache[2] * trr_12z;
+                    fz = ai2 * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     goutx[12] +=  fx  * 1 * trr_02z;
                     gouty[12] += hrr_0200x *  fy  * trr_02z;
                     goutz[12] += hrr_0200x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_12z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_12z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[13] +=  fx  * hrr_0100y * trr_02z;
                     gouty[13] += hrr_0100x *  fy  * trr_02z;
                     goutz[13] += hrr_0100x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
                     double hrr_1120z = trr_22z - rjri[2] * trr_12z;
-                    fz = aij_cache[2] * hrr_1120z;
+                    fz = ai2 * hrr_1120z;
                     double hrr_0120z = trr_12z - rjri[2] * trr_02z;
                     goutx[14] +=  fx  * 1 * hrr_0120z;
                     gouty[14] += hrr_0100x *  fy  * hrr_0120z;
                     goutz[14] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = aij_cache[2] * hrr_1200y;
-                    fz = aij_cache[2] * trr_12z;
+                    fy = ai2 * hrr_1200y;
+                    fz = ai2 * trr_12z;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     goutx[15] +=  fx  * hrr_0200y * trr_02z;
                     gouty[15] += 1 *  fy  * trr_02z;
                     goutz[15] += 1 * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1120z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1120z;
                     goutx[16] +=  fx  * hrr_0100y * hrr_0120z;
                     gouty[16] += 1 *  fy  * hrr_0120z;
                     goutz[16] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
                     double hrr_2120z = trr_32z - rjri[2] * trr_22z;
                     double hrr_1220z = hrr_2120z - rjri[2] * hrr_1120z;
-                    fz = aij_cache[2] * hrr_1220z;
+                    fz = ai2 * hrr_1220z;
                     double hrr_0220z = hrr_1120z - rjri[2] * hrr_0120z;
                     goutx[17] +=  fx  * 1 * hrr_0220z;
                     gouty[17] += 1 *  fy  * hrr_0220z;
@@ -12333,29 +12206,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -12371,20 +12236,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -12501,34 +12363,35 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += trr_10x *  fy  * wt;
                     goutz[0] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += 1 *  fy  * wt;
                     goutz[1] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += 1 *  fy  * trr_10z;
@@ -12647,29 +12510,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1010(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -12685,20 +12540,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -12816,6 +12668,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
@@ -12824,81 +12677,81 @@ while (1) {
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
-                    fx = aij_cache[2] * trr_21x;
+                    fx = ai2 * trr_21x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_01x = cpx * 1;
                     fx -= 1 * trr_01x;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += trr_11x *  fy  * wt;
                     goutz[0] += trr_11x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += trr_01x *  fy  * wt;
                     goutz[1] += trr_01x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += trr_01x *  fy  * trr_10z;
                     goutz[2] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     double trr_01y = cpy * 1;
                     goutx[3] +=  fx  * trr_01y * wt;
                     gouty[3] += trr_10x *  fy  * wt;
                     goutz[3] += trr_10x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * trr_01y;
                     goutx[4] +=  fx  * trr_11y * wt;
                     gouty[4] += 1 *  fy  * wt;
                     goutz[4] += 1 * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[5] +=  fx  * trr_01y * trr_10z;
                     gouty[5] += 1 *  fy  * trr_10z;
                     goutz[5] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * 1;
                     double trr_01z = cpz * wt;
                     goutx[6] +=  fx  * 1 * trr_01z;
                     gouty[6] += trr_10x *  fy  * trr_01z;
                     goutz[6] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_11z;
                     fy -= 1 * 1;
                     goutx[7] +=  fx  * trr_10y * trr_01z;
                     gouty[7] += 1 *  fy  * trr_01z;
                     goutz[7] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = aij_cache[2] * trr_21z;
+                    fz = ai2 * trr_21z;
                     fz -= 1 * trr_01z;
                     goutx[8] +=  fx  * 1 * trr_11z;
                     gouty[8] += 1 *  fy  * trr_11z;
@@ -13114,29 +12967,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1011(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -13152,20 +12997,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -13283,6 +13125,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -13295,13 +13138,13 @@ while (1) {
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
                     double hrr_2011x = trr_22x - xlxk * trr_21x;
-                    fx = aij_cache[2] * hrr_2011x;
+                    fx = ai2 * hrr_2011x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_01x = cpx * 1;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double hrr_0011x = trr_02x - xlxk * trr_01x;
@@ -13311,28 +13154,28 @@ while (1) {
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_1011x *  fy  * wt;
                     goutz[0] += hrr_1011x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
+                    fx = ai2 * hrr_1011x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += hrr_0011x *  fy  * wt;
                     goutz[1] += hrr_0011x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1011x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1011x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += hrr_0011x *  fy  * trr_10z;
                     goutz[2] += hrr_0011x * 1 *  fz ;
                     double hrr_2001x = trr_21x - xlxk * trr_20x;
-                    fx = aij_cache[2] * hrr_2001x;
+                    fx = ai2 * hrr_2001x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0001x = trr_01x - xlxk * 1;
                     fx -= 1 * hrr_0001x;
                     double hrr_1001x = trr_11x - xlxk * trr_10x;
@@ -13340,186 +13183,186 @@ while (1) {
                     goutx[3] +=  fx  * trr_01y * wt;
                     gouty[3] += hrr_1001x *  fy  * wt;
                     goutz[3] += hrr_1001x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
+                    fx = ai2 * hrr_1001x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * trr_01y;
                     goutx[4] +=  fx  * trr_11y * wt;
                     gouty[4] += hrr_0001x *  fy  * wt;
                     goutz[4] += hrr_0001x * trr_11y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[5] +=  fx  * trr_01y * trr_10z;
                     gouty[5] += hrr_0001x *  fy  * trr_10z;
                     goutz[5] += hrr_0001x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_2001x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_2001x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * hrr_0001x;
                     double trr_01z = cpz * wt;
                     goutx[6] +=  fx  * 1 * trr_01z;
                     gouty[6] += hrr_1001x *  fy  * trr_01z;
                     goutz[6] += hrr_1001x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_11z;
                     fy -= 1 * 1;
                     goutx[7] +=  fx  * trr_10y * trr_01z;
                     gouty[7] += hrr_0001x *  fy  * trr_01z;
                     goutz[7] += hrr_0001x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1001x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1001x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = aij_cache[2] * trr_21z;
+                    fz = ai2 * trr_21z;
                     fz -= 1 * trr_01z;
                     goutx[8] +=  fx  * 1 * trr_11z;
                     gouty[8] += hrr_0001x *  fy  * trr_11z;
                     goutz[8] += hrr_0001x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_21x;
+                    fx = ai2 * trr_21x;
                     double hrr_1001y = trr_11y - ylyk * trr_10y;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * trr_01x;
                     double hrr_0001y = trr_01y - ylyk * 1;
                     goutx[9] +=  fx  * hrr_0001y * wt;
                     gouty[9] += trr_11x *  fy  * wt;
                     goutz[9] += trr_11x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double hrr_2001y = trr_21y - ylyk * trr_20y;
-                    fy = aij_cache[2] * hrr_2001y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2001y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * hrr_0001y;
                     goutx[10] +=  fx  * hrr_1001y * wt;
                     gouty[10] += trr_01x *  fy  * wt;
                     goutz[10] += trr_01x * hrr_1001y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[11] +=  fx  * hrr_0001y * trr_10z;
                     gouty[11] += trr_01x *  fy  * trr_10z;
                     goutz[11] += trr_01x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
                     double hrr_1011y = trr_12y - ylyk * trr_11y;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     double hrr_0011y = trr_02y - ylyk * trr_01y;
                     goutx[12] +=  fx  * hrr_0011y * wt;
                     gouty[12] += trr_10x *  fy  * wt;
                     goutz[12] += trr_10x * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
                     double hrr_2011y = trr_22y - ylyk * trr_21y;
-                    fy = aij_cache[2] * hrr_2011y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2011y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * hrr_0011y;
                     goutx[13] +=  fx  * hrr_1011y * wt;
                     gouty[13] += 1 *  fy  * wt;
                     goutz[13] += 1 * hrr_1011y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1011y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1011y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[14] +=  fx  * hrr_0011y * trr_10z;
                     gouty[14] += 1 *  fy  * trr_10z;
                     goutz[14] += 1 * hrr_0011y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * 1;
                     goutx[15] +=  fx  * hrr_0001y * trr_01z;
                     gouty[15] += trr_10x *  fy  * trr_01z;
                     goutz[15] += trr_10x * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_2001y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_2001y;
+                    fz = ai2 * trr_11z;
                     fy -= 1 * hrr_0001y;
                     goutx[16] +=  fx  * hrr_1001y * trr_01z;
                     gouty[16] += 1 *  fy  * trr_01z;
                     goutz[16] += 1 * hrr_1001y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1001y;
-                    fz = aij_cache[2] * trr_21z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1001y;
+                    fz = ai2 * trr_21z;
                     fz -= 1 * trr_01z;
                     goutx[17] +=  fx  * hrr_0001y * trr_11z;
                     gouty[17] += 1 *  fy  * trr_11z;
                     goutz[17] += 1 * hrr_0001y *  fz ;
-                    fx = aij_cache[2] * trr_21x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_21x;
+                    fy = ai2 * trr_10y;
                     double hrr_1001z = trr_11z - zlzk * trr_10z;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fz = ai2 * hrr_1001z;
                     fx -= 1 * trr_01x;
                     double hrr_0001z = trr_01z - zlzk * wt;
                     goutx[18] +=  fx  * 1 * hrr_0001z;
                     gouty[18] += trr_11x *  fy  * hrr_0001z;
                     goutz[18] += trr_11x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1001z;
                     fy -= 1 * 1;
                     goutx[19] +=  fx  * trr_10y * hrr_0001z;
                     gouty[19] += trr_01x *  fy  * hrr_0001z;
                     goutz[19] += trr_01x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double hrr_2001z = trr_21z - zlzk * trr_20z;
-                    fz = aij_cache[2] * hrr_2001z;
+                    fz = ai2 * hrr_2001z;
                     fz -= 1 * hrr_0001z;
                     goutx[20] +=  fx  * 1 * hrr_1001z;
                     gouty[20] += trr_01x *  fy  * hrr_1001z;
                     goutz[20] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1001z;
                     fx -= 1 * 1;
                     goutx[21] +=  fx  * trr_01y * hrr_0001z;
                     gouty[21] += trr_10x *  fy  * hrr_0001z;
                     goutz[21] += trr_10x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * hrr_1001z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * hrr_1001z;
                     fy -= 1 * trr_01y;
                     goutx[22] +=  fx  * trr_11y * hrr_0001z;
                     gouty[22] += 1 *  fy  * hrr_0001z;
                     goutz[22] += 1 * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_2001z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_2001z;
                     fz -= 1 * hrr_0001z;
                     goutx[23] +=  fx  * trr_01y * hrr_1001z;
                     gouty[23] += 1 *  fy  * hrr_1001z;
                     goutz[23] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
                     double hrr_1011z = trr_12z - zlzk * trr_11z;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fz = ai2 * hrr_1011z;
                     fx -= 1 * 1;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     double hrr_0011z = trr_02z - zlzk * trr_01z;
                     goutx[24] +=  fx  * 1 * hrr_0011z;
                     gouty[24] += trr_10x *  fy  * hrr_0011z;
                     goutz[24] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1011z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1011z;
                     fy -= 1 * 1;
                     goutx[25] +=  fx  * trr_10y * hrr_0011z;
                     gouty[25] += 1 *  fy  * hrr_0011z;
                     goutz[25] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
                     double hrr_2011z = trr_22z - zlzk * trr_21z;
-                    fz = aij_cache[2] * hrr_2011z;
+                    fz = ai2 * hrr_2011z;
                     fz -= 1 * hrr_0011z;
                     goutx[26] +=  fx  * 1 * hrr_1011z;
                     gouty[26] += 1 *  fy  * hrr_1011z;
@@ -13806,29 +13649,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1020(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -13844,20 +13679,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -13975,6 +13807,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -13986,13 +13819,13 @@ while (1) {
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
-                    fx = aij_cache[2] * trr_22x;
+                    fx = ai2 * trr_22x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_01x = cpx * 1;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     fx -= 1 * trr_02x;
@@ -14000,137 +13833,137 @@ while (1) {
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += trr_12x *  fy  * wt;
                     goutz[0] += trr_12x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_12x;
+                    fx = ai2 * trr_12x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += trr_02x *  fy  * wt;
                     goutz[1] += trr_02x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += trr_02x *  fy  * trr_10z;
                     goutz[2] += trr_02x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_21x;
+                    fx = ai2 * trr_21x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * trr_01x;
                     double trr_01y = cpy * 1;
                     goutx[3] +=  fx  * trr_01y * wt;
                     gouty[3] += trr_11x *  fy  * wt;
                     goutz[3] += trr_11x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * trr_01y;
                     goutx[4] +=  fx  * trr_11y * wt;
                     gouty[4] += trr_01x *  fy  * wt;
                     goutz[4] += trr_01x * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[5] +=  fx  * trr_01y * trr_10z;
                     gouty[5] += trr_01x *  fy  * trr_10z;
                     goutz[5] += trr_01x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_21x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_21x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * trr_01x;
                     double trr_01z = cpz * wt;
                     goutx[6] +=  fx  * 1 * trr_01z;
                     gouty[6] += trr_11x *  fy  * trr_01z;
                     goutz[6] += trr_11x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_11z;
                     fy -= 1 * 1;
                     goutx[7] +=  fx  * trr_10y * trr_01z;
                     gouty[7] += trr_01x *  fy  * trr_01z;
                     goutz[7] += trr_01x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = aij_cache[2] * trr_21z;
+                    fz = ai2 * trr_21z;
                     fz -= 1 * trr_01z;
                     goutx[8] +=  fx  * 1 * trr_11z;
                     gouty[8] += trr_01x *  fy  * trr_11z;
                     goutz[8] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     goutx[9] +=  fx  * trr_02y * wt;
                     gouty[9] += trr_10x *  fy  * wt;
                     goutz[9] += trr_10x * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
-                    fy = aij_cache[2] * trr_22y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_22y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * trr_02y;
                     goutx[10] +=  fx  * trr_12y * wt;
                     gouty[10] += 1 *  fy  * wt;
                     goutz[10] += 1 * trr_12y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_12y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_12y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[11] +=  fx  * trr_02y * trr_10z;
                     gouty[11] += 1 *  fy  * trr_10z;
                     goutz[11] += 1 * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * 1;
                     goutx[12] +=  fx  * trr_01y * trr_01z;
                     gouty[12] += trr_10x *  fy  * trr_01z;
                     goutz[12] += trr_10x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_11z;
                     fy -= 1 * trr_01y;
                     goutx[13] +=  fx  * trr_11y * trr_01z;
                     gouty[13] += 1 *  fy  * trr_01z;
                     goutz[13] += 1 * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_21z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_21z;
                     fz -= 1 * trr_01z;
                     goutx[14] +=  fx  * trr_01y * trr_11z;
                     gouty[14] += 1 *  fy  * trr_11z;
                     goutz[14] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = aij_cache[2] * trr_12z;
+                    fz = ai2 * trr_12z;
                     fx -= 1 * 1;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     goutx[15] +=  fx  * 1 * trr_02z;
                     gouty[15] += trr_10x *  fy  * trr_02z;
                     goutz[15] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_12z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_12z;
                     fy -= 1 * 1;
                     goutx[16] +=  fx  * trr_10y * trr_02z;
                     gouty[16] += 1 *  fy  * trr_02z;
                     goutz[16] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
-                    fz = aij_cache[2] * trr_22z;
+                    fz = ai2 * trr_22z;
                     fz -= 1 * trr_02z;
                     goutx[17] +=  fx  * 1 * trr_12z;
                     gouty[17] += 1 *  fy  * trr_12z;
@@ -14478,35 +14311,26 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1021(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
     constexpr int g_size = 18;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * 62 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (62+nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -14522,20 +14346,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -16716,29 +16537,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1100(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -16754,20 +16567,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -16884,6 +16694,7 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
@@ -16891,81 +16702,81 @@ while (1) {
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
-                    fx = aij_cache[2] * hrr_2100x;
+                    fx = ai2 * hrr_2100x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     fx -= 1 * hrr_0100x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_1100x *  fy  * wt;
                     goutz[0] += hrr_1100x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += hrr_0100x *  fy  * wt;
                     goutz[1] += hrr_0100x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += hrr_0100x *  fy  * trr_10z;
                     goutz[2] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[3] +=  fx  * hrr_0100y * wt;
                     gouty[3] += trr_10x *  fy  * wt;
                     goutz[3] += trr_10x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * hrr_0100y;
                     goutx[4] +=  fx  * hrr_1100y * wt;
                     gouty[4] += 1 *  fy  * wt;
                     goutz[4] += 1 * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[5] +=  fx  * hrr_0100y * trr_10z;
                     gouty[5] += 1 *  fy  * trr_10z;
                     goutz[5] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     fx -= 1 * 1;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[6] +=  fx  * 1 * hrr_0100z;
                     gouty[6] += trr_10x *  fy  * hrr_0100z;
                     goutz[6] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1100z;
                     fy -= 1 * 1;
                     goutx[7] +=  fx  * trr_10y * hrr_0100z;
                     gouty[7] += 1 *  fy  * hrr_0100z;
                     goutz[7] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fz = ai2 * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     goutx[8] +=  fx  * 1 * hrr_1100z;
                     gouty[8] += 1 *  fy  * hrr_1100z;
@@ -17181,29 +16992,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1110(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -17219,20 +17022,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -17350,6 +17150,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
@@ -17361,13 +17162,13 @@ while (1) {
                     double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double hrr_2110x = trr_31x - rjri[0] * trr_21x;
-                    fx = aij_cache[2] * hrr_2110x;
+                    fx = ai2 * hrr_2110x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
@@ -17376,78 +17177,78 @@ while (1) {
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_1110x *  fy  * wt;
                     goutz[0] += hrr_1110x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
+                    fx = ai2 * hrr_1110x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += hrr_0110x *  fy  * wt;
                     goutz[1] += hrr_0110x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1110x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1110x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += hrr_0110x *  fy  * trr_10z;
                     goutz[2] += hrr_0110x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_21x;
+                    fx = ai2 * trr_21x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * trr_01x;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[3] +=  fx  * hrr_0100y * wt;
                     gouty[3] += trr_11x *  fy  * wt;
                     goutz[3] += trr_11x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * hrr_0100y;
                     goutx[4] +=  fx  * hrr_1100y * wt;
                     gouty[4] += trr_01x *  fy  * wt;
                     goutz[4] += trr_01x * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[5] +=  fx  * hrr_0100y * trr_10z;
                     gouty[5] += trr_01x *  fy  * trr_10z;
                     goutz[5] += trr_01x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_21x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_21x;
+                    fy = ai2 * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     fx -= 1 * trr_01x;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[6] +=  fx  * 1 * hrr_0100z;
                     gouty[6] += trr_11x *  fy  * hrr_0100z;
                     goutz[6] += trr_11x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1100z;
                     fy -= 1 * 1;
                     goutx[7] +=  fx  * trr_10y * hrr_0100z;
                     gouty[7] += trr_01x *  fy  * hrr_0100z;
                     goutz[7] += trr_01x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fz = ai2 * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     goutx[8] +=  fx  * 1 * hrr_1100z;
                     gouty[8] += trr_01x *  fy  * hrr_1100z;
                     goutz[8] += trr_01x * 1 *  fz ;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
-                    fx = aij_cache[2] * hrr_2100x;
+                    fx = ai2 * hrr_2100x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     fx -= 1 * hrr_0100x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
@@ -17455,134 +17256,134 @@ while (1) {
                     goutx[9] +=  fx  * trr_01y * wt;
                     gouty[9] += hrr_1100x *  fy  * wt;
                     goutz[9] += hrr_1100x * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * trr_01y;
                     goutx[10] +=  fx  * trr_11y * wt;
                     gouty[10] += hrr_0100x *  fy  * wt;
                     goutz[10] += hrr_0100x * trr_11y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[11] +=  fx  * trr_01y * trr_10z;
                     gouty[11] += hrr_0100x *  fy  * trr_10z;
                     goutz[11] += hrr_0100x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     goutx[12] +=  fx  * hrr_0110y * wt;
                     gouty[12] += trr_10x *  fy  * wt;
                     goutz[12] += trr_10x * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
                     double hrr_2110y = trr_31y - rjri[1] * trr_21y;
-                    fy = aij_cache[2] * hrr_2110y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2110y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * hrr_0110y;
                     goutx[13] +=  fx  * hrr_1110y * wt;
                     gouty[13] += 1 *  fy  * wt;
                     goutz[13] += 1 * hrr_1110y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1110y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1110y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[14] +=  fx  * hrr_0110y * trr_10z;
                     gouty[14] += 1 *  fy  * trr_10z;
                     goutz[14] += 1 * hrr_0110y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_1100z;
                     fx -= 1 * 1;
                     goutx[15] +=  fx  * trr_01y * hrr_0100z;
                     gouty[15] += trr_10x *  fy  * hrr_0100z;
                     goutz[15] += trr_10x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * hrr_1100z;
                     fy -= 1 * trr_01y;
                     goutx[16] +=  fx  * trr_11y * hrr_0100z;
                     gouty[16] += 1 *  fy  * hrr_0100z;
                     goutz[16] += 1 * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     goutx[17] +=  fx  * trr_01y * hrr_1100z;
                     gouty[17] += 1 *  fy  * hrr_1100z;
                     goutz[17] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_2100x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * hrr_0100x;
                     double trr_01z = cpz * wt;
                     goutx[18] +=  fx  * 1 * trr_01z;
                     gouty[18] += hrr_1100x *  fy  * trr_01z;
                     goutz[18] += hrr_1100x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_11z;
                     fy -= 1 * 1;
                     goutx[19] +=  fx  * trr_10y * trr_01z;
                     gouty[19] += hrr_0100x *  fy  * trr_01z;
                     goutz[19] += hrr_0100x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = aij_cache[2] * trr_21z;
+                    fz = ai2 * trr_21z;
                     fz -= 1 * trr_01z;
                     goutx[20] +=  fx  * 1 * trr_11z;
                     gouty[20] += hrr_0100x *  fy  * trr_11z;
                     goutz[20] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * 1;
                     goutx[21] +=  fx  * hrr_0100y * trr_01z;
                     gouty[21] += trr_10x *  fy  * trr_01z;
                     goutz[21] += trr_10x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * trr_11z;
                     fy -= 1 * hrr_0100y;
                     goutx[22] +=  fx  * hrr_1100y * trr_01z;
                     gouty[22] += 1 *  fy  * trr_01z;
                     goutz[22] += 1 * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_21z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_21z;
                     fz -= 1 * trr_01z;
                     goutx[23] +=  fx  * hrr_0100y * trr_11z;
                     gouty[23] += 1 *  fy  * trr_11z;
                     goutz[23] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fz = ai2 * hrr_1110z;
                     fx -= 1 * 1;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     goutx[24] +=  fx  * 1 * hrr_0110z;
                     gouty[24] += trr_10x *  fy  * hrr_0110z;
                     goutz[24] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1110z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1110z;
                     fy -= 1 * 1;
                     goutx[25] +=  fx  * trr_10y * hrr_0110z;
                     gouty[25] += 1 *  fy  * hrr_0110z;
                     goutz[25] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
                     double hrr_2110z = trr_31z - rjri[2] * trr_21z;
-                    fz = aij_cache[2] * hrr_2110z;
+                    fz = ai2 * hrr_2110z;
                     fz -= 1 * hrr_0110z;
                     goutx[26] +=  fx  * 1 * hrr_1110z;
                     gouty[26] += 1 *  fy  * hrr_1110z;
@@ -17869,35 +17670,26 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1111(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
     constexpr int g_size = 24;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * 80 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (80+nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -17913,20 +17705,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -20272,35 +20061,26 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1120(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
     constexpr int g_size = 18;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * 62 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (62+nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -20316,20 +20096,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -22633,29 +22410,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1200(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -22671,20 +22440,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -22801,6 +22567,7 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
@@ -22811,13 +22578,13 @@ while (1) {
                     double hrr_3100x = trr_40x - rjri[0] * trr_30x;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     double hrr_2200x = hrr_3100x - rjri[0] * hrr_2100x;
-                    fx = aij_cache[2] * hrr_2200x;
+                    fx = ai2 * hrr_2200x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
@@ -22826,141 +22593,141 @@ while (1) {
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_1200x *  fy  * wt;
                     goutz[0] += hrr_1200x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1200x;
+                    fx = ai2 * hrr_1200x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += hrr_0200x *  fy  * wt;
                     goutz[1] += hrr_0200x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1200x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1200x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += hrr_0200x *  fy  * trr_10z;
                     goutz[2] += hrr_0200x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
+                    fx = ai2 * hrr_2100x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * hrr_0100x;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[3] +=  fx  * hrr_0100y * wt;
                     gouty[3] += hrr_1100x *  fy  * wt;
                     goutz[3] += hrr_1100x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * hrr_0100y;
                     goutx[4] +=  fx  * hrr_1100y * wt;
                     gouty[4] += hrr_0100x *  fy  * wt;
                     goutz[4] += hrr_0100x * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[5] +=  fx  * hrr_0100y * trr_10z;
                     gouty[5] += hrr_0100x *  fy  * trr_10z;
                     goutz[5] += hrr_0100x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_2100x;
+                    fy = ai2 * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     fx -= 1 * hrr_0100x;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[6] +=  fx  * 1 * hrr_0100z;
                     gouty[6] += hrr_1100x *  fy  * hrr_0100z;
                     goutz[6] += hrr_1100x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1100z;
                     fy -= 1 * 1;
                     goutx[7] +=  fx  * trr_10y * hrr_0100z;
                     gouty[7] += hrr_0100x *  fy  * hrr_0100z;
                     goutz[7] += hrr_0100x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fz = ai2 * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     goutx[8] +=  fx  * 1 * hrr_1100z;
                     gouty[8] += hrr_0100x *  fy  * hrr_1100z;
                     goutz[8] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = aij_cache[2] * hrr_1200y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1200y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     goutx[9] +=  fx  * hrr_0200y * wt;
                     gouty[9] += trr_10x *  fy  * wt;
                     goutz[9] += trr_10x * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
                     double hrr_3100y = trr_40y - rjri[1] * trr_30y;
                     double hrr_2200y = hrr_3100y - rjri[1] * hrr_2100y;
-                    fy = aij_cache[2] * hrr_2200y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2200y;
+                    fz = ai2 * trr_10z;
                     fy -= 1 * hrr_0200y;
                     goutx[10] +=  fx  * hrr_1200y * wt;
                     gouty[10] += 1 *  fy  * wt;
                     goutz[10] += 1 * hrr_1200y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1200y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1200y;
+                    fz = ai2 * trr_20z;
                     fz -= 1 * wt;
                     goutx[11] +=  fx  * hrr_0200y * trr_10z;
                     gouty[11] += 1 *  fy  * trr_10z;
                     goutz[11] += 1 * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_1100z;
                     fx -= 1 * 1;
                     goutx[12] +=  fx  * hrr_0100y * hrr_0100z;
                     gouty[12] += trr_10x *  fy  * hrr_0100z;
                     goutz[12] += trr_10x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * hrr_1100z;
                     fy -= 1 * hrr_0100y;
                     goutx[13] +=  fx  * hrr_1100y * hrr_0100z;
                     gouty[13] += 1 *  fy  * hrr_0100z;
                     goutz[13] += 1 * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     goutx[14] +=  fx  * hrr_0100y * hrr_1100z;
                     gouty[14] += 1 *  fy  * hrr_1100z;
                     goutz[14] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fz = ai2 * hrr_1200z;
                     fx -= 1 * 1;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     goutx[15] +=  fx  * 1 * hrr_0200z;
                     gouty[15] += trr_10x *  fy  * hrr_0200z;
                     goutz[15] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1200z;
                     fy -= 1 * 1;
                     goutx[16] +=  fx  * trr_10y * hrr_0200z;
                     gouty[16] += 1 *  fy  * hrr_0200z;
                     goutz[16] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
                     double hrr_3100z = trr_40z - rjri[2] * trr_30z;
                     double hrr_2200z = hrr_3100z - rjri[2] * hrr_2100z;
-                    fz = aij_cache[2] * hrr_2200z;
+                    fz = ai2 * hrr_2200z;
                     fz -= 1 * hrr_0200z;
                     goutx[17] +=  fx  * 1 * hrr_1200z;
                     gouty[17] += 1 *  fy  * hrr_1200z;
@@ -23308,35 +23075,26 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_1210(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
     constexpr int g_size = 18;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * 62 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (62+nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -23352,20 +23110,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -25554,29 +25309,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_2000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -25592,20 +25339,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -25722,61 +25466,62 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
-                    fx = aij_cache[2] * trr_30x;
+                    fx = ai2 * trr_30x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     fx -= 2 * trr_10x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += trr_20x *  fy  * wt;
                     goutz[0] += trr_20x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += trr_10x *  fy  * wt;
                     goutz[1] += trr_10x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += trr_10x *  fy  * trr_10z;
                     goutz[2] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * trr_10y;
                     goutx[3] +=  fx  * trr_20y * wt;
                     gouty[3] += 1 *  fy  * wt;
                     goutz[3] += 1 * trr_20y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[4] +=  fx  * trr_10y * trr_10z;
                     gouty[4] += 1 *  fy  * trr_10z;
                     goutz[4] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = aij_cache[2] * trr_30z;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[5] +=  fx  * 1 * trr_20z;
                     gouty[5] += 1 *  fy  * trr_20z;
@@ -26012,29 +25757,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_2010(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -26050,20 +25787,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -26181,6 +25915,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
@@ -26190,158 +25925,158 @@ while (1) {
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
                     double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
-                    fx = aij_cache[2] * trr_31x;
+                    fx = ai2 * trr_31x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     fx -= 2 * trr_11x;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += trr_21x *  fy  * wt;
                     goutz[0] += trr_21x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_21x;
+                    fx = ai2 * trr_21x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     double trr_01x = cpx * 1;
                     fx -= 1 * trr_01x;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += trr_11x *  fy  * wt;
                     goutz[1] += trr_11x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_21x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_21x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * trr_01x;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += trr_11x *  fy  * trr_10z;
                     goutz[2] += trr_11x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * trr_10y;
                     goutx[3] +=  fx  * trr_20y * wt;
                     gouty[3] += trr_01x *  fy  * wt;
                     goutz[3] += trr_01x * trr_20y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[4] +=  fx  * trr_10y * trr_10z;
                     gouty[4] += trr_01x *  fy  * trr_10z;
                     goutz[4] += trr_01x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = aij_cache[2] * trr_30z;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[5] +=  fx  * 1 * trr_20z;
                     gouty[5] += trr_01x *  fy  * trr_20z;
                     goutz[5] += trr_01x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_30x;
+                    fx = ai2 * trr_30x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     fx -= 2 * trr_10x;
                     double trr_01y = cpy * 1;
                     goutx[6] +=  fx  * trr_01y * wt;
                     gouty[6] += trr_20x *  fy  * wt;
                     goutz[6] += trr_20x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     fy -= 1 * trr_01y;
                     goutx[7] +=  fx  * trr_11y * wt;
                     gouty[7] += trr_10x *  fy  * wt;
                     goutz[7] += trr_10x * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[8] +=  fx  * trr_01y * trr_10z;
                     gouty[8] += trr_10x *  fy  * trr_10z;
                     goutz[8] += trr_10x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
-                    fy = aij_cache[2] * trr_31y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_31y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * trr_11y;
                     goutx[9] +=  fx  * trr_21y * wt;
                     gouty[9] += 1 *  fy  * wt;
                     goutz[9] += 1 * trr_21y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * trr_01y;
                     fz -= 1 * wt;
                     goutx[10] +=  fx  * trr_11y * trr_10z;
                     gouty[10] += 1 *  fy  * trr_10z;
                     goutz[10] += 1 * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_30z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[11] +=  fx  * trr_01y * trr_20z;
                     gouty[11] += 1 *  fy  * trr_20z;
                     goutz[11] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_30x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_30x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     fx -= 2 * trr_10x;
                     double trr_01z = cpz * wt;
                     goutx[12] +=  fx  * 1 * trr_01z;
                     gouty[12] += trr_20x *  fy  * trr_01z;
                     goutz[12] += trr_20x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * 1;
                     fy -= 1 * 1;
                     goutx[13] +=  fx  * trr_10y * trr_01z;
                     gouty[13] += trr_10x *  fy  * trr_01z;
                     goutz[13] += trr_10x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = aij_cache[2] * trr_21z;
+                    fz = ai2 * trr_21z;
                     fx -= 1 * 1;
                     fz -= 1 * trr_01z;
                     goutx[14] +=  fx  * 1 * trr_11z;
                     gouty[14] += trr_10x *  fy  * trr_11z;
                     goutz[14] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * trr_11z;
                     fy -= 2 * trr_10y;
                     goutx[15] +=  fx  * trr_20y * trr_01z;
                     gouty[15] += 1 *  fy  * trr_01z;
                     goutz[15] += 1 * trr_20y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_21z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_21z;
                     fy -= 1 * 1;
                     fz -= 1 * trr_01z;
                     goutx[16] +=  fx  * trr_10y * trr_11z;
                     gouty[16] += 1 *  fy  * trr_11z;
                     goutz[16] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
-                    fz = aij_cache[2] * trr_31z;
+                    fz = ai2 * trr_31z;
                     fz -= 2 * trr_11z;
                     goutx[17] +=  fx  * 1 * trr_21z;
                     gouty[17] += 1 *  fy  * trr_21z;
@@ -26689,35 +26424,26 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_2011(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
     constexpr int g_size = 16;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * 56 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (56+nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -26733,20 +26459,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -28711,29 +28434,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_2020(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -28749,20 +28464,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -28880,6 +28592,7 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
@@ -28892,13 +28605,13 @@ while (1) {
                     double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double trr_32x = cpx * trr_31x + 1*b01 * trr_30x + 3*b00 * trr_21x;
-                    fx = aij_cache[2] * trr_32x;
+                    fx = ai2 * trr_32x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
@@ -28907,145 +28620,145 @@ while (1) {
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += trr_22x *  fy  * wt;
                     goutz[0] += trr_22x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_22x;
+                    fx = ai2 * trr_22x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     fx -= 1 * trr_02x;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += trr_12x *  fy  * wt;
                     goutz[1] += trr_12x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_22x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_22x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * trr_02x;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += trr_12x *  fy  * trr_10z;
                     goutz[2] += trr_12x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_12x;
+                    fx = ai2 * trr_12x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * trr_10y;
                     goutx[3] +=  fx  * trr_20y * wt;
                     gouty[3] += trr_02x *  fy  * wt;
                     goutz[3] += trr_02x * trr_20y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[4] +=  fx  * trr_10y * trr_10z;
                     gouty[4] += trr_02x *  fy  * trr_10z;
                     goutz[4] += trr_02x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_12x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_12x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = aij_cache[2] * trr_30z;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[5] +=  fx  * 1 * trr_20z;
                     gouty[5] += trr_02x *  fy  * trr_20z;
                     goutz[5] += trr_02x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_31x;
+                    fx = ai2 * trr_31x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_10z;
                     fx -= 2 * trr_11x;
                     double trr_01y = cpy * 1;
                     goutx[6] +=  fx  * trr_01y * wt;
                     gouty[6] += trr_21x *  fy  * wt;
                     goutz[6] += trr_21x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_21x;
+                    fx = ai2 * trr_21x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * trr_01x;
                     fy -= 1 * trr_01y;
                     goutx[7] +=  fx  * trr_11y * wt;
                     gouty[7] += trr_11x *  fy  * wt;
                     goutz[7] += trr_11x * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_21x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_21x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * trr_01x;
                     fz -= 1 * wt;
                     goutx[8] +=  fx  * trr_01y * trr_10z;
                     gouty[8] += trr_11x *  fy  * trr_10z;
                     goutz[8] += trr_11x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
+                    fx = ai2 * trr_11x;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
-                    fy = aij_cache[2] * trr_31y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_31y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * trr_11y;
                     goutx[9] +=  fx  * trr_21y * wt;
                     gouty[9] += trr_01x *  fy  * wt;
                     goutz[9] += trr_01x * trr_21y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * trr_01y;
                     fz -= 1 * wt;
                     goutx[10] +=  fx  * trr_11y * trr_10z;
                     gouty[10] += trr_01x *  fy  * trr_10z;
                     goutz[10] += trr_01x * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_11y;
-                    fz = aij_cache[2] * trr_30z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_11y;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[11] +=  fx  * trr_01y * trr_20z;
                     gouty[11] += trr_01x *  fy  * trr_20z;
                     goutz[11] += trr_01x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_31x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_31x;
+                    fy = ai2 * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     fx -= 2 * trr_11x;
                     double trr_01z = cpz * wt;
                     goutx[12] +=  fx  * 1 * trr_01z;
                     gouty[12] += trr_21x *  fy  * trr_01z;
                     goutz[12] += trr_21x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_21x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_21x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * trr_01x;
                     fy -= 1 * 1;
                     goutx[13] +=  fx  * trr_10y * trr_01z;
                     gouty[13] += trr_11x *  fy  * trr_01z;
                     goutz[13] += trr_11x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_21x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_21x;
+                    fy = ai2 * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = aij_cache[2] * trr_21z;
+                    fz = ai2 * trr_21z;
                     fx -= 1 * trr_01x;
                     fz -= 1 * trr_01z;
                     goutx[14] +=  fx  * 1 * trr_11z;
                     gouty[14] += trr_11x *  fy  * trr_11z;
                     goutz[14] += trr_11x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * trr_11z;
                     fy -= 2 * trr_10y;
                     goutx[15] +=  fx  * trr_20y * trr_01z;
                     gouty[15] += trr_01x *  fy  * trr_01z;
                     goutz[15] += trr_01x * trr_20y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_21z;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_21z;
                     fy -= 1 * 1;
                     fz -= 1 * trr_01z;
                     goutx[16] +=  fx  * trr_10y * trr_11z;
                     gouty[16] += trr_01x *  fy  * trr_11z;
                     goutz[16] += trr_01x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_11x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_11x;
+                    fy = ai2 * trr_10y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
-                    fz = aij_cache[2] * trr_31z;
+                    fz = ai2 * trr_31z;
                     fz -= 2 * trr_11z;
                     goutx[17] +=  fx  * 1 * trr_21z;
                     gouty[17] += trr_01x *  fy  * trr_21z;
@@ -29454,13 +29167,14 @@ while (1) {
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
-                    fx = aij_cache[2] * trr_30x;
+                    fx = ai2 * trr_30x;
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpy = yqc + ypq*rt_akl;
@@ -29469,156 +29183,156 @@ while (1) {
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
                     double trr_01y = cpy * 1;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = aij_cache[2] * trr_12y;
+                    fy = ai2 * trr_12y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     fx -= 2 * trr_10x;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     goutx[0] +=  fx  * trr_02y * wt;
                     gouty[0] += trr_20x *  fy  * wt;
                     goutz[0] += trr_20x * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
-                    fy = aij_cache[2] * trr_22y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_22y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     fy -= 1 * trr_02y;
                     goutx[1] +=  fx  * trr_12y * wt;
                     gouty[1] += trr_10x *  fy  * wt;
                     goutz[1] += trr_10x * trr_12y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_12y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_12y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * trr_02y * trr_10z;
                     gouty[2] += trr_10x *  fy  * trr_10z;
                     goutz[2] += trr_10x * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
                     double trr_32y = cpy * trr_31y + 1*b01 * trr_30y + 3*b00 * trr_21y;
-                    fy = aij_cache[2] * trr_32y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_32y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * trr_12y;
                     goutx[3] +=  fx  * trr_22y * wt;
                     gouty[3] += 1 *  fy  * wt;
                     goutz[3] += 1 * trr_22y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_22y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_22y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * trr_02y;
                     fz -= 1 * wt;
                     goutx[4] +=  fx  * trr_12y * trr_10z;
                     gouty[4] += 1 *  fy  * trr_10z;
                     goutz[4] += 1 * trr_12y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_12y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_12y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = aij_cache[2] * trr_30z;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[5] +=  fx  * trr_02y * trr_20z;
                     gouty[5] += 1 *  fy  * trr_20z;
                     goutz[5] += 1 * trr_02y *  fz ;
-                    fx = aij_cache[2] * trr_30x;
-                    fy = aij_cache[2] * trr_11y;
+                    fx = ai2 * trr_30x;
+                    fy = ai2 * trr_11y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = aij_cache[2] * trr_11z;
+                    fz = ai2 * trr_11z;
                     fx -= 2 * trr_10x;
                     double trr_01z = cpz * wt;
                     goutx[6] +=  fx  * trr_01y * trr_01z;
                     gouty[6] += trr_20x *  fy  * trr_01z;
                     goutz[6] += trr_20x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_11z;
                     fx -= 1 * 1;
                     fy -= 1 * trr_01y;
                     goutx[7] +=  fx  * trr_11y * trr_01z;
                     gouty[7] += trr_10x *  fy  * trr_01z;
                     goutz[7] += trr_10x * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_11y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_11y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = aij_cache[2] * trr_21z;
+                    fz = ai2 * trr_21z;
                     fx -= 1 * 1;
                     fz -= 1 * trr_01z;
                     goutx[8] +=  fx  * trr_01y * trr_11z;
                     gouty[8] += trr_10x *  fy  * trr_11z;
                     goutz[8] += trr_10x * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_31y;
-                    fz = aij_cache[2] * trr_11z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_31y;
+                    fz = ai2 * trr_11z;
                     fy -= 2 * trr_11y;
                     goutx[9] +=  fx  * trr_21y * trr_01z;
                     gouty[9] += 1 *  fy  * trr_01z;
                     goutz[9] += 1 * trr_21y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_21y;
-                    fz = aij_cache[2] * trr_21z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_21y;
+                    fz = ai2 * trr_21z;
                     fy -= 1 * trr_01y;
                     fz -= 1 * trr_01z;
                     goutx[10] +=  fx  * trr_11y * trr_11z;
                     gouty[10] += 1 *  fy  * trr_11z;
                     goutz[10] += 1 * trr_11y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_11y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_11y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
-                    fz = aij_cache[2] * trr_31z;
+                    fz = ai2 * trr_31z;
                     fz -= 2 * trr_11z;
                     goutx[11] +=  fx  * trr_01y * trr_21z;
                     gouty[11] += 1 *  fy  * trr_21z;
                     goutz[11] += 1 * trr_01y *  fz ;
-                    fx = aij_cache[2] * trr_30x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_30x;
+                    fy = ai2 * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = aij_cache[2] * trr_12z;
+                    fz = ai2 * trr_12z;
                     fx -= 2 * trr_10x;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     goutx[12] +=  fx  * 1 * trr_02z;
                     gouty[12] += trr_20x *  fy  * trr_02z;
                     goutz[12] += trr_20x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_12z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_12z;
                     fx -= 1 * 1;
                     fy -= 1 * 1;
                     goutx[13] +=  fx  * trr_10y * trr_02z;
                     gouty[13] += trr_10x *  fy  * trr_02z;
                     goutz[13] += trr_10x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
-                    fz = aij_cache[2] * trr_22z;
+                    fz = ai2 * trr_22z;
                     fx -= 1 * 1;
                     fz -= 1 * trr_02z;
                     goutx[14] +=  fx  * 1 * trr_12z;
                     gouty[14] += trr_10x *  fy  * trr_12z;
                     goutz[14] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * trr_12z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * trr_12z;
                     fy -= 2 * trr_10y;
                     goutx[15] +=  fx  * trr_20y * trr_02z;
                     gouty[15] += 1 *  fy  * trr_02z;
                     goutz[15] += 1 * trr_20y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_22z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_22z;
                     fy -= 1 * 1;
                     fz -= 1 * trr_02z;
                     goutx[16] +=  fx  * trr_10y * trr_12z;
                     gouty[16] += 1 *  fy  * trr_12z;
                     goutz[16] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
-                    fz = aij_cache[2] * trr_32z;
+                    fz = ai2 * trr_32z;
                     fz -= 2 * trr_12z;
                     goutx[17] +=  fx  * 1 * trr_22z;
                     gouty[17] += 1 *  fy  * trr_22z;
@@ -29966,29 +29680,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_2100(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -30004,20 +29710,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -30134,6 +29837,7 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
@@ -30142,158 +29846,158 @@ while (1) {
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
                     double trr_40x = c0x * trr_30x + 3*b10 * trr_20x;
                     double hrr_3100x = trr_40x - rjri[0] * trr_30x;
-                    fx = aij_cache[2] * hrr_3100x;
+                    fx = ai2 * hrr_3100x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     fx -= 2 * hrr_1100x;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_2100x *  fy  * wt;
                     goutz[0] += hrr_2100x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
+                    fx = ai2 * hrr_2100x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     fx -= 1 * hrr_0100x;
                     fy -= 1 * 1;
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += hrr_1100x *  fy  * wt;
                     goutz[1] += hrr_1100x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_2100x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * hrr_0100x;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += hrr_1100x *  fy  * trr_10z;
                     goutz[2] += hrr_1100x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * trr_10y;
                     goutx[3] +=  fx  * trr_20y * wt;
                     gouty[3] += hrr_0100x *  fy  * wt;
                     goutz[3] += hrr_0100x * trr_20y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[4] +=  fx  * trr_10y * trr_10z;
                     gouty[4] += hrr_0100x *  fy  * trr_10z;
                     goutz[4] += hrr_0100x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = aij_cache[2] * trr_30z;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[5] +=  fx  * 1 * trr_20z;
                     gouty[5] += hrr_0100x *  fy  * trr_20z;
                     goutz[5] += hrr_0100x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_30x;
+                    fx = ai2 * trr_30x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     fx -= 2 * trr_10x;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[6] +=  fx  * hrr_0100y * wt;
                     gouty[6] += trr_20x *  fy  * wt;
                     goutz[6] += trr_20x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     fy -= 1 * hrr_0100y;
                     goutx[7] +=  fx  * hrr_1100y * wt;
                     gouty[7] += trr_10x *  fy  * wt;
                     goutz[7] += trr_10x * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[8] +=  fx  * hrr_0100y * trr_10z;
                     gouty[8] += trr_10x *  fy  * trr_10z;
                     goutz[8] += trr_10x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
                     double hrr_3100y = trr_40y - rjri[1] * trr_30y;
-                    fy = aij_cache[2] * hrr_3100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_3100y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * hrr_1100y;
                     goutx[9] +=  fx  * hrr_2100y * wt;
                     gouty[9] += 1 *  fy  * wt;
                     goutz[9] += 1 * hrr_2100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * hrr_0100y;
                     fz -= 1 * wt;
                     goutx[10] +=  fx  * hrr_1100y * trr_10z;
                     gouty[10] += 1 *  fy  * trr_10z;
                     goutz[10] += 1 * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_30z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[11] +=  fx  * hrr_0100y * trr_20z;
                     gouty[11] += 1 *  fy  * trr_20z;
                     goutz[11] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_30x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_30x;
+                    fy = ai2 * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     fx -= 2 * trr_10x;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[12] +=  fx  * 1 * hrr_0100z;
                     gouty[12] += trr_20x *  fy  * hrr_0100z;
                     goutz[12] += trr_20x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1100z;
                     fx -= 1 * 1;
                     fy -= 1 * 1;
                     goutx[13] +=  fx  * trr_10y * hrr_0100z;
                     gouty[13] += trr_10x *  fy  * hrr_0100z;
                     goutz[13] += trr_10x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fz = ai2 * hrr_2100z;
                     fx -= 1 * 1;
                     fz -= 1 * hrr_0100z;
                     goutx[14] +=  fx  * 1 * hrr_1100z;
                     gouty[14] += trr_10x *  fy  * hrr_1100z;
                     goutz[14] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * hrr_1100z;
                     fy -= 2 * trr_10y;
                     goutx[15] +=  fx  * trr_20y * hrr_0100z;
                     gouty[15] += 1 *  fy  * hrr_0100z;
                     goutz[15] += 1 * trr_20y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_2100z;
                     fy -= 1 * 1;
                     fz -= 1 * hrr_0100z;
                     goutx[16] +=  fx  * trr_10y * hrr_1100z;
                     gouty[16] += 1 *  fy  * hrr_1100z;
                     goutz[16] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
                     double hrr_3100z = trr_40z - rjri[2] * trr_30z;
-                    fz = aij_cache[2] * hrr_3100z;
+                    fz = ai2 * hrr_3100z;
                     fz -= 2 * hrr_1100z;
                     goutx[17] +=  fx  * 1 * hrr_2100z;
                     gouty[17] += 1 *  fy  * hrr_2100z;
@@ -30641,35 +30345,26 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_2110(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int gout_id = threadIdx.y;
     constexpr int g_size = 16;
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * 56 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (56+nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -30685,20 +30380,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -32659,29 +32351,21 @@ while (1) {
 }
 
 __global__ static
-void rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    uint32_t *pool, int *head)
+void rys_vjk_ip1_2200(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int nroots = bounds.nroots;
-    int nsq_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    extern __shared__ double shared_memory[];
+    int nsq_per_block = _nsq_per_block;
+    int gout_stride = 1;
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -32697,20 +32381,17 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                              q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                              q_cond_ij, q_cond_kl, dm_penalty,
+                              (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
-                                 s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                                 s_cond_ij, s_cond_kl, diffuse_exps,
+                                 (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[3];
-    __shared__ int expi;
-    __shared__ int expj;
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -32827,6 +32508,7 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
@@ -32838,13 +32520,13 @@ while (1) {
                     double hrr_4100x = trr_50x - rjri[0] * trr_40x;
                     double hrr_3100x = trr_40x - rjri[0] * trr_30x;
                     double hrr_3200x = hrr_4100x - rjri[0] * hrr_3100x;
-                    fx = aij_cache[2] * hrr_3200x;
+                    fx = ai2 * hrr_3200x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = aij_cache[2] * trr_10y;
+                    fy = ai2 * trr_10y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     double hrr_1200x = hrr_2100x - rjri[0] * hrr_1100x;
@@ -32853,10 +32535,10 @@ while (1) {
                     goutx[0] +=  fx  * 1 * wt;
                     gouty[0] += hrr_2200x *  fy  * wt;
                     goutz[0] += hrr_2200x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_2200x;
+                    fx = ai2 * hrr_2200x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
                     fx -= 1 * hrr_0200x;
@@ -32864,135 +32546,135 @@ while (1) {
                     goutx[1] +=  fx  * trr_10y * wt;
                     gouty[1] += hrr_1200x *  fy  * wt;
                     goutz[1] += hrr_1200x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_2200x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_2200x;
+                    fy = ai2 * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * hrr_0200x;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * 1 * trr_10z;
                     gouty[2] += hrr_1200x *  fy  * trr_10z;
                     goutz[2] += hrr_1200x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1200x;
+                    fx = ai2 * hrr_1200x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * trr_10y;
                     goutx[3] +=  fx  * trr_20y * wt;
                     gouty[3] += hrr_0200x *  fy  * wt;
                     goutz[3] += hrr_0200x * trr_20y *  fz ;
-                    fx = aij_cache[2] * hrr_1200x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * hrr_1200x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[4] +=  fx  * trr_10y * trr_10z;
                     gouty[4] += hrr_0200x *  fy  * trr_10z;
                     goutz[4] += hrr_0200x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1200x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1200x;
+                    fy = ai2 * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = aij_cache[2] * trr_30z;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[5] +=  fx  * 1 * trr_20z;
                     gouty[5] += hrr_0200x *  fy  * trr_20z;
                     goutz[5] += hrr_0200x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_3100x;
+                    fx = ai2 * hrr_3100x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_10z;
                     fx -= 2 * hrr_1100x;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     goutx[6] +=  fx  * hrr_0100y * wt;
                     gouty[6] += hrr_2100x *  fy  * wt;
                     goutz[6] += hrr_2100x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
+                    fx = ai2 * hrr_2100x;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * hrr_0100x;
                     fy -= 1 * hrr_0100y;
                     goutx[7] +=  fx  * hrr_1100y * wt;
                     gouty[7] += hrr_1100x *  fy  * wt;
                     goutz[7] += hrr_1100x * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * hrr_2100x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * hrr_0100x;
                     fz -= 1 * wt;
                     goutx[8] +=  fx  * hrr_0100y * trr_10z;
                     gouty[8] += hrr_1100x *  fy  * trr_10z;
                     goutz[8] += hrr_1100x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
+                    fx = ai2 * hrr_1100x;
                     double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
                     double hrr_3100y = trr_40y - rjri[1] * trr_30y;
-                    fy = aij_cache[2] * hrr_3100y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_3100y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * hrr_1100y;
                     goutx[9] +=  fx  * hrr_2100y * wt;
                     gouty[9] += hrr_0100x *  fy  * wt;
                     goutz[9] += hrr_0100x * hrr_2100y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * hrr_0100y;
                     fz -= 1 * wt;
                     goutx[10] +=  fx  * hrr_1100y * trr_10z;
                     gouty[10] += hrr_0100x *  fy  * trr_10z;
                     goutz[10] += hrr_0100x * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * hrr_1100y;
-                    fz = aij_cache[2] * trr_30z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * hrr_1100y;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[11] +=  fx  * hrr_0100y * trr_20z;
                     gouty[11] += hrr_0100x *  fy  * trr_20z;
                     goutz[11] += hrr_0100x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * hrr_3100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_3100x;
+                    fy = ai2 * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     fx -= 2 * hrr_1100x;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[12] +=  fx  * 1 * hrr_0100z;
                     gouty[12] += hrr_2100x *  fy  * hrr_0100z;
                     goutz[12] += hrr_2100x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * hrr_2100x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1100z;
                     fx -= 1 * hrr_0100x;
                     fy -= 1 * 1;
                     goutx[13] +=  fx  * trr_10y * hrr_0100z;
                     gouty[13] += hrr_1100x *  fy  * hrr_0100z;
                     goutz[13] += hrr_1100x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_2100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_2100x;
+                    fy = ai2 * trr_10y;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fz = ai2 * hrr_2100z;
                     fx -= 1 * hrr_0100x;
                     fz -= 1 * hrr_0100z;
                     goutx[14] +=  fx  * 1 * hrr_1100z;
                     gouty[14] += hrr_1100x *  fy  * hrr_1100z;
                     goutz[14] += hrr_1100x * 1 *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * hrr_1100z;
                     fy -= 2 * trr_10y;
                     goutx[15] +=  fx  * trr_20y * hrr_0100z;
                     gouty[15] += hrr_0100x *  fy  * hrr_0100z;
                     goutz[15] += hrr_0100x * trr_20y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_2100z;
                     fy -= 1 * 1;
                     fz -= 1 * hrr_0100z;
                     goutx[16] +=  fx  * trr_10y * hrr_1100z;
                     gouty[16] += hrr_0100x *  fy  * hrr_1100z;
                     goutz[16] += hrr_0100x * trr_10y *  fz ;
-                    fx = aij_cache[2] * hrr_1100x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * hrr_1100x;
+                    fy = ai2 * trr_10y;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
                     double hrr_3100z = trr_40z - rjri[2] * trr_30z;
-                    fz = aij_cache[2] * hrr_3100z;
+                    fz = ai2 * hrr_3100z;
                     fz -= 2 * hrr_1100z;
                     goutx[17] +=  fx  * 1 * hrr_2100z;
                     gouty[17] += hrr_0100x *  fy  * hrr_2100z;
@@ -33400,13 +33082,14 @@ while (1) {
                     double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double fx, fy, fz;
+                    double ai2 = aij_cache[2];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
-                    fx = aij_cache[2] * trr_30x;
+                    fx = ai2 * trr_30x;
                     double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
@@ -33414,159 +33097,159 @@ while (1) {
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = aij_cache[2] * hrr_1200y;
+                    fy = ai2 * hrr_1200y;
                     double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = aij_cache[2] * trr_10z;
+                    fz = ai2 * trr_10z;
                     fx -= 2 * trr_10x;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     goutx[0] +=  fx  * hrr_0200y * wt;
                     gouty[0] += trr_20x *  fy  * wt;
                     goutz[0] += trr_20x * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
+                    fx = ai2 * trr_20x;
                     double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
                     double hrr_3100y = trr_40y - rjri[1] * trr_30y;
                     double hrr_2200y = hrr_3100y - rjri[1] * hrr_2100y;
-                    fy = aij_cache[2] * hrr_2200y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_2200y;
+                    fz = ai2 * trr_10z;
                     fx -= 1 * 1;
                     fy -= 1 * hrr_0200y;
                     goutx[1] +=  fx  * hrr_1200y * wt;
                     gouty[1] += trr_10x *  fy  * wt;
                     goutz[1] += trr_10x * hrr_1200y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * hrr_1200y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * hrr_1200y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = aij_cache[2] * trr_20z;
+                    fz = ai2 * trr_20z;
                     fx -= 1 * 1;
                     fz -= 1 * wt;
                     goutx[2] +=  fx  * hrr_0200y * trr_10z;
                     gouty[2] += trr_10x *  fy  * trr_10z;
                     goutz[2] += trr_10x * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
+                    fx = ai2 * trr_10x;
                     double trr_50y = c0y * trr_40y + 4*b10 * trr_30y;
                     double hrr_4100y = trr_50y - rjri[1] * trr_40y;
                     double hrr_3200y = hrr_4100y - rjri[1] * hrr_3100y;
-                    fy = aij_cache[2] * hrr_3200y;
-                    fz = aij_cache[2] * trr_10z;
+                    fy = ai2 * hrr_3200y;
+                    fz = ai2 * trr_10z;
                     fy -= 2 * hrr_1200y;
                     goutx[3] +=  fx  * hrr_2200y * wt;
                     gouty[3] += 1 *  fy  * wt;
                     goutz[3] += 1 * hrr_2200y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_2200y;
-                    fz = aij_cache[2] * trr_20z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_2200y;
+                    fz = ai2 * trr_20z;
                     fy -= 1 * hrr_0200y;
                     fz -= 1 * wt;
                     goutx[4] +=  fx  * hrr_1200y * trr_10z;
                     gouty[4] += 1 *  fy  * trr_10z;
                     goutz[4] += 1 * hrr_1200y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1200y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1200y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = aij_cache[2] * trr_30z;
+                    fz = ai2 * trr_30z;
                     fz -= 2 * trr_10z;
                     goutx[5] +=  fx  * hrr_0200y * trr_20z;
                     gouty[5] += 1 *  fy  * trr_20z;
                     goutz[5] += 1 * hrr_0200y *  fz ;
-                    fx = aij_cache[2] * trr_30x;
-                    fy = aij_cache[2] * hrr_1100y;
+                    fx = ai2 * trr_30x;
+                    fy = ai2 * hrr_1100y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fz = ai2 * hrr_1100z;
                     fx -= 2 * trr_10x;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     goutx[6] +=  fx  * hrr_0100y * hrr_0100z;
                     gouty[6] += trr_20x *  fy  * hrr_0100z;
                     goutz[6] += trr_20x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * hrr_1100z;
                     fx -= 1 * 1;
                     fy -= 1 * hrr_0100y;
                     goutx[7] +=  fx  * hrr_1100y * hrr_0100z;
                     gouty[7] += trr_10x *  fy  * hrr_0100z;
                     goutz[7] += trr_10x * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * hrr_1100y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * hrr_1100y;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fz = ai2 * hrr_2100z;
                     fx -= 1 * 1;
                     fz -= 1 * hrr_0100z;
                     goutx[8] +=  fx  * hrr_0100y * hrr_1100z;
                     gouty[8] += trr_10x *  fy  * hrr_1100z;
                     goutz[8] += trr_10x * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_3100y;
-                    fz = aij_cache[2] * hrr_1100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_3100y;
+                    fz = ai2 * hrr_1100z;
                     fy -= 2 * hrr_1100y;
                     goutx[9] +=  fx  * hrr_2100y * hrr_0100z;
                     gouty[9] += 1 *  fy  * hrr_0100z;
                     goutz[9] += 1 * hrr_2100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_2100y;
-                    fz = aij_cache[2] * hrr_2100z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_2100y;
+                    fz = ai2 * hrr_2100z;
                     fy -= 1 * hrr_0100y;
                     fz -= 1 * hrr_0100z;
                     goutx[10] +=  fx  * hrr_1100y * hrr_1100z;
                     gouty[10] += 1 *  fy  * hrr_1100z;
                     goutz[10] += 1 * hrr_1100y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * hrr_1100y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * hrr_1100y;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
                     double hrr_3100z = trr_40z - rjri[2] * trr_30z;
-                    fz = aij_cache[2] * hrr_3100z;
+                    fz = ai2 * hrr_3100z;
                     fz -= 2 * hrr_1100z;
                     goutx[11] +=  fx  * hrr_0100y * hrr_2100z;
                     gouty[11] += 1 *  fy  * hrr_2100z;
                     goutz[11] += 1 * hrr_0100y *  fz ;
-                    fx = aij_cache[2] * trr_30x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_30x;
+                    fy = ai2 * trr_10y;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fz = ai2 * hrr_1200z;
                     fx -= 2 * trr_10x;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     goutx[12] +=  fx  * 1 * hrr_0200z;
                     gouty[12] += trr_20x *  fy  * hrr_0200z;
                     goutz[12] += trr_20x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_1200z;
                     fx -= 1 * 1;
                     fy -= 1 * 1;
                     goutx[13] +=  fx  * trr_10y * hrr_0200z;
                     gouty[13] += trr_10x *  fy  * hrr_0200z;
                     goutz[13] += trr_10x * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_20x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_20x;
+                    fy = ai2 * trr_10y;
                     double hrr_2200z = hrr_3100z - rjri[2] * hrr_2100z;
-                    fz = aij_cache[2] * hrr_2200z;
+                    fz = ai2 * hrr_2200z;
                     fx -= 1 * 1;
                     fz -= 1 * hrr_0200z;
                     goutx[14] +=  fx  * 1 * hrr_1200z;
                     gouty[14] += trr_10x *  fy  * hrr_1200z;
                     goutz[14] += trr_10x * 1 *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_30y;
-                    fz = aij_cache[2] * hrr_1200z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_30y;
+                    fz = ai2 * hrr_1200z;
                     fy -= 2 * trr_10y;
                     goutx[15] +=  fx  * trr_20y * hrr_0200z;
                     gouty[15] += 1 *  fy  * hrr_0200z;
                     goutz[15] += 1 * trr_20y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_20y;
-                    fz = aij_cache[2] * hrr_2200z;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_20y;
+                    fz = ai2 * hrr_2200z;
                     fy -= 1 * 1;
                     fz -= 1 * hrr_0200z;
                     goutx[16] +=  fx  * trr_10y * hrr_1200z;
                     gouty[16] += 1 *  fy  * hrr_1200z;
                     goutz[16] += 1 * trr_10y *  fz ;
-                    fx = aij_cache[2] * trr_10x;
-                    fy = aij_cache[2] * trr_10y;
+                    fx = ai2 * trr_10x;
+                    fy = ai2 * trr_10y;
                     double trr_50z = c0z * trr_40z + 4*b10 * trr_30z;
                     double hrr_4100z = trr_50z - rjri[2] * trr_40z;
                     double hrr_3200z = hrr_4100z - rjri[2] * hrr_3100z;
-                    fz = aij_cache[2] * hrr_3200z;
+                    fz = ai2 * hrr_3200z;
                     fz -= 2 * hrr_1200z;
                     goutx[17] +=  fx  * 1 * hrr_2200z;
                     gouty[17] += 1 *  fy  * hrr_2200z;
@@ -34039,112 +33722,79 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
-        rys_vjk_ip1_0000<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0000); break;
     case 5: // (0, 0, 1, 0)
-        rys_vjk_ip1_0010<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0010); break;
     case 6: // (0, 0, 1, 1)
-        rys_vjk_ip1_0011<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0011); break;
     case 10: // (0, 0, 2, 0)
-        rys_vjk_ip1_0020<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0020); break;
     case 11: // (0, 0, 2, 1)
-        rys_vjk_ip1_0021<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0021); break;
     case 12: // (0, 0, 2, 2)
-        rys_vjk_ip1_0022<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0022); break;
     case 25: // (0, 1, 0, 0)
-        rys_vjk_ip1_0100<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0100); break;
     case 30: // (0, 1, 1, 0)
-        rys_vjk_ip1_0110<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0110); break;
     case 31: // (0, 1, 1, 1)
-        rys_vjk_ip1_0111<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0111); break;
     case 35: // (0, 1, 2, 0)
-        rys_vjk_ip1_0120<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0120); break;
     case 36: // (0, 1, 2, 1)
         buflen = 5760 + iprim * jprim;
-        rys_vjk_ip1_0121<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0121); break;
     case 50: // (0, 2, 0, 0)
-        rys_vjk_ip1_0200<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0200); break;
     case 55: // (0, 2, 1, 0)
-        rys_vjk_ip1_0210<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0210); break;
     case 56: // (0, 2, 1, 1)
         buflen = 5760 + iprim * jprim;
-        rys_vjk_ip1_0211<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0211); break;
     case 60: // (0, 2, 2, 0)
-        rys_vjk_ip1_0220<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_0220); break;
     case 125: // (1, 0, 0, 0)
-        rys_vjk_ip1_1000<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1000); break;
     case 130: // (1, 0, 1, 0)
-        rys_vjk_ip1_1010<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1010); break;
     case 131: // (1, 0, 1, 1)
-        rys_vjk_ip1_1011<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1011); break;
     case 135: // (1, 0, 2, 0)
-        rys_vjk_ip1_1020<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1020); break;
     case 136: // (1, 0, 2, 1)
         buflen = 4608 + iprim * jprim;
-        rys_vjk_ip1_1021<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1021); break;
     case 150: // (1, 1, 0, 0)
-        rys_vjk_ip1_1100<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1100); break;
     case 155: // (1, 1, 1, 0)
-        rys_vjk_ip1_1110<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1110); break;
     case 156: // (1, 1, 1, 1)
         buflen = 5760 + iprim * jprim;
-        rys_vjk_ip1_1111<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1111); break;
     case 160: // (1, 1, 2, 0)
         buflen = 4608 + iprim * jprim;
-        rys_vjk_ip1_1120<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1120); break;
     case 175: // (1, 2, 0, 0)
-        rys_vjk_ip1_1200<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1200); break;
     case 180: // (1, 2, 1, 0)
         buflen = 4608 + iprim * jprim;
-        rys_vjk_ip1_1210<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_1210); break;
     case 250: // (2, 0, 0, 0)
-        rys_vjk_ip1_2000<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_2000); break;
     case 255: // (2, 0, 1, 0)
-        rys_vjk_ip1_2010<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_2010); break;
     case 256: // (2, 0, 1, 1)
         buflen = 4224 + iprim * jprim;
-        rys_vjk_ip1_2011<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_2011); break;
     case 260: // (2, 0, 2, 0)
-        rys_vjk_ip1_2020<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_2020); break;
     case 275: // (2, 1, 0, 0)
-        rys_vjk_ip1_2100<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_2100); break;
     case 280: // (2, 1, 1, 0)
         buflen = 4224 + iprim * jprim;
-        rys_vjk_ip1_2110<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_2110); break;
     case 300: // (2, 2, 0, 0)
-        rys_vjk_ip1_2200<<<workers, threads, buflen*sizeof(double)>>>(
-            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+        LAUNCH_KERNEL(rys_vjk_ip1_2200); break;
     default: return 0;
     }
     return 1;

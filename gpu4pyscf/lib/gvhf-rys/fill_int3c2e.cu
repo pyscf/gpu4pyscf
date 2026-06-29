@@ -39,9 +39,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     int thread_id = threadIdx.x;
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
-    int nbas = envs.nbas;
-    int *bas = envs.bas;
-    double *env = envs.env;
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1, nksp;
     __shared__ int ksh0, ksh1;
     __shared__ int li, lj, lk, nroots;
@@ -49,6 +47,10 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     __shared__ int nf, aux_start;
     __shared__ int g_size;
     __shared__ int gout_stride, nst_per_block;
+
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -100,7 +102,6 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 4 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;

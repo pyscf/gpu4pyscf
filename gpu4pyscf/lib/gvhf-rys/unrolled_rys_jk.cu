@@ -14,7 +14,8 @@
 
 #define KERNEL_SETUP() \
     int sq_id = threadIdx.x; \
-    int nsq_per_block = blockDim.x; \
+    int gout_id = threadIdx.y; \
+    int _nsq_per_block = blockDim.x; \
     uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH; \
     extern __shared__ double shared_memory[]; \
     __shared__ int ntasks, pair_ij, pair_kl0; \
@@ -34,6 +35,7 @@ void rys_k_0000(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -56,11 +58,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -214,6 +218,7 @@ void rys_k_1000(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -236,11 +241,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -435,6 +442,7 @@ void rys_k_1010(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -457,11 +465,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -703,6 +713,7 @@ void rys_k_1011(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -725,11 +736,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -1122,6 +1135,7 @@ void rys_k_1100(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1144,11 +1158,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -1389,6 +1405,7 @@ void rys_k_1110(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1411,11 +1428,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -1808,6 +1827,7 @@ void rys_k_1111(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1830,11 +1850,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -2294,6 +2316,7 @@ void rys_k_2000(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2316,11 +2339,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -2558,6 +2583,7 @@ void rys_k_2010(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2580,11 +2606,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -2932,6 +2960,7 @@ void rys_k_2011(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2954,11 +2983,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -3538,6 +3569,7 @@ void rys_k_2020(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -3560,11 +3592,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -3992,15 +4026,7 @@ while (1) {
 __global__ static
 void rys_jk_2021(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
+    KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -4033,11 +4059,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -5373,6 +5401,7 @@ void rys_k_2100(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -5395,11 +5424,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -5745,6 +5776,7 @@ void rys_k_2110(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -5767,11 +5799,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -6345,15 +6379,7 @@ while (1) {
 __global__ static
 void rys_jk_2111(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
+    KERNEL_SETUP();
 
     int t_id = 32 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -6386,11 +6412,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -8725,15 +8753,7 @@ while (1) {
 __global__ static
 void rys_jk_2120(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
+    KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -8766,11 +8786,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -10211,6 +10233,7 @@ void rys_k_2200(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -10233,11 +10256,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -10668,15 +10693,7 @@ while (1) {
 __global__ static
 void rys_jk_2210(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
+    KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -10709,11 +10726,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -12057,6 +12076,7 @@ void rys_k_3000(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -12079,11 +12099,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -12376,6 +12398,7 @@ void rys_k_3010(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -12398,11 +12421,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -12862,15 +12887,7 @@ while (1) {
 __global__ static
 void rys_jk_3011(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
+    KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -12903,11 +12920,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -14165,6 +14184,7 @@ void rys_k_3020(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -14187,11 +14207,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -14894,6 +14916,7 @@ void rys_k_3100(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -14916,11 +14939,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -15378,15 +15403,7 @@ while (1) {
 __global__ static
 void rys_jk_3110(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];     __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ int expi;
-    __shared__ int expj;
+    KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -15419,11 +15436,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -16677,6 +16696,7 @@ void rys_k_3200(KERNEL_ARGS)
 {
     KERNEL_SETUP();
 
+    int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -16699,11 +16719,13 @@ while (1) {
     }
     if (jk.omega >= 0) {
         _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                        q_cond_ij, q_cond_kl, dm_penalty,
+                        (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
-                           s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;

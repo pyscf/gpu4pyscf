@@ -1,3 +1,4 @@
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
@@ -5,27 +6,47 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "create_tasks.cu"
 
+#define KERNEL_ARGS \
+    RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, \
+    int64_t *pair_ij_mapping, int64_t *pair_kl_mapping, \
+    int *supcell_shl, int *Ts_ij_lookup, \
+    int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao, \
+    float *q_cond_ij, float *q_cond_kl, \
+    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
+    float dm_penalty, int64_t *pool, int *head
+
+#define KERNEL_SETUP() \
+    int sq_id = threadIdx.x; \
+    int gout_id = threadIdx.y; \
+    int _nsq_per_block = blockDim.x; \
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH; \
+    extern __shared__ double shared_memory[]; \
+    __shared__ int ntasks, pair_ij, pair_kl0; \
+    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0; \
+    __shared__ double ri[3]; \
+    __shared__ double rjri[3]; \
+    __shared__ double aij_cache[2]; \
+    __shared__ int expi; \
+    __shared__ int expj;
+
+#define LAUNCH_KERNEL(KERNEL) \
+    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
+    *envs, *kmat, *bounds, \
+    pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
+    nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
+    s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head)
+
 
 __global__ static
-void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_0000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 4;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -43,15 +64,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -213,25 +228,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_1000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 4;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -249,15 +254,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -453,25 +452,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_1010(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -489,15 +478,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -737,25 +720,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_1011(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -773,15 +746,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -1127,25 +1094,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_1100(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -1163,15 +1120,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -1389,25 +1340,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_1110(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -1425,15 +1366,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -1779,25 +1714,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_2000(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -1815,15 +1740,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -2050,25 +1969,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_2010(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -2086,15 +1995,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -2413,25 +2316,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *supcell_shl, int *Ts_ij_lookup,
-                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                float *q_cond_ij, float *q_cond_kl,
-                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                float dm_penalty, int64_t *pool, int *head)
+void rys_k_2100(KERNEL_ARGS)
 {
-    int sq_id = threadIdx.x;
+    KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim.x;
     int threads = nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -2449,15 +2342,9 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -2796,50 +2683,23 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
-        rys_k_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_0000); break;
     case 125: // (1, 0, 0, 0)
-        rys_k_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1000); break;
     case 130: // (1, 0, 1, 0)
-        rys_k_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1010); break;
     case 131: // (1, 0, 1, 1)
-        rys_k_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1011); break;
     case 150: // (1, 1, 0, 0)
-        rys_k_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1100); break;
     case 155: // (1, 1, 1, 0)
-        rys_k_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_1110); break;
     case 250: // (2, 0, 0, 0)
-        rys_k_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2000); break;
     case 255: // (2, 0, 1, 0)
-        rys_k_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2010); break;
     case 275: // (2, 1, 0, 0)
-        rys_k_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
+        LAUNCH_KERNEL(rys_k_2100); break;
     default: return 0;
     }
     return 1;

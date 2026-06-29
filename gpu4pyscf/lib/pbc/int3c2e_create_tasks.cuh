@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <cub/cub.cuh>
 
 #define THREADS         256
 // WARP_SIZE: compile-time constant used for shared-memory sizing.
@@ -53,6 +52,25 @@ typedef struct {
     float yiyk;
     float zizk;
 } ShellTripletTaskInfo;
+
+// np.where(threads_mask)[0]
+__device__ inline
+int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
+{
+    tmp_storage[t_id] = keep;
+    __syncthreads();
+    for (int offset = 1; offset < threads; offset <<= 1) {
+        int val = 0;
+        if (t_id >= offset) {
+            val = tmp_storage[t_id - offset];
+        }
+        __syncthreads();
+        tmp_storage[t_id] += val;
+        __syncthreads();
+    }
+    int offset = tmp_storage[t_id] - keep;
+    return offset;
+}
 
 __device__ inline
 void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
@@ -170,17 +188,15 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
 
 __device__ inline
 void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
-                       ShellTripletTaskInfo *ijk_tasks_info)
+                       ShellTripletTaskInfo *ijk_tasks_info, int *swap)
 {
     int thread_id = threadIdx.x;
+    int threads = blockDim.x * blockDim.y;
     int tot_tasks = num_ijk_tasks;
     __syncthreads();
     if (thread_id == 0) {
         num_ijk_tasks = 0;
     }
-    using BlockScan = cub::BlockScan<int, THREADS>;
-    __shared__ typename BlockScan::TempStorage temp_storage;
-
     for (int base = 0; base < tot_tasks; base += THREADS) {
         int task_id = base + thread_id;
         register int ijk_id = 0;
@@ -190,16 +206,13 @@ void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
             keep = ijk_tasks_info[ijk_id].remaining_imgs > 0;
         }
 
-        int prefix, block_total;
-        BlockScan(temp_storage).ExclusiveSum(keep, prefix, block_total);
-        __syncthreads();  // required before reusing temp_storage
-
+        int offset = mask_to_index(keep, swap, threads, thread_id);
         if (keep) {
-            rem_task_idx[num_ijk_tasks + prefix] = ijk_id;
+            rem_task_idx[num_ijk_tasks + offset] = ijk_id;
         }
         __syncthreads();
         if (thread_id == 0) {
-            num_ijk_tasks += block_total;
+            num_ijk_tasks += swap[threads - 1];
         }
     }
     __syncthreads();
@@ -209,9 +222,10 @@ __device__ inline
 void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
                      int& img_not_processed, int& img_tile_size,
                      uint32_t *rem_task_idx, int num_ijk_tasks,
-                     ShellTripletTaskInfo *ijk_tasks_info)
+                     ShellTripletTaskInfo *ijk_tasks_info, int *swap)
 {
     int thread_id = threadIdx.x;
+    int threads = blockDim.x * blockDim.y;
     __syncthreads();
     if (thread_id == 0) {
         num_sub_tasks = 0;
@@ -221,9 +235,6 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
         img_not_processed -= img_tile_size;
     }
     __syncthreads();
-
-    using BlockScan = cub::BlockScan<int, THREADS>;
-    __shared__ typename BlockScan::TempStorage temp_storage;
 
     for (int base = 0; base < num_ijk_tasks; base += THREADS) {
         int task_id = base + thread_id;
@@ -236,17 +247,14 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
             keep = img_count >= img_tile_size;
         }
 
-        int prefix, block_total;
-        BlockScan(temp_storage).ExclusiveSum(keep, prefix, block_total);
-        __syncthreads();  // required before reusing temp_storage
-
+        int offset = mask_to_index(keep, swap, threads, thread_id);
         if (keep) {
-            sub_task_idx[num_sub_tasks + prefix] = ijk_id;
+            sub_task_idx[num_sub_tasks + offset] = ijk_id;
             ijk_tasks_info[ijk_id].img_count = img_count - img_tile_size;
         }
         __syncthreads();
         if (thread_id == 0) {
-            num_sub_tasks += block_total;
+            num_ijk_tasks += swap[threads - 1];
         }
     }
     __syncthreads();
