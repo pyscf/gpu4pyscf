@@ -27,6 +27,76 @@
 #define NPRIM_MAX       32
 #define PTR_PBAS_IDX    4
 
+// Macros to abstract CUDA/SYCL thread-indexing and kernel launch differences.
+// Each pattern appears 4 times in this file, so macros are warranted.
+
+#ifdef USE_SYCL
+#define SETUP_BRA_KERNEL() \
+    auto item = syclex::this_work_item::get_nd_item<3>(); \
+    int thread_id = item.get_local_id(2); \
+    int col0      = item.get_group(2) * COL_BLKSIZE; \
+    int c_bas_id  = item.get_group(1); \
+    int count     = item.get_group(0); \
+    int (&p_ao_offsets)[NPRIM_MAX] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX]>(item.get_group());
+#else
+#define SETUP_BRA_KERNEL() \
+    int thread_id = threadIdx.x; \
+    int col0      = blockIdx.x * COL_BLKSIZE; \
+    int c_bas_id  = blockIdx.y; \
+    int count     = blockIdx.z; \
+    __shared__ int p_ao_offsets[NPRIM_MAX];
+#endif
+
+#ifdef USE_SYCL
+#define SETUP_KET_KERNEL() \
+    auto item = syclex::this_work_item::get_nd_item<2>(); \
+    int tx       = item.get_local_id(1); \
+    int ty       = item.get_local_id(0); \
+    int row0     = item.get_group(1) * ROW_BLKSIZE; \
+    int c_bas_id = item.get_group(0) * TILE_X + tx; \
+    int (&p_ao_offsets)[NPRIM_MAX*TILE_X] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX*TILE_X]>(item.get_group());
+#else
+#define SETUP_KET_KERNEL() \
+    int tx       = threadIdx.x; \
+    int ty       = threadIdx.y; \
+    int row0     = blockIdx.x * ROW_BLKSIZE; \
+    int c_bas_id = blockIdx.y * TILE_X + tx; \
+    __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
+#endif
+
+#ifdef USE_SYCL
+#define LAUNCH_BRA_KERNEL(KERNEL, counts_, nbas_, nbatch_col_, ...) { \
+    sycl::range<3> _threads(1, 1, THREADS); \
+    sycl::range<3> _blocks(counts_, nbas_, nbatch_col_); \
+    sycl_get_queue()->parallel_for<class KERNEL##_sycl>( \
+        sycl::nd_range<3>(_blocks * _threads, _threads), [=](auto item) { \
+        KERNEL(__VA_ARGS__); \
+    }); \
+}
+#else
+#define LAUNCH_BRA_KERNEL(KERNEL, counts_, nbas_, nbatch_col_, ...) { \
+    dim3 _blocks(nbatch_col_, nbas_, counts_); \
+    KERNEL<<<_blocks, THREADS>>>(__VA_ARGS__); \
+}
+#endif
+
+#ifdef USE_SYCL
+#define LAUNCH_KET_KERNEL(KERNEL, nbas_, nrow_, ...) { \
+    sycl::range<2> _threads(TILE_Y, TILE_X); \
+    sycl::range<2> _blocks((nbas_+TILE_X-1)/TILE_X, (nrow_+ROW_BLKSIZE-1)/ROW_BLKSIZE); \
+    sycl_get_queue()->parallel_for<class KERNEL##_sycl>( \
+        sycl::nd_range<2>(_blocks * _threads, _threads), [=](auto item) { \
+        KERNEL(__VA_ARGS__); \
+    }); \
+}
+#else
+#define LAUNCH_KET_KERNEL(KERNEL, nbas_, nrow_, ...) { \
+    dim3 _threads(TILE_X, TILE_Y); \
+    dim3 _blocks((nrow_+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas_+TILE_X-1)/TILE_X); \
+    KERNEL<<<_blocks, _threads>>>(__VA_ARGS__); \
+}
+#endif
+
 static __global__
 void bra_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
                             int *recontract_bas, int *pbas_idx_recontraction,
@@ -35,20 +105,7 @@ void bra_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
     constexpr int BLKSIZE = 8;
     double cval[BLKSIZE];
     
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<3>();
-    int thread_id = item.get_local_id(2);
-    int col0 = item.get_group(2) * COL_BLKSIZE;
-    int c_bas_id = item.get_group(1);
-    int count = item.get_group(0);
-    int (&p_ao_offsets)[NPRIM_MAX] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX]>(item.get_group());
-    #else
-    int thread_id = threadIdx.x;
-    int col0 = blockIdx.x * COL_BLKSIZE;
-    int c_bas_id = blockIdx.y;
-    int count = blockIdx.z;
-    __shared__ int p_ao_offsets[NPRIM_MAX];
-    #endif
+    SETUP_BRA_KERNEL();
     int col1 = min(col0 + COL_BLKSIZE, ncol);
     int li = recontract_bas[c_bas_id*BAS_SLOTS+ANG_OF];
     int nfi = (li + 1) * (li + 2) / 2;
@@ -101,20 +158,7 @@ void bra_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
     constexpr int BLKSIZE = 8;
     double cval[BLKSIZE];
   
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<3>();
-    int thread_id = item.get_local_id(2);
-    int col0 = item.get_group(2) * COL_BLKSIZE;
-    int c_bas_id = item.get_group(1);
-    int count = item.get_group(0);
-    int (&p_ao_offsets)[NPRIM_MAX] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX]>(item.get_group());
-    #else
-    int thread_id = threadIdx.x;
-    int col0 = blockIdx.x * COL_BLKSIZE;
-    int c_bas_id = blockIdx.y;
-    int count = blockIdx.z;
-    __shared__ int p_ao_offsets[NPRIM_MAX];
-    #endif
+    SETUP_BRA_KERNEL();
     int col1 = min(col0 + COL_BLKSIZE, ncol);
     int li = recontract_bas[c_bas_id*BAS_SLOTS+ANG_OF];
     int nfi = (li + 1) * (li + 2) / 2;
@@ -166,20 +210,7 @@ void bra_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
     constexpr int BLKSIZE = 4;
     double cval[BLKSIZE];
   
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<3>();
-    int thread_id = item.get_local_id(2);
-    int col0 = item.get_group(2) * COL_BLKSIZE;
-    int c_bas_id = item.get_group(1);
-    int count = item.get_group(0);
-    int (&p_ao_offsets)[NPRIM_MAX] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX]>(item.get_group());
-    #else
-    int thread_id = threadIdx.x;
-    int col0 = blockIdx.x * COL_BLKSIZE;
-    int c_bas_id = blockIdx.y;
-    int count = blockIdx.z;
-    __shared__ int p_ao_offsets[NPRIM_MAX];
-    #endif
+    SETUP_BRA_KERNEL();
     int col1 = min(col0 + COL_BLKSIZE, ncol);
     int li = recontract_bas[c_bas_id*BAS_SLOTS+ANG_OF];
     int nfi = (li + 1) * (li + 2) / 2;
@@ -573,20 +604,7 @@ void bra_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
     constexpr int BLKSIZE = 8;
     double cval[BLKSIZE];
   
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<3>();
-    int thread_id = item.get_local_id(2);
-    int col0 = item.get_group(2) * COL_BLKSIZE;
-    int c_bas_id = item.get_group(1);
-    int count = item.get_group(0);
-    int (&p_ao_offsets)[NPRIM_MAX] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX]>(item.get_group());
-    #else
-    int thread_id = threadIdx.x;
-    int col0 = blockIdx.x * COL_BLKSIZE;
-    int c_bas_id = blockIdx.y;
-    int count = blockIdx.z;
-    __shared__ int p_ao_offsets[NPRIM_MAX];
-    #endif
+    SETUP_BRA_KERNEL();
     int col1 = min(col0 + COL_BLKSIZE, ncol);
     int li = recontract_bas[c_bas_id*BAS_SLOTS+ANG_OF];
     int di = li * 2 + 1;
@@ -908,20 +926,7 @@ void ket_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
     constexpr int BLKSIZE = 8;
     double cval[BLKSIZE];
   
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int tx = item.get_local_id(1);
-    int ty = item.get_local_id(0);
-    int row0 = item.get_group(1) * ROW_BLKSIZE;
-    int c_bas_id = item.get_group(0) * TILE_X + tx;
-    int (&p_ao_offsets)[NPRIM_MAX*TILE_X] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX*TILE_X]>(item.get_group());
-    #else
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int row0 = blockIdx.x * ROW_BLKSIZE;
-    int c_bas_id = blockIdx.y * TILE_X + tx;
-    __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
-    #endif
+    SETUP_KET_KERNEL();
     int thread_id = ty * TILE_X + tx;
     int row1 = min(row0 + ROW_BLKSIZE, nrow);
     int valid = c_bas_id < nbas;
@@ -980,20 +985,7 @@ void ket_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
     constexpr int BLKSIZE = 8;
     double cval[BLKSIZE];
   
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int tx = item.get_local_id(1);
-    int ty = item.get_local_id(0);
-    int row0 = item.get_group(1) * ROW_BLKSIZE;
-    int c_bas_id = item.get_group(0) * TILE_X + tx;
-    int (&p_ao_offsets)[NPRIM_MAX*TILE_X] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX*TILE_X]>(item.get_group());
-    #else
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int row0 = blockIdx.x * ROW_BLKSIZE;
-    int c_bas_id = blockIdx.y * TILE_X + tx;
-    __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
-    #endif
+    SETUP_KET_KERNEL();
     int thread_id = ty * TILE_X + tx;
     int row1 = min(row0 + ROW_BLKSIZE, nrow);
     int valid = c_bas_id < nbas;
@@ -1049,20 +1041,7 @@ void ket_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
     constexpr int BLKSIZE = 4;
     double cval[BLKSIZE];
   
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int tx = item.get_local_id(1);
-    int ty = item.get_local_id(0);
-    int row0 = item.get_group(1) * ROW_BLKSIZE;
-    int c_bas_id = item.get_group(0) * TILE_X + tx;
-    int (&p_ao_offsets)[NPRIM_MAX*TILE_X] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX*TILE_X]>(item.get_group());
-    #else
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int row0 = blockIdx.x * ROW_BLKSIZE;
-    int c_bas_id = blockIdx.y * TILE_X + tx;
-    __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
-    #endif
+    SETUP_KET_KERNEL();
     int thread_id = ty * TILE_X + tx;
     int row1 = min(row0 + ROW_BLKSIZE, nrow);
     int valid = c_bas_id < nbas;
@@ -1464,20 +1443,7 @@ void ket_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
     constexpr int BLKSIZE = 8;
     double cval[BLKSIZE];
   
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int tx = item.get_local_id(1);
-    int ty = item.get_local_id(0);
-    int row0 = item.get_group(1) * ROW_BLKSIZE;
-    int c_bas_id = item.get_group(0) * TILE_X + tx;
-    int (&p_ao_offsets)[NPRIM_MAX*TILE_X] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX*TILE_X]>(item.get_group());
-    #else
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int row0 = blockIdx.x * ROW_BLKSIZE;
-    int c_bas_id = blockIdx.y * TILE_X + tx;
-    __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
-    #endif
+    SETUP_KET_KERNEL();
     int thread_id = ty * TILE_X + tx;
     int row1 = min(row0 + ROW_BLKSIZE, nrow);
     int valid = c_bas_id < nbas;
@@ -1803,20 +1769,9 @@ int bra_sorted2cart(double *out, double *input, double *recontract_coef,
                     int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
-    #ifdef USE_SYCL
-    sycl::range<3> threads(1, 1, THREADS);
-    sycl::range<3> blocks(counts, nbas, nbatch_col);
-    sycl_get_queue()->parallel_for<class bra_sorted2cart_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
-      bra_sorted2cart_kernel(
+    LAUNCH_BRA_KERNEL(bra_sorted2cart_kernel, counts, nbas, nbatch_col,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
-    });
-    #else
-    dim3 blocks(nbatch_col, nbas, counts);
-    bra_sorted2cart_kernel<<<blocks, THREADS>>>(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, ncol);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bra_sorted2cart kernel: %s\n", cudaGetErrorString(err));
@@ -1830,17 +1785,7 @@ int bra_cart2sorted(double *out, double *input, double *recontract_coef,
                     int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
-    #ifdef USE_SYCL
-    sycl::range<3> threads(1, 1, THREADS);
-    sycl::range<3> blocks(counts, nbas, nbatch_col);
-    sycl_get_queue()->parallel_for<class bra_cart2sorted_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
-      bra_cart2sorted_kernel(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, ncol);
-    });
-    #else
-    dim3 blocks(nbatch_col, nbas, counts);
-    bra_cart2sorted_kernel<<<blocks, THREADS>>>(
+    LAUNCH_BRA_KERNEL(bra_cart2sorted_kernel, counts, nbas, nbatch_col,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
     cudaError_t err = cudaGetLastError();
@@ -1848,7 +1793,6 @@ int bra_cart2sorted(double *out, double *input, double *recontract_coef,
         fprintf(stderr, "CUDA Error in bra_cart2sorted kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif    
     return 0;
 }
 
@@ -1857,17 +1801,7 @@ int bra_sorted2sph(double *out, double *input, double *recontract_coef,
                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
-    #ifdef USE_SYCL
-    sycl::range<3> threads(1, 1, THREADS);
-    sycl::range<3> blocks(counts, nbas, nbatch_col);
-    sycl_get_queue()->parallel_for<class bra_sorted2sph_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
-      bra_sorted2sph_kernel(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, ncol);
-    });
-    #else
-    dim3 blocks(nbatch_col, nbas, counts);
-    bra_sorted2sph_kernel<<<blocks, THREADS>>>(
+    LAUNCH_BRA_KERNEL(bra_sorted2sph_kernel, counts, nbas, nbatch_col,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
     cudaError_t err = cudaGetLastError();
@@ -1875,7 +1809,6 @@ int bra_sorted2sph(double *out, double *input, double *recontract_coef,
         fprintf(stderr, "CUDA Error in bra_sorted2sph kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif    
     return 0;
 }
 
@@ -1884,17 +1817,7 @@ int bra_sph2sorted(double *out, double *input, double *recontract_coef,
                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
-    #ifdef USE_SYCL
-    sycl::range<3> threads(1, 1, THREADS);
-    sycl::range<3> blocks(counts, nbas, nbatch_col);
-    sycl_get_queue()->parallel_for<class bra_sph2sorted_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
-      bra_sph2sorted_kernel(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, ncol);
-    });
-    #else
-    dim3 blocks(nbatch_col, nbas, counts);
-    bra_sph2sorted_kernel<<<blocks, THREADS>>>(
+    LAUNCH_BRA_KERNEL(bra_sph2sorted_kernel, counts, nbas, nbatch_col,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
     cudaError_t err = cudaGetLastError();
@@ -1902,7 +1825,6 @@ int bra_sph2sorted(double *out, double *input, double *recontract_coef,
         fprintf(stderr, "CUDA Error in bra_sph2sorted kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif    
     return 0;
 }
 
@@ -1910,18 +1832,7 @@ int ket_sorted2cart(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
                     int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
 {
-    #ifdef USE_SYCL
-    sycl::range<2> threads(TILE_Y, TILE_X);
-    sycl::range<2> blocks((nbas+TILE_X-1)/TILE_X, (nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE);
-    sycl_get_queue()->parallel_for<class ket_sorted2cart_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      ket_sorted2cart_kernel(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, nrow);
-    });
-    #else
-    dim3 threads(TILE_X, TILE_Y);
-    dim3 blocks((nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas+TILE_X-1)/TILE_X);
-    ket_sorted2cart_kernel<<<blocks, threads>>>(
+    LAUNCH_KET_KERNEL(ket_sorted2cart_kernel, nbas, nrow,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
     cudaError_t err = cudaGetLastError();
@@ -1929,7 +1840,6 @@ int ket_sorted2cart(double *out, double *input, double *recontract_coef,
         fprintf(stderr, "CUDA Error in ket_sorted2cart kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif    
     return 0;
 }
 
@@ -1937,18 +1847,7 @@ int ket_cart2sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
                     int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
 {
-    #ifdef USE_SYCL
-    sycl::range<2> threads(TILE_Y, TILE_X);
-    sycl::range<2> blocks((nbas+TILE_X-1)/TILE_X, (nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE);
-    sycl_get_queue()->parallel_for<class ket_cart2sorted_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      ket_cart2sorted_kernel(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, nrow);
-    });
-    #else
-    dim3 threads(TILE_X, TILE_Y);
-    dim3 blocks((nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas+TILE_X-1)/TILE_X);
-    ket_cart2sorted_kernel<<<blocks, threads>>>(
+    LAUNCH_KET_KERNEL(ket_cart2sorted_kernel, nbas, nrow,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
     cudaError_t err = cudaGetLastError();
@@ -1956,7 +1855,6 @@ int ket_cart2sorted(double *out, double *input, double *recontract_coef,
         fprintf(stderr, "CUDA Error in ket_cart2sorted kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif    
     return 0;
 }
 
@@ -1964,18 +1862,7 @@ int ket_sorted2sph(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
 {
-    #ifdef USE_SYCL
-    sycl::range<2> threads(TILE_Y, TILE_X);
-    sycl::range<2> blocks((nbas+TILE_X-1)/TILE_X, (nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE);
-    sycl_get_queue()->parallel_for<class ket_sorted2sph_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      ket_sorted2sph_kernel(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, nrow);
-    });
-    #else
-    dim3 threads(TILE_X, TILE_Y);
-    dim3 blocks((nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas+TILE_X-1)/TILE_X);
-    ket_sorted2sph_kernel<<<blocks, threads>>>(
+    LAUNCH_KET_KERNEL(ket_sorted2sph_kernel, nbas, nrow,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
     cudaError_t err = cudaGetLastError();
@@ -1983,7 +1870,6 @@ int ket_sorted2sph(double *out, double *input, double *recontract_coef,
         fprintf(stderr, "CUDA Error in ket_sorted2sph kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif    
     return 0;
 }
 
@@ -1991,18 +1877,7 @@ int ket_sph2sorted(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
 {
-    #ifdef USE_SYCL
-    sycl::range<2> threads(TILE_Y, TILE_X);
-    sycl::range<2> blocks((nbas+TILE_X-1)/TILE_X, (nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE);
-    sycl_get_queue()->parallel_for<class ket_sph2sorted_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      ket_sph2sorted_kernel(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, nrow);
-    });
-    #else
-    dim3 threads(TILE_X, TILE_Y);
-    dim3 blocks((nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas+TILE_X-1)/TILE_X);
-    ket_sph2sorted_kernel<<<blocks, threads>>>(
+    LAUNCH_KET_KERNEL(ket_sph2sorted_kernel, nbas, nrow,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
     cudaError_t err = cudaGetLastError();
@@ -2010,7 +1885,6 @@ int ket_sph2sorted(double *out, double *input, double *recontract_coef,
         fprintf(stderr, "CUDA Error in ket_sph2sorted kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif    
     return 0;
 }
 }

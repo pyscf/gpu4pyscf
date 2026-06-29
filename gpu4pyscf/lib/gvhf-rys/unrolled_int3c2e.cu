@@ -7,20 +7,28 @@
 #define POOL_SIZE       25600
 
 
+// Abstracts CUDA/SYCL thread-index setup for 2D kernels in this file.
+// KERNEL_SETUP      : st_id + nst_per_block  (7 usages)
+// SETUP_INT3C2E_TID : thread_id only          (8 usages)
 #ifdef USE_SYCL
-
-#define KERNEL_SETUP()                                          \
-    auto item = syclex::this_work_item::get_nd_item<2>();       \
-    int st_id = item.get_local_id(1);                           \
+#define KERNEL_SETUP() \
+    auto item = syclex::this_work_item::get_nd_item<2>(); \
+    int st_id = item.get_local_id(1); \
     int nst_per_block = item.get_local_range(1);
-
-#else // USE_SYCL
-
-#define KERNEL_SETUP()                          \
-    int st_id = threadIdx.x;                    \
+#else
+#define KERNEL_SETUP() \
+    int st_id = threadIdx.x; \
     int nst_per_block = blockDim.x;
+#endif
 
-#endif // USE_SYCL
+#ifdef USE_SYCL
+#define SETUP_INT3C2E_TID() \
+    auto item = syclex::this_work_item::get_nd_item<2>(); \
+    int thread_id = item.get_local_id(1);
+#else
+#define SETUP_INT3C2E_TID() \
+    int thread_id = threadIdx.x;
+#endif
 
 __device__ inline
 void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
@@ -489,12 +497,7 @@ void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+     SETUP_INT3C2E_TID();
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
     int nbas = envs.nbas;
@@ -742,12 +745,7 @@ void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+     SETUP_INT3C2E_TID();
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
     int nbas = envs.nbas;
@@ -1290,12 +1288,7 @@ void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+     SETUP_INT3C2E_TID();
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
     int nbas = envs.nbas;
@@ -1541,12 +1534,7 @@ void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+     SETUP_INT3C2E_TID();
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
     int nbas = envs.nbas;
@@ -1767,12 +1755,7 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+     SETUP_INT3C2E_TID();
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
     int nbas = envs.nbas;
@@ -2202,12 +2185,7 @@ void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+     SETUP_INT3C2E_TID();
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
     int nbas = envs.nbas;
@@ -2419,12 +2397,7 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+     SETUP_INT3C2E_TID();
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
     int nbas = envs.nbas;
@@ -2716,12 +2689,7 @@ void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+     SETUP_INT3C2E_TID();
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
     int nbas = envs.nbas;
@@ -3020,3 +2988,6 @@ int int3c2e_unrolled(double *out, RysIntEnvVars& envs, double *pool,
     }
     return 1;
 }
+
+#undef KERNEL_SETUP
+#undef SETUP_INT3C2E_TID

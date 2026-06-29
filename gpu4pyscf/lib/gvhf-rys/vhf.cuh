@@ -47,6 +47,13 @@
 #define MIN(x, y)       ((x) < (y) ? (x) : (y))
 #define MAX(x, y)       ((x) > (y) ? (x) : (y))
 
+// Abstracts __device__ __forceinline__ (CUDA) vs static inline (SYCL) on device functions.
+#ifdef USE_SYCL
+#define DEVICE_INLINE static inline
+#else
+#define DEVICE_INLINE __device__ __forceinline__
+#endif
+
 // 2*pi**2.5
 #define PI_FAC          34.98683665524972497
 
