@@ -169,6 +169,16 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
             else:
                 logger.info(mf, '  HOMO = %.12g  LUMO = %.12g  gap/eV = %.5f',
                             homo, lumo, gap)
+
+        if (mf.time_reversal_symmetry and
+            (lumo_a is not None and homo_a+1e-5 > lumo_a) and
+            (homo_b is not None and homo_b+1e-5 > lumo_b)):
+            idx = np.array([(k, k_conj) for k, k_conj in mf.iter_kpt_pairs()
+                            if k_conj is not None])
+            if not cp.array_equal(mo_occ_kpts[0,idx[:,0]], mo_occ_kpts[0,idx[:,1]]):
+                logger.warn(mf, 'k/-k pairs have unequal alpha occupations.')
+            if not cp.array_equal(mo_occ_kpts[1,idx[:,0]], mo_occ_kpts[1,idx[:,1]]):
+                logger.warn(mf, 'k/-k pairs have unequal beta occupations.')
     return mo_occ_kpts
 
 
@@ -307,22 +317,30 @@ class KUHF(khf.KSCF):
             dm1 = self.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
             fock = self.get_hcore(self.cell, self.kpts) + self.get_veff(self.cell, dm1)
 
+        nkpts, nao = mo_occ_kpts.shape[1:3]
+
         def grad(mo, mo_occ, fock):
-            occidx = mo_occ > 0
-            viridx = ~occidx
-            g = mo[:,viridx].conj().T.dot(fock.dot(mo[:,occidx]))
-            return g.ravel()
+            omask = mo_occ > 0
+            vmask = ~omask
+            nocc = cp.count_nonzero(omask, axis=1).get()
+            if all(nocc[0] == nocc):
+                o = mo.transpose(0,2,1)[omask].reshape(nkpts,-1,nao)
+                v = mo.transpose(0,2,1)[vmask].reshape(nkpts,-1,nao)
+                g = contract('kpq,kjq->kpj', fock, o)
+                g = contract('kpj,kip->kij', g, v.conj())
+                return g.ravel()
 
-        nkpts = len(mo_occ_kpts[0])
-        grad_kpts = [grad(mo_coeff_kpts[0][k], mo_occ_kpts[0][k], fock[0][k])
-                     for k in range(nkpts)]
-        grad_kpts+= [grad(mo_coeff_kpts[1][k], mo_occ_kpts[1][k], fock[1][k])
-                     for k in range(nkpts)]
-        return cp.hstack(grad_kpts)
+            g = [ck[:,vmask[k]].conj().T.dot(fk.dot(ck[:,omask[k]])).ravel()
+                 for k, (fk, ck) in enumerate(zip(fock, mo))]
+            return cp.hstack(g).ravel()
 
-    def eig(self, h_kpts, s_kpts, overwrite=False, x=None):
-        e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts, x=x)
-        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite, x)
+        return cp.hstack([
+            grad(mo_coeff_kpts[0], mo_occ_kpts[0], fock[0]),
+            grad(mo_coeff_kpts[1], mo_occ_kpts[1], fock[1])])
+
+    def eig(self, h_kpts, s_kpts, overwrite=False, x=None, time_reversal_symmetry=None):
+        e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts, False, x, time_reversal_symmetry)
+        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite, x, time_reversal_symmetry)
         return cp.asarray((e_a,e_b)), cp.asarray((c_a,c_b))
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):
@@ -342,7 +360,10 @@ class KUHF(khf.KSCF):
         fock = self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
         fock += self.get_hcore(cell, kpts_band)
         s1e = self.get_ovlp(cell, kpts_band)
-        e, c = self.eig(fock, s1e)
+
+        x = self.check_linear_dependency(s1e, time_reversal_symmetry=False)
+        e, c = self.eig(fock, s1e, overwrite=True, x=x, time_reversal_symmetry=False)
+
         if single_kpt_band:
             e = e[:,0]
             c = c[:,0]
