@@ -203,7 +203,7 @@ class KnownValues(unittest.TestCase):
         dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
         dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
-        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*auxmol.nao*40)):
+        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*auxmol.nao*60)):
             ref = rhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1e-20)
             ej = rhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=0)
             assert abs(ej-ref).max().get() < 5e-8
@@ -228,7 +228,6 @@ class KnownValues(unittest.TestCase):
             e1 = eval_grad(i, x, disp)
             e2 = eval_grad(i, x, -disp)
             assert abs((e1 - e2)/(2*disp) - ejk[i,:,x]).max() < 1e-5
-
 
     def test_jk_ip1(self):
         from gpu4pyscf.df.hessian.rhf import _get_jk_ip
@@ -283,8 +282,7 @@ class KnownValues(unittest.TestCase):
             v1 = eval_veff(i, x, disp)
             v2 = eval_veff(i, x, -disp)
             ref = mo_coeff.T.dot(v1 - v2).dot(mo_coeff[:,:nocc]) / (2*disp)
-            print( abs(ref - veff[i,x]).max().get() )
-            assert abs(ref - veff[i,x]).max().get() < 5e-5
+            assert abs(ref - veff[i,x]).max().get() < 1e-5
 
     def test_jk_ip1_limited_memory(self):
         mol1 = mol + mol

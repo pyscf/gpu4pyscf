@@ -76,7 +76,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mo_coeff = cupy.asarray(mo_coeff)
     de2 = hessobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                     max_memory, log)
-    t1 = log.timer_debug1('hess elec', *t1)
+    t1 = log.timer_debug1('partial hess elec', *t1)
     if h1mo is None:
         h1mo = hessobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
         if h1mo.size * 8 * 5 > get_avail_mem():
@@ -960,5 +960,4 @@ class Hessian(HessianBase):
     get_veff_resp_mo = _get_veff_resp_mo
 
 # Inject to RHF class
-from gpu4pyscf import scf
 scf.hf.RHF.Hessian = lib.class_as_method(Hessian)
