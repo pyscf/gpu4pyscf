@@ -28,17 +28,22 @@
     const int gid_x = item.get_global_id(1); \
     const int gid_y = item.get_global_id(0);
 
-#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
-    stream.parallel_for<class TAG>(     \
+#define GINT_CAT_(a, b) a##b
+#define GINT_CAT(a, b)  GINT_CAT_(a, b)
+// ARGS: parenthesized runtime args. Kernel-id (with any template args) is the
+// trailing __VA_ARGS__ so its commas survive macro expansion. SYCL kernel name
+// is generated inline per source line (unique within this translation unit).
+#define LAUNCH_KERNEL(ARGS, ...) \
+    stream.parallel_for<class GINT_CAT(gint_kernel_L, __LINE__)>( \
         sycl::nd_range<2>(blocks * threads, threads), \
-        [=](auto item) { KERNEL(__VA_ARGS__); });
+        [=](auto item) { __VA_ARGS__ ARGS; });
 #else // USE_SYCL
 #define KERNEL_SETUP() \
     const int gid_x = blockIdx.x * blockDim.x + threadIdx.x; \
     const int gid_y = blockIdx.y * blockDim.y + threadIdx.y;
 
-#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
-    KERNEL<<<blocks, threads, 0, stream>>>(__VA_ARGS__);
+#define LAUNCH_KERNEL(ARGS, ...) \
+    __VA_ARGS__ <<<blocks, threads, 0, stream>>> ARGS;
 #endif // USE_SYCL
 
 template<int L>
@@ -762,17 +767,17 @@ extern "C" {
                 const dim3 blocks((n_ao_cartesian + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
                 #endif
                 switch (l_i) {
-                    case  0: LAUNCH_KERNEL(left_cart2sph_inplace_0_sycl,  left_cart2sph_inplace< 0>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  1: LAUNCH_KERNEL(left_cart2sph_inplace_1_sycl,  left_cart2sph_inplace< 1>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  2: LAUNCH_KERNEL(left_cart2sph_inplace_2_sycl,  left_cart2sph_inplace< 2>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  3: LAUNCH_KERNEL(left_cart2sph_inplace_3_sycl,  left_cart2sph_inplace< 3>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  4: LAUNCH_KERNEL(left_cart2sph_inplace_4_sycl,  left_cart2sph_inplace< 4>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  5: LAUNCH_KERNEL(left_cart2sph_inplace_5_sycl,  left_cart2sph_inplace< 5>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  6: LAUNCH_KERNEL(left_cart2sph_inplace_6_sycl,  left_cart2sph_inplace< 6>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  7: LAUNCH_KERNEL(left_cart2sph_inplace_7_sycl,  left_cart2sph_inplace< 7>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  8: LAUNCH_KERNEL(left_cart2sph_inplace_8_sycl,  left_cart2sph_inplace< 8>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  9: LAUNCH_KERNEL(left_cart2sph_inplace_9_sycl,  left_cart2sph_inplace< 9>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case 10: LAUNCH_KERNEL(left_cart2sph_inplace_10_sycl, left_cart2sph_inplace<10>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  0: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 0>) break;
+                    case  1: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 1>) break;
+                    case  2: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 2>) break;
+                    case  3: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 3>) break;
+                    case  4: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 4>) break;
+                    case  5: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 5>) break;
+                    case  6: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 6>) break;
+                    case  7: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 7>) break;
+                    case  8: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 8>) break;
+                    case  9: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace< 9>) break;
+                    case 10: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_cart2sph_inplace<10>) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
@@ -795,17 +800,17 @@ extern "C" {
                 const dim3 blocks((n_ao_cartesian + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
                 #endif
                 switch (l_i) {
-                    case  0: LAUNCH_KERNEL(right_cart2sph_inplace_0_sycl,  right_cart2sph_inplace< 0>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  1: LAUNCH_KERNEL(right_cart2sph_inplace_1_sycl,  right_cart2sph_inplace< 1>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  2: LAUNCH_KERNEL(right_cart2sph_inplace_2_sycl,  right_cart2sph_inplace< 2>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  3: LAUNCH_KERNEL(right_cart2sph_inplace_3_sycl,  right_cart2sph_inplace< 3>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  4: LAUNCH_KERNEL(right_cart2sph_inplace_4_sycl,  right_cart2sph_inplace< 4>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  5: LAUNCH_KERNEL(right_cart2sph_inplace_5_sycl,  right_cart2sph_inplace< 5>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  6: LAUNCH_KERNEL(right_cart2sph_inplace_6_sycl,  right_cart2sph_inplace< 6>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  7: LAUNCH_KERNEL(right_cart2sph_inplace_7_sycl,  right_cart2sph_inplace< 7>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  8: LAUNCH_KERNEL(right_cart2sph_inplace_8_sycl,  right_cart2sph_inplace< 8>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  9: LAUNCH_KERNEL(right_cart2sph_inplace_9_sycl,  right_cart2sph_inplace< 9>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case 10: LAUNCH_KERNEL(right_cart2sph_inplace_10_sycl, right_cart2sph_inplace<10>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  0: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 0>) break;
+                    case  1: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 1>) break;
+                    case  2: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 2>) break;
+                    case  3: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 3>) break;
+                    case  4: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 4>) break;
+                    case  5: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 5>) break;
+                    case  6: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 6>) break;
+                    case  7: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 7>) break;
+                    case  8: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 8>) break;
+                    case  9: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace< 9>) break;
+                    case 10: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_cart2sph_inplace<10>) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
@@ -834,11 +839,7 @@ extern "C" {
                     const dim3 threads(32, 32);
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
                     #endif
-                    LAUNCH_KERNEL(copy_spherical_cart2sph_sycl, copy_spherical_cart2sph,
-                        cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-                        l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
-                        l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
-                        d_ao_idx)
+                    LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical, l_i, n_bas_i, i_cartesian_offset, i_spherical_offset, l_j, n_bas_j, j_cartesian_offset, j_spherical_offset, d_ao_idx), copy_spherical_cart2sph)
 
                     j_cartesian_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_spherical_offset += n_bas_j * (l_j * 2 + 1);
@@ -866,11 +867,7 @@ extern "C" {
                     const dim3 threads(32, 32);
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
                     #endif
-                    LAUNCH_KERNEL(copy_cartesian_pad_to_unpad_sycl, copy_cartesian_pad_to_unpad,
-                        cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-                        l_i, n_bas_i, i_pad_offset, i_unpad_offset,
-                        l_j, n_bas_j, j_pad_offset, j_unpad_offset,
-                        d_ao_idx)
+                    LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical, l_i, n_bas_i, i_pad_offset, i_unpad_offset, l_j, n_bas_j, j_pad_offset, j_unpad_offset, d_ao_idx), copy_cartesian_pad_to_unpad)
 
                     j_pad_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_unpad_offset += n_bas_j * ((l_j + 1) * (l_j + 2) / 2);
@@ -909,11 +906,7 @@ extern "C" {
                     const dim3 threads(32, 32);
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
                     #endif
-                    LAUNCH_KERNEL(copy_spherical_sph2cart_sycl, copy_spherical_sph2cart,
-                        cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-                        l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
-                        l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
-                        d_ao_idx)
+                    LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical, l_i, n_bas_i, i_cartesian_offset, i_spherical_offset, l_j, n_bas_j, j_cartesian_offset, j_spherical_offset, d_ao_idx), copy_spherical_sph2cart)
 
                     j_cartesian_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_spherical_offset += n_bas_j * (l_j * 2 + 1);
@@ -935,17 +928,17 @@ extern "C" {
                 const dim3 blocks((n_ao_cartesian + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
                 #endif
                 switch (l_i) {
-                    case  0: LAUNCH_KERNEL(left_sph2cart_inplace_0_sycl,  left_sph2cart_inplace< 0>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  1: LAUNCH_KERNEL(left_sph2cart_inplace_1_sycl,  left_sph2cart_inplace< 1>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  2: LAUNCH_KERNEL(left_sph2cart_inplace_2_sycl,  left_sph2cart_inplace< 2>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  3: LAUNCH_KERNEL(left_sph2cart_inplace_3_sycl,  left_sph2cart_inplace< 3>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  4: LAUNCH_KERNEL(left_sph2cart_inplace_4_sycl,  left_sph2cart_inplace< 4>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  5: LAUNCH_KERNEL(left_sph2cart_inplace_5_sycl,  left_sph2cart_inplace< 5>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  6: LAUNCH_KERNEL(left_sph2cart_inplace_6_sycl,  left_sph2cart_inplace< 6>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  7: LAUNCH_KERNEL(left_sph2cart_inplace_7_sycl,  left_sph2cart_inplace< 7>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  8: LAUNCH_KERNEL(left_sph2cart_inplace_8_sycl,  left_sph2cart_inplace< 8>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  9: LAUNCH_KERNEL(left_sph2cart_inplace_9_sycl,  left_sph2cart_inplace< 9>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case 10: LAUNCH_KERNEL(left_sph2cart_inplace_10_sycl, left_sph2cart_inplace<10>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  0: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 0>) break;
+                    case  1: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 1>) break;
+                    case  2: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 2>) break;
+                    case  3: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 3>) break;
+                    case  4: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 4>) break;
+                    case  5: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 5>) break;
+                    case  6: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 6>) break;
+                    case  7: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 7>) break;
+                    case  8: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 8>) break;
+                    case  9: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace< 9>) break;
+                    case 10: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), left_sph2cart_inplace<10>) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
@@ -968,17 +961,17 @@ extern "C" {
                 const dim3 blocks((n_ao_cartesian + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
                 #endif
                 switch (l_i) {
-                    case  0: LAUNCH_KERNEL(right_sph2cart_inplace_0_sycl,  right_sph2cart_inplace< 0>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  1: LAUNCH_KERNEL(right_sph2cart_inplace_1_sycl,  right_sph2cart_inplace< 1>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  2: LAUNCH_KERNEL(right_sph2cart_inplace_2_sycl,  right_sph2cart_inplace< 2>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  3: LAUNCH_KERNEL(right_sph2cart_inplace_3_sycl,  right_sph2cart_inplace< 3>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  4: LAUNCH_KERNEL(right_sph2cart_inplace_4_sycl,  right_sph2cart_inplace< 4>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  5: LAUNCH_KERNEL(right_sph2cart_inplace_5_sycl,  right_sph2cart_inplace< 5>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  6: LAUNCH_KERNEL(right_sph2cart_inplace_6_sycl,  right_sph2cart_inplace< 6>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  7: LAUNCH_KERNEL(right_sph2cart_inplace_7_sycl,  right_sph2cart_inplace< 7>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  8: LAUNCH_KERNEL(right_sph2cart_inplace_8_sycl,  right_sph2cart_inplace< 8>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case  9: LAUNCH_KERNEL(right_sph2cart_inplace_9_sycl,  right_sph2cart_inplace< 9>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
-                    case 10: LAUNCH_KERNEL(right_sph2cart_inplace_10_sycl, right_sph2cart_inplace<10>, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  0: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 0>) break;
+                    case  1: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 1>) break;
+                    case  2: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 2>) break;
+                    case  3: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 3>) break;
+                    case  4: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 4>) break;
+                    case  5: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 5>) break;
+                    case  6: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 6>) break;
+                    case  7: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 7>) break;
+                    case  8: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 8>) break;
+                    case  9: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace< 9>) break;
+                    case 10: LAUNCH_KERNEL((cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset), right_sph2cart_inplace<10>) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
@@ -1007,11 +1000,7 @@ extern "C" {
                     const dim3 threads(32, 32);
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
                     #endif
-                    LAUNCH_KERNEL(copy_cartesian_unpad_to_pad_sycl, copy_cartesian_unpad_to_pad,
-                        cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-                        l_i, n_bas_i, i_pad_offset, i_unpad_offset,
-                        l_j, n_bas_j, j_pad_offset, j_unpad_offset,
-                        d_ao_idx)
+                    LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical, l_i, n_bas_i, i_pad_offset, i_unpad_offset, l_j, n_bas_j, j_pad_offset, j_unpad_offset, d_ao_idx), copy_cartesian_unpad_to_pad)
 
                     j_pad_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_unpad_offset += n_bas_j * ((l_j + 1) * (l_j + 2) / 2);
@@ -1045,17 +1034,17 @@ extern "C" {
                 const dim3 blocks((n_right + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
                 #endif
                 switch (l_i) {
-                    case  0: LAUNCH_KERNEL(left_sph2cart_0_sycl,  left_sph2cart< 0>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  1: LAUNCH_KERNEL(left_sph2cart_1_sycl,  left_sph2cart< 1>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  2: LAUNCH_KERNEL(left_sph2cart_2_sycl,  left_sph2cart< 2>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  3: LAUNCH_KERNEL(left_sph2cart_3_sycl,  left_sph2cart< 3>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  4: LAUNCH_KERNEL(left_sph2cart_4_sycl,  left_sph2cart< 4>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  5: LAUNCH_KERNEL(left_sph2cart_5_sycl,  left_sph2cart< 5>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  6: LAUNCH_KERNEL(left_sph2cart_6_sycl,  left_sph2cart< 6>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  7: LAUNCH_KERNEL(left_sph2cart_7_sycl,  left_sph2cart< 7>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  8: LAUNCH_KERNEL(left_sph2cart_8_sycl,  left_sph2cart< 8>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case  9: LAUNCH_KERNEL(left_sph2cart_9_sycl,  left_sph2cart< 9>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
-                    case 10: LAUNCH_KERNEL(left_sph2cart_10_sycl, left_sph2cart<10>, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  0: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 0>) break;
+                    case  1: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 1>) break;
+                    case  2: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 2>) break;
+                    case  3: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 3>) break;
+                    case  4: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 4>) break;
+                    case  5: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 5>) break;
+                    case  6: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 6>) break;
+                    case  7: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 7>) break;
+                    case  8: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 8>) break;
+                    case  9: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart< 9>) break;
+                    case 10: LAUNCH_KERNEL((cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx), left_sph2cart<10>) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_with_padding(), max_L = 10\n", l_i);

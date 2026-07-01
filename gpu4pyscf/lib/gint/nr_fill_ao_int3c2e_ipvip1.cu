@@ -43,19 +43,26 @@
     dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
 #endif
 
-// Abstracts 2D kernel launch syntax. dev_envs/dev_eri/dev_offsets are value copies
-// hoisted unconditionally so both branches use identical argument names.
-// TAG:    unique SYCL class name (ignored on CUDA)
-// KERNEL: kernel function (with template args if needed)
-// ...:    kernel arguments
+// Abstracts 2D kernel launch syntax. On SYCL, dev_envs/dev_eri/dev_offsets are
+// on-host value copies (needed for lambda capture); on CUDA they alias *envs/
+// *eri/*offsets directly (passed by value at launch, like master).
+#define GINT_CAT_(a, b) a##b
+#define GINT_CAT(a, b)  GINT_CAT_(a, b)
 #ifdef USE_SYCL
-#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
-    stream.parallel_for<class TAG>(     \
+// Kernel-id (with any template args) is the trailing __VA_ARGS__ so its commas
+// survive macro expansion. SYCL kernel name is generated inline per source line.
+// dev_envs/dev_eri/dev_offsets are on-host value copies made just before launch
+// for lambda capture.
+#define LAUNCH_KERNEL(...) { \
+    auto dev_envs = *envs; auto dev_eri = *eri; auto dev_offsets = *offsets; \
+    stream.parallel_for<class GINT_CAT(gint_kernel_L, __LINE__)>( \
         sycl::nd_range<2>(blocks * threads, threads), \
-        [=](auto item) [[intel::kernel_args_restrict]] { KERNEL(__VA_ARGS__); });
+        [=](auto item) [[intel::kernel_args_restrict]] { \
+            __VA_ARGS__(dev_envs, dev_eri, dev_offsets); }); }
 #else
-#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
-    KERNEL<<<blocks, threads, 0, stream>>>(__VA_ARGS__);
+// CUDA passes the dereferenced structs by value at launch, like master.
+#define LAUNCH_KERNEL(...) \
+    __VA_ARGS__ <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets);
 #endif
 
 __host__
@@ -65,9 +72,6 @@ static int GINTfill_int3c2e_ipvip1(ERITensor *eri, BasisProdOffsets *offsets, GI
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-    auto dev_envs = *envs;
-    auto dev_eri = *eri;
-    auto dev_offsets = *offsets;
     LAUNCH_CONFIG();
     int li = envs->i_l;
     int lj = envs->j_l;
@@ -76,67 +80,67 @@ static int GINTfill_int3c2e_ipvip1(ERITensor *eri, BasisProdOffsets *offsets, GI
 
     switch (type_ijk) {
         // li+lj+lk=0
-        case 0: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel000dev, GINTfill_int3c2e_ipvip1_kernel000, dev_envs, dev_eri, dev_offsets) break;
+        case 0: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel000) break;
         // li+lj+lk=1
-        case 1: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel001, GINTfill_int3c2e_ipvip1_kernel<0,0,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 10: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel010, GINTfill_int3c2e_ipvip1_kernel<0,1,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 100: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel100, GINTfill_int3c2e_ipvip1_kernel<1,0,0>, dev_envs, dev_eri, dev_offsets) break;
+        case 1: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,0,1>) break;
+        case 10: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,1,0>) break;
+        case 100: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,0,0>) break;
         // li+lj+lk=2
-        case 2: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel002, GINTfill_int3c2e_ipvip1_kernel<0,0,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 11: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel011, GINTfill_int3c2e_ipvip1_kernel<0,1,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 20: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel020, GINTfill_int3c2e_ipvip1_kernel<0,2,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel101, GINTfill_int3c2e_ipvip1_kernel<1,0,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel110, GINTfill_int3c2e_ipvip1_kernel<1,1,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel200, GINTfill_int3c2e_ipvip1_kernel<2,0,0>, dev_envs, dev_eri, dev_offsets) break;
+        case 2: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,0,2>) break;
+        case 11: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,1,1>) break;
+        case 20: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,2,0>) break;
+        case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,0,1>) break;
+        case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,1,0>) break;
+        case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,0,0>) break;
         // li+lj+lk=3
-        case 3: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel003, GINTfill_int3c2e_ipvip1_kernel<0,0,3>, dev_envs, dev_eri, dev_offsets) break;
-        case 12: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel012, GINTfill_int3c2e_ipvip1_kernel<0,1,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 21: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel021, GINTfill_int3c2e_ipvip1_kernel<0,2,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 30: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel030, GINTfill_int3c2e_ipvip1_kernel<0,3,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 102: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel102, GINTfill_int3c2e_ipvip1_kernel<1,0,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 111: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel111, GINTfill_int3c2e_ipvip1_kernel<1,1,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 120: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel120, GINTfill_int3c2e_ipvip1_kernel<1,2,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 201: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel201, GINTfill_int3c2e_ipvip1_kernel<2,0,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 210: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel210, GINTfill_int3c2e_ipvip1_kernel<2,1,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 300: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel300, GINTfill_int3c2e_ipvip1_kernel<3,0,0>, dev_envs, dev_eri, dev_offsets) break;
+        case 3: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,0,3>) break;
+        case 12: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,1,2>) break;
+        case 21: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,2,1>) break;
+        case 30: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,3,0>) break;
+        case 102: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,0,2>) break;
+        case 111: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,1,1>) break;
+        case 120: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,2,0>) break;
+        case 201: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,0,1>) break;
+        case 210: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,1,0>) break;
+        case 300: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<3,0,0>) break;
         // li+lj+lk=4
-        case 4: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel004, GINTfill_int3c2e_ipvip1_kernel<0,0,4>, dev_envs, dev_eri, dev_offsets) break;
-        case 13: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel013, GINTfill_int3c2e_ipvip1_kernel<0,1,3>, dev_envs, dev_eri, dev_offsets) break;
-        case 22: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel022, GINTfill_int3c2e_ipvip1_kernel<0,2,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 31: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel031, GINTfill_int3c2e_ipvip1_kernel<0,3,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 40: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel040, GINTfill_int3c2e_ipvip1_kernel<0,4,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 103: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel103, GINTfill_int3c2e_ipvip1_kernel<1,0,3>, dev_envs, dev_eri, dev_offsets) break;
-        case 112: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel112, GINTfill_int3c2e_ipvip1_kernel<1,1,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 121: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel121, GINTfill_int3c2e_ipvip1_kernel<1,2,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 130: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel130, GINTfill_int3c2e_ipvip1_kernel<1,3,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 202: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel202, GINTfill_int3c2e_ipvip1_kernel<2,0,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 211: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel211, GINTfill_int3c2e_ipvip1_kernel<2,1,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 220: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel220, GINTfill_int3c2e_ipvip1_kernel<2,2,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 301: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel301, GINTfill_int3c2e_ipvip1_kernel<3,0,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 310: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel310, GINTfill_int3c2e_ipvip1_kernel<3,1,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 400: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel400, GINTfill_int3c2e_ipvip1_kernel<4,0,0>, dev_envs, dev_eri, dev_offsets) break;
+        case 4: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,0,4>) break;
+        case 13: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,1,3>) break;
+        case 22: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,2,2>) break;
+        case 31: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,3,1>) break;
+        case 40: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,4,0>) break;
+        case 103: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,0,3>) break;
+        case 112: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,1,2>) break;
+        case 121: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,2,1>) break;
+        case 130: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,3,0>) break;
+        case 202: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,0,2>) break;
+        case 211: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,1,1>) break;
+        case 220: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,2,0>) break;
+        case 301: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<3,0,1>) break;
+        case 310: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<3,1,0>) break;
+        case 400: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<4,0,0>) break;
         // li+lj+lk=5
-        //case 5: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel005, GINTfill_int3c2e_ipvip1_kernel<0,0,5>, dev_envs, dev_eri, dev_offsets) break;
-        case 14: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel014, GINTfill_int3c2e_ipvip1_kernel<0,1,4>, dev_envs, dev_eri, dev_offsets) break;
-        case 23: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel023, GINTfill_int3c2e_ipvip1_kernel<0,2,3>, dev_envs, dev_eri, dev_offsets) break;
-        case 32: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel032, GINTfill_int3c2e_ipvip1_kernel<0,3,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 41: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel041, GINTfill_int3c2e_ipvip1_kernel<0,4,1>, dev_envs, dev_eri, dev_offsets) break;
-        //case 50: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel050, GINTfill_int3c2e_ipvip1_kernel<0,5,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 104: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel104, GINTfill_int3c2e_ipvip1_kernel<1,0,4>, dev_envs, dev_eri, dev_offsets) break;
-        case 113: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel113, GINTfill_int3c2e_ipvip1_kernel<1,1,3>, dev_envs, dev_eri, dev_offsets) break;
-        case 122: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel122, GINTfill_int3c2e_ipvip1_kernel<1,2,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 131: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel131, GINTfill_int3c2e_ipvip1_kernel<1,3,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 140: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel140, GINTfill_int3c2e_ipvip1_kernel<1,4,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 203: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel203, GINTfill_int3c2e_ipvip1_kernel<2,0,3>, dev_envs, dev_eri, dev_offsets) break;
-        case 212: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel212, GINTfill_int3c2e_ipvip1_kernel<2,1,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 221: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel221, GINTfill_int3c2e_ipvip1_kernel<2,2,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 230: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel230, GINTfill_int3c2e_ipvip1_kernel<2,3,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 302: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel302, GINTfill_int3c2e_ipvip1_kernel<3,0,2>, dev_envs, dev_eri, dev_offsets) break;
-        case 311: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel311, GINTfill_int3c2e_ipvip1_kernel<3,1,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 320: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel320, GINTfill_int3c2e_ipvip1_kernel<3,2,0>, dev_envs, dev_eri, dev_offsets) break;
-        case 401: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel401, GINTfill_int3c2e_ipvip1_kernel<4,0,1>, dev_envs, dev_eri, dev_offsets) break;
-        case 410: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel410, GINTfill_int3c2e_ipvip1_kernel<4,1,0>, dev_envs, dev_eri, dev_offsets) break;
-        //case 500: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel500, GINTfill_int3c2e_ipvip1_kernel<5,0,0>, dev_envs, dev_eri, dev_offsets) break;
+        //case 5: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,0,5>) break;
+        case 14: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,1,4>) break;
+        case 23: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,2,3>) break;
+        case 32: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,3,2>) break;
+        case 41: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,4,1>) break;
+        //case 50: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<0,5,0>) break;
+        case 104: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,0,4>) break;
+        case 113: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,1,3>) break;
+        case 122: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,2,2>) break;
+        case 131: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,3,1>) break;
+        case 140: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<1,4,0>) break;
+        case 203: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,0,3>) break;
+        case 212: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,1,2>) break;
+        case 221: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,2,1>) break;
+        case 230: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2,3,0>) break;
+        case 302: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<3,0,2>) break;
+        case 311: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<3,1,1>) break;
+        case 320: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<3,2,0>) break;
+        case 401: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<4,0,1>) break;
+        case 410: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<4,1,0>) break;
+        //case 500: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<5,0,0>) break;
 #ifdef UNROLL_INT3C2E
 #endif
         default: {
@@ -146,6 +150,7 @@ static int GINTfill_int3c2e_ipvip1(ERITensor *eri, BasisProdOffsets *offsets, GI
 	    #ifdef USE_SYCL
             sycl::range<2> threads(1, THREADSX*THREADSY);
             sycl::range<2> blocks(ntasks_kl, ntasks_ij);
+	    auto dev_envs = *envs; auto dev_eri = *eri; auto dev_offsets = *offsets;
 	    stream.submit([&](sycl::handler &cgh) {
 		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize+16), cgh);
 		cgh.parallel_for<class GINTfill_int3c2e_ipvip1_general_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {

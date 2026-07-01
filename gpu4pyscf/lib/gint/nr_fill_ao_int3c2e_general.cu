@@ -55,14 +55,23 @@
 // TAG:    unique SYCL class name (ignored on CUDA)
 // KERNEL: kernel function (with template args if needed)
 // ...:    kernel arguments
+#define GINT_CAT_(a, b) a##b
+#define GINT_CAT(a, b)  GINT_CAT_(a, b)
 #ifdef USE_SYCL
-#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
-    stream.parallel_for<class TAG>(     \
+// Kernel-id (with any template args) is the trailing __VA_ARGS__ so its commas
+// survive macro expansion. SYCL kernel name is generated inline per source line.
+// dev_envs/dev_eri/dev_offsets are on-host value copies made just before launch
+// for lambda capture.
+#define LAUNCH_KERNEL(...) { \
+    auto dev_envs = *envs; auto dev_eri = *eri; auto dev_offsets = *offsets; \
+    stream.parallel_for<class GINT_CAT(gint_kernel_L, __LINE__)>( \
         sycl::nd_range<2>(blocks * threads, threads), \
-        [=](auto item) [[intel::kernel_args_restrict]] { KERNEL(__VA_ARGS__); });
+        [=](auto item) [[intel::kernel_args_restrict]] { \
+            __VA_ARGS__(dev_envs, dev_eri, dev_offsets); }); }
 #else
-#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
-    KERNEL<<<blocks, threads, 0, stream>>>(__VA_ARGS__);
+// CUDA passes the dereferenced structs by value at launch, like master.
+#define LAUNCH_KERNEL(...) \
+    __VA_ARGS__ <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets);
 #endif
 
 __host__
@@ -72,20 +81,17 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-    auto dev_envs = *envs;
-    auto dev_eri = *eri;
-    auto dev_offsets = *offsets;
     LAUNCH_CONFIG();
     switch (nrys_roots) {
-        case 1: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel1000_sycl, GINTfill_int3c2e_ip1_kernel1000, dev_envs, dev_eri, dev_offsets) break;
-        case 2: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_2_sycl, GINTfill_int3c2e_ip1_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 3: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_3_sycl, GINTfill_int3c2e_ip1_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 4: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_4_sycl, GINTfill_int3c2e_ip1_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 5: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_5_sycl, GINTfill_int3c2e_ip1_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 6: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_6_sycl, GINTfill_int3c2e_ip1_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 7: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_7_sycl, GINTfill_int3c2e_ip1_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 8: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_8_sycl, GINTfill_int3c2e_ip1_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 9: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_9_sycl, GINTfill_int3c2e_ip1_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 1: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel1000) break;
+        case 2: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel<2, GSIZE2_INT3C>) break;
+        case 3: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel<3, GSIZE3_INT3C>) break;
+        case 4: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel<4, GSIZE4_INT3C>) break;
+        case 5: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel<5, GSIZE5_INT3C>) break;
+        case 6: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel<6, GSIZE6_INT3C>) break;
+        case 7: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel<7, GSIZE7_INT3C>) break;
+        case 8: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel<8, GSIZE8_INT3C>) break;
+        case 9: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel<9, GSIZE9_INT3C>) break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -105,20 +111,17 @@ static int GINTfill_int3c2e_ip2_tasks(ERITensor *eri, BasisProdOffsets *offsets,
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-    auto dev_envs = *envs;
-    auto dev_eri = *eri;
-    auto dev_offsets = *offsets;
     LAUNCH_CONFIG();
     switch (nrys_roots) {
-        case 1: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel0010_sycl, GINTfill_int3c2e_ip2_kernel0010, dev_envs, dev_eri, dev_offsets) break;
-        case 2: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_2_sycl, GINTfill_int3c2e_ip2_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 3: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_3_sycl, GINTfill_int3c2e_ip2_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 4: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_4_sycl, GINTfill_int3c2e_ip2_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 5: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_5_sycl, GINTfill_int3c2e_ip2_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 6: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_6_sycl, GINTfill_int3c2e_ip2_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 7: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_7_sycl, GINTfill_int3c2e_ip2_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 8: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_8_sycl, GINTfill_int3c2e_ip2_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-        case 9: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_9_sycl, GINTfill_int3c2e_ip2_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 1: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel0010) break;
+        case 2: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel<2, GSIZE2_INT3C>) break;
+        case 3: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel<3, GSIZE3_INT3C>) break;
+        case 4: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel<4, GSIZE4_INT3C>) break;
+        case 5: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel<5, GSIZE5_INT3C>) break;
+        case 6: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel<6, GSIZE6_INT3C>) break;
+        case 7: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel<7, GSIZE7_INT3C>) break;
+        case 8: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel<8, GSIZE8_INT3C>) break;
+        case 9: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel<9, GSIZE9_INT3C>) break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -138,73 +141,70 @@ static int GINTfill_int3c2e_ipip_tasks(ERITensor *eri, BasisProdOffsets *offsets
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-    auto dev_envs = *envs;
-    auto dev_eri = *eri;
-    auto dev_offsets = *offsets;
     LAUNCH_CONFIG();
     switch (nrys_roots) {
         case 2:
             switch (ip_type){
-                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_2_sycl, GINTfill_int3c2e_ipip1_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_2_sycl, GINTfill_int3c2e_ip1ip2_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_2_sycl, GINTfill_int3c2e_ipvip1_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_2_sycl, GINTfill_int3c2e_ipip2_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel<2, GSIZE2_INT3C>) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel<2, GSIZE2_INT3C>) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<2, GSIZE2_INT3C>) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel<2, GSIZE2_INT3C>) break;
             }
             break;
         case 3:
             switch (ip_type){
-                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_3_sycl, GINTfill_int3c2e_ipip1_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_3_sycl, GINTfill_int3c2e_ip1ip2_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_3_sycl, GINTfill_int3c2e_ipvip1_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_3_sycl, GINTfill_int3c2e_ipip2_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel<3, GSIZE3_INT3C>) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel<3, GSIZE3_INT3C>) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<3, GSIZE3_INT3C>) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel<3, GSIZE3_INT3C>) break;
             }
             break;
         case 4:
             switch (ip_type){
-                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_4_sycl, GINTfill_int3c2e_ipip1_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_4_sycl, GINTfill_int3c2e_ip1ip2_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_4_sycl, GINTfill_int3c2e_ipvip1_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_4_sycl, GINTfill_int3c2e_ipip2_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel<4, GSIZE4_INT3C>) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel<4, GSIZE4_INT3C>) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<4, GSIZE4_INT3C>) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel<4, GSIZE4_INT3C>) break;
             }
             break;
         case 5:
             switch (ip_type){
-                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_5_sycl, GINTfill_int3c2e_ipip1_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_5_sycl, GINTfill_int3c2e_ip1ip2_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_5_sycl, GINTfill_int3c2e_ipvip1_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_5_sycl, GINTfill_int3c2e_ipip2_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel<5, GSIZE5_INT3C>) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel<5, GSIZE5_INT3C>) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<5, GSIZE5_INT3C>) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel<5, GSIZE5_INT3C>) break;
             }
             break;
         case 6:
             switch (ip_type){
-                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_6_sycl, GINTfill_int3c2e_ipip1_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_6_sycl, GINTfill_int3c2e_ip1ip2_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_6_sycl, GINTfill_int3c2e_ipvip1_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_6_sycl, GINTfill_int3c2e_ipip2_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel<6, GSIZE6_INT3C>) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel<6, GSIZE6_INT3C>) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<6, GSIZE6_INT3C>) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel<6, GSIZE6_INT3C>) break;
             }
             break;
         case 7:
             switch (ip_type){
-                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_7_sycl, GINTfill_int3c2e_ipip1_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_7_sycl, GINTfill_int3c2e_ip1ip2_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_7_sycl, GINTfill_int3c2e_ipvip1_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_7_sycl, GINTfill_int3c2e_ipip2_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel<7, GSIZE7_INT3C>) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel<7, GSIZE7_INT3C>) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<7, GSIZE7_INT3C>) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel<7, GSIZE7_INT3C>) break;
             }
             break;
         case 8:
             switch (ip_type){
-                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_8_sycl, GINTfill_int3c2e_ipip1_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_8_sycl, GINTfill_int3c2e_ip1ip2_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_8_sycl, GINTfill_int3c2e_ipvip1_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_8_sycl, GINTfill_int3c2e_ipip2_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel<8, GSIZE8_INT3C>) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel<8, GSIZE8_INT3C>) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<8, GSIZE8_INT3C>) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel<8, GSIZE8_INT3C>) break;
             }
             break;
         case 9:  // was duplicate case 8: — fixed
             switch (ip_type){
-                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_9_sycl, GINTfill_int3c2e_ipip1_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_9_sycl, GINTfill_int3c2e_ip1ip2_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_9_sycl, GINTfill_int3c2e_ipvip1_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
-                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_9_sycl, GINTfill_int3c2e_ipip2_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel<9, GSIZE9_INT3C>) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel<9, GSIZE9_INT3C>) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel<9, GSIZE9_INT3C>) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel<9, GSIZE9_INT3C>) break;
             }
             break;
         default:
