@@ -1833,7 +1833,7 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
     assert nset == 1
     assert ngrids == np.prod(mesh)
     rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(nvar, ngrids)
-    rho0 *= cell.vol / ngrids
+    rho0 *= ngrids / cell.vol
 
     ni_copy = ni.copy()
     def update_pairs_info(cell1):
@@ -1866,13 +1866,13 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
 
             update_pairs_info(cell1)
             rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
-            w1 = cell1.vol / ngrids
-            rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real / w1
+            rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
+            rho_plus *= ngrids / cell1.vol
 
             update_pairs_info(cell2)
             rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
-            w2 = cell2.vol / ngrids
-            rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real / w2
+            rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
+            rho_minus *= ngrids / cell2.vol
 
             rho1[x,y] = (rho_plus - rho_minus).reshape(nvar, ngrids) / (disp * 2)
 
@@ -1913,10 +1913,10 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
     xctype = ni._xc_type(xc_code)
     rho0 = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xctype)
     nset, nvar, ngrids = rho0.shape
-    assert nset == 1
+    assert nset == 2
     assert ngrids == np.prod(mesh)
-    rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(nvar, ngrids)
-    rho0 *= cell.vol / ngrids
+    rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(2, nvar, ngrids)
+    rho0 *= ngrids / cell.vol
 
     ni_copy = ni.copy()
     def update_pairs_info(cell1):
@@ -1949,25 +1949,26 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
 
             update_pairs_info(cell1)
             rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
-            w1 = cell1.vol / ngrids
-            rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real / w1
+            rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
+            rho_plus *= ngrids / cell1.vol
 
             update_pairs_info(cell2)
             rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
-            w2 = cell2.vol / ngrids
-            rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real / w2
+            rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
+            rho_minus *= ngrids / cell2.vol
 
             rho1[x,y] = (rho_plus - rho_minus).reshape(2, nvar, ngrids) / (disp * 2)
 
     weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
     exc, vxc = ni.eval_xc_eff(xc_code, rho0, 1, xctype=xctype, spin=1)[:2]
     out = cp.einsum('xysng,sng->xy', rho1, vxc).real.get() * weight_0
-    rho0 = rho0[:,0].sum(axis=0)
-    rho1 = rho1[:,:,:,0].sum(axis=2)
-    out += cp.einsum('g,g->', rho0, exc.ravel()).real.get() * weight_1
+    rho0_sf = rho0[:,0].sum(axis=0)
+    rho1_sf = rho1[:,:,:,0].sum(axis=2)
+    out += cp.einsum('g,g->', rho0_sf, exc.ravel()).real.get() * weight_1
 
-    out += _contract_coulomb_and_nuc(cell, mesh, dm_kpts, kpts, rho0, rho1,
-                                     grids, with_j, with_nuc)
+    dm_sf = dm_kpts[0] + dm_kpts[1]
+    out += _contract_coulomb_and_nuc(cell, mesh, dm_sf, kpts, rho0_sf,
+                                     rho1_sf, grids, with_j, with_nuc)
     return out
 
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
@@ -1996,7 +1997,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     get_rho = get_rho
     nr_rks = nr_rks
     nr_uks = nr_uks
-    get_vxc = nr_vxc = NotImplemented
+    nr_vxc = get_vxc = multigrid_v1.MultiGridNumInt.get_vxc
 
     eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
