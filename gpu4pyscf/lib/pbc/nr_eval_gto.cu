@@ -24,6 +24,18 @@
 #define LMAX 4
 #define THREADS 256
 
+// Abstracts CUDA/SYCL 2D thread-index setup for GTO eval kernels. Used 8x in this file.
+#ifdef USE_SYCL
+#define SETUP_GTO_KERNEL() \
+    auto item = syclex::this_work_item::get_nd_item<2>(); \
+    int grid_id = item.get_global_id(1); \
+    int bas_id = item.get_group(0);
+#else
+#define SETUP_GTO_KERNEL() \
+    int grid_id = blockIdx.x * blockDim.x + threadIdx.x; \
+    int bas_id = blockIdx.y;
+#endif
+
 template <int ANG> __device__ __forceinline__
 void _cart_gto_ip2(double gto[], double gx[], double gy[], double gz[],
                    double a2, double rx, double ry, double rz)
@@ -216,14 +228,7 @@ __global__
 static void _cart_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                 size_t ngrids, int nao, double *rcut)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int grid_id = item.get_global_id(1);
-    int bas_id = item.get_group(0);
-#else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int bas_id = blockIdx.y;
-#endif
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
@@ -322,14 +327,7 @@ __global__
 static void _cart_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                 size_t ngrids, int nao, double *rcut)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int grid_id = item.get_global_id(1);
-    int bas_id = item.get_group(0);
-#else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int bas_id = blockIdx.y;
-#endif
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
@@ -551,14 +549,7 @@ __global__
 static void _cart_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
                              size_t ngrids, int nao, double *rcut)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int grid_id = item.get_global_id(1);
-    int bas_id = item.get_group(0);
-#else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int bas_id = blockIdx.y;
-#endif
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
@@ -658,14 +649,7 @@ __global__
 static void _sph_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                size_t ngrids, int nao, double *rcut)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int grid_id = item.get_global_id(1);
-    int bas_id = item.get_group(0);
-#else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int bas_id = blockIdx.y;
-#endif
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
@@ -796,14 +780,7 @@ __global__
 static void _sph_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                size_t ngrids, int nao, double *rcut)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int grid_id = item.get_global_id(1);
-    int bas_id = item.get_group(0);
-#else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int bas_id = blockIdx.y;
-#endif
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
@@ -1055,14 +1032,7 @@ __global__
 static void _sph_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
                             size_t ngrids, int nao, double *rcut)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int grid_id = item.get_global_id(1);
-    int bas_id = item.get_group(0);
-#else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int bas_id = blockIdx.y;
-#endif
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
@@ -1203,14 +1173,7 @@ static void _cart_deriv0_strain_tensor_kernel(
         double *out, PBCIntEnvVars envs, double *grids,
         size_t ngrids, int nao, double *rcut)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int grid_id = item.get_global_id(1);
-    int bas_id = item.get_group(0);
-#else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int bas_id = blockIdx.y;
-#endif
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
@@ -1496,14 +1459,7 @@ static void _cart_deriv1_strain_tensor_kernel(
         double *out, PBCIntEnvVars envs, double *grids,
         size_t ngrids, int nao, double *rcut)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int grid_id = item.get_global_id(1);
-    int bas_id = item.get_group(0);
-#else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int bas_id = blockIdx.y;
-#endif
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
@@ -1668,3 +1624,5 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
     return 0;
 }
 }
+
+#undef SETUP_GTO_KERNEL

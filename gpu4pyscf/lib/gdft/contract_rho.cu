@@ -21,6 +21,16 @@
 #include <assert.h>
 #include <cuda_runtime.h>
 #include "contract_rho.cuh"
+// Tree reduction along iy dimension in shared memory buf.
+#define REDUCE_Y(buf, ixy, iy) \
+    for (int _s_ = BLKSIZEY >> 1; _s_ > 0; _s_ >>= 1) { \
+        if ((iy) < _s_) { \
+            (buf)[(ixy)] += (buf)[(ixy) + BLKSIZEX * _s_]; \
+        } \
+        __syncthreads(); \
+    }
+static_assert((BLKSIZEY & (BLKSIZEY - 1)) == 0, "BLKSIZEY must be a power of 2");
+
 // TODO: improve this?
 __global__
 void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, int ngrids, int nao)
@@ -34,14 +44,12 @@ void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, 
     const int threadIdx_y = item.get_local_id(0);
     int ix = item.get_local_id(1);
     int iy = item.get_local_id(0);
-    int blockDim_y = item.get_local_range(0);
 #else
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
     int threadIdx_y = threadIdx.y;
     int ix = threadIdx.x;
     int iy = threadIdx.y;
-    int blockDim_y = blockDim.y;
 #endif
 
     const bool active = grid_id < ngrids;
@@ -56,12 +64,7 @@ void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, 
 
     int ixy = ix + BLKSIZEX * iy;
     buf[ixy] = v;   __syncthreads();
-
-    if (blockDim_y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
-    if (blockDim_y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
-    if (blockDim_y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
-    if (blockDim_y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
-    if (blockDim_y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+    REDUCE_Y(buf, ixy, iy);
 
     if (iy == 0 && active) {
         rho[grid_id] = buf[ix];
@@ -81,14 +84,12 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
     const int threadIdx_y = item.get_local_id(0);
     int ix = item.get_local_id(1);
     int iy = item.get_local_id(0);
-    int blockDim_y = item.get_local_range(0);
 #else
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
     int threadIdx_y = threadIdx.y;
     int ix = threadIdx.x;
     int iy = threadIdx.y;
-    int blockDim_y = blockDim.y;
 #endif
     const bool active = grid_id < ngrids;
     size_t ket_stride = nao * ngrids;
@@ -110,11 +111,7 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
         int ixy = ix + BLKSIZEX * iy;
         for (int i = 0; i < 4; i++){
             buf[ixy] = v[i];   __syncthreads();
-            if (blockDim_y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
-            if (blockDim_y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
-            if (blockDim_y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
-            if (blockDim_y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
-            if (blockDim_y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+            REDUCE_Y(buf, ixy, iy);
 
             if (iy == 0 && active) {
                 rho[grid_id + ia * ngrids + rho_stride * i] = buf[ix];
@@ -134,14 +131,12 @@ void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngri
     const int ix = item.get_local_id(1);
     const int iy = item.get_local_id(0);
     const int threadIdx_y = item.get_local_id(0);
-    const int blockDim_y = item.get_local_range(1);
 #else
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
     int ix = threadIdx.x;
     int iy = threadIdx.y;
     const int threadIdx_y = threadIdx.y;
-    int blockDim_y = blockDim.y;
 #endif
     const bool active = grid_id < ngrids;
 
@@ -175,11 +170,7 @@ void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngri
 
     for (int i = 0; i < 4; i++){
         buf[ixy] = v[i];   __syncthreads();
-        if (blockDim_y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
-        if (blockDim_y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
-        if (blockDim_y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
-        if (blockDim_y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
-        if (blockDim_y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+        REDUCE_Y(buf, ixy, iy);
 
         if (iy == 0 && active) {
             rho[grid_id + ngrids * i] = buf[ix];
@@ -199,14 +190,12 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
     tile_t& buf = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
     const int ix = item.get_local_id(1);
     const int iy = item.get_local_id(0);
-    const int blockDim_y = item.get_group_range(1);
 #else
     int threadIdx_y = threadIdx.y;
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
     int ix = threadIdx.x;
     int iy = threadIdx.y;
-    int blockDim_y = blockDim.y;
 #endif
     const bool active = grid_id < ngrids;
 
@@ -252,11 +241,7 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
 
     for (int i = 0; i < 5; i++){
         buf[ixy] = v[i];   __syncthreads();
-        if (blockDim_y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
-        if (blockDim_y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
-        if (blockDim_y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
-        if (blockDim_y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
-        if (blockDim_y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+        REDUCE_Y(buf, ixy, iy);
 
         if (iy == 0 && active) {
             rho[grid_id + ngrids * i] = buf[ix];

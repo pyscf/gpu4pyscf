@@ -21,6 +21,17 @@
 #include "cart2xyz.cu"
 #include "loader.cu"
 
+// Abstracts CUDA/SYCL 1D thread-id + fold2idx setup. Used 3x in this file.
+#ifdef USE_SYCL
+#define KERNEL_SETUP() \
+    auto item = syclex::this_work_item::get_nd_item<1>(); \
+    int thread_id = item.get_local_id(0); \
+    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
+#else
+#define KERNEL_SETUP() \
+    int thread_id = threadIdx.x;
+#endif
+
 template <int L> __device__ static
 void fill_dm_xyz_ip1(double *cache, double *dm_xyz, double *gx_dmyz, double *xs_exp,
                      int ngridx, int ngrid_span)
@@ -477,13 +488,7 @@ void _dm_xyz_to_dm_sigmax(double *cache, double *dm, double *dm_yzx, int nao, in
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
-#else
-    int thread_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
@@ -526,13 +531,7 @@ void _dm_xyz_to_dm_sigmay(double *cache, double *dm, double *dm_xzy, int nao, in
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
-#else
-    int thread_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
@@ -575,13 +574,7 @@ void _dm_xyz_to_dm_sigmaz(double *cache, double *dm, double *dm_xyz, int nao, in
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
-#else
-    int thread_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
@@ -1041,6 +1034,7 @@ int MG_eval_mat_gga_orth(double *out, double *rho, MGridEnvVars envs,
         return 1;
     }
     cudaFree(batch_head);
+#undef KERNEL_SETUP
 #undef LAUNCH_EVAL_MAT_GGA
     return 0;
 }

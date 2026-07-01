@@ -21,16 +21,21 @@
 #include "cart2xyz.cu"
 #include "loader.cu"
 
+// Abstracts CUDA/SYCL 1D thread-id setup. Used 5x in this file.
+#ifdef USE_SYCL
+#define KERNEL_SETUP() \
+    auto item = syclex::this_work_item::get_nd_item<1>(); \
+    int thread_id = item.get_local_id(0);
+#else
+#define KERNEL_SETUP() \
+    int thread_id = threadIdx.x;
+#endif
+
 template <int L> __device__ static
 void fill_gx_dmyz(double* cache, double *gx_dmyz, double *dm_xyz, double *xs_exp,
                   int ngridx, int ngrid_span, int npairs_this_block)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
-    int thread_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     constexpr int L2 = L + 2;
@@ -191,12 +196,7 @@ void _dm_to_dm_xyz_derivx(double *cache, double *dm_xyz, double *dm, int nao, in
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
-    int thread_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
@@ -313,12 +313,7 @@ void _dm_to_dm_xyz_derivy(double *cache, double *dm_xyz, double *dm, int nao, in
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
-    int thread_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
@@ -435,12 +430,7 @@ void _dm_to_dm_xyz_derivz(double *cache, double *dm_xyz, double *dm, int nao, in
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
-    int thread_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj2 = lj + 2;
@@ -556,12 +546,7 @@ template <int L> __device__ static
 void _eval_tau_orth_kernel(double *cache, double *rho, double *dm, MGridEnvVars envs,
                            MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
-    int thread_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     int sp_id = thread_id % WARP_SIZE;
     int npairs_this_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
     int *bas = envs.bas;
@@ -851,7 +836,7 @@ template <int L> __global__
 void eval_tau_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                           MGridBounds bounds, double *pool, uint32_t *batch_head
 #ifdef USE_SYCL
-                         , sycl::nd_item<1> &item, std::byte* shm_mem
+                          , sycl::nd_item<1> &item, std::byte* shm_mem
 #endif
                           )
 {
@@ -945,6 +930,7 @@ int MG_eval_tau_orth(double *rho, double *dm, MGridEnvVars envs,
         return 1;
     }
     cudaFree(batch_head); // USE_SYCL
+#undef KERNEL_SETUP
 #undef LAUNCH_EVAL_TAU
     return 0;
 }

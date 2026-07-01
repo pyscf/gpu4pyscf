@@ -96,15 +96,7 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    KERNEL_SETUP();
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
@@ -149,15 +141,7 @@ static void GINTwrite_int3c2e_ipip2_direct(GINTEnvVars envs, ERITensor eri,
     double* __restrict__ g0, const double ak2,
     const int ish, const int jsh, const int ksh)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int threadIdx_x = item.get_local_id(1);
-    const int blockDim_x = item.get_local_range(1);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    KERNEL_SETUP_LOCAL();
     int *ao_loc = c_bpcache.ao_loc;
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
@@ -308,15 +292,7 @@ static void GINTfill_int3c2e_ipip2_kernel000(GINTEnvVars envs, ERITensor eri, Ba
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    KERNEL_SETUP();
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }

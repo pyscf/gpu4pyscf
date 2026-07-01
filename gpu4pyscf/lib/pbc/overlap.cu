@@ -35,6 +35,54 @@ typedef struct {
 #define GOUT_WIDTH_IP1  18
 #define REMOTE_THRESHOLD 50
 
+// Abstracts CUDA/SYCL thread-index setup for 1D overlap kernels. Used 10x in this file.
+#ifdef USE_SYCL
+#define KERNEL_SETUP() \
+    int sp_block_id = item.get_group(0); \
+    int thread_id = item.get_local_id(0); \
+    auto thread_block = item.get_group(); \
+    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
+    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
+    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
+    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
+    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
+    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
+    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
+    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
+    double *g = reinterpret_cast<double *>(shm_mem);
+#else
+#define KERNEL_SETUP() \
+    int sp_block_id = blockIdx.x; \
+    int thread_id = threadIdx.x; \
+    __shared__ int shl_pair0, shl_pair1; \
+    __shared__ int li, lj, iprim, jprim; \
+    __shared__ int gout_stride, nsp_per_block; \
+    extern __shared__ double g[];
+#endif
+
+// Abstracts 1D kernel launch for overlap integrals. Used 10x in this file.
+// cudaFuncSetAttribute (where needed) must be placed outside this macro.
+#ifdef USE_SYCL
+#define LAUNCH_OVERLAP_KERNEL(KERNEL, nbatches_, ...) { \
+    auto dev_envs = *envs; \
+    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
+        sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh); \
+        cgh.parallel_for<class KERNEL##_sycl>(sycl::nd_range<1>(nbatches_ * THREADS, THREADS), [=](auto item) { \
+            KERNEL(__VA_ARGS__, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
+        }); \
+    }); \
+}
+#else
+#define LAUNCH_OVERLAP_KERNEL(KERNEL, nbatches_, ...) { \
+    KERNEL<<<nbatches_, THREADS, shm_size>>>(__VA_ARGS__); \
+    cudaError_t err = cudaGetLastError(); \
+    if (err != cudaSuccess) { \
+        fprintf(stderr, "CUDA Error in " #KERNEL ": %s\n", cudaGetErrorString(err)); \
+        return 1; \
+    } \
+}
+#endif
+
 __global__ static
 void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                        int *shl_pair_offsets, int *gout_stride_lookup
@@ -43,29 +91,7 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                        #endif
                        )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -240,29 +266,7 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                       #endif
                       )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -456,29 +460,7 @@ void int1e_r2_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                            #endif
                            )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -674,29 +656,7 @@ void int1e_r4_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                            #endif
                            )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -901,29 +861,7 @@ void int1e_r2_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                                #endif
                                )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1152,29 +1090,7 @@ void int1e_r4_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                                #endif
                                )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1409,29 +1325,7 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                          #endif
                          )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1625,29 +1519,7 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                         #endif
                         )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1872,29 +1744,7 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
                               #endif
                               )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int *bas = envs.bas;
     int cell0_nbas = envs.cell0_nbas;
     int supmol_nbas = cell0_nbas * envs.nimgs;
@@ -2110,29 +1960,7 @@ void kin_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
                              #endif
                              )
 {
-#ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *g = reinterpret_cast<double *>(shm_mem);
-#else
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
-
-    extern __shared__ double g[];
-#endif
+    KERNEL_SETUP();
     int *bas = envs.bas;
     int cell0_nbas = envs.cell0_nbas;
     int supmol_nbas = cell0_nbas * envs.nimgs;
@@ -2450,24 +2278,8 @@ int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
     PBCInt2c2eBounds bounds = {
         bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
     };
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int1e_ovlp_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        int1e_ovlp_kernel(out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-                          item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
-    int1e_ovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(int1e_ovlp_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2479,24 +2291,8 @@ int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
     PBCInt2c2eBounds bounds = {
         bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
     };
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int1e_kin_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        int1e_kin_kernel(out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-                         item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
-    int1e_kin_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(int1e_kin_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2504,25 +2300,9 @@ int PBCint1e_r2_origi(double *out, PBCIntEnvVars *envs, int shm_size,
                       int nbatches_shl_pair, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup)
 {
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int1e_r2_origi_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        int1e_r2_origi_kernel(out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-                              item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
     cudaFuncSetAttribute(int1e_r2_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_r2_origi_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(int1e_r2_origi_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_r2_origi kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2530,25 +2310,9 @@ int PBCint1e_r4_origi(double *out, PBCIntEnvVars *envs, int shm_size,
                       int nbatches_shl_pair, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup)
 {
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int1e_r4_origi_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        int1e_r4_origi_kernel(out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-                              item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
     cudaFuncSetAttribute(int1e_r4_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_r4_origi_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(int1e_r4_origi_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_r4_origi kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2556,25 +2320,9 @@ int PBCint1e_r2_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, int *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup)
 {
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int1e_r2_origi_ip2_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        int1e_r2_origi_ip2_kernel(out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-                                  item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
     cudaFuncSetAttribute(int1e_r2_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_r2_origi_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(int1e_r2_origi_ip2_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_r2_origi_ip2 kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2582,25 +2330,9 @@ int PBCint1e_r4_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, int *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup)
 {
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int1e_r4_origi_ip2_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        int1e_r4_origi_ip2_kernel(out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-                                  item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
     cudaFuncSetAttribute(int1e_r4_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_r4_origi_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(int1e_r4_origi_ip2_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_r4_origi_ip2 kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2612,24 +2344,8 @@ int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
     PBCInt2c2eBounds bounds = {
         bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
     };
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int1e_ipovlp_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        int1e_ipovlp_kernel(out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-                            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
-    int1e_ipovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(int1e_ipovlp_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ipovlp kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2641,24 +2357,8 @@ int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
     PBCInt2c2eBounds bounds = {
         bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
     };
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int1e_ipkin_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        int1e_ipkin_kernel(out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-                           item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
-    int1e_ipkin_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(int1e_ipkin_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ipkin kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2667,25 +2367,9 @@ int PBCovlp_strain_deriv(double *out, double *dm,
                     int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup,
                     int is_gamma_point)
 {
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class ovlp_strain_deriv_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        ovlp_strain_deriv_kernel(out, dm, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, is_gamma_point,
-                                 item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
     cudaFuncSetAttribute(ovlp_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    ovlp_strain_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(ovlp_strain_deriv_kernel, nbatches_shl_pair,
             out, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, is_gamma_point);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in ovlp_strain_deriv kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2694,25 +2378,9 @@ int PBCkin_strain_deriv(double *out, double *dm,
                         int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup,
                         int is_gamma_point)
 {
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class kin_strain_deriv_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
-        kin_strain_deriv_kernel(out, dm, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, is_gamma_point,
-                                item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
     cudaFuncSetAttribute(kin_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    kin_strain_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_OVERLAP_KERNEL(kin_strain_deriv_kernel, nbatches_shl_pair,
             out, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, is_gamma_point);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in kin_strain_deriv kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    #endif
     return 0;
 }
 
@@ -2737,3 +2405,6 @@ void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
     #endif
 }
 }
+
+#undef KERNEL_SETUP
+#undef LAUNCH_OVERLAP_KERNEL

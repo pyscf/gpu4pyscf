@@ -4,6 +4,16 @@
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 
+// Abstracts CUDA/SYCL 2D thread-index setup for int3c2e kernels. Used 5x in this file.
+#ifdef USE_SYCL
+#define KERNEL_SETUP() \
+    auto item = syclex::this_work_item::get_nd_item<2>(); \
+    int st_id = item.get_local_id(1);
+#else
+#define KERNEL_SETUP() \
+    int st_id = threadIdx.x;
+#endif
+
 
 __device__ __forceinline__
 void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
@@ -13,12 +23,7 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
         int nauxbas, int naux, int to_sph, double *rw)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-#else
-    int st_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
@@ -123,12 +128,7 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
         int nauxbas, int naux, int to_sph, double *rw)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-#else
-    int st_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
@@ -244,12 +244,7 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
         int nauxbas, int naux, int to_sph, double *rw)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-#else
-    int st_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
@@ -381,12 +376,7 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
         int nauxbas, int naux, int to_sph, double *rw)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-#else
-    int st_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
@@ -502,12 +492,7 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
         int *ao_pair_loc, int ao_pair_offset, int aux_offset,
         int nauxbas, int naux, int to_sph, double *rw)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int st_id = item.get_local_id(1);
-#else
-    int st_id = threadIdx.x;
-#endif
+    KERNEL_SETUP();
     constexpr int nst_per_block = THREADS;
     int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
@@ -666,3 +651,5 @@ int int3c2e_unrolled(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     }
     return 1;
 }
+
+#undef KERNEL_SETUP

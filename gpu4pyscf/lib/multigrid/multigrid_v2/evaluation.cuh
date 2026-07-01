@@ -29,6 +29,17 @@
 
 #define BLOCK_DIM_XYZ 4
 
+// Abstracts CUDA/SYCL 3D block_size/block_grid configuration. Used 4x in this file.
+#ifdef USE_SYCL
+#define SETUP_EVAL_BLOCK_CONFIG() \
+  sycl::range<3> block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ); \
+  sycl::range<3> block_grid(1, 1, n_contributing_blocks);
+#else
+#define SETUP_EVAL_BLOCK_CONFIG() \
+  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ); \
+  dim3 block_grid(n_contributing_blocks, 1, 1);
+#endif
+
 namespace gpu4pyscf::gpbc::multi_grid {
 
 template <typename KernelType, int n_channels, int i_angular, int j_angular,
@@ -466,13 +477,7 @@ int evaluate_density_driver(
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
   int mesh_c = mesh[2];
-  #ifdef USE_SYCL
-  sycl::range<3> block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
-  sycl::range<3> block_grid(1, 1, n_contributing_blocks);
-  #else
-  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
-  dim3 block_grid(n_contributing_blocks, 1, 1);
-  #endif
+  SETUP_EVAL_BLOCK_CONFIG();
   switch (i_angular * 10 + j_angular) {
     density_kernel_case_macro(0, 0);
     density_kernel_case_macro(0, 1);
@@ -921,13 +926,7 @@ int evaluate_xc_driver(
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
   int mesh_c = mesh[2];
-  #ifdef USE_SYCL
-  sycl::range<3> block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
-  sycl::range<3> block_grid(1, 1, n_contributing_blocks);
-  #else
-  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
-  dim3 block_grid(n_contributing_blocks, 1, 1);
-  #endif
+  SETUP_EVAL_BLOCK_CONFIG();
 
   switch (i_angular * 10 + j_angular) {
     xc_kernel_case_macro(0, 0);
@@ -1435,13 +1434,7 @@ int evaluate_density_tau_driver(
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
   int mesh_c = mesh[2];
-  #ifdef USE_SYCL
-  sycl::range<3> block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
-  sycl::range<3> block_grid(1, 1, n_contributing_blocks);
-  #else
-  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
-  dim3 block_grid(n_contributing_blocks, 1, 1);
-  #endif
+  SETUP_EVAL_BLOCK_CONFIG();
   switch (i_angular * 10 + j_angular) {
     density_tau_kernel_case_macro(0, 0);
     density_tau_kernel_case_macro(0, 1);
@@ -1931,13 +1924,7 @@ int evaluate_xc_with_tau_driver(
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
   int mesh_c = mesh[2];
-  #ifdef USE_SYCL
-  sycl::range<3> block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
-  sycl::range<3> block_grid(1, 1, n_contributing_blocks);
-  #else
-  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
-  dim3 block_grid(n_contributing_blocks, 1, 1);
-  #endif
+  SETUP_EVAL_BLOCK_CONFIG();
 
   switch (i_angular * 10 + j_angular) {
     xc_with_tau_kernel_case_macro(0, 0);
@@ -1977,3 +1964,5 @@ int evaluate_xc_with_tau_driver(
 }
 
 } // namespace gpu4pyscf::gpbc::multi_grid
+
+#undef SETUP_EVAL_BLOCK_CONFIG

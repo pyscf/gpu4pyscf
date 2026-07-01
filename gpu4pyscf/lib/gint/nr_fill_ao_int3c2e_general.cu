@@ -38,6 +38,33 @@
 #include "g3c2e_ipvip1.cu"
 #include "g3c2e_ipip2.cu"
 
+// Abstracts 2D thread/block config (THREADSX/Y swapped between SYCL and CUDA).
+// ntasks_kl drives the Y dimension in this file.  Used 3x.
+#ifdef USE_SYCL
+#define LAUNCH_CONFIG() \
+    sycl::range<2> threads(THREADSY, THREADSX); \
+    sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+#else
+#define LAUNCH_CONFIG() \
+    dim3 threads(THREADSX, THREADSY); \
+    dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
+#endif
+
+// Abstracts 2D kernel launch.  dev_envs/dev_eri/dev_offsets are value copies
+// hoisted above the ifdef so both branches use the same argument names.
+// TAG:    unique SYCL class name (ignored on CUDA)
+// KERNEL: kernel function (with template args if needed)
+// ...:    kernel arguments
+#ifdef USE_SYCL
+#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
+    stream.parallel_for<class TAG>(     \
+        sycl::nd_range<2>(blocks * threads, threads), \
+        [=](auto item) [[intel::kernel_args_restrict]] { KERNEL(__VA_ARGS__); });
+#else
+#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
+    KERNEL<<<blocks, threads, 0, stream>>>(__VA_ARGS__);
+#endif
+
 __host__
 static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
 {
@@ -45,51 +72,29 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-    #ifdef USE_SYCL
     auto dev_envs = *envs;
     auto dev_eri = *eri;
     auto dev_offsets = *offsets;
-    sycl::range<2> threads(THREADSY, THREADSX);
-    sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
-    switch (envs->nrys_roots) {
-        case 1: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel1000(dev_envs, dev_eri, dev_offsets); }); break;
-        case 2: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel<2, GSIZE2_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 3: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel<3, GSIZE3_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 4: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel<4, GSIZE4_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 5: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel<5, GSIZE5_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 6: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel<6, GSIZE6_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 7: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel<7, GSIZE7_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 8: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel_8_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel<8, GSIZE8_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 9: stream.parallel_for<class GINTfill_int3c2e_ip1_kernel_9_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1_kernel<9, GSIZE9_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+    LAUNCH_CONFIG();
+    switch (nrys_roots) {
+        case 1: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel1000_sycl, GINTfill_int3c2e_ip1_kernel1000, dev_envs, dev_eri, dev_offsets) break;
+        case 2: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_2_sycl, GINTfill_int3c2e_ip1_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 3: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_3_sycl, GINTfill_int3c2e_ip1_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 4: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_4_sycl, GINTfill_int3c2e_ip1_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 5: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_5_sycl, GINTfill_int3c2e_ip1_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 6: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_6_sycl, GINTfill_int3c2e_ip1_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 7: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_7_sycl, GINTfill_int3c2e_ip1_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 8: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_8_sycl, GINTfill_int3c2e_ip1_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 9: LAUNCH_KERNEL(GINTfill_int3c2e_ip1_kernel_9_sycl, GINTfill_int3c2e_ip1_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }
-    #else
-    dim3 threads(THREADSX, THREADSY);
-    dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
-
-    switch (envs->nrys_roots) {
-        case 1: GINTfill_int3c2e_ip1_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 2: GINTfill_int3c2e_ip1_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 3: GINTfill_int3c2e_ip1_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 4: GINTfill_int3c2e_ip1_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 5: GINTfill_int3c2e_ip1_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 6: GINTfill_int3c2e_ip1_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 7: GINTfill_int3c2e_ip1_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 8: GINTfill_int3c2e_ip1_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 9: GINTfill_int3c2e_ip1_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        default:
-            fprintf(stderr, "rys roots %d\n", nrys_roots);
-        return 1;
-    }
-
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GINTfill_int3c2e_ip1_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -100,50 +105,29 @@ static int GINTfill_int3c2e_ip2_tasks(ERITensor *eri, BasisProdOffsets *offsets,
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-    #ifdef USE_SYCL
     auto dev_envs = *envs;
     auto dev_eri = *eri;
     auto dev_offsets = *offsets;
-    sycl::range<2> threads(THREADSY, THREADSX);
-    sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
-    switch (envs->nrys_roots) {
-        case 1: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel0010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel0010(dev_envs, dev_eri, dev_offsets); }); break;
-        case 2: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel<2, GSIZE2_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 3: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel<3, GSIZE3_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 4: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel<4, GSIZE4_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 5: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel<5, GSIZE5_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 6: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel<6, GSIZE6_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 7: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel<7, GSIZE7_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 8: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel_8_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel<8, GSIZE8_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-        case 9: stream.parallel_for<class GINTfill_int3c2e_ip2_kernel_9_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip2_kernel<9, GSIZE9_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+    LAUNCH_CONFIG();
+    switch (nrys_roots) {
+        case 1: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel0010_sycl, GINTfill_int3c2e_ip2_kernel0010, dev_envs, dev_eri, dev_offsets) break;
+        case 2: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_2_sycl, GINTfill_int3c2e_ip2_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 3: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_3_sycl, GINTfill_int3c2e_ip2_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 4: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_4_sycl, GINTfill_int3c2e_ip2_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 5: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_5_sycl, GINTfill_int3c2e_ip2_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 6: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_6_sycl, GINTfill_int3c2e_ip2_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 7: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_7_sycl, GINTfill_int3c2e_ip2_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 8: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_8_sycl, GINTfill_int3c2e_ip2_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+        case 9: LAUNCH_KERNEL(GINTfill_int3c2e_ip2_kernel_9_sycl, GINTfill_int3c2e_ip2_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }
-    #else
-    dim3 threads(THREADSX, THREADSY);
-    dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
-    switch (envs->nrys_roots) {
-        case 1: GINTfill_int3c2e_ip2_kernel0010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 2: GINTfill_int3c2e_ip2_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 3: GINTfill_int3c2e_ip2_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 4: GINTfill_int3c2e_ip2_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 5: GINTfill_int3c2e_ip2_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 6: GINTfill_int3c2e_ip2_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 7: GINTfill_int3c2e_ip2_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 8: GINTfill_int3c2e_ip2_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 9: GINTfill_int3c2e_ip2_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        default:
-            fprintf(stderr, "rys roots %d\n", nrys_roots);
-        return 1;
-    }
-
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GINTfill_int3c2e_ip2_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -154,154 +138,79 @@ static int GINTfill_int3c2e_ipip_tasks(ERITensor *eri, BasisProdOffsets *offsets
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-    #ifdef USE_SYCL
     auto dev_envs = *envs;
     auto dev_eri = *eri;
     auto dev_offsets = *offsets;
-    sycl::range<2> threads(THREADSY, THREADSX);
-    sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
-    switch (envs->nrys_roots) {
+    LAUNCH_CONFIG();
+    switch (nrys_roots) {
         case 2:
             switch (ip_type){
-                case 200: stream.parallel_for<class GINTfill_int3c2e_ipip1_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip1_kernel<2, GSIZE2_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 101: stream.parallel_for<class GINTfill_int3c2e_ip1ip2_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1ip2_kernel<2, GSIZE2_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 110: stream.parallel_for<class GINTfill_int3c2e_ipvip1_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipvip1_kernel<2, GSIZE2_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 002: stream.parallel_for<class GINTfill_int3c2e_ipip2_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip2_kernel<2, GSIZE2_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_2_sycl, GINTfill_int3c2e_ipip1_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_2_sycl, GINTfill_int3c2e_ip1ip2_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_2_sycl, GINTfill_int3c2e_ipvip1_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_2_sycl, GINTfill_int3c2e_ipip2_kernel<2, GSIZE2_INT3C>, dev_envs, dev_eri, dev_offsets) break;
             }
             break;
         case 3:
             switch (ip_type){
-                case 200: stream.parallel_for<class GINTfill_int3c2e_ipip1_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip1_kernel<3, GSIZE3_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 101: stream.parallel_for<class GINTfill_int3c2e_ip1ip2_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1ip2_kernel<3, GSIZE3_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 110: stream.parallel_for<class GINTfill_int3c2e_ipvip1_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipvip1_kernel<3, GSIZE3_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 002: stream.parallel_for<class GINTfill_int3c2e_ipip2_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip2_kernel<3, GSIZE3_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_3_sycl, GINTfill_int3c2e_ipip1_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_3_sycl, GINTfill_int3c2e_ip1ip2_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_3_sycl, GINTfill_int3c2e_ipvip1_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_3_sycl, GINTfill_int3c2e_ipip2_kernel<3, GSIZE3_INT3C>, dev_envs, dev_eri, dev_offsets) break;
             }
             break;
         case 4:
             switch (ip_type){
-                case 200: stream.parallel_for<class GINTfill_int3c2e_ipip1_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip1_kernel<4, GSIZE4_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 101: stream.parallel_for<class GINTfill_int3c2e_ip1ip2_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1ip2_kernel<4, GSIZE4_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 110: stream.parallel_for<class GINTfill_int3c2e_ipvip1_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipvip1_kernel<4, GSIZE4_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 002: stream.parallel_for<class GINTfill_int3c2e_ipip2_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip2_kernel<4, GSIZE4_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_4_sycl, GINTfill_int3c2e_ipip1_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_4_sycl, GINTfill_int3c2e_ip1ip2_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_4_sycl, GINTfill_int3c2e_ipvip1_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_4_sycl, GINTfill_int3c2e_ipip2_kernel<4, GSIZE4_INT3C>, dev_envs, dev_eri, dev_offsets) break;
             }
             break;
         case 5:
             switch (ip_type){
-                case 200: stream.parallel_for<class GINTfill_int3c2e_ipip1_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip1_kernel<5, GSIZE5_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 101: stream.parallel_for<class GINTfill_int3c2e_ip1ip2_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1ip2_kernel<5, GSIZE5_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 110: stream.parallel_for<class GINTfill_int3c2e_ipvip1_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipvip1_kernel<5, GSIZE5_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 002: stream.parallel_for<class GINTfill_int3c2e_ipip2_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip2_kernel<5, GSIZE5_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_5_sycl, GINTfill_int3c2e_ipip1_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_5_sycl, GINTfill_int3c2e_ip1ip2_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_5_sycl, GINTfill_int3c2e_ipvip1_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_5_sycl, GINTfill_int3c2e_ipip2_kernel<5, GSIZE5_INT3C>, dev_envs, dev_eri, dev_offsets) break;
             }
             break;
         case 6:
             switch (ip_type){
-                case 200: stream.parallel_for<class GINTfill_int3c2e_ipip1_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip1_kernel<6, GSIZE6_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 101: stream.parallel_for<class GINTfill_int3c2e_ip1ip2_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1ip2_kernel<6, GSIZE6_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 110: stream.parallel_for<class GINTfill_int3c2e_ipvip1_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipvip1_kernel<6, GSIZE6_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 002: stream.parallel_for<class GINTfill_int3c2e_ipip2_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip2_kernel<6, GSIZE6_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_6_sycl, GINTfill_int3c2e_ipip1_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_6_sycl, GINTfill_int3c2e_ip1ip2_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_6_sycl, GINTfill_int3c2e_ipvip1_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_6_sycl, GINTfill_int3c2e_ipip2_kernel<6, GSIZE6_INT3C>, dev_envs, dev_eri, dev_offsets) break;
             }
             break;
         case 7:
             switch (ip_type){
-                case 200: stream.parallel_for<class GINTfill_int3c2e_ipip1_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip1_kernel<7, GSIZE7_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 101: stream.parallel_for<class GINTfill_int3c2e_ip1ip2_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1ip2_kernel<7, GSIZE7_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 110: stream.parallel_for<class GINTfill_int3c2e_ipvip1_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipvip1_kernel<7, GSIZE7_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 002: stream.parallel_for<class GINTfill_int3c2e_ipip2_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip2_kernel<7, GSIZE7_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_7_sycl, GINTfill_int3c2e_ipip1_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_7_sycl, GINTfill_int3c2e_ip1ip2_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_7_sycl, GINTfill_int3c2e_ipvip1_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_7_sycl, GINTfill_int3c2e_ipip2_kernel<7, GSIZE7_INT3C>, dev_envs, dev_eri, dev_offsets) break;
             }
             break;
         case 8:
             switch (ip_type){
-                case 200: stream.parallel_for<class GINTfill_int3c2e_ipip1_kernel_8_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip1_kernel<8, GSIZE8_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 101: stream.parallel_for<class GINTfill_int3c2e_ip1ip2_kernel_8_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1ip2_kernel<8, GSIZE8_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 110: stream.parallel_for<class GINTfill_int3c2e_ipvip1_kernel_8_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipvip1_kernel<8, GSIZE8_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 002: stream.parallel_for<class GINTfill_int3c2e_ipip2_kernel_8_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip2_kernel<8, GSIZE8_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_8_sycl, GINTfill_int3c2e_ipip1_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_8_sycl, GINTfill_int3c2e_ip1ip2_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_8_sycl, GINTfill_int3c2e_ipvip1_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_8_sycl, GINTfill_int3c2e_ipip2_kernel<8, GSIZE8_INT3C>, dev_envs, dev_eri, dev_offsets) break;
             }
             break;
-        case 8:
+        case 9:  // was duplicate case 8: — fixed
             switch (ip_type){
-                case 200: stream.parallel_for<class GINTfill_int3c2e_ipip1_kernel_9_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip1_kernel<9, GSIZE9_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 101: stream.parallel_for<class GINTfill_int3c2e_ip1ip2_kernel_9_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ip1ip2_kernel<9, GSIZE9_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 110: stream.parallel_for<class GINTfill_int3c2e_ipvip1_kernel_9_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipvip1_kernel<9, GSIZE9_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
-                case 002: stream.parallel_for<class GINTfill_int3c2e_ipip2_kernel_9_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { GINTfill_int3c2e_ipip2_kernel<9, GSIZE9_INT3C> (dev_envs, dev_eri, dev_offsets); }); break;
+                case 200: LAUNCH_KERNEL(GINTfill_int3c2e_ipip1_kernel_9_sycl, GINTfill_int3c2e_ipip1_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 101: LAUNCH_KERNEL(GINTfill_int3c2e_ip1ip2_kernel_9_sycl, GINTfill_int3c2e_ip1ip2_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 110: LAUNCH_KERNEL(GINTfill_int3c2e_ipvip1_kernel_9_sycl, GINTfill_int3c2e_ipvip1_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
+                case 002: LAUNCH_KERNEL(GINTfill_int3c2e_ipip2_kernel_9_sycl, GINTfill_int3c2e_ipip2_kernel<9, GSIZE9_INT3C>, dev_envs, dev_eri, dev_offsets) break;
             }
             break;
         default:
             fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }
-    #else // USE_SYCL
-    dim3 threads(THREADSX, THREADSY);
-    dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
-    switch (envs->nrys_roots) {
-        case 2:
-            switch (ip_type){
-                case 200: GINTfill_int3c2e_ipip1_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 101: GINTfill_int3c2e_ip1ip2_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 110: GINTfill_int3c2e_ipvip1_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 002: GINTfill_int3c2e_ipip2_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            }
-            break;
-        case 3:
-            switch (ip_type){
-                case 200: GINTfill_int3c2e_ipip1_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 101: GINTfill_int3c2e_ip1ip2_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 110: GINTfill_int3c2e_ipvip1_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 002: GINTfill_int3c2e_ipip2_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            }
-            break;
-        case 4:
-            switch (ip_type){
-                case 200: GINTfill_int3c2e_ipip1_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 101: GINTfill_int3c2e_ip1ip2_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 110: GINTfill_int3c2e_ipvip1_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 002: GINTfill_int3c2e_ipip2_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            }
-            break;
-        case 5:
-            switch (ip_type){
-                case 200: GINTfill_int3c2e_ipip1_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 101: GINTfill_int3c2e_ip1ip2_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 110: GINTfill_int3c2e_ipvip1_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 002: GINTfill_int3c2e_ipip2_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            }
-            break;
-        case 6:
-            switch (ip_type){
-                case 200: GINTfill_int3c2e_ipip1_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 101: GINTfill_int3c2e_ip1ip2_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 110: GINTfill_int3c2e_ipvip1_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 002: GINTfill_int3c2e_ipip2_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            }
-            break;
-        case 7:
-            switch (ip_type){
-                case 200: GINTfill_int3c2e_ipip1_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 101: GINTfill_int3c2e_ip1ip2_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 110: GINTfill_int3c2e_ipvip1_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 002: GINTfill_int3c2e_ipip2_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            }
-            break;
-        case 8:
-            switch (ip_type){
-                case 200: GINTfill_int3c2e_ipip1_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 101: GINTfill_int3c2e_ip1ip2_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 110: GINTfill_int3c2e_ipvip1_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 002: GINTfill_int3c2e_ipip2_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            }
-            break;
-        case 8:
-            switch (ip_type){
-                case 200: GINTfill_int3c2e_ipip1_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 101: GINTfill_int3c2e_ip1ip2_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 110: GINTfill_int3c2e_ipvip1_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-                case 002: GINTfill_int3c2e_ipip2_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-            }
-            break;
-        default:
-            fprintf(stderr, "rys roots %d\n", nrys_roots);
-        return 1;
-    }
-
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         size_t free, total, GB;
@@ -315,7 +224,6 @@ static int GINTfill_int3c2e_ipip_tasks(ERITensor *eri, BasisProdOffsets *offsets
         fprintf(stderr, "----------------- end info -----------------------------------");
         return 1;
     }
-#endif // USE_SYCL
     return 0;
 }
 
@@ -530,3 +438,6 @@ int GINTfill_int3c2e_general(cudaStream_t stream, BasisProdCache *bpcache, doubl
 }
 
 }
+
+#undef LAUNCH_CONFIG
+#undef LAUNCH_KERNEL
