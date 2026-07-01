@@ -240,7 +240,8 @@ class GHF(hf.SCF):
         mo_occ[e_idx[:nocc]] = 1
         
         if nocc < nmo:
-            homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
+            homo = mo_energy[e_idx[nocc-1]].item()
+            lumo = mo_energy[e_idx[nocc]].item()
             gap = (lumo - homo) * HARTREE2EV
             self.scf_summary['gap'] = gap
             if self.verbose >= logger.INFO:
@@ -276,7 +277,7 @@ class GHF(hf.SCF):
         ssz += (nocc_a-nocc_b)**2 * .25
         tmp  = saa - sbb
         ssz -= cp.einsum('ij,ji->', tmp, tmp).real * .25
-        ss = float(ssxy.get()) + ssz
+        ss = ssxy.item() + ssz
         s = (ss+.25)**.5 - .5
         return ss, s*2+1
 

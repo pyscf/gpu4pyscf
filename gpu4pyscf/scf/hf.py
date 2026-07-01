@@ -86,7 +86,8 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     nocc = mf.mol.nelectron // 2
 
     if nocc < nmo:
-        homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
+        homo = mo_energy[e_idx[nocc-1]].item()
+        lumo = mo_energy[e_idx[nocc]].item()
         gap = (lumo - homo) * HARTREE2EV
         mf.scf_summary['gap'] = gap
         if mf.verbose >= logger.INFO:
@@ -127,11 +128,11 @@ def _trace_ecoul(vj, ddm, dm_last=None, vhf_last=None):
             # Ecoul = 1/2 (dm_last+ddm)*J[dm_last+ddm]
             # = 1/2 (dm_last*J[dm_last] + 2 dm_last*J[ddm] + ddm*J[ddm])
             # = Ecoul_last + dm_last*J[ddm] + 1/2 ddm*J[ddm]
-            ecoul = float(cupy.einsum('ij,ji->', dm_last, vj).real.get())
-            ecoul += float(cupy.einsum('ij,ji->', ddm, vj).real.get()) * .5
+            ecoul = cupy.einsum('ij,ji->', dm_last, vj).real.item()
+            ecoul += cupy.einsum('ij,ji->', ddm, vj).real.item() * .5
             ecoul += vhf_last.ecoul
     elif ddm.ndim == 2:
-        ecoul = float(cupy.einsum('ij,ji->', ddm, vj).real.get()) * .5
+        ecoul = cupy.einsum('ij,ji->', ddm, vj).real.item() * .5
     return ecoul
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
@@ -203,8 +204,8 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = mf.get_veff(mf.mol, dm)
-    e1 = float(cupy.einsum('ij,ji->', h1e, dm).real.get())
-    e2 = float(cupy.einsum('ij,ji->', vhf, dm).real.get()) * .5
+    e1 = cupy.einsum('ij,ji->', h1e, dm).real.item()
+    e2 = cupy.einsum('ij,ji->', vhf, dm).real.item() * .5
     ecoul = vhf.ecoul.real
     exx = e2 - ecoul
     mf.scf_summary['e1'] = e1
@@ -370,7 +371,7 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
             e_tot += e_disp
     mf.scf_summary['nuc'] = nuc.real
     if isinstance(e_tot, cupy.ndarray):
-        e_tot = e_tot.get()
+        e_tot = e_tot.item()
     return e_tot
 
 def scf(mf, dm0=None, **kwargs):
@@ -624,7 +625,7 @@ def _cast_rhf_init_guess(fn):
         dm = fn(mf, mol)
         assert dm.ndim == 2
         if hasattr(dm, 'mo_coeff'):
-            idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
+            idx = cupy.nonzero(dm.mo_occ > 0)[0]
             mo_coeff = asarray(dm.mo_coeff[:,idx])
             mo_occ = asarray(dm.mo_occ[idx])
             dm = tag_array(asarray(dm), mo_coeff=mo_coeff, mo_occ=mo_occ)
