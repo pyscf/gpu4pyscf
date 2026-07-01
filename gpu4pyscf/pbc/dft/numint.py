@@ -827,7 +827,14 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
 
     nr_rks = nr_rks
     nr_uks = nr_uks
-    get_vxc = nr_vxc = numint_cpu.KNumInt.nr_vxc
+
+    def get_vxc(self, cell, grids, xc_code, dm_kpts, spin=0, hermi=1,
+                kpts=None, kpts_band=None, verbose=None):
+        fn = self.nr_rks if spin == 0 else self.nr_uks
+        return fn(cell, grids, xc_code, dm_kpts, spin, hermi=hermi,
+                  kpts=kpts, kpts_band=kpts_band, verbose=verbose)
+    nr_vxc = get_vxc
+
     eval_rho1 = NotImplemented
     eval_rho2 = NotImplemented
 

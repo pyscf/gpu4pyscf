@@ -57,6 +57,7 @@ from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF, ft_ao
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
+from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv, MultiGridNumInt
 from gpu4pyscf.pbc.grad import rks as rks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -94,7 +95,7 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
 
 def _get_coulG_strain_derivatives(cell, Gv, omega=None):
     '''derivatives of 4pi/G^2'''
-    remove_G0 = is_zero(Gv[0])
+    remove_G0 = is_zero(cp.asnumpy(Gv[0]))
     Gv = asarray(Gv)
     G2 = cp.einsum('gx,gx->g', Gv, Gv)
     if remove_G0:
@@ -185,27 +186,34 @@ def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
     mf = mf_grad.base
     with_rsjk = mf.rsjk
     ni = mf._numint
+    is_hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
-    if with_rsjk is not None:
-        assert isinstance(with_rsjk, PBCJKMatrixOpt)
-        if with_rsjk.supmol is None:
-            with_rsjk.build()
-        # TODO: with_nuc should be disabled for all-electron calculations
-        sigma = get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=with_nuc)
-        if not ni.libxc.is_hybrid_xc(mf.xc):
-            return sigma
-        j_factor = 1
-        omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
-        sigma += with_rsjk._get_ejk_sr_strain_deriv(
-            dm, exxdiv=mf.exxdiv, omega=omega,
-            j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
-        sigma += with_rsjk._get_ejk_lr_strain_deriv(
-            dm, exxdiv=mf.exxdiv, omega=omega,
-            j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+    j_factor = 1 if with_j else 0
+    if is_hybrid and with_rsjk is not None:
+        with_j = False
+
+    # TODO: with_nuc should be disabled for all-electron calculations
+    if isinstance(ni, MultiGridNumInt):
+        sigma = _rks_exc_strain_deriv(ni, mf.xc, dm[None], None, with_j, with_nuc)
+    elif isinstance(ni, NumInt):
+        sigma = get_vxc(mf_grad, cell, dm, with_j, with_nuc)
     else:
-        if not ni.libxc.is_hybrid_xc(mf.xc):
-            return get_vxc(mf_grad, cell, dm, with_j, with_nuc)
-        raise NotImplementedError(f'Stress tensor for KHF for {mf.with_df}')
+        raise NotImplementedError(f'RKS stress tensor for {mf.xc}')
+
+    if is_hybrid:
+        if with_rsjk is not None:
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if with_rsjk.supmol is None:
+                with_rsjk.build()
+            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+            sigma += with_rsjk._get_ejk_sr_strain_deriv(
+                dm, exxdiv=mf.exxdiv, omega=omega,
+                j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+            sigma += with_rsjk._get_ejk_lr_strain_deriv(
+                dm, exxdiv=mf.exxdiv, omega=omega,
+                j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+        else:
+            raise NotImplementedError(f'RKS stress tensor for {mf.xc}')
     return sigma
 
 def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
