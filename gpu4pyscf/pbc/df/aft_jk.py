@@ -636,8 +636,8 @@ def _generate_shl_pairs(ft_opt):
     for (i, j), bas_ij in ft_opt.bas_ij_cache.items():
         p0, p1 = p1, p1 + len(bas_ij)
         img_counts_ij = img_counts[p0:p1]
-        bas_ij = np.repeat(bas_ij.get(), img_counts_ij)
-        bas_ij_idx.append(cp.asarray(bas_ij, dtype=np.int32))
+        bas_ij = cp.repeat(bas_ij, cp.asarray(img_counts_ij))
+        bas_ij_idx.append(bas_ij.astype(np.int32))
         bas_ij_img_idx.append(img_idx[img_offsets[p0]:img_offsets[p1]])
         sp0, sp1 = sp1, sp1 + len(bas_ij)
         shl_pair_offsets.append(cp.arange(sp0, sp1, 128, dtype=np.int32))

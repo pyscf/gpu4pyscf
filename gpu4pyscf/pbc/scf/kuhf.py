@@ -228,7 +228,7 @@ def _cast_mol_init_guess(fn):
         assert dm.ndim == 3
         nkpts = len(kpts)
         if hasattr(dm, 'mo_coeff'):
-            idx = np.where(cp.asnumpy(dm.mo_occ.sum(axis=0)) > 0)[0]
+            idx = cp.where(dm.mo_occ.sum(axis=0) > 0)[0]
             mo_coeff = cp.repeat(asarray(dm.mo_coeff[:,None,:,idx]), nkpts, axis=1)
             mo_occ = cp.repeat(asarray(dm.mo_occ[:,None,idx]), nkpts, axis=1)
             dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
