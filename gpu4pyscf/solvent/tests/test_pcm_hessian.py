@@ -546,6 +546,69 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
         assert np.max(np.abs(test_hessian - ref_hessian)) < 2e-6
 
+    def test_dSdx_dot_q_lowmem(self):
+        mol = gto.M(
+            atom = """
+                Na     0.000000    0.000000    0.000000
+                Na     0.000000    2.845847    2.845847
+                Na     2.845847    0.000000    2.845847
+                Na     2.845847    2.845847    0.000000
+                Cl     2.845847    0.000000    0.000000
+                Cl     2.845847    2.845847    2.845847
+                Cl     0.000000    0.000000    2.845847
+                Cl     0.000000    2.845847    0.000000
+                Na     5.691694    0.000000    0.000000
+                Na     5.691694    5.691694    0.000000
+                Na     5.691694    0.000000    5.691694
+                Na     0.000000    5.691694    0.000000
+                Na     0.000000    5.691694    5.691694
+                Na     0.000000    0.000000    5.691694
+                Na     5.691694    5.691694    5.691694
+                Na     5.691694    2.845847    2.845847
+                Na     2.845847    5.691694    2.845847
+                Na     2.845847    2.845847    5.691694
+                Cl     2.845847    5.691694    0.000000
+                Cl     2.845847    0.000000    5.691694
+                Cl     2.845847    5.691694    5.691694
+                Cl     5.691694    0.000000    2.845847
+                Cl     5.691694    5.691694    2.845847
+                Cl     0.000000    5.691694    2.845847
+                Cl     5.691694    2.845847    0.000000
+                Cl     5.691694    2.845847    5.691694
+                Cl     0.000000    2.845847    5.691694
+            """,
+            charge = 1,
+            basis = "6-31g",
+            verbose = 0,
+        )
+        mf = dft.rks.RKS(mol, xc="PBE")
+        mf = mf.PCM()
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.lebedev_order = 29
+
+        mf.conv_tol = 1e0
+        mf.kernel()
+
+        pcmobj = mf.with_solvent
+
+        atmlst = range(mol.natm - 1)
+        gridslice = pcmobj.surface['gslice_by_atom']
+        q_sym = pcmobj._intermediates['q_sym']
+
+        from gpu4pyscf.solvent.grad.pcm import get_dF_dA, get_dD_dS, get_dSii
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False, surface_discretization_method = pcmobj.surface_discretization_method)
+        dSii = get_dSii(pcmobj.surface, dF)
+        del dF
+        _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
+
+        from gpu4pyscf.solvent.hessian.pcm import get_dS_dot_q, get_dS_dot_q_lowmem
+        ref_dSdx_dot_q = get_dS_dot_q(dS, dSii, q_sym, atmlst, gridslice)
+        del dS
+
+        test_dSdx_dot_q = get_dS_dot_q_lowmem(dSii, pcmobj.surface, q_sym, atmlst, gridslice, stream = None)
+
+        assert np.max(np.abs(test_dSdx_dot_q - ref_dSdx_dot_q)) < 1e-15
+
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
     unittest.main()
