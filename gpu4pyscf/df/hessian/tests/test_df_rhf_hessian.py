@@ -289,7 +289,7 @@ class KnownValues(unittest.TestCase):
         mol2 = mol1 + mol1
         np.random.seed(8)
         nao = mol2.nao
-        nocc = 5
+        nocc = 20
         mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
         mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
@@ -297,7 +297,7 @@ class KnownValues(unittest.TestCase):
 
         ref = rhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
 
-        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*3*mol2.natm*16)):
+        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*3*mol2.natm*20)):
             veff = rhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
             assert abs(ref - veff).max() < 1e-9
 

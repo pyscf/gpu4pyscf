@@ -224,7 +224,7 @@ class KnownValues(unittest.TestCase):
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm_rhf = tag_array(dm[0]+dm[1], mo_coeff=mo_coeff[0], mo_occ=mo_occ[0]*2)
         ref = rhf_fast._jk_energy_per_atom(opt, dm_rhf, j_factor=1, k_factor=1)
-        with lib.temporary_env(uhf_fast, get_avail_mem=(lambda **kw: 2000000)):
+        with lib.temporary_env(uhf_fast, get_avail_mem=(lambda **kw: 5000000)):
             ejk = uhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
         assert abs(ejk.sum(axis=(0,1))).max().get() < 1e-9
         assert abs(ejk-ref).max().get() < 1e-8
@@ -329,7 +329,7 @@ class KnownValues(unittest.TestCase):
         opt = int3c2e.Int3c2eOpt(mol1, auxmol).build()
         ref = rhf_fast._get_veff(opt, mo_coeff[0], mo_occ[0]*2, j_factor=1, k_factor=1)
 
-        with lib.temporary_env(uhf_fast, get_avail_mem=(lambda **kw: nao**2*3*mol1.natm*24)):
+        with lib.temporary_env(uhf_fast, get_avail_mem=(lambda **kw: nao**2*3*mol1.natm*20)):
             veff = uhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
             assert abs(ref - veff[0]).max() < 1e-9
             assert abs(ref - veff[1]).max() < 1e-9
