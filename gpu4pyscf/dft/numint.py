@@ -502,7 +502,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
             exc, vxc = ni.eval_xc_eff(xc_code, rho_tot, deriv=1, xctype=xctype, spin=0)[:2]
             vxc = cupy.asarray(vxc, order='C')
             exc = cupy.asarray(exc, order='C')
-            excsum = float(cupy.dot(den, exc).get())
+            excsum = cupy.dot(den, exc).item()
             wv = vxc
             wv *= weights
             if xctype == 'GGA':
@@ -1695,7 +1695,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     den = rho[0] * grids.weights
     nelec = den.sum()
-    excsum = float(cupy.dot(den, exc).get())
+    excsum = cupy.dot(den, exc).item()
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
     t1 = log.timer_debug1('transform vxc', *t1)
 
@@ -2544,7 +2544,7 @@ class _GDFTOpt:
         # Padding zeros to transformation coefficients
         if nao > coeff.shape[0]:
             paddings = nao - coeff.shape[0]
-            coeff = np.vstack([coeff, np.zeros((paddings, coeff.shape[1]))])
+            coeff = cupy.vstack([coeff, cupy.zeros((paddings, coeff.shape[1]))])
         coeff = coeff[self._ao_idx]
         return coeff
 

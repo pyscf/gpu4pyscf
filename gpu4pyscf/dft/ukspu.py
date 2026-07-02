@@ -78,7 +78,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
                 logger.info(ks, "spin %s\n%s\n%s", s, lab_string, P)
             logger.info(ks, "-" * 79)
 
-    E_U = E_U.real.get()[()]
+    E_U = E_U.real.item()
     if E_U < 0.0 and all(np.asarray(U_val) > 0):
         logger.warn(ks, "E_U (%s) is negative...", E_U)
     vxc.E_U = E_U
@@ -92,7 +92,7 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = mf.get_veff(mf.mol, dm)
-    e1 = float(cp.einsum('ij,nji->', h1e, dm).real.get())
+    e1 = cp.einsum('ij,nji->', h1e, dm).real.item()
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
     E_U = vhf.E_U
@@ -215,7 +215,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
             C_on_site = [c.dot(mf.mo_coeff[0]), c.dot(mf.mo_coeff[1])]
             rdm1_lo = mf.make_rdm1(C_on_site, mf.mo_occ)
             local_occ += rdm1_lo[0].trace() + rdm1_lo[1].trace()
-        final_occupancies.append(local_occ.get())
+        final_occupancies.append(local_occ.item())
 
         # The first iteration of SCF
         fock = mf.get_fock(dm=bare_dm)
@@ -225,7 +225,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
             C_on_site = [c.dot(mo[0]), c.dot(mo[1])]
             rdm1_lo = mf.make_rdm1(C_on_site, mf.mo_occ)
             local_occ += rdm1_lo[0].trace() + rdm1_lo[1].trace()
-        bare_occupancies.append(local_occ.get())
+        bare_occupancies.append(local_occ.item())
         log.info('alpha=%f bare_occ=%g final_occ=%g',
                  alpha, bare_occupancies[-1], final_occupancies[-1])
 

@@ -243,8 +243,7 @@ class _DFHF:
         if isinstance(self, rohf.ROHF):
             if getattr(dm, 'mo_coeff', None) is not None:
                 mo_coeff = cupy.repeat(dm.mo_coeff[None], 2, axis=0)
-                mo_occ = cupy.asarray([dm.mo_occ>0, dm.mo_occ==2],
-                                      dtype=numpy.double)
+                mo_occ = cupy.stack([dm.mo_occ>0, dm.mo_occ==2]).astype(numpy.double)
                 if dm.ndim == 2:  # RHF DM
                     dm = cupy.repeat(dm[None]*.5, 2, axis=0)
                 dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
@@ -286,8 +285,8 @@ class _DFHF:
                         vklr *= (alpha - hyb)
                         vk += vklr
                     vxc -= vk
-                    exc -= float(cupy.einsum('sij,sji->', dm, vk).real.get()) * .5
-                ecoul = float(cupy.einsum('sij,ji->', dm, vj).real.get()) * .5
+                    exc -= cupy.einsum('sij,sji->', dm, vk).real.item() * .5
+                ecoul = cupy.einsum('sij,ji->', dm, vj).real.item() * .5
 
             elif isinstance(self, hf.RHF):
                 rks.initialize_grids(self, mol, dm)
@@ -318,8 +317,8 @@ class _DFHF:
                         vklr *= (alpha - hyb)
                         vk += vklr
                     vxc -= vk * .5
-                    exc -= float(cupy.einsum('ij,ji->', dm, vk).real.get()) * .25
-                ecoul = float(cupy.einsum('ij,ji->', dm, vj).real.get()) * .5
+                    exc -= cupy.einsum('ij,ji->', dm, vk).real.item() * .25
+                ecoul = cupy.einsum('ij,ji->', dm, vj).real.item() * .5
             elif isinstance(self, ghf.GHF):
                 ground_state = isinstance(dm, cupy.ndarray) and dm.ndim == 2
                 
@@ -394,17 +393,17 @@ class _DFHF:
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             vj = vj[0] + vj[1]
             vhf = vj - vk
-            ecoul = float(cp.einsum('sij,ji->', dm, vj).real.get()) * .5
+            ecoul = cp.einsum('sij,ji->', dm, vj).real.item() * .5
             return tag_array(vhf, ecoul=ecoul)
         elif isinstance(self, hf.RHF):
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             vhf = vj - vk * .5
-            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
+            ecoul = cp.einsum('ij,ji->', dm, vj).real.item() * .5
             return tag_array(vhf, ecoul=ecoul)
         elif isinstance(self, ghf.GHF): # (New) GHF branch
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             vhf = vj - vk
-            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
+            ecoul = cp.einsum('ij,ji->', dm, vj).real.item() * .5
             return tag_array(vhf, ecoul=ecoul)
         else:
             raise NotImplementedError("DF only supports R/U/RO/G HF.")

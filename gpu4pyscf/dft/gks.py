@@ -121,7 +121,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if vj_last is not None:
             vhf += asarray(vhf_last.vj)
         vxc += vhf
-        exc += float(cp.einsum('ij,ji->', dm_orig, vhf).real.get()) * .5
+        exc += cp.einsum('ij,ji->', dm_orig, vhf).real.item() * .5
         if ecoul is not None:
             exc -= ecoul
     t0 = log.timer('veff', *t0)

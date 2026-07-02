@@ -1455,7 +1455,7 @@ def get_d2h1e(mol, dm0):
     aoslices = mol.aoslice_by_atom()
     ao2atom = get_ao2atom(intopt, aoslices)
     d2h1e = contract('aix,ib->abx', d2h1e_offdiag, ao2atom)
-    d2h1e[np.diag_indices(natm), :] += d2h1e_diag
+    d2h1e[cupy.diag_indices(natm), :] += d2h1e_diag
     return 2.0 * contract('abx,a->xab', d2h1e, charges)
 
 def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=None, omega=None, stream=None):
@@ -1561,7 +1561,7 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
             int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
         int3c[:, j0:j1, i0:i1] = int3c_slice
     if aosym:
-        row, col = np.tril_indices(nao)
+        row, col = cupy.tril_indices(nao)
         int3c[:, row, col] = int3c[:, col, row]
     int3c = intopt.unsort_orbitals(int3c, aux_axis=[0], axis=[1,2])
     return int3c.transpose([2,1,0])
