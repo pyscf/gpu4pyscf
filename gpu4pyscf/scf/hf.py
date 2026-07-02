@@ -86,8 +86,7 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     nocc = mf.mol.nelectron // 2
 
     if nocc < nmo:
-        homo = mo_energy[e_idx[nocc-1]].item()
-        lumo = mo_energy[e_idx[nocc]].item()
+        homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
         gap = (lumo - homo) * HARTREE2EV
         mf.scf_summary['gap'] = gap
         if mf.verbose >= logger.INFO:
@@ -128,11 +127,11 @@ def _trace_ecoul(vj, ddm, dm_last=None, vhf_last=None):
             # Ecoul = 1/2 (dm_last+ddm)*J[dm_last+ddm]
             # = 1/2 (dm_last*J[dm_last] + 2 dm_last*J[ddm] + ddm*J[ddm])
             # = Ecoul_last + dm_last*J[ddm] + 1/2 ddm*J[ddm]
-            ecoul = cupy.einsum('ij,ji->', dm_last, vj).real.item()
-            ecoul += cupy.einsum('ij,ji->', ddm, vj).real.item() * .5
+            ecoul = float(cupy.einsum('ij,ji->', dm_last, vj).real.get())
+            ecoul += float(cupy.einsum('ij,ji->', ddm, vj).real.get()) * .5
             ecoul += vhf_last.ecoul
     elif ddm.ndim == 2:
-        ecoul = cupy.einsum('ij,ji->', ddm, vj).real.item() * .5
+        ecoul = float(cupy.einsum('ij,ji->', ddm, vj).real.get()) * .5
     return ecoul
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
@@ -371,7 +370,7 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
             e_tot += e_disp
     mf.scf_summary['nuc'] = nuc.real
     if isinstance(e_tot, cupy.ndarray):
-        e_tot = e_tot.item()
+        e_tot = e_tot.get()
     return e_tot
 
 def scf(mf, dm0=None, **kwargs):

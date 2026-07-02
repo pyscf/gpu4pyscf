@@ -215,11 +215,11 @@ def _trace_ecoul(vj, ddm, dm_last, vhf_last):
     ecoul = None
     if dm_last is not None:
         if hasattr(vhf_last, 'ecoul') and ddm.ndim == 3:
-            ecoul = cupy.einsum('nij,ji->', dm_last, vj).real.item()
-            ecoul += cupy.einsum('nij,ji->', ddm, vj).real.item() * .5
+            ecoul = float(cupy.einsum('nij,ji->', dm_last, vj).real.get())
+            ecoul += float(cupy.einsum('nij,ji->', ddm, vj).real.get()) * .5
             ecoul += vhf_last.ecoul
     elif ddm.ndim == 3:
-        ecoul = cupy.einsum('nij,ji->', ddm, vj).real.item() * .5
+        ecoul = float(cupy.einsum('nij,ji->', ddm, vj).real.get()) * .5
     return ecoul
 
 class UHF(hf.SCF):
