@@ -50,7 +50,7 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
         floats = scaled_kpts[:,i]
         uniq_floats_idx = np.unique((floats/precision+.5).astype(int), return_index=True)[1]
         uniq_floats = floats[uniq_floats_idx]
-        fracs = [Fraction(x).limit_denominator(int(kmesh[i])) for x in uniq_floats]
+        fracs = [Fraction(x).limit_denominator(int(kmesh[i])+10) for x in uniq_floats]
         denominators = np.unique([x.denominator for x in fracs])
         common_denominator = reduce(np.lcm, denominators)
         fs = [(x * common_denominator).numerator for x in fracs]

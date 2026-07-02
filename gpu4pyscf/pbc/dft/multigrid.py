@@ -1462,7 +1462,13 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     get_rho = get_rho
     nr_rks = nr_rks
     nr_uks = nr_uks
-    get_vxc = nr_vxc = NotImplemented #numint_cpu.KNumInt.nr_vxc
+
+    def get_vxc(self, cell, grids, xc_code, dm_kpts, spin=0, hermi=1,
+                kpts=None, kpts_band=None, with_j=False, verbose=None):
+        fn = self.nr_rks if spin == 0 else self.nr_uks
+        return fn(cell, grids, xc_code, dm_kpts, spin, hermi=hermi,
+                  kpts=kpts, kpts_band=kpts_band, with_j=with_j, verbose=verbose)
+    nr_vxc = get_vxc
 
     eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
