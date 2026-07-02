@@ -1561,7 +1561,12 @@ def get_int3c2e(mol, auxmol=None, auxbasis='weigend+etb', direct_scf_tol=1e-13, 
             int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
         int3c[:, j0:j1, i0:i1] = int3c_slice
     if aosym:
-        row, col = cupy.tril_indices(nao)
+        # Symmetrize: fill lower triangle from the upper. Indices are built on
+        # device (cupy) to avoid an implicit host->device copy when indexing the
+        # GPU tensor, and kept int32 (nao << 2^31, no overflow) to halve their
+        # footprint. Note: the dominant cost here is the RHS gather int3c[:,col,row],
+        # not the index arrays.
+        row, col = (idx.astype(cupy.int32) for idx in cupy.tril_indices(nao))
         int3c[:, row, col] = int3c[:, col, row]
     int3c = intopt.unsort_orbitals(int3c, aux_axis=[0], axis=[1,2])
     return int3c.transpose([2,1,0])

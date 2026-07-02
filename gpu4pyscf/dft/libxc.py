@@ -210,7 +210,7 @@ class XCfun:
         assert self.on_gpu
 
         if isinstance(inp, cupy.ndarray):
-            inp = {"rho": inp.astype(cupy.double, copy=False)}
+            inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}
         elif isinstance(inp, dict):
             inp = {k: cupy.asarray(v, dtype=cupy.double) for k, v in inp.items()}
         else:

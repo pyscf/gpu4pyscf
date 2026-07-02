@@ -128,7 +128,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if vj_last is not None:
             vhf += asarray(vhf_last.vj)
         vxc += vhf
-        exc += cupy.einsum('ij,ji', dm_orig, vhf).real.item() * .5
+        exc += float(cupy.einsum('ij,ji', dm_orig, vhf).real.get()) * .5
         if ecoul is not None:
             exc -= ecoul
         log.timer_debug1('vk', *cput2)
@@ -160,7 +160,7 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     if h1e is None: h1e = ks.get_hcore()
     if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = ks.get_veff(ks.mol, dm)
-    e1 = cupy.einsum('ij,ji->', h1e, dm).real.item()
+    e1 = float(cupy.einsum('ij,ji->', h1e, dm).real.get())
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
     e2 = ecoul + exc

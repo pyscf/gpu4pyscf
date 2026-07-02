@@ -161,7 +161,7 @@ class Int3c2eOpt:
 
         if ao_pair_batch_size is None:
             pair_splits = [0, len(shl_pair_offsets)-1]
-            ao_pair_offsets = [0, ao_pair_loc[-1].item()]
+            ao_pair_offsets = [0, ao_pair_loc[-1].get()]
         else:
             ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
             pair_splits = splits_by_blocksize(ao_pair_offsets, ao_pair_batch_size)
@@ -354,11 +354,11 @@ class Int3c2eOpt:
         uniq_l = mol.uniq_l_ctr[:,0]
         bas_ij_idx = mol.aggregate_shl_pairs(self.bas_ij_cache, 1000000000)[0]
         cart_pair_loc = get_ao_pair_loc(uniq_l, self.bas_ij_cache, cart=True)
-        assert compressed_eri3c.shape[0] == cart_pair_loc[-1].item(), \
+        assert compressed_eri3c.shape[0] == cart_pair_loc[-1].get(), \
                 'compressed_eri3c might be already transformed into spherical GTOs'
 
         sph_pair_loc = get_ao_pair_loc(uniq_l, self.bas_ij_cache, cart=False)
-        nao_pair = sph_pair_loc[-1].item()
+        nao_pair = sph_pair_loc[-1].get()
         naux = compressed_eri3c.shape[1]
         out = cp.zeros((nao_pair, naux))
         int3c2e_envs = self.int3c2e_envs

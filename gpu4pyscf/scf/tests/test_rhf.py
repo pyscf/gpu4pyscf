@@ -282,14 +282,13 @@ class KnownValues(unittest.TestCase):
         mf.chkfile = ftmp.name
         mf.kernel()
         dm_stored = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
-        dm_stored = cupy.asnumpy(dm_stored)
 
         mf_copy = scf.RHF(mol)
         mf_copy.chkfile = ftmp.name
         dm_loaded = mf_copy.init_guess_by_chkfile()
         # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
-        assert np.allclose(dm_stored, dm_loaded, atol = 1e-14) 
-    
+        assert cupy.allclose(dm_stored, dm_loaded, atol = 1e-14)
+
     def test_init_guess(self):
         atom = [
             ('X-O', (0.000000, 0.000000, 0.000000)),

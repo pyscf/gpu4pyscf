@@ -285,8 +285,8 @@ class _DFHF:
                         vklr *= (alpha - hyb)
                         vk += vklr
                     vxc -= vk
-                    exc -= cupy.einsum('sij,sji->', dm, vk).real.item() * .5
-                ecoul = cupy.einsum('sij,ji->', dm, vj).real.item() * .5
+                    exc -= float(cupy.einsum('sij,sji->', dm, vk).real.get()) * .5
+                ecoul = float(cupy.einsum('sij,ji->', dm, vj).real.get()) * .5
 
             elif isinstance(self, hf.RHF):
                 rks.initialize_grids(self, mol, dm)
@@ -317,8 +317,8 @@ class _DFHF:
                         vklr *= (alpha - hyb)
                         vk += vklr
                     vxc -= vk * .5
-                    exc -= cupy.einsum('ij,ji->', dm, vk).real.item() * .25
-                ecoul = cupy.einsum('ij,ji->', dm, vj).real.item() * .5
+                    exc -= float(cupy.einsum('ij,ji->', dm, vk).real.get()) * .25
+                ecoul = float(cupy.einsum('ij,ji->', dm, vj).real.get()) * .5
             elif isinstance(self, ghf.GHF):
                 ground_state = isinstance(dm, cupy.ndarray) and dm.ndim == 2
                 
@@ -393,17 +393,17 @@ class _DFHF:
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             vj = vj[0] + vj[1]
             vhf = vj - vk
-            ecoul = cp.einsum('sij,ji->', dm, vj).real.item() * .5
+            ecoul = float(cp.einsum('sij,ji->', dm, vj).real.get()) * .5
             return tag_array(vhf, ecoul=ecoul)
         elif isinstance(self, hf.RHF):
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             vhf = vj - vk * .5
-            ecoul = cp.einsum('ij,ji->', dm, vj).real.item() * .5
+            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
             return tag_array(vhf, ecoul=ecoul)
         elif isinstance(self, ghf.GHF): # (New) GHF branch
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             vhf = vj - vk
-            ecoul = cp.einsum('ij,ji->', dm, vj).real.item() * .5
+            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
             return tag_array(vhf, ecoul=ecoul)
         else:
             raise NotImplementedError("DF only supports R/U/RO/G HF.")
