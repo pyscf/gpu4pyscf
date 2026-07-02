@@ -391,14 +391,25 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
 
     dqdx = get_dqsym_dx(pcmobj, dm, range(mol.natm), intopt_derivative)
 
-    d2e_from_dIdq = numpy.zeros([mol.natm, mol.natm, 3, 3])
+    rho_q_dorbital = int1e_grids_ip1(mol, grid_coords, dm = dm,
+                                     direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                                     intopt=intopt_derivative)
+    rho_q_dq = int1e_grids_ip2(mol, grid_coords, dm = dm,
+                               direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                               intopt=intopt_derivative)
+
+    d2e_from_dIdq = cupy.zeros([mol.natm, mol.natm, 3, 3])
     for i_atom in range(mol.natm):
         for i_xyz in range(3):
-            d2e_from_dIdq[i_atom, :, i_xyz, :] = grad_qv(pcmobj, dm, q_sym = dqdx[i_atom, i_xyz, :])
+            dq  = rho_q_dq * dqdx[i_atom, i_xyz, :]
+            dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
+            dvj = 2.0 * cupy.einsum("Adq,q->Ad", rho_q_dorbital, dqdx[i_atom, i_xyz, :])
 
-    d2e_from_d2I = d2e_from_d2I.get()
+            d2e_from_dIdq[i_atom, :, i_xyz, :] = dq + dvj
+
     d2e = d2e_from_d2I + d2e_from_dIdq
     d2e *= -1
+    d2e = d2e.get()
 
     t1 = log.timer_debug1('solvent hessian d(dI/dx * q)/dx contribution', *t1)
     return d2e
