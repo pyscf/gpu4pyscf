@@ -109,7 +109,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     t0 = log.timer_debug1('contract dm', *t0)
 
     metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, mol.omega > 0)
-    dm_oo = cp.einsum('uv,unij->vnij', metric_v, j3c_oo)
+    dm_oo = contract('uv,unij->vnij', metric_v, j3c_oo)
     dm_oo /= metric_w[:,None,None,None]
     dm_oo = contract('uv,vnij->unij', metric_v, dm_oo, out=j3c_oo)
     j3c_oo = None
@@ -258,8 +258,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
         dm_aux1 = cp.einsum('xr,t->xrt', auxvec_ipauxp, auxvec)
     dm_aux1 = contract('xrnij,snij->xrs', j3c_oo1p, dm_oo, -k_factor,
                        beta=j_factor, out=dm_aux1)
-    tmp = cp.einsum('xrt,st->xrs', j2c_10v_w, metric_v)
-    w10_100 = cp.einsum('xrt,ytr->rtxy', tmp, dm_aux1)
+    tmp = contract('xrt,st->xrs', j2c_10v_w, metric_v)
+    w10_100 = contract('xrt,ytr->rtxy', tmp, dm_aux1)
     h_aux -= w10_100
     h_aux -= w10_100.transpose(1,0,3,2) # swap the asymetric di,dj indices
     dm_aux1 = j2c_10 = w10_100 = tmp = None
@@ -457,7 +457,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
         word_avail -= vhf_atm_ao.size
 
     # size for caching a tensor with the shape (:,nao_pair) or (:,nocc*nao)
-    pair_size_max = max(nao_pair, nocc*nao)
+    pair_size_max = max(nao_pair, 2*nocc*nao)
     _unit = 6*pair_size_max
     largest_shell_nao = int((aux_loc[1:] - aux_loc[:-1]).max())
     batch_size = int(word_avail*.8 / _unit)
@@ -515,7 +515,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, mol.omega > 0)
 
     nw = metric_v.shape[1]
-    work = cp.empty((nw, 2, nocc, nao))
+    work = cp.empty((nw, 2, 8, nao))
     for i0, i1 in lib.prange(0, nocc, 8):
         tmp = ndarray((nw, 2, i1-i0, nao), buffer=work)
         contract('rs,rniq->sniq', metric_v, j3c_00[:,:,i0:i1], out=tmp)
@@ -524,7 +524,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     dm_3c = j3c_00
     j3c_00 = tmp = work = metric_v = metric_w = None
 
-    dm_oo = cp.einsum('rniq,nqj->rnij', dm_3c, orbo)
+    dm_oo = contract('rniq,nqj->rnij', dm_3c, orbo)
     if j_factor != 0:
         auxvec = cp.einsum('rnii->r', dm_oo)
         auxvec_by_atm = auxvec[aux_idx]
@@ -546,8 +546,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     for i, (p0, p1) in enumerate(aux_slices):
         if mem_sufficient:
             dm_3c_atm = cp.take(dm_3c, aux_idx[p0:p1], axis=0, out=buf1[:p1-p0])
-            tmp = ndarray((3,p1-p0,2,nocc,nao), buffer=buf)
-            j3c_1 = contract('xrs,sniq->xrniq', j2c_10[:,p0:p1], dm_3c, out=tmp)
+            j3c_1 = ndarray((3,p1-p0,2,nocc,nao), buffer=buf)
+            contract('xrs,sniq->xrniq', j2c_10[:,p0:p1], dm_3c, out=j3c_1)
             contract('xrnip,rniq->xnpq', j3c_1, dm_3c_atm, -k_factor, beta=1, out=vhf_atm_ao[i])
         else:
             dm_3c_atm = cp.take(dm_3c, aux_idx[p0:p1], axis=0, out=buf1[:p1-p0])
@@ -556,8 +556,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
             tmp = contract('xrs,snij->xrnij', j2c_10[:,p0:p1], dm_oo, out=tmp)
             contract('rniq,xrnij->xnjq', dm_3c_atm, tmp, -k_factor, beta=1, out=vhf_atm[i])
 
-            tmp = ndarray((3,p1-p0,2,nocc,nao), buffer=buf)
-            j3c_1 = contract('xrs,sniq->xrniq', j2c_10[:,p0:p1], dm_3c, out=tmp)
+            j3c_1 = ndarray((3,p1-p0,2,nocc,nao), buffer=buf)
+            contract('xrs,sniq->xrniq', j2c_10[:,p0:p1], dm_3c, out=j3c_1)
             contract('xrniq,rnij->xnjq', j3c_1, dm_oo_atm, -k_factor, beta=1, out=vhf_atm[i])
 
         if j_factor != 0:
@@ -578,7 +578,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
         kern='fill_int3c2e_ipaux')[0]
 
     work = cp.empty(max(
-        (nao**2 + 3*pair_size_max + 6*nocc*nao) * batch_size,
+        nao**2*blksize + (3*pair_size_max + 6*nocc*nao) * batch_size,
         6*nocc*nao*batch_size * 2,
         6*pair_size_max*batch_size +
         (nao*nao + (nao+nocc)*2 * max(nao_on_atom, nocc)) * blksize))
@@ -640,8 +640,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
                                  -k_factor, beta=1, out=vhf_atm[i,x])
 
                 if j_factor != 0:
-                    contract('pqr,nr->npq', j3c, auxvec_tmp, j_factor, beta=1,
-                             out=vhf1[x])
+                    contract('pqr,nr->npq', j3c, auxvec_tmp, j_factor, beta=1, out=vhf1[x])
                     for i, (p0, p1) in enumerate(aoslices[:,2:]):
                         auxvec1 = cp.einsum('pqr,pq->r', j3c[p0:p1], dm[p0:p1])
                         contract('rniq,r->niq', dm_3c[_aux0:_aux1], auxvec1,

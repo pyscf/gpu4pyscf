@@ -101,7 +101,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     t0 = log.timer_debug1('contract dm', *t0)
 
     metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, mol.omega > 0)
-    dm_oo = cp.einsum('uv,uij->vij', metric_v, j3c_oo)
+    dm_oo = contract('uv,uij->vij', metric_v, j3c_oo)
     dm_oo /= metric_w[:,None,None]
     dm_oo = contract('uv,vij->uij', metric_v, dm_oo, out=j3c_oo)
     j3c_oo = None
@@ -246,8 +246,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
         dm_aux1 = cp.einsum('xr,t->xrt', auxvec_ipauxp, auxvec)
     dm_aux1 = contract('xrij,sij->xrs', j3c_oo1p, dm_oo, -.5*k_factor,
                        beta=j_factor, out=dm_aux1)
-    tmp = cp.einsum('xrt,st->xrs', j2c_10v_w, metric_v)
-    w10_100 = cp.einsum('xrt,ytr->rtxy', tmp, dm_aux1)
+    tmp = contract('xrt,st->xrs', j2c_10v_w, metric_v)
+    w10_100 = contract('xrt,ytr->rtxy', tmp, dm_aux1)
     h_aux -= w10_100
     h_aux -= w10_100.transpose(1,0,3,2) # swap the asymetric di,dj indices
     dm_aux1 = j2c_10 = w10_100 = tmp = None
@@ -561,8 +561,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
                              out=auxvec_ipaux)
     # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
     dm_aux1 = cp.einsum('xr,t->xrt', auxvec_ipauxp, auxvec)
-    tmp = cp.einsum('xrt,st->xrs', j2c_10v_w, metric_v)
-    w10_100 = cp.einsum('xrt,ytr->rtxy', tmp, dm_aux1)
+    tmp = contract('xrt,st->xrs', j2c_10v_w, metric_v)
+    w10_100 = contract('xrt,ytr->rtxy', tmp, dm_aux1)
     h_aux -= w10_100
     h_aux -= w10_100.transpose(1,0,3,2) # swap the asymetric di,dj indices
     dm_aux1 = j2c_10v = j2c_10v_w = w10_100 = tmp = None
@@ -586,9 +586,9 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
 
     # (10|0)(0|0)(0|01) + (10|0)(0|0)(0|10)
     # (01|0)(0|0)(0|01) + (01|0)(0|0)(0|10)
-    tmp = cp.einsum('xpr,rs->xps', auxvec_100_atm, metric_v)
+    tmp = contract('xpr,rs->xps', auxvec_100_atm, metric_v)
     tmp /= metric_w
-    auxvec_100v_atm = cp.einsum('xps,rs->xpr', tmp, metric_v)
+    auxvec_100v_atm = contract('xps,rs->xpr', tmp, metric_v)
     ej_ao = contract('xpr,yqr->pqxy', auxvec_100v_atm, auxvec_100_atm)
     # scale ej_ao: *2 for swaping (di/dX j|dk/dY l) -> (di/dY j|dk/dX l)
     # *.5 from Coulomb operator
@@ -828,7 +828,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, mol.omega > 0)
 
     nw = metric_v.shape[1]
-    work = cp.empty((nw, nocc, nao))
+    work = cp.empty((nw, 16, nao))
     for i0, i1 in lib.prange(0, nocc, 16):
         tmp = ndarray((nw, i1-i0, nao), buffer=work)
         contract('uv,uij->vij', metric_v, j3c_00[:,i0:i1], out=tmp)
@@ -837,7 +837,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
     dm_3c = j3c_00
     j3c_00 = tmp = work = metric_v = metric_w = None
 
-    dm_oo = cp.einsum('riq,qj->rij', dm_3c, orbo)
+    dm_oo = contract('riq,qj->rij', dm_3c, orbo)
     if j_factor != 0:
         auxvec = cp.einsum('rii->r', dm_oo)
         auxvec_by_atm = auxvec[aux_idx]
