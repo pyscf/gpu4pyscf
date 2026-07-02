@@ -138,7 +138,6 @@ class KnownValues(unittest.TestCase):
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    @pytest.mark.slow
     def test_gga_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
@@ -148,7 +147,7 @@ class KnownValues(unittest.TestCase):
                      spin=1,
                      pseudo='gth-pade', a=a, unit='Bohr', verbose=0)
         xc = 'pbe'
-        mf = cell.UKS(xc=xc).to_gpu().run()
+        mf = cell.UKS(xc=xc).to_gpu().multigrid_numint().run()
         mf_grad = uks.Gradients(mf)
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
@@ -159,7 +158,6 @@ class KnownValues(unittest.TestCase):
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    @pytest.mark.slow
     def test_mgga_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
@@ -168,7 +166,7 @@ class KnownValues(unittest.TestCase):
                      basis=[[0, [1.5, 1]], [1, [.8, 1]]],
                      a=a, unit='Bohr', verbose=0)
         xc = 'rscan'
-        mf = cell.UKS(xc=xc).to_gpu().run()
+        mf = cell.UKS(xc=xc).to_gpu().multigrid_numint().run()
         mf_grad = uks.Gradients(mf)
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
