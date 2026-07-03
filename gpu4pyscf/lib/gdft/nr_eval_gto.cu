@@ -25,22 +25,24 @@
 #include "contract_rho.cuh"
 
 // Abstracts 2D kernel launch/setup syntax. blocks/threads must be in scope.
-// SYCL creates a value copy of *gto_envs for lambda capture; CUDA dereferences
-// inline. TAG is a unique SYCL class name (ignored on CUDA).
+// The envs argument is supplied by the macro: SYCL makes an on-host value copy
+// of *gto_envs for lambda capture; CUDA passes *gto_envs directly. The SYCL
+// kernel name is generated inline per source line (unique in this TU).
+#define GDFT_CAT_(a, b) a##b
+#define GDFT_CAT(a, b)  GDFT_CAT_(a, b)
 #ifdef USE_SYCL
-#define LAUNCH_KERNEL(TAG, KERNEL, ...) do { \
-    auto _envs_ = *gto_envs; \
-    stream.parallel_for<class TAG>( \
+#define LAUNCH_KERNEL(KERNEL, ...) { \
+    auto dev_gto_envs = *gto_envs; \
+    stream.parallel_for<class GDFT_CAT(gdft_kernel_L, __LINE__)>( \
         sycl::nd_range<2>(blocks * threads, threads), \
-        [=](auto item) [[intel::kernel_args_restrict]] { KERNEL(__VA_ARGS__, _envs_); }); \
-} while(0);
+        [=](auto item) [[intel::kernel_args_restrict]] { KERNEL(__VA_ARGS__, dev_gto_envs); }); }
 
 #define KERNEL_PROLOGUE_BAS_GRID()                                    \
     auto item       = syclex::this_work_item::get_nd_item<2>();       \
     const int grid_id = item.get_global_id(1);                        \
     const int bas_id  = item.get_group(0);
 #else
-#define LAUNCH_KERNEL(TAG, KERNEL, ...) \
+#define LAUNCH_KERNEL(KERNEL, ...) \
     KERNEL<<<blocks, threads, 0, stream>>>(__VA_ARGS__, *gto_envs);
 
 #define KERNEL_PROLOGUE_BAS_GRID()                                    \
@@ -1849,135 +1851,135 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
         case 0:
             if (cart == 1) {
                 switch (l) {
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv00, _cart_kernel_deriv0<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv01, _cart_kernel_deriv0<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(cart_kernel_deriv02, _cart_kernel_deriv0<2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(cart_kernel_deriv03, _cart_kernel_deriv0<3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(cart_kernel_deriv04, _cart_kernel_deriv0<4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(cart_kernel_deriv05, _cart_kernel_deriv0<5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(cart_kernel_deriv06, _cart_kernel_deriv0<6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(cart_kernel_deriv07, _cart_kernel_deriv0<7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(cart_kernel_deriv08, _cart_kernel_deriv0<8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv0<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv0<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv0<2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv0<3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv0<4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv0<5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv0<6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv0<7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv0<8>, offsets) break;
                 default:fprintf(stderr, "l = %d not supported\n", l); }
             } else {
                 switch (l) {
-                case 0: LAUNCH_KERNEL(_cart_kernel_deriv00, _cart_kernel_deriv0<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(_cart_kernel_deriv01, _cart_kernel_deriv0<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(_sph_kernel_deriv0_2, _sph_kernel_deriv0 <2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(_sph_kernel_deriv0_3, _sph_kernel_deriv0 <3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(_sph_kernel_deriv0_4, _sph_kernel_deriv0 <4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(_sph_kernel_deriv0_5, _sph_kernel_deriv0 <5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(_sph_kernel_deriv0_6, _sph_kernel_deriv0 <6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(_sph_kernel_deriv0_7, _sph_kernel_deriv0 <7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(_sph_kernel_deriv0_8, _sph_kernel_deriv0 <8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv0<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv0<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv0 <2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv0 <3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv0 <4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv0 <5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv0 <6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv0 <7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv0 <8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); }
             }
             break;
         case 1:
             if (cart == 1) {
                 switch (l) {
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv10, _cart_kernel_deriv1<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv11, _cart_kernel_deriv1<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(cart_kernel_deriv12, _cart_kernel_deriv1<2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(cart_kernel_deriv13, _cart_kernel_deriv1<3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(cart_kernel_deriv14, _cart_kernel_deriv1<4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(cart_kernel_deriv15, _cart_kernel_deriv1<5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(cart_kernel_deriv16, _cart_kernel_deriv1<6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(cart_kernel_deriv17, _cart_kernel_deriv1<7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(cart_kernel_deriv18, _cart_kernel_deriv1<8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv1<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv1<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv1<2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv1<3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv1<4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv1<5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv1<6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv1<7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv1<8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); }
             } else {
                 switch (l) {
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv1s0, _cart_kernel_deriv1<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv1s1, _cart_kernel_deriv1<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(sph_kernel_deriv12,   _sph_kernel_deriv1 <2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(sph_kernel_deriv13,   _sph_kernel_deriv1 <3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(sph_kernel_deriv14,   _sph_kernel_deriv1 <4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(sph_kernel_deriv15,   _sph_kernel_deriv1 <5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(sph_kernel_deriv16,   _sph_kernel_deriv1 <6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(sph_kernel_deriv17,   _sph_kernel_deriv1 <7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(sph_kernel_deriv18,   _sph_kernel_deriv1 <8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv1<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv1<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv1 <2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv1 <3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv1 <4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv1 <5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv1 <6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv1 <7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv1 <8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); }
             }
             break;
         case 2:
             if (cart == 1){
                 switch (l) {
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv20, _cart_kernel_deriv2<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv21, _cart_kernel_deriv2<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(cart_kernel_deriv22, _cart_kernel_deriv2<2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(cart_kernel_deriv23, _cart_kernel_deriv2<3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(cart_kernel_deriv24, _cart_kernel_deriv2<4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(cart_kernel_deriv25, _cart_kernel_deriv2<5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(cart_kernel_deriv26, _cart_kernel_deriv2<6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(cart_kernel_deriv27, _cart_kernel_deriv2<7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(cart_kernel_deriv28, _cart_kernel_deriv2<8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv2<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv2<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv2<2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv2<3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv2<4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv2<5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv2<6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv2<7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv2<8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break;}
             } else {
                 switch(l){
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv2s0, _cart_kernel_deriv2<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv2s1, _cart_kernel_deriv2<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(sph_kernel_deriv22,   _sph_kernel_deriv2<2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(sph_kernel_deriv23,   _sph_kernel_deriv2<3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(sph_kernel_deriv24,   _sph_kernel_deriv2<4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(sph_kernel_deriv25,   _sph_kernel_deriv2<5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(sph_kernel_deriv26,   _sph_kernel_deriv2<6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(sph_kernel_deriv27,   _sph_kernel_deriv2<7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(sph_kernel_deriv28,   _sph_kernel_deriv2<8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv2<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv2<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv2<2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv2<3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv2<4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv2<5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv2<6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv2<7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv2<8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
                 }
             break;
         case 3:
             if (cart == 1){
                 switch (l) {
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv30, _cart_kernel_deriv3<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv31, _cart_kernel_deriv3<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(cart_kernel_deriv32, _cart_kernel_deriv3<2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(cart_kernel_deriv33, _cart_kernel_deriv3<3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(cart_kernel_deriv34, _cart_kernel_deriv3<4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(cart_kernel_deriv35, _cart_kernel_deriv3<5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(cart_kernel_deriv36, _cart_kernel_deriv3<6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(cart_kernel_deriv37, _cart_kernel_deriv3<7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(cart_kernel_deriv38, _cart_kernel_deriv3<8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv3<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv3<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv3<2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv3<3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv3<4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv3<5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv3<6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv3<7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv3<8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
             } else {
                 switch(l){
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv3s0, _cart_kernel_deriv3<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv3s1, _cart_kernel_deriv3<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(sph_kernel_deriv32,   _sph_kernel_deriv3<2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(sph_kernel_deriv33,   _sph_kernel_deriv3<3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(sph_kernel_deriv34,   _sph_kernel_deriv3<4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(sph_kernel_deriv35,   _sph_kernel_deriv3<5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(sph_kernel_deriv36,   _sph_kernel_deriv3<6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(sph_kernel_deriv37,   _sph_kernel_deriv3<7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(sph_kernel_deriv38,   _sph_kernel_deriv3<8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv3<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv3<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv3<2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv3<3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv3<4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv3<5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv3<6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv3<7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv3<8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
                 }
             break;
         case 4:
             if (cart == 1){
                 switch (l) {
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv40, _cart_kernel_deriv4<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv41, _cart_kernel_deriv4<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(cart_kernel_deriv42, _cart_kernel_deriv4<2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(cart_kernel_deriv43, _cart_kernel_deriv4<3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(cart_kernel_deriv44, _cart_kernel_deriv4<4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(cart_kernel_deriv45, _cart_kernel_deriv4<5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(cart_kernel_deriv46, _cart_kernel_deriv4<6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(cart_kernel_deriv47, _cart_kernel_deriv4<7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(cart_kernel_deriv48, _cart_kernel_deriv4<8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv4<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv4<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv4<2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv4<3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv4<4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv4<5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv4<6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv4<7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv4<8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
             } else {
                 switch(l){
-                case 0: LAUNCH_KERNEL(cart_kernel_deriv4s0, _cart_kernel_deriv4<0>, offsets, gto_envs) break;
-                case 1: LAUNCH_KERNEL(cart_kernel_deriv4s1, _cart_kernel_deriv4<1>, offsets, gto_envs) break;
-                case 2: LAUNCH_KERNEL(sph_kernel_deriv42,   _sph_kernel_deriv4<2>, offsets, gto_envs) break;
-                case 3: LAUNCH_KERNEL(sph_kernel_deriv43,   _sph_kernel_deriv4<3>, offsets, gto_envs) break;
-                case 4: LAUNCH_KERNEL(sph_kernel_deriv44,   _sph_kernel_deriv4<4>, offsets, gto_envs) break;
-                case 5: LAUNCH_KERNEL(sph_kernel_deriv45,   _sph_kernel_deriv4<5>, offsets, gto_envs) break;
-                case 6: LAUNCH_KERNEL(sph_kernel_deriv46,   _sph_kernel_deriv4<6>, offsets, gto_envs) break;
-                case 7: LAUNCH_KERNEL(sph_kernel_deriv47,   _sph_kernel_deriv4<7>, offsets, gto_envs) break;
-                case 8: LAUNCH_KERNEL(sph_kernel_deriv48,   _sph_kernel_deriv4<8>, offsets, gto_envs) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv4<0>, offsets) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv4<1>, offsets) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv4<2>, offsets) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv4<3>, offsets) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv4<4>, offsets) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv4<5>, offsets) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv4<6>, offsets) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv4<7>, offsets) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv4<8>, offsets) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
             }
             break;
@@ -2003,9 +2005,17 @@ int GDFTscreen_index(cudaStream_t stream, int8_t *non0shl_mask, double log_cutof
     auto threads = MAKE_RANGE_2D(NG_PER_BLOCK, 1);
     auto blocks  = MAKE_RANGE_2D((ngrids+block_size-1)/block_size,
                                   (nbas+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    LAUNCH_KERNEL(_screen_index_kernel, _screen_index,
-            non0shl_mask, log_cutoff, grids, ngrids, block_size,
+    // _screen_index takes no gto_envs; launch directly (LAUNCH_KERNEL appends envs).
+#ifdef USE_SYCL
+    stream.parallel_for<class GDFT_CAT(gdft_kernel_L, __LINE__)>(
+        sycl::nd_range<2>(blocks * threads, threads),
+        [=](auto item) [[intel::kernel_args_restrict]] {
+            _screen_index(non0shl_mask, log_cutoff, grids, ngrids, block_size,
+                          atm, natm, bas, nbas, env); });
+#else
+    _screen_index<<<blocks, threads, 0, stream>>>(non0shl_mask, log_cutoff, grids, ngrids, block_size,
             atm, natm, bas, nbas, env);
+#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
@@ -2034,9 +2044,9 @@ int GDFTscreen_index_legacy(cudaStream_t stream, int *non0shl_idx, double cutoff
             fprintf(stderr, "l = %d not supported\n", l);
             return 1;
         }
-        LAUNCH_KERNEL(_screen_index_legacy_kernel, _screen_index_legacy,
+        LAUNCH_KERNEL(_screen_index_legacy,
                 non0shl_idx, cutoff, l, nprim,
-                grids, ngrids, bas_offset, gto_envs);
+                grids, ngrids, bas_offset);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
