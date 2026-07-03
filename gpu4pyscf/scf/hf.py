@@ -624,7 +624,7 @@ def _cast_rhf_init_guess(fn):
         dm = fn(mf, mol)
         assert dm.ndim == 2
         if hasattr(dm, 'mo_coeff'):
-            idx = cupy.nonzero(dm.mo_occ > 0)[0]
+            idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
             mo_coeff = asarray(dm.mo_coeff[:,idx])
             mo_occ = asarray(dm.mo_occ[idx])
             dm = tag_array(asarray(dm), mo_coeff=mo_coeff, mo_occ=mo_occ)

@@ -195,7 +195,7 @@ def _cast_rhf_init_guess(fn):
             fac_b = (neleca-1) / ne
         if hasattr(dm, 'mo_coeff'):
             scale = ne / dm.mo_occ.sum()
-            idx = cupy.nonzero(dm.mo_occ > 0)[0]
+            idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
             mo_coeff = cupy.repeat(asarray(dm.mo_coeff[None,:,idx]), 2, axis=0)
             mo_occ = cupy.repeat(asarray(dm.mo_occ[None,idx]), 2, axis=0)
             mo_occ[0] *= fac_a * scale

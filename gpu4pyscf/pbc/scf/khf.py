@@ -245,7 +245,7 @@ def _cast_mol_init_guess(fn):
         assert dm.ndim == 2
         nkpts = len(kpts)
         if hasattr(dm, 'mo_coeff'):
-            idx = cp.where(dm.mo_occ > 0)[0]
+            idx = np.where(cp.asnumpy(dm.mo_occ) > 0)[0]
             mo_coeff = cp.repeat(asarray(dm.mo_coeff[None,:,idx]), nkpts, axis=0)
             mo_occ = cp.repeat(asarray(dm.mo_occ[None,idx]), nkpts, axis=0)
             dm = cp.repeat(asarray(dm[None]), nkpts, axis=0)
