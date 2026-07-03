@@ -274,7 +274,6 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
                         device_id=0, with_j=True, with_k=True, omega=None,
                         auxbasis_response=1):
     natm = intopt.mol.natm
-    diag = cupy.arange(natm)
     nao = dm0.shape[0]
     assert with_j or with_k
     ao_loc = intopt.ao_loc
@@ -366,7 +365,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
 
             hj_ipip1 = hj_ipip1.reshape([3,3,nao])
             tmp = contract('ia,xyi->axy', ao2atom, hj_ipip1)
-            hj[diag, diag] += 2.0 * tmp
+            hj[range(natm), range(natm)] += 2.0 * tmp
 
         hk = None
         if with_k:
@@ -376,7 +375,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
 
             hk_ipip1 = hk_ipip1.reshape([3,3,nao])
             tmp = contract('ia,xyi->axy', ao2atom, hk_ipip1)
-            hk[diag, diag] += tmp
+            hk[range(natm), range(natm)] += tmp
 
         if auxbasis_response > 0:
             if with_j:
@@ -400,11 +399,11 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             if with_j:
                 hj_ipip2 = hj_ipip2.reshape([3,3,naux])
                 tmp = contract('ia,xyi->axy', aux2atom, hj_ipip2)
-                hj[diag, diag] += tmp
+                hj[range(natm), range(natm)] += tmp
             if with_k:
                 hk_ipip2 = hk_ipip2.reshape([3,3,naux])
                 tmp = contract('ia,xyi->axy', aux2atom, hk_ipip2)
-                hk[diag, diag] += .5 * tmp
+                hk[range(natm), range(natm)] += .5 * tmp
         t0 = log.timer_debug1(f'int3c2e_ipip on Device {device_id}', *t0)
     return hj, hk
 

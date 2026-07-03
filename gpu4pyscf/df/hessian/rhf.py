@@ -406,7 +406,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
 
     natm = mol.natm
-    idx = cupy.arange(natm)
+    idx = range(natm)
     # Diagonal contributions
     if hessobj.auxbasis_response > 1:
         if with_j:
