@@ -55,7 +55,7 @@ static void _pcm_d_s(double* __restrict__ matrix_d, double* __restrict__ matrix_
     if (i == j) rij = 1.0;
     double s = erf(xi_r_ij) / rij;
     if (i == j) s = charge_exp[i] * SQRT2_PI / switch_fun[i];
-    matrix_s[i*n+j] = s;
+    matrix_s[((int64_t)i) * ((int64_t)n) + ((int64_t)j)] = s;
 
     if (matrix_d != NULL){
         double nxj = norm_vec[3*j];
@@ -72,7 +72,7 @@ static void _pcm_d_s(double* __restrict__ matrix_d, double* __restrict__ matrix_
         double xi_r2_ij = xi_r_ij * xi_r_ij;
         double d = s * nrij / rij2 - 2.0*xi_r_ij/SQRT_PI*exp(-xi_r2_ij)*nrij/rij3;
         if (i == j) d = -charge_exp[i] * SQRT2_PI / (2.0*r_vdw[i]);
-        matrix_d[i*n+j] = d;
+        matrix_d[((int64_t)i) * ((int64_t)n) + ((int64_t)j)] = d;
     }
 }
 
@@ -240,9 +240,11 @@ static void _pcm_dD_dS(double* __restrict__ matrix_dd, double* __restrict__ matr
     double dy_rij = dy / rij;
     double dz_rij = dz / rij;
 
-    matrix_ds[i*n+j       ] = dS_dr * dx_rij;
-    matrix_ds[i*n+j +  n*n] = dS_dr * dy_rij;
-    matrix_ds[i*n+j +2*n*n] = dS_dr * dz_rij;
+    const int64_t ij = ((int64_t)i) * ((int64_t)n) + ((int64_t)j);
+    const int64_t n2 = ((int64_t)n) * ((int64_t)n);
+    matrix_ds[ij       ] = dS_dr * dx_rij;
+    matrix_ds[ij +   n2] = dS_dr * dy_rij;
+    matrix_ds[ij + 2*n2] = dS_dr * dz_rij;
 
     if (matrix_dd != NULL){
         double nxj = norm_vec[3*j];
@@ -254,9 +256,9 @@ static void _pcm_dD_dS(double* __restrict__ matrix_dd, double* __restrict__ matr
         if (i == j) dD_dri = 0.0;
 
         nj_rij = 3.0*nj_rij/rij2;
-        matrix_dd[i*n+j        ] = dD_dri*dx_rij + dS_dr*(-nxj/rij + nj_rij*dx_rij);
-        matrix_dd[i*n+j +   n*n] = dD_dri*dy_rij + dS_dr*(-nyj/rij + nj_rij*dy_rij);
-        matrix_dd[i*n+j + 2*n*n] = dD_dri*dz_rij + dS_dr*(-nzj/rij + nj_rij*dz_rij);
+        matrix_dd[ij       ] = dD_dri*dx_rij + dS_dr*(-nxj/rij + nj_rij*dx_rij);
+        matrix_dd[ij +   n2] = dD_dri*dy_rij + dS_dr*(-nyj/rij + nj_rij*dy_rij);
+        matrix_dd[ij + 2*n2] = dD_dri*dz_rij + dS_dr*(-nzj/rij + nj_rij*dz_rij);
     }
 }
 
@@ -588,16 +590,17 @@ static void _pcm_d2D_d2S(double* __restrict__ matrix_d2D, double* __restrict__ m
                                               + 3 * rij_5 * erf_eij_rij;
     const double S_xyz_diagonal_prefactor = two_eij_over_sqrt_pi_exp_minus_eij2_rij2 * rij_2 - rij_3 * erf_eij_rij;
 
-    const int n2 = n * n;
-    matrix_d2S[i*n + j         ] = dx * dx * S_direct_product_prefactor + S_xyz_diagonal_prefactor;
-    matrix_d2S[i*n + j + n2    ] = dx * dy * S_direct_product_prefactor;
-    matrix_d2S[i*n + j + n2 * 2] = dx * dz * S_direct_product_prefactor;
-    matrix_d2S[i*n + j + n2 * 3] = dy * dx * S_direct_product_prefactor;
-    matrix_d2S[i*n + j + n2 * 4] = dy * dy * S_direct_product_prefactor + S_xyz_diagonal_prefactor;
-    matrix_d2S[i*n + j + n2 * 5] = dy * dz * S_direct_product_prefactor;
-    matrix_d2S[i*n + j + n2 * 6] = dz * dx * S_direct_product_prefactor;
-    matrix_d2S[i*n + j + n2 * 7] = dz * dy * S_direct_product_prefactor;
-    matrix_d2S[i*n + j + n2 * 8] = dz * dz * S_direct_product_prefactor + S_xyz_diagonal_prefactor;
+    const int64_t ij = ((int64_t)i) * ((int64_t)n) + ((int64_t)j);
+    const int64_t n2 = ((int64_t)n) * ((int64_t)n);
+    matrix_d2S[ij         ] = dx * dx * S_direct_product_prefactor + S_xyz_diagonal_prefactor;
+    matrix_d2S[ij + n2    ] = dx * dy * S_direct_product_prefactor;
+    matrix_d2S[ij + n2 * 2] = dx * dz * S_direct_product_prefactor;
+    matrix_d2S[ij + n2 * 3] = dy * dx * S_direct_product_prefactor;
+    matrix_d2S[ij + n2 * 4] = dy * dy * S_direct_product_prefactor + S_xyz_diagonal_prefactor;
+    matrix_d2S[ij + n2 * 5] = dy * dz * S_direct_product_prefactor;
+    matrix_d2S[ij + n2 * 6] = dz * dx * S_direct_product_prefactor;
+    matrix_d2S[ij + n2 * 7] = dz * dy * S_direct_product_prefactor;
+    matrix_d2S[ij + n2 * 8] = dz * dz * S_direct_product_prefactor + S_xyz_diagonal_prefactor;
 
     if (matrix_d2D != NULL) {
         const double nxj = norm_vec[3*j];
@@ -611,15 +614,15 @@ static void _pcm_d2D_d2S(double* __restrict__ matrix_d2D, double* __restrict__ m
 
         const double D_direct_product_prefactor = (-two_eij_over_sqrt_pi_exp_minus_eij2_rij2 * (15 * rij_6 + 10 * eij2 * rij_4 + 4 * eij4 * rij_2)
                                                    + 15 * rij_7 * erf_eij_rij) * nj_rij;
-        matrix_d2D[i*n + j         ] = D_direct_product_prefactor * dx * dx - S_direct_product_prefactor * (dx * nxj + dx * nxj + nj_rij);
-        matrix_d2D[i*n + j + n2    ] = D_direct_product_prefactor * dx * dy - S_direct_product_prefactor * (dy * nxj + dx * nyj);
-        matrix_d2D[i*n + j + n2 * 2] = D_direct_product_prefactor * dx * dz - S_direct_product_prefactor * (dz * nxj + dx * nzj);
-        matrix_d2D[i*n + j + n2 * 3] = D_direct_product_prefactor * dy * dx - S_direct_product_prefactor * (dx * nyj + dy * nxj);
-        matrix_d2D[i*n + j + n2 * 4] = D_direct_product_prefactor * dy * dy - S_direct_product_prefactor * (dy * nyj + dy * nyj + nj_rij);
-        matrix_d2D[i*n + j + n2 * 5] = D_direct_product_prefactor * dy * dz - S_direct_product_prefactor * (dz * nyj + dy * nzj);
-        matrix_d2D[i*n + j + n2 * 6] = D_direct_product_prefactor * dz * dx - S_direct_product_prefactor * (dx * nzj + dz * nxj);
-        matrix_d2D[i*n + j + n2 * 7] = D_direct_product_prefactor * dz * dy - S_direct_product_prefactor * (dy * nzj + dz * nyj);
-        matrix_d2D[i*n + j + n2 * 8] = D_direct_product_prefactor * dz * dz - S_direct_product_prefactor * (dz * nzj + dz * nzj + nj_rij);
+        matrix_d2D[ij         ] = D_direct_product_prefactor * dx * dx - S_direct_product_prefactor * (dx * nxj + dx * nxj + nj_rij);
+        matrix_d2D[ij + n2    ] = D_direct_product_prefactor * dx * dy - S_direct_product_prefactor * (dy * nxj + dx * nyj);
+        matrix_d2D[ij + n2 * 2] = D_direct_product_prefactor * dx * dz - S_direct_product_prefactor * (dz * nxj + dx * nzj);
+        matrix_d2D[ij + n2 * 3] = D_direct_product_prefactor * dy * dx - S_direct_product_prefactor * (dx * nyj + dy * nxj);
+        matrix_d2D[ij + n2 * 4] = D_direct_product_prefactor * dy * dy - S_direct_product_prefactor * (dy * nyj + dy * nyj + nj_rij);
+        matrix_d2D[ij + n2 * 5] = D_direct_product_prefactor * dy * dz - S_direct_product_prefactor * (dz * nyj + dy * nzj);
+        matrix_d2D[ij + n2 * 6] = D_direct_product_prefactor * dz * dx - S_direct_product_prefactor * (dx * nzj + dz * nxj);
+        matrix_d2D[ij + n2 * 7] = D_direct_product_prefactor * dz * dy - S_direct_product_prefactor * (dy * nzj + dz * nyj);
+        matrix_d2D[ij + n2 * 8] = D_direct_product_prefactor * dz * dz - S_direct_product_prefactor * (dz * nzj + dz * nzj + nj_rij);
     }
 }
 
