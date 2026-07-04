@@ -30,6 +30,8 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import num_devices
 
+libvhf_rys = int3c2e_bdiv.libvhf_rys
+
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
 GB = 1024*1024*1024

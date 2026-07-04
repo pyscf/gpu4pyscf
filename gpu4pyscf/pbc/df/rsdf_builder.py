@@ -39,6 +39,7 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray)
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.__config__ import num_devices
+from gpu4pyscf.df.df import libvhf_rys
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
@@ -398,7 +399,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
             p0 = ao_pair_offsets[batch_id]
             p1 = ao_pair_offsets[batch_id+1]
             #:cderi[:,p0:p1] = j3c.get()
-            libpbc.store_col_segment(
+            libvhf_rys.store_col_segment(
                 cderi.ctypes,
                 ctypes.cast(j3c.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs),
@@ -746,9 +747,9 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     on_host = not isinstance(cderi_compressed, cp.ndarray)
     if cderi_compressed.flags.c_contiguous:
         if cderi_compressed.dtype == np.float64:
-            kern = libpbc.decompress_and_transpose
+            kern = libvhf_rys.decompress_and_transpose
         else:
-            kern = libpbc.z_decompress_and_transpose
+            kern = libvhf_rys.z_decompress_and_transpose
         if on_host:
             j3c_ptr = cderi_compressed.ctypes
         else:
@@ -757,7 +758,8 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
             fill_triu = True
         else:
             fill_triu = False
-        kern(ctypes.cast(cderi.data.ptr, ctypes.c_void_p), j3c_ptr,
+        kern(ctypes.cast(cderi.data.ptr, ctypes.c_void_p), ctypes.c_int(naux),
+             j3c_ptr,
              ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
              ctypes.c_int(nao_pairs), ctypes.c_int(nL*nao), ctypes.c_int(naux),
              ctypes.c_int(0), ctypes.c_int(naux),

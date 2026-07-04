@@ -19,14 +19,14 @@ import numpy as np
 import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
-from pyscf.df import df, addons, incore
+from pyscf.df import addons, incore
 from gpu4pyscf.lib.cupy_helper import (
-    cholesky, tag_array, get_avail_mem, cart2sph, p2p_transfer, copy_array,
+    cholesky, tag_array, get_avail_mem, cart2sph, copy_array,
     asarray, empty_mapped, ndarray)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.df import int3c2e, df_jk
+from gpu4pyscf.df import df_jk_o1
 from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.gto.mole import SortedMole
 from gpu4pyscf import __config__
@@ -34,13 +34,10 @@ from gpu4pyscf import __config__
 libvhf_rys = int3c2e_bdiv.libvhf_rys
 num_devices = multi_gpu.num_devices
 
-MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
+MIN_BLK_SIZE = 256
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
-GB = 1024*1024*1024
-INT3C2E_V2 = False
 
 LINEAR_DEP_THR = incore.LINEAR_DEP_THR
-GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
 
@@ -58,7 +55,6 @@ class DF(lib.StreamObject):
         self.auxmol = None
         self.intopt = None
         self.nao = None
-        self.naux = None
         self.cd_low = None
         self._cderi = None
         self._rsh_df = {}
@@ -94,11 +90,12 @@ class DF(lib.StreamObject):
         self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
         intopt.mol = SortedMole.from_mol(mol, decontract=True)
         intopt.build()
-        self._cderi, (rows, cols, diags) = _cholesky_eri(
+        self._cderi, self._cderi_idx = _cholesky_eri(
             intopt, omega=None, use_gpu_memory=self.use_gpu_memory)
+        rows, cols = divmod(self._cderi_idx[0], self.nao)
         self.cderi_row  = intopt.cderi_row = rows
         self.cderi_col  = intopt.cderi_col = cols
-        self.cderi_diag = intopt.cderi_diag = diags
+        self.cderi_diag = intopt.cderi_diag = self._cderi_idx[1]
         log.timer_debug1('cholesky_eri', *t0)
         return self
 
@@ -106,7 +103,7 @@ class DF(lib.StreamObject):
                direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),
                omega=None):
         if omega is None:
-            return df_jk.get_jk(self, dm, hermi, with_j, with_k, direct_scf_tol)
+            return df_jk_o1.get_jk(self, dm, hermi, with_j, with_k, direct_scf_tol)
         assert omega >= 0.0
 
         # A temporary treatment for RSH-DF integrals
@@ -118,7 +115,7 @@ class DF(lib.StreamObject):
             rsh_df = self._rsh_df[key] = self.copy().reset()
             logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
 
-        return df_jk.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol, omega=omega)
+        return df_jk_o1.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol, omega=omega)
 
     def get_blksize(self, extra=0, nao=None):
         '''
@@ -138,39 +135,86 @@ class DF(lib.StreamObject):
         ''' loop over cderi for the current device
             and unpack the CDERI in (Lij) format
         '''
+        if self._cderi is None:
+            self.build()
+
         device_id = cupy.cuda.Device().id
         cderi_sparse = self._cderi[device_id]
-        if blksize is None:
-            blksize = self.get_blksize()
         nao = self.nao
         naux_slice = cderi_sparse.shape[0]
-        rows = self.cderi_row
-        cols = self.cderi_col
-        buf_prefetch = None
-        buf_cderi = cupy.zeros([blksize,nao,nao])
-        for p0, p1 in lib.prange(0, naux_slice, blksize):
-            p2 = min(naux_slice, p1+blksize)
-            if isinstance(cderi_sparse, cupy.ndarray):
-                buf = cderi_sparse[p0:p1,:]
-            if isinstance(cderi_sparse, np.ndarray):
-                # first block
-                if buf_prefetch is None:
-                    buf = asarray(cderi_sparse[p0:p1,:])
-                buf_prefetch = cupy.empty([p2-p1,cderi_sparse.shape[1]])
-            if isinstance(cderi_sparse, np.ndarray) and p1 < p2:
-                buf_prefetch.set(cderi_sparse[p1:p2,:])
-            if unpack:
-                buf_cderi[:p1-p0,rows,cols] = buf
-                buf_cderi[:p1-p0,cols,rows] = buf
-                buf2 = buf_cderi[:p1-p0]
-            else:
-                buf2 = None
-            yield buf2, buf.T
-            if isinstance(cderi_sparse, np.ndarray):
-                cupy.cuda.Device().synchronize()
+        if blksize is None:
+            blksize = self.get_blksize()
+        blksize = min(blksize, naux_slice)
+        on_gpu = isinstance(cderi_sparse, cp.ndarray)
 
-            if buf_prefetch is not None:
-                buf = buf_prefetch
+        work = cp.zeros((nao, nao, blksize))
+        pair_idx = cp.asarray(self._cderi_idx[0], dtype=np.int32)
+        npairs = len(pair_idx)
+        if on_gpu:
+            for p0, p1 in lib.prange(0, naux_slice, blksize):
+                cderi_blk = cderi_sparse[p0:p1]
+                if not unpack:
+                    yield None, cderi_blk
+                    continue
+
+                out = work[:,:,:p1-p0]
+                if cderi_sparse.flags.c_contiguous:
+                    err = libvhf_rys.decompress_and_transpose(
+                        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(blksize),
+                        ctypes.cast(cderi_sparse.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(npairs),
+                        ctypes.c_int(nao),
+                        ctypes.c_int(naux_slice),
+                        ctypes.c_int(p0), ctypes.c_int(p1),
+                        ctypes.c_int(1), ctypes.c_int(0))
+                else:
+                    err = libvhf_rys.decompress_and_fill(
+                        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(blksize),
+                        ctypes.cast(cderi_sparse.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(npairs),
+                        ctypes.c_int(nao),
+                        ctypes.c_int(naux_slice),
+                        ctypes.c_int(p0), ctypes.c_int(p1))
+                if err != 0:
+                    raise RuntimeError('decompress cderi failed')
+                yield out.transpose(2,0,1), cderi_blk
+
+        else:
+            buf = cupy.empty((blksize, npairs))
+            stream = cp.cuda.stream.Stream(non_blocking=True)
+            with stream:
+                cderi_blk = buf
+                buf.set(cderi_sparse[:blksize])
+            for p0, p1 in lib.prange(0, naux_slice, blksize):
+                stream.synchronize()
+                if not unpack:
+                    yield None, cderi_blk
+                    continue
+
+                out = work[:,:,:p1-p0]
+                err = libvhf_rys.decompress_and_transpose(
+                    ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(blksize),
+                    ctypes.cast(cderi_blk.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(npairs),
+                    ctypes.c_int(nao),
+                    ctypes.c_int(p1-p0),
+                    ctypes.c_int(0), ctypes.c_int(p1-p0),
+                    ctypes.c_int(1), ctypes.c_int(0))
+                if err != 0:
+                    raise RuntimeError('decompress cderi failed')
+
+                p2 = min(naux_slice, p1 + blksize)
+                if p1 < p2:
+                    cp.cuda.get_current_stream().synchronize()
+                    with stream:
+                        cderi_blk = buf[:p2-p1]
+                        cderi_blk.set(cderi_sparse[p1:p2])
 
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
@@ -181,7 +225,6 @@ class DF(lib.StreamObject):
         self._rsh_df = {}
         self.intopt = None
         self.nao = None
-        self.naux = None
         self.cd_low = None
         return self
 
@@ -199,6 +242,8 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     warnings.warn(
         'cholesky_eri_gpu is deprecated',
         DeprecationWarning, stacklevel=2)
+
+    GB = 1024*1024*1024
 
     naux = cd_low.shape[1]
     npairs = len(intopt.cderi_row)
@@ -264,6 +309,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                 omega=None, sr_only=False, device_id=0):
     ''' Execute CDERI tasks on one device
     '''
+    from gpu4pyscf.df import int3c2e
     nq = len(intopt.log_qs)
     mol = intopt.mol
     naux = cd_low.shape[1]
@@ -391,15 +437,16 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
                 int3c2e_bdiv._create_pair_recontraction(sorted_mol, bas_ij_batches)
         cderi_offsets = np.append(0, np.cumsum(cderi_pair_counts))
         cderi_npairs = len(pair_addresses)
-        rows, cols = divmod(asarray(pair_addresses), mol.nao)
+        pair_addresses = asarray(pair_addresses)
+        rows, cols = divmod(pair_addresses, mol.nao)
         diag_addrs = cp.where(rows == cols)[0]
-        cderi_idx = rows, cols, diag_addrs
+        cderi_idx = (pair_addresses, diag_addrs)
     else:
         cderi_offsets = ao_pair_offsets
-        pair_addrs, diag_addrs = intopt.pair_and_diag_indices()
-        cderi_npairs = len(pair_addrs)
-        rows, cols = divmod(pair_addrs, mol.nao)
-        cderi_idx = rows, cols, diag_addrs
+        pair_addresses, diag_addrs = intopt.pair_and_diag_indices()
+        cderi_npairs = len(pair_addresses)
+        pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
+        cderi_idx = (pair_addresses, diag_addrs)
 
     aux_coef, tag = _decompose_j2c(auxmol, aux_sorting)
     batch_size = max(ao_pair_offsets[1:] - ao_pair_offsets[:-1])
@@ -410,14 +457,14 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
     word_avail -= batch_size * naux
     if needs_recontraction:
         word_avail -= batch_size * naux_per_device
-    write_to_cpu = False
+    on_gpu = True
     if cderi_npairs * naux > word_avail * 0.95 * num_devices:
         if use_gpu_memory:
             cderi_size = cderi_npairs * naux / num_devices * 8e-9
             raise MemoryError(f'Not enough GPU memory. cderi size = {cderi_size:.2f} GB')
-        write_to_cpu = True
+        on_gpu = False
 
-    if write_to_cpu:
+    if not on_gpu:
         cderi_cpu = empty_mapped((naux, cderi_npairs))
 
         def proc(batch_iter):
@@ -456,7 +503,8 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
 
         # Ensure data are fully written to host memory.
         multi_gpu.synchronize()
-        cderi = [cderi_cpu] * num_devices
+        cderi = [cderi_cpu[i*naux_per_device:(i+1)*naux_per_device]
+                 for i in range(num_devices)]
 
     else:
         def proc():

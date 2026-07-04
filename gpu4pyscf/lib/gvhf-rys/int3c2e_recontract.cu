@@ -23,21 +23,6 @@
 
 #define PTR_PBAS_IDX    4
 
-__global__ static
-void transpose_write_kernel(double *out, double *cderi, int naux, int npairs,
-                            int ao_pair0, int ao_pair1)
-{
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x;
-    int aux_id = blockIdx.x;
-    size_t Naux = naux;
-    size_t out_Npairs = npairs;
-    size_t inp_Npairs = ao_pair1 - ao_pair0;
-    for (int i = thread_id; i < inp_Npairs; i += threads) {
-        out[aux_id * out_Npairs + ao_pair0 + i] = cderi[i * Naux + aux_id];
-    }
-}
-
 static __global__
 void recontract_kernel(double *out, double *input, int *out_idx, int *inp_idx,
                        double *coef, int naux)
@@ -55,25 +40,6 @@ void recontract_kernel(double *out, double *input, int *out_idx, int *inp_idx,
 }
 
 extern "C" {
-int transpose_write(double *cderi_cpu, double *cderi_gpu,
-                    int naux, int npairs, int ao_pair0, int ao_pair1)
-{
-    double *out;
-    cudaError_t err = cudaHostGetDevicePointer(&out, cderi_cpu, 0);
-    if(err != cudaSuccess){
-        fprintf(stderr, "transpose_write address mapping error %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    transpose_write_kernel<<<naux, 256>>>(
-            out, cderi_gpu, naux, npairs, ao_pair0, ao_pair1);
-    err = cudaGetLastError();
-    if(err != cudaSuccess){
-        fprintf(stderr, "transpose_write error %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
 int recontract_ao_pair(double *out, double *input, int *out_idx, int *inp_idx,
                        double *coef, int naux, int count)
 {

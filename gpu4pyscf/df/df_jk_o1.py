@@ -1,0 +1,673 @@
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Author: Qiming Sun <osirpt.sun@gmail.com>
+# Modified by Xiaojie Wu <wxj6000@gmail.com>
+
+import copy
+from concurrent.futures import ThreadPoolExecutor
+import cupy
+import numpy
+import cupy as cp
+from pyscf import lib
+from pyscf.scf import dhf
+from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import (
+    contract, transpose_sum, reduce_to_device, tag_array, CPArrayWithTag)
+from gpu4pyscf.dft import rks, uks, numint, gks
+from gpu4pyscf.scf import hf, uhf, rohf
+from gpu4pyscf.scf.jk import _check_rsh_factors
+from gpu4pyscf.df import df_o1 as df
+from gpu4pyscf.scf import ghf
+from gpu4pyscf.lib.cupy_helper import asarray, ndarray, get_avail_mem
+from gpu4pyscf.lib import multi_gpu
+num_devices = multi_gpu.num_devices
+
+def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
+    '''For the given SCF object, update the J, K matrix constructor with
+    corresponding density fitting integrals.
+    Args:
+        mf : an SCF object
+    Kwargs:
+        auxbasis : str or basis dict
+            Same format to the input attribute mol.basis.  If auxbasis is
+            None, optimal auxiliary basis based on AO basis (if possible) or
+            even-tempered Gaussian basis will be used.
+        only_dfj : str
+            Compute Coulomb integrals only and no approximation for HF
+            exchange. Same to RIJONX in ORCA
+    Returns:
+        An SCF object with a modified J, K matrix constructor which uses density
+        fitting integrals to compute J and K
+    Examples:
+    '''
+
+    assert isinstance(mf, hf.SCF)
+
+    if with_df is None:
+        if isinstance(mf, dhf.UHF):
+            with_df = df.DF4C(mf.mol)
+        else:
+            with_df = df.DF(mf.mol)
+        with_df.max_memory = mf.max_memory
+        with_df.stdout = mf.stdout
+        with_df.verbose = mf.verbose
+        with_df.auxbasis = auxbasis
+
+    if isinstance(mf, _DFHF):
+        if mf.with_df is None:
+            mf.with_df = with_df
+        elif getattr(mf.with_df, 'auxbasis', None) != auxbasis:
+            #logger.warn(mf, 'DF might have been initialized twice.')
+            mf = mf.copy()
+            mf.with_df = with_df
+            mf.only_dfj = only_dfj
+        return mf
+
+    dfmf = _DFHF(mf, with_df, only_dfj)
+    return lib.set_class(dfmf, (_DFHF, mf.__class__))
+
+from gpu4pyscf.lib import utils
+class _DFHF:
+    '''
+    Density fitting SCF class
+    Attributes for density-fitting SCF:
+        auxbasis : str or basis dict
+            Same format to the input attribute mol.basis.
+            The default basis 'weigend+etb' means weigend-coulomb-fit basis
+            for light elements and even-tempered basis for heavy elements.
+        with_df : DF object
+            Set mf.with_df = None to switch off density fitting mode.
+    '''
+    to_gpu = utils.to_gpu
+    device = utils.device
+    __name_mixin__ = 'DF'
+    _keys = {'rhoj', 'rhok', 'disp', 'screen_tol', 'with_df', 'only_dfj'}
+
+    def __init__(self, mf, dfobj, only_dfj):
+        self.__dict__.update(mf.__dict__)
+        self._eri = None
+        self.rhoj = None
+        self.rhok = None
+        self.direct_scf = False
+        self.with_df = dfobj
+        self.only_dfj = only_dfj
+
+    def undo_df(self):
+        '''Remove the DFHF Mixin'''
+        obj = lib.view(self, lib.drop_class(self.__class__, _DFHF))
+        del obj.rhoj, obj.rhok, obj.with_df, obj.only_dfj
+        return obj
+
+    def reset(self, mol=None):
+        self.with_df.reset(mol)
+        return super().reset(mol)
+
+    def get_j(self, mol=None, dm=None, hermi=1, omega=None):
+        return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega)[0]
+
+    def get_k(self, mol=None, dm=None, hermi=1, omega=None,
+              lr_factor=None, sr_factor=None):
+        omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+        vk = self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol)[1]
+        vk *= sr_factor
+        if omega == 0:
+            return vk
+
+        vklr = self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol, omega)[1]
+        vklr *= lr_factor - sr_factor
+        vk += vklr
+        return vk
+
+    def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
+               omega=None):
+        if dm is None: dm = self.make_rdm1()
+        
+        if self.with_df and self.only_dfj:
+            vj = vk = None
+            # 1. Calculate DF J (Density Fitting J)
+            if with_j:
+                if isinstance(self, ghf.GHF):
+                    # GHF: Define local strategy and call GHF adapter for J only
+                    def jkbuild(mol_obj, dm_obj, hermi, omega=None):
+                        nao = mol_obj.nao
+                        dm_obj = dm_obj.reshape(-1, nao, nao)
+                        return self.with_df.get_jk(dm_obj, hermi,
+                                                   direct_scf_tol=self.direct_scf_tol,
+                                                   omega=omega)
+                    # Pass with_k=False to get only DF J
+                    vj, _ = ghf.get_jk(mol, dm, hermi, True, False,
+                                       jkbuild=jkbuild, omega=omega)
+                else:
+                    # Standard RHF/UHF: Use Master's get_j logic
+                    vj = self.get_j(mol, dm, hermi, omega)
+            
+            # 2. Calculate Exact K (because only_dfj is True, we don't use DF for K)
+            if with_k:
+                vk = super().get_jk(mol, dm, hermi, False, True, omega)[1]
+
+        elif self.with_df:
+            # Full DF mode (DF J + DF K)
+            if isinstance(self, ghf.GHF):
+                # GHF: Define local strategy and call GHF adapter
+                def jkbuild(mol_obj, dm_obj, hermi, omega=None):
+                    nao = mol_obj.nao
+                    dm_obj = dm_obj.reshape(-1, nao, nao)
+                    return self.with_df.get_jk(dm_obj, hermi,
+                                               direct_scf_tol=self.direct_scf_tol,
+                                               omega=omega)
+                vj, vk = ghf.get_jk(mol, dm, hermi, with_j, with_k,
+                                    jkbuild=jkbuild, omega=omega)
+            else:
+                # Standard RHF/UHF: Use Master's direct call
+                vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k,
+                                             self.direct_scf_tol, omega)
+                                             
+        else:
+            # Error handling from Master
+            raise ValueError(f"with_df field not found in a df object (type = {type(self)}) during a get_jk() call.")
+            
+        return vj, vk
+
+    def Gradients(self):
+        if self.istype('_Solvation'):
+            raise NotImplementedError(
+                'Gradients of solvent are not computed. '
+                'Solvent must be applied after density fitting method, e.g.\n'
+                'mf = mol.RKS().to_gpu().density_fit().PCM()')
+        from gpu4pyscf.dft import ucdft
+        if isinstance(self, ucdft.CDFT_UKS):
+            from gpu4pyscf.df.grad import ucdft as ucdft_grad
+            return ucdft_grad.Gradients(self)
+        if isinstance(self, rks.RKS):
+            from gpu4pyscf.df.grad import rks as rks_grad
+            return rks_grad.Gradients(self)
+        if isinstance(self, hf.RHF):
+            from gpu4pyscf.df.grad import rhf as rhf_grad
+            return rhf_grad.Gradients(self)
+        if isinstance(self, uks.UKS):
+            from gpu4pyscf.df.grad import uks as uks_grad
+            return uks_grad.Gradients(self)
+        if isinstance(self, uhf.UHF):
+            from gpu4pyscf.df.grad import uhf as uhf_grad
+            return uhf_grad.Gradients(self)
+        raise NotImplementedError()
+
+    def Hessian(self):
+        if self.istype('_Solvation'):
+            raise NotImplementedError(
+                'Hessian of solvent are not computed. '
+                'Solvent must be applied after density fitting method, e.g.\n'
+                'mf = mol.RKS().to_gpu().density_fit().PCM()')
+        from gpu4pyscf.dft.rks import KohnShamDFT
+        if isinstance(self, hf.RHF):
+            if isinstance(self, KohnShamDFT):
+                from gpu4pyscf.df.hessian import rks as rks_hess
+                return rks_hess.Hessian(self)
+            else:
+                from gpu4pyscf.df.hessian import rhf as rhf_hess
+                return rhf_hess.Hessian(self)
+        elif isinstance(self, uhf.UHF):
+            if isinstance(self, KohnShamDFT):
+                from gpu4pyscf.df.hessian import uks as uks_hess
+                return uks_hess.Hessian(self)
+            else:
+                from gpu4pyscf.df.hessian import uhf as uhf_hess
+                return uhf_hess.Hessian(self)
+        else:
+            raise NotImplementedError
+
+    @property
+    def auxbasis(self):
+        return getattr(self.with_df, 'auxbasis', None)
+
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
+        '''
+        effective potential
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        assert not self.direct_scf
+        log = logger.new_logger(self)
+
+        if isinstance(self, rohf.ROHF):
+            if getattr(dm, 'mo_coeff', None) is not None:
+                mo_coeff = cupy.repeat(dm.mo_coeff[None], 2, axis=0)
+                mo_occ = cupy.asarray([dm.mo_occ>0, dm.mo_occ==2],
+                                      dtype=numpy.double)
+                if dm.ndim == 2:  # RHF DM
+                    dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+                dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+            elif dm.ndim == 2:  # RHF DM
+                dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+
+        # for DFT
+        if isinstance(self, rks.KohnShamDFT):
+            t0 = log.init_timer()
+            ni = self._numint
+            if isinstance(self, (uhf.UHF, rohf.ROHF)): # UKS
+                if self.grids.coords is None:
+                    rks.initialize_grids(self, mol, dm[0]+dm[1])
+                n, exc, vxc = ni.nr_uks(mol, self.grids, self.xc, dm)
+                log.debug('nelec by numeric integration = %s', n)
+                if self.do_nlc():
+                    if ni.libxc.is_nlc(self.xc):
+                        xc = self.xc
+                    else:
+                        assert ni.libxc.is_nlc(self.nlc)
+                        xc = self.nlc
+                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
+                    exc += enlc
+                    vxc += vnlc
+                    log.debug('nelec with nlc grids = %s', n)
+                t0 = log.timer('vxc', *t0)
+
+                if not ni.libxc.is_hybrid_xc(self.xc):
+                    vj = self.get_j(mol, dm[0]+dm[1], hermi)
+                    vxc += vj
+                else:
+                    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+                    vj, vk = self.get_jk(mol, dm, hermi)
+                    vj = vj[0] + vj[1]
+                    vxc += vj
+                    vk *= hyb
+                    if abs(omega) > 1e-10:
+                        vklr = self.get_k(mol, dm, hermi, omega=omega)
+                        vklr *= (alpha - hyb)
+                        vk += vklr
+                    vxc -= vk
+                    exc -= float(cupy.einsum('sij,sji->', dm, vk).real.get()) * .5
+                ecoul = float(cupy.einsum('sij,ji->', dm, vj).real.get()) * .5
+
+            elif isinstance(self, hf.RHF):
+                rks.initialize_grids(self, mol, dm)
+                n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
+                log.debug('nelec by numeric integration = %s', n)
+                if self.do_nlc():
+                    if ni.libxc.is_nlc(self.xc):
+                        xc = self.xc
+                    else:
+                        assert ni.libxc.is_nlc(self.nlc)
+                        xc = self.nlc
+                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
+                    exc += enlc
+                    vxc += vnlc
+                    log.debug('nelec with nlc grids = %s', n)
+                t0 = log.timer('vxc', *t0)
+
+                if not ni.libxc.is_hybrid_xc(self.xc):
+                    vj = self.get_j(mol, dm, hermi)
+                    vxc += vj
+                else:
+                    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+                    vj, vk = self.get_jk(mol, dm, hermi)
+                    vxc += vj
+                    vk *= hyb
+                    if omega != 0:
+                        vklr = self.get_k(mol, dm, hermi, omega=abs(omega))
+                        vklr *= (alpha - hyb)
+                        vk += vklr
+                    vxc -= vk * .5
+                    exc -= float(cupy.einsum('ij,ji->', dm, vk).real.get()) * .25
+                ecoul = float(cupy.einsum('ij,ji->', dm, vj).real.get()) * .5
+            elif isinstance(self, ghf.GHF):
+                if hermi == 2:  # because rho = 0
+                    n, exc, vxc = 0, 0, 0
+                else:
+                    max_memory = self.max_memory - lib.current_memory()[0]
+                    if ni.collinear[0].lower() != 'm':
+                        raise NotImplementedError('Only multi-colinear GKS is implemented for DF')
+                    if self.grids.coords is None:
+                        self.initialize_grids(mol, dm)
+                    
+                    if self.grids.coords is None:
+                        self.initialize_grids(mol, dm)
+                    
+                    n, exc, vxc = ni.get_vxc(mol, self.grids, self.xc, dm,
+                                             hermi=hermi, max_memory=max_memory)
+                    log.debug('nelec by numeric integration = %s', n)
+                    t0 = log.timer('vxc', *t0)
+                    
+                    if self.do_nlc():
+                        if ni.libxc.is_nlc(self.xc):
+                            xc = self.xc
+                        else:
+                            assert ni.libxc.is_nlc(self.nlc)
+                            xc = self.nlc
+                        n_nlc, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm,
+                                                      hermi=hermi, max_memory=max_memory)
+                        exc += enlc
+                        vxc += vnlc
+                        log.debug('nelec with nlc grids = %s', n_nlc)
+
+                if not ni.libxc.is_hybrid_xc(self.xc):
+                    vk = None
+                    vj = self.get_j(mol, dm, hermi)
+                    vxc += vj
+                else:
+                    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+                    if omega == 0:
+                        vj, vk = self.get_jk(mol, dm, hermi)
+                        vk *= hyb
+                    elif alpha == 0:
+                        vj = self.get_j(mol, dm, hermi)
+                        vk = self.get_k(mol, dm, hermi, omega=-omega)
+                        vk *= hyb
+                    elif hyb == 0:
+                        vj = self.get_j(mol, dm, hermi)
+                        vk = self.get_k(mol, dm, hermi, omega=omega)
+                        vk *= alpha
+                    else:
+                        vj, vk = self.get_jk(mol, dm, hermi)
+                        vk *= hyb
+                        vklr = self.get_k(mol, dm, hermi, omega=omega)
+                        vklr *= (alpha - hyb)
+                        vk += vklr
+                    vxc += vj - vk
+                    exc -= cupy.einsum('ij,ji->', dm, vk).real * .5
+                    ecoul = cupy.einsum('ij,ji->', dm, vj).real * .5
+            else:
+                raise NotImplementedError("DF only supports R/U/RO KS.")
+            t0 = log.timer('veff', *t0)
+            return tag_array(vxc, ecoul=ecoul, exc=exc)
+
+        if isinstance(self, (uhf.UHF, rohf.ROHF)):
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            vj = vj[0] + vj[1]
+            vhf = vj - vk
+            ecoul = float(cp.einsum('sij,ji->', dm, vj).real.get()) * .5
+            return tag_array(vhf, ecoul=ecoul)
+        elif isinstance(self, hf.RHF):
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            vhf = vj - vk * .5
+            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
+            return tag_array(vhf, ecoul=ecoul)
+        elif isinstance(self, ghf.GHF): # GHF branch
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            vhf = vj - vk
+            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
+            return tag_array(vhf, ecoul=ecoul)
+        else:
+            raise NotImplementedError("DF only supports R/U/RO/G HF.")
+
+    def to_cpu(self):
+        obj = self.undo_df().to_cpu().density_fit()
+        obj = utils.to_cpu(self, obj)
+        if hasattr(self, 'collinear'):
+            obj.collinear = self.collinear
+        if hasattr(self, 'spin_samples'):
+            obj.spin_samples = self.spin_samples
+        return obj
+
+def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
+    '''
+    get jk with density fitting
+    outputs and input are on the same device
+    TODO: separate into three cases: j only, k only, j and k
+    '''
+
+    log = logger.new_logger(dfobj.mol, dfobj.verbose)
+    t1 = t0 = log.init_timer()
+    if dfobj._cderi is None:
+        log.debug('Build CDERI ...')
+        dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
+        t1 = log.timer_debug1('init jk', *t0)
+
+    out_cupy = isinstance(dms, cp.ndarray)
+    dm_factor_l, dm_factor_r = factorize_dm(dms, hermi)
+    symmetrize = getattr(dms, 'symmetrize', 0)
+
+    nao, nocc = dm_factor_l.shape[-2:]
+    dms_3d = cp.asarray(dms).reshape(-1,nao,nao)
+    n_dm = dms_3d.shape[0]
+
+    intopt = dfobj.intopt
+
+    def proc():
+        factor_l = cp.asarray(dm_factor_l).reshape(n_dm, nao, nocc)
+        factor_r = dm_factor_r
+        if factor_r is not None:
+            factor_r = cp.asarray(factor_r).reshape(n_dm, nao, nocc)
+
+        vj = vk = None
+        if with_j:
+            rows = cp.asarray(intopt.cderi_row)
+            cols = cp.asarray(intopt.cderi_col)
+            pair_addresses, diags = dfobj._cderi_idx
+            rows, cols = divmod(cp.asarray(pair_addresses), nao)
+            dm_sparse = cp.asarray(dms_3d)[:,rows,cols]
+            if hermi == 0:
+                dm_sparse += cp.asarray(dms_3d)[:,cols,rows]
+            else:
+                dm_sparse *= 2
+            dm_sparse[:,cp.asarray(diags)] *= .5
+            vj_sparse = cp.zeros_like(dm_sparse)
+
+        if with_k:
+            vk = cupy.zeros_like(dms_3d)
+            mem_avail = get_avail_mem()
+            blksize = int(mem_avail * 0.3 / (nao**2 * 8))
+            blksize = blksize // df.ALIGNED * df.ALIGNED
+            blksize = min(blksize, df.MIN_BLK_SIZE)
+            dm_batch_size = int(mem_avail * 0.4 / (blksize*nao*nocc * 8))
+
+            if factor_r is None:
+                buf = cp.empty(dm_batch_size * blksize * nao*nocc)
+            elif factor_l.ndim == factor_r.ndim:
+                dm_batch_size = dm_batch_size // 2
+                assert dm_batch_size > 0
+                buf = cp.empty(2 * dm_batch_size * blksize * nao*nocc)
+            elif factor_l.ndim < factor_r.ndim:
+                assert factor_l.ndim == 2
+                buf = cp.empty(dm_batch_size+1, blksize * nao*nocc)
+                buf1 = buf[-1]
+            else:
+                assert factor_r.ndim == 2
+                buf = cp.empty(dm_batch_size+1, blksize * nao*nocc)
+                buf1 = buf[-1]
+
+        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+            if with_j:
+                vj_sparse += dm_sparse.dot(cderi_sparse.T).dot(cderi_sparse)
+            if with_k:
+                nL = len(cderi)
+                if factor_r is None:
+                    for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                        rhok = ndarray((i1-i0,nL,nocc,nao), buffer=buf)
+                        contract('Lij,njk->nLki', cderi, factor_l[i0:i1], out=rhok)
+                        contract('nLki,nLkj->nij', rhok, rhok, beta=1, out=vk[i0:i1])
+                elif factor_l.ndim == factor_r.ndim:
+                    for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                        rhok, rhok1 = ndarray((2,i1-i0,nL,nocc,nao), buffer=buf)
+                        contract('Lij,njk->nLki', cderi, factor_l[i0:i1], out=rhok)
+                        contract('Lij,njk->nLki', cderi, factor_r[i0:i1], out=rhok1)
+                        contract('nLki,nLkj->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
+                elif factor_l.ndim < factor_r.ndim:
+                    rhok = ndarray((nL,nocc,nao), buffer=buf1)
+                    contract('Lij,jk->Lki', cderi, factor_l, out=rhok)
+                    for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                        rhok1 = ndarray((i1-i0,nL,nocc,nao), buffer=buf)
+                        contract('Lij,njk->nLki', cderi, factor_r[i0:i1], out=rhok1)
+                        contract('nLki,Lkj->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
+                else:
+                    rhok1 = ndarray((nL,nocc,nao), buffer=buf1)
+                    contract('Lij,jk->Lki', cderi, factor_r, out=rhok1)
+                    for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                        rhok = ndarray((i1-i0,nL,nocc,nao), buffer=buf)
+                        contract('Lij,njk->nLki', cderi, factor_l[i0:i1], out=rhok)
+                        contract('nLki,Lkj->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
+                rhok1 = rhok = None
+        if with_j:
+            vj = cp.zeros(dms_3d.shape)
+            vj[:,cols,rows] = vj_sparse
+            vj[:,rows,cols] = vj_sparse
+        return vj, vk
+
+    results = multi_gpu.run(proc, non_blocking=True)
+
+    vj = vk = None
+    if with_j:
+        vj = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+        vj = vj.reshape(dms.shape)
+        if not out_cupy: vj = vj.get()
+
+    if with_k:
+        vk = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
+        if symmetrize != 0:
+            vk = transpose_sum(vk, hermi=symmetrize)
+        vk = vk.reshape(dms.shape)
+        if not out_cupy: vk = vk.get()
+    t1 = log.timer_debug1('vj and vk', *t1)
+    return vj, vk
+
+def get_j(dfobj, dm, hermi=1, direct_scf_tol=1e-13):
+    intopt = getattr(dfobj, 'intopt', None)
+    if intopt is None:
+        dfobj.build(direct_scf_tol=direct_scf_tol)
+        intopt = dfobj.intopt
+    j2c = dfobj.j2c
+    rhoj = int3c2e.get_j_int3c2e_pass1(intopt, dm)
+    if dfobj.cd_low.tag == 'eig':
+        rhoj, _, _, _ = cupy.linalg.lstsq(j2c, rhoj)
+    else:
+        rhoj = cupy.linalg.solve(j2c, rhoj)
+
+    rhoj *= 2.0
+    vj = int3c2e.get_j_int3c2e_pass2(intopt, rhoj)
+    return vj
+
+density_fit = _density_fit
+
+def factorize_dm(dm, hermi=0):
+    '''
+    Factorize density matrices to the product of two low-rank tensors.
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix.
+            When the input dm contains the mo_coeff attribute, orbol stores
+            eigenvectors * sqrt(occupancies).
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies).
+            When the input dm contains the mo_coeff attribute, orbor is None
+    '''
+    if isinstance(dm, CPArrayWithTag):
+        if hasattr(dm, 'mo_coeff'):
+            mo_coeff = cp.asarray(dm.mo_coeff)
+            mo_occ = cp.asarray(dm.mo_occ)
+            assert mo_coeff.ndim == mo_occ.ndim + 1
+            if mo_coeff.ndim == 2:
+                mask = mo_occ > 0
+                dm_factor = mo_coeff[:,mask]
+                dm_factor *= cp.sqrt(mo_occ[mask])
+            elif mo_coeff.ndim == 3:
+                mask = (mo_occ > 0).any(axis=0)
+                dm_factor = mo_coeff[:,:,mask]
+                dm_factor *= cp.sqrt(mo_occ[:,None,mask])
+            else:
+                mask = (mo_occ > 0).any(axis=(0, 1))
+                dm_factor = mo_coeff[:,:,:,mask]
+                dm_factor *= cp.sqrt(mo_occ[:,:,None,mask])
+            return dm_factor, None
+        if hasattr(dm, 'factor_l'):
+            return dm.factor_l, dm.factor_r
+
+    dm = cp.asarray(dm)
+    shape = dm.shape
+    if len(shape) > 3:
+        dm = dm.reshape(-1, *shape[-2:])
+    l, r = decompose_rdm1_svd(dm, hermi)
+    if len(shape) > 3:
+        shape = shape[:-2] + l.shape[-2:]
+        l = l.reshape(shape)
+        r = r.reshape(shape)
+    return l, r
+
+def decompose_rdm1_svd(dm, hermi=0):
+    '''Decompose density matrix as U.Vh using SVD
+
+    Args:
+        dm : ndarray or sequence of ndarrays of shape (*,nao,nao)
+            Density matrices
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies)
+    '''
+    if hermi == 1:
+        s, u = cp.linalg.eigh(dm)
+        mask = abs(s) > 1e-8
+        if dm.ndim == 2:
+            c = u[:,mask]
+            return c, contract('i,pi->pi', s[mask], c).conj()
+        else:
+            mask = mask.any(axis=0)
+            c = u[:,:,mask]
+            return c, contract('si,spi->spi', s[:,mask], c).conj()
+
+    u, s, vh = cp.linalg.svd(dm)
+    mask = s > 1e-8
+    if dm.ndim == 2:
+        return u[:,mask], contract('i,ip->pi', s[mask], vh[mask])
+    else:
+        mask = mask.any(axis=0)
+        return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
+
+def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
+    if factor_r.ndim == 2:
+        dm = factor_l.dot(factor_r.T)
+    elif factor_l.ndim == 2:
+        dm = contract('pi,xqi->xpq', factor_l, factor_r)
+    elif factor_l.ndim == 3:
+        dm = contract('xpi,xqi->xpq', factor_l, factor_r)
+    else:
+        raise RuntimeError(f'{factor_l.shape} not supported')
+
+    if dm.ndim == 2:
+        if symmetrize == 1:
+            dm = dm + dm.T
+        elif symmetrize == 2:
+            dm = dm - dm.T
+    else:
+        if symmetrize == 1:
+            dm = dm + dm.transpose(0,2,1)
+        elif symmetrize == 2:
+            dm = dm - dm.transpose(0,2,1)
+    return tag_array(dm, factor_l=factor_l, factor_r=factor_r, symmetrize=symmetrize)
+
+def _tag_factorize_dm(dm, hermi=0):
+    if hasattr(dm, 'symmetrize'):
+        # This dm should be created by the _make_factorized_dm
+        return dm
+    l, r = factorize_dm(dm, hermi)
+    return tag_array(dm, factor_l=l, factor_r=r, symmetrize=0)
+
+def _transpose_dm(dm):
+    dm_T = dm.T
+    if hasattr(dm, 'symmetrize'):
+        dm_T.factor_l = dm.factor_r
+        dm_T.factor_r = dm.factor_l
+        dm_T.symmetrize = dm.symmetrize
+    else:
+        dm_T = dm_T.view(cp.ndarray)
+    return dm_T
+
+def _aggregate_dm_factor_l(dms):
+    factor_l = cp.stack([x.factor_l for x in dms])
+    factor_r = dms[0].factor_r
+    assert all(x.symmetrize == 0 for x in dms)
+    return tag_array(cp.stack(dms), factor_l=factor_l, factor_r=factor_r,
+                     symmetrize=0)
