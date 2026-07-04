@@ -12,6 +12,7 @@ add_library(gvhf_rys SHARED
   contract_int3c2e.cu
   mole_helper.cu
   ejk_int3c2e_ip1.cu fill_int3c2e.cu
+  int3c2e_recontract.cu
   utils.c
   ejk_int3c2e_ip2.cu fill_int3c2e_ip1.cu
   e_int2c2e_ip2.cu

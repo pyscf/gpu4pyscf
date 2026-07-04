@@ -24,14 +24,15 @@ import warnings
 from pyscf import lib
 from pyscf.lib.parameters import ANGULAR
 from pyscf import gto
-from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, conc_env
+from pyscf.gto.mole import (
+    ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, NPRIM_OF, NCTR_OF, conc_env)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     load_library, contract, dist_matrix, asarray, hermi_triu, transpose_sum,
     ndarray)
 from gpu4pyscf.lib.utils import splits_by_blocksize
-from gpu4pyscf.gto.mole import PTR_BAS_COORD, SortedMole, RysIntEnvVars
-from gpu4pyscf.gto.mole import extract_pgto_params
+from gpu4pyscf.gto.mole import (
+    PTR_BAS_COORD, SortedMole, RysIntEnvVars, extract_pgto_params, groupby)
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, _cache_q_cond_and_non0pairs,
     _check_rsh_factors, SHM_SIZE, libvhf_rys)
@@ -46,6 +47,9 @@ L_AUX_MAX = 6
 GOUT_WIDTH = 54
 THREADS = 256
 POOL_SIZE = 25600
+
+libvhf_rys.pair_recontraction_info.restype = ctypes.c_int
+libvhf_rys.recontract_ao_pair.restype = ctypes.c_int
 
 def aux_e2(mol, auxmol):
     r'''
@@ -106,14 +110,14 @@ def contract_int3c2e_auxvec(mol, auxmol, auxvec, sort_output=True):
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
-        self.mol = SortedMole.from_mol(mol)
-        self.auxmol = SortedMole.from_mol(auxmol)
+        self.mol = mol
+        self.auxmol = auxmol
         self._int3c2e_envs = None
         self.bas_ij_cache = None
 
     def build(self, cutoff=1e-14):
-        mol = self.mol
-        auxmol = self.auxmol
+        mol = self.mol = SortedMole.from_cell(self.mol)
+        auxmol = self.auxmol = SortedMole.from_cell(self.auxmol)
         _atm, _bas, _env = conc_env(
             mol._atm, mol._bas, _scale_sp_ctr_coeff(mol),
             auxmol._atm, auxmol._bas, _scale_sp_ctr_coeff(auxmol))
@@ -127,7 +131,8 @@ class Int3c2eOpt:
             mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
 
         bas_pair_cache = _cache_q_cond_and_non0pairs(mol, self._int3c2e_envs, cutoff)
-        self.bas_ij_cache = {k: cp.sort(v[0]) for k, v in bas_pair_cache.items()}
+        self.bas_ij_cache = {
+            k: cp.sort(v[0]) for k, v in mol.iter_pair_by_l(bas_pair_cache)}
         return self
 
     @property
@@ -138,13 +143,12 @@ class Int3c2eOpt:
         return _int3c2e_envs.copy()
 
     def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None,
-                          reorder_aux=False, cart=None,
+                          reorder_aux=False, cart=None, pair_batch_by_l=False,
+                          return_bas_ij_batches=False,
                           omega=None, lr_factor=None, sr_factor=None):
         if self._int3c2e_envs is None:
             self.build()
         mol = self.mol
-        assert all(cp.asnumpy(mol.recontract_coef) == 1.), \
-                'int3c2e for general-contraction basis not supported'
         auxmol = self.auxmol
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
@@ -154,15 +158,40 @@ class Int3c2eOpt:
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+
+        if pair_batch_by_l:
+            bas_ij_cache = {k: v for k, v in mol.iter_pair_by_l(self.bas_ij_cache)}
+        else:
+            bas_ij_cache = self.bas_ij_cache
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-            self.bas_ij_cache, nsp_per_block[0]*4)
+            bas_ij_cache, nsp_per_block[0]*4)
+
         if cart is None:
             cart = mol.mol.cart
-        ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], self.bas_ij_cache, cart)
+        ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], bas_ij_cache, cart)
+        nao_pair = ao_pair_loc[-1].get()
 
-        if ao_pair_batch_size is None:
+        if ao_pair_batch_size is None or nao_pair < ao_pair_batch_size:
             pair_splits = [0, len(shl_pair_offsets)-1]
-            ao_pair_offsets = [0, ao_pair_loc[-1].get()]
+            ao_pair_offsets = np.array([0, nao_pair])
+
+        elif pair_batch_by_l:
+            uniq_l = mol.uniq_l_ctr[:,0].tolist()
+            pair_batch_sizes = []
+            last_key = None
+            for (i, j), bas_ij in bas_ij_cache.items():
+                key = (uniq_l[i], uniq_l[j])
+                if key != last_key:
+                    last_key = key
+                    pair_batch_sizes.append(bas_ij.size)
+                else:
+                    pair_batch_sizes[-1] += bas_ij.size
+            ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
+            pair_splits = np.append(0, np.searchsorted(
+                ao_pair_offsets, np.cumsum(pair_batch_sizes), side='left'))
+            ao_pair_offsets = ao_pair_offsets[pair_splits]
+            assert max(ao_pair_offsets[1:]-ao_pair_offsets[:-1]) < ao_pair_batch_size
+
         else:
             ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
             pair_splits = splits_by_blocksize(ao_pair_offsets, ao_pair_batch_size)
@@ -233,7 +262,14 @@ class Int3c2eOpt:
             if err != 0:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out
-        return evaluate_j3c, aux_sorting, ao_pair_offsets, aux_offsets
+
+        if return_bas_ij_batches:
+            bas_ij_splits = shl_pair_offsets[pair_splits].get()
+            bas_ij_batches = cp.split(bas_ij_idx, bas_ij_splits[1:-1])
+            return (evaluate_j3c, aux_sorting, ao_pair_offsets, aux_offsets,
+                    bas_ij_batches)
+        else:
+            return evaluate_j3c, aux_sorting, ao_pair_offsets, aux_offsets
 
     def int3c2e_bdiv_generator(self, cutoff=1e-14, batch_size=None, verbose=None):
         '''An iterator to generate eri3c blocks using the block-divergent
@@ -355,12 +391,13 @@ class Int3c2eOpt:
         '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''
         mol = self.mol
         uniq_l = mol.uniq_l_ctr[:,0]
-        bas_ij_idx = mol.aggregate_shl_pairs(self.bas_ij_cache, 1000000000)[0]
-        cart_pair_loc = get_ao_pair_loc(uniq_l, self.bas_ij_cache, cart=True)
+        bas_ij_cache = {k: v for k, v in mol.iter_pair_by_l(self.bas_ij_cache)}
+        bas_ij_idx = mol.aggregate_shl_pairs(bas_ij_cache, 1000000000)[0]
+        cart_pair_loc = get_ao_pair_loc(uniq_l, bas_ij_cache, cart=True)
         assert compressed_eri3c.shape[0] == cart_pair_loc[-1].get(), \
                 'compressed_eri3c might be already transformed into spherical GTOs'
 
-        sph_pair_loc = get_ao_pair_loc(uniq_l, self.bas_ij_cache, cart=False)
+        sph_pair_loc = get_ao_pair_loc(uniq_l, bas_ij_cache, cart=False)
         nao_pair = sph_pair_loc[-1].get()
         naux = compressed_eri3c.shape[1]
         out = cp.zeros((nao_pair, naux))
@@ -411,7 +448,7 @@ class Int3c2eOpt:
         offset = 0
         diag = []
         ao_pair_addresses = []
-        for (i, j), bas_ij in self.bas_ij_cache.items():
+        for (i, j), bas_ij in mol.iter_pair_by_l(self.bas_ij_cache):
             ish, jsh = divmod(bas_ij, nbas)
             if original_ao_order:
                 ish = sorted_idx[ish]
@@ -695,3 +732,92 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor))
     return q_out, s_out
+
+def _create_pair_recontraction(mol, bas_ij_batches, cart=None):
+    assert isinstance(mol, SortedMole)
+    recontract_bas = cp.asnumpy(mol.recontract_bas)
+    recontract_coef = cp.asnumpy(mol.recontract_coef)
+    recontraction_idx = cp.asnumpy(mol.recontraction_idx)
+
+    orig_shell_for_sorted_bas = np.empty(mol.nbas, dtype=np.int32)
+    orig_shell_for_sorted_bas[recontraction_idx] = \
+            np.repeat(np.arange(mol.mol.nbas), recontract_bas[:,NPRIM_OF])
+
+    # Generate np.hstack([np.arange(i) for i in recontract_bas[:,NPRIM_OF]])
+    nprims = recontract_bas[:,NPRIM_OF]
+    prim_offsets = np.append(0, np.cumsum(nprims))
+    prim_id_within_shell = np.empty(mol.nbas, dtype=np.int32)
+    prim_id_within_shell[recontraction_idx] = \
+            np.arange(mol.nbas) - np.repeat(prim_offsets[:-1], nprims)
+
+    nctrs = recontract_bas[orig_shell_for_sorted_bas, NCTR_OF]
+    l = mol._bas[:,ANG_OF]
+    if cart is None:
+        cart = mol.mol.cart
+    if cart:
+        nf = (l + 1) * (l + 2) // 2 * nctrs
+    else:
+        nf = (l * 2 + 1) * nctrs
+
+    ao_pair_counts = []
+    orig_ao_pair_counts = []
+    recontraction_params = []
+
+    nbas_sorted = mol.nbas
+    ao_loc = mol.mol.ao_loc
+    nao = int(ao_loc[-1])
+    output_lut = np.full((nao, nao), -1, dtype=np.int32)
+    pair_addresses = np.empty(nao**2, dtype=np.int32)
+    offset = 0
+    for batch_id, bas_ij_idx in enumerate(bas_ij_batches):
+        bas_ij_idx = cp.asnumpy(bas_ij_idx)
+        i, j = divmod(bas_ij_idx, nbas_sorted)
+        # For diagonal blocks of mol, only the low-triangular part of the
+        # corresonding integrals in sorted_mol are generated. They and their
+        # transpose are both used in the contraction expansion.
+        # *2 to ensure sufficient buffer size.
+        size = np.dot(nf[i], nf[j]) * 2
+        inp_idx = np.empty(size, dtype=np.int32)
+        out_idx = np.empty(size, dtype=np.int32)
+        coef = np.empty(size, dtype=np.float64)
+        count = ctypes.c_int(0)
+        cderi_npairs = libvhf_rys.pair_recontraction_info(
+            inp_idx.ctypes, out_idx.ctypes, coef.ctypes, ctypes.byref(count),
+            pair_addresses[offset:].ctypes, output_lut.ctypes,
+            bas_ij_idx.ctypes, ctypes.c_int(len(bas_ij_idx)),
+            orig_shell_for_sorted_bas.ctypes, prim_id_within_shell.ctypes,
+            recontract_bas.ctypes, recontract_coef.ctypes,
+            ao_loc.ctypes,
+            ctypes.c_int(nbas_sorted),
+            ctypes.c_int(nao))
+        count = count.value
+        ao_pair_counts.append(count)
+        orig_ao_pair_counts.append(cderi_npairs)
+        recontraction_params.append(
+            (inp_idx[:count], out_idx[:count], coef[:count]))
+        offset += cderi_npairs
+    pair_addresses = pair_addresses[:offset]
+
+    def recontract(batch_id, j3c, out=None):
+        naux = j3c.shape[1]
+        out_count = orig_ao_pair_counts[batch_id]
+        out = ndarray((out_count, naux), buffer=out)
+        if out_count == 0:
+            return out
+        out[:] = 0.
+        inp_idx, out_idx, coef = recontraction_params[batch_id]
+        inp_idx = asarray(inp_idx)
+        out_idx = asarray(out_idx)
+        coef = asarray(coef)
+        count = len(inp_idx)
+        err = libvhf_rys.recontract_ao_pair(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(j3c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(out_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(inp_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(coef.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(naux), ctypes.c_int(count))
+        if err != 0:
+            raise RuntimeError('recontract_ao_pair kernel failed')
+        return out
+    return recontract, ao_pair_counts, orig_ao_pair_counts, pair_addresses

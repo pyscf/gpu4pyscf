@@ -641,7 +641,7 @@ class SortedGTO:
         # recontraction_idx stores the indices of primitive shells (self._bas)
         # for each original contracted shell (self.mol._bas). The offset of each
         # contracted shell for recontraction_idx is provided by the
-        # recontract_bas[:,PTR_BAS_IDX]
+        # recontract_bas[:,PTR_PBAS_IDX]
         self.recontraction_idx = inv_sorted
         self.p_ao_loc = self.ao_loc_nr(cart=True)
 
@@ -1017,6 +1017,17 @@ class SortedMole(Mole, SortedGTO):
         shl_pair_offsets.append(np.int32(sp1))
         shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
         return bas_ij_idx, shl_pair_offsets
+
+    def iter_pair_by_l(self, bas_ij_pairs):
+        '''Iterate over the bas_ij pair in bas_ij_pairs based on the angular
+        momentum of the two bases of each pair
+        '''
+        uniq_l = self.uniq_l_ctr[:,0].tolist()
+        li_lj = [uniq_l[i]*8+uniq_l[j] for i, j in bas_ij_pairs]
+        sorted_pairs = (k for _, k in sorted(zip(li_lj, bas_ij_pairs)))
+        if isinstance(bas_ij_pairs, dict):
+            return ((key, bas_ij_pairs[key]) for key in sorted_pairs)
+        return sorted_pairs
 
 class SortedCell(Cell, SortedGTO):
     @multi_gpu.property(cache='_rys_envs')

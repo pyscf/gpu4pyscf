@@ -1,5 +1,6 @@
 import numpy as np
 import cupy as cp
+import scipy.linalg
 import pyscf
 from pyscf import lib
 from pyscf.df import incore
@@ -407,3 +408,56 @@ def test_int3c2e_rsh():
     with mol.with_range_coulomb(-omega):
         ref += incore.aux_e2(mol, auxmol) * sr_factor
     assert abs(out.get()-ref).max() < 1e-12
+
+def test_make_cderi():
+    from gpu4pyscf.gto.mole import SortedMole
+    from gpu4pyscf.df import df_o1
+    from pyscf.df.incore import aux_e2
+    mol = pyscf.M(
+        atom='''
+O    0.873    5.017    1.816
+H    1.128    5.038    2.848
+H    0.173    4.317    1.960
+O    3.665    1.316    1.319
+H    3.904    2.233    1.002
+H    4.224    0.640    0.837
+C1   1.3    .2       .3
+C1   .19   .1      1.1
+C2   1.    .3      1.1
+C2   .1    1.1     -.1
+C2   .4    -.1     -.1
+C2   -.3    .2     -.7''',
+        basis={
+            'default': 'ccpvdz',
+            'C1': [[1, [7.7, 1, .1], [4., .2, .8], [.8, .2, .1]]],
+        },
+    )
+    auxmol = mol.copy()
+    auxmol.auxbasis = 'weigend'
+    auxmol.build(0, 0)
+
+    nao = mol.nao
+    def _unpack(a, row, col):
+        out = cp.zeros((a.shape[0],nao,nao))
+        out[:,col,row] = out[:,row,col] = a
+        return out
+
+    cp.random.seed(12)
+    dm = cp.random.rand(nao,nao)
+
+    j3c = aux_e2(mol, auxmol)
+    j2c = auxmol.intor_symmetric('int2c2e')
+    ref = np.einsum('ijp,ij->p', j3c, dm.get())
+    ref = np.einsum('ijp,p->ij', j3c, scipy.linalg.solve(j2c, ref))
+
+    opt = int3c2e_bdiv.Int3c2eOpt(SortedMole.from_mol(mol, decontract=True), auxmol)
+    cderi, (row, col, diags) = df_o1._cholesky_eri(opt)
+    cderi = _unpack(cderi[0], row, col)
+    dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
+    assert abs(dat.get() - ref).max() < 1e-10
+
+    opt = int3c2e_bdiv.Int3c2eOpt(SortedMole.from_mol(mol, decontract=False), auxmol)
+    cderi, (row, col, diags) = df_o1._cholesky_eri(opt)
+    cderi = _unpack(cderi[0], row, col)
+    dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
+    assert abs(dat.get() - ref).max() < 1e-10
