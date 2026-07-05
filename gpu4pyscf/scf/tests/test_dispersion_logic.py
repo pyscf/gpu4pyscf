@@ -27,6 +27,18 @@ class KnownHF(scf.hf.SCF):
         self.disp = None
 
 class TestDispersionLogic(unittest.TestCase):
+    def test_parse_dft_with_d3_suffix(self):
+        self.assertEqual(
+            dispersion.parse_dft('b3lyp-d3bj'),
+            ('b3lyp', '', 'd3bj')
+        )
+
+    def test_parse_dft_with_hyphenated_d4_method(self):
+        self.assertEqual(
+            dispersion.parse_dft('wb97x-d4:wb97x-2008'),
+            ('wb97x', '', 'd4:wb97x-2008')
+        )
+
     def test_parse_disp_none(self):
         # Case 1: All None
         self.assertEqual(dispersion.parse_disp(None, None), (None, None, False))
@@ -60,6 +72,12 @@ class TestDispersionLogic(unittest.TestCase):
 
         # wb97x-3c -> d4, 3body=True (from whitelist)
         self.assertEqual(dispersion.parse_disp('wb97x-3c'), ('wb97x-3c', 'd4', True))
+
+        # wb97x-d4 with explicit d4 method should preserve the hyphenated payload
+        self.assertEqual(
+            dispersion.parse_disp('wb97x-d4:wb97x-2008'),
+            ('wb97x-2008', 'd4', True)
+        )
 
     def test_parse_disp_errors(self):
         # Unknown disp version
