@@ -457,7 +457,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, 
         if with_k:
             vk = cupy.zeros_like(dms_3d)
             mem_avail = get_avail_mem()
-            blksize = int(mem_avail * 0.3 / (nao**2 * 8))
+            blksize = int(mem_avail * 0.25 / (nao**2 * 8))
             blksize = blksize // df.ALIGNED * df.ALIGNED
             blksize = min(blksize, df.MIN_BLK_SIZE)
             dm_batch_size = int(mem_avail * 0.4 / (blksize*nao*nocc * 8))

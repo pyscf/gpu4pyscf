@@ -147,7 +147,9 @@ class DF(lib.StreamObject):
         blksize = min(blksize, naux_slice)
         on_gpu = isinstance(cderi_sparse, cp.ndarray)
 
-        work = cp.zeros((nao, nao, blksize))
+        if unpack:
+            work = cp.zeros((nao, nao, blksize))
+
         pair_idx = cp.asarray(self._cderi_idx[0], dtype=np.int32)
         npairs = len(pair_idx)
         if on_gpu:
@@ -184,13 +186,23 @@ class DF(lib.StreamObject):
                 yield out.transpose(2,0,1), cderi_blk
 
         else:
-            buf = cupy.empty((blksize, npairs))
+            buf = cp.empty((blksize, npairs))
+            buf_prefetch = cp.empty_like(buf)
+            cur_stream = cp.cuda.get_current_stream()
             stream = cp.cuda.stream.Stream(non_blocking=True)
-            with stream:
-                cderi_blk = buf
-                buf.set(cderi_sparse[:blksize])
+
+            buf_prefetch.set(cderi_sparse[:blksize], stream=stream)
+
             for p0, p1 in lib.prange(0, naux_slice, blksize):
                 stream.synchronize()
+                buf, buf_prefetch = buf_prefetch, buf
+                cderi_blk = buf[:p1-p0]
+
+                # prefetch the next block
+                p2 = min(naux_slice, p1 + blksize)
+                if p1 < p2:
+                    buf_prefetch[:p2-p1].set(cderi_sparse[p1:p2], stream=stream)
+
                 if not unpack:
                     yield None, cderi_blk
                     continue
@@ -208,13 +220,7 @@ class DF(lib.StreamObject):
                     ctypes.c_int(1), ctypes.c_int(0))
                 if err != 0:
                     raise RuntimeError('decompress cderi failed')
-
-                p2 = min(naux_slice, p1 + blksize)
-                if p1 < p2:
-                    cp.cuda.get_current_stream().synchronize()
-                    with stream:
-                        cderi_blk = buf[:p2-p1]
-                        cderi_blk.set(cderi_sparse[p1:p2])
+                yield out.transpose(2,0,1), cderi_blk
 
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
@@ -411,9 +417,8 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
     sorted_mol = intopt.mol
     mol = sorted_mol.mol
     auxmol = intopt.auxmol
-    naux = auxmol.nao
+    naux_sorted = auxmol.nao
     num_devices = multi_gpu.num_devices
-    naux_per_device = (naux + num_devices - 1) // num_devices
 
     # When the basis set does not contain general contractions, sorted_mol are
     # simply an reordering of the original mol bases.
@@ -423,9 +428,9 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
     if needs_recontraction:
-        batch_size = int(word_avail * .3) // naux
+        batch_size = int(word_avail * .3) // naux_sorted
     else:
-        batch_size = int(word_avail * .45) // naux
+        batch_size = int(word_avail * .45) // naux_sorted
 
     current_device = cp.cuda.device.get_device_id()
     eval_j3c, aux_sorting, ao_pair_offsets, _, bas_ij_batches = intopt.int3c2e_evaluator(
@@ -449,7 +454,10 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
         cderi_idx = (pair_addresses, diag_addrs)
 
     aux_coef, tag = _decompose_j2c(auxmol, aux_sorting)
-    batch_size = max(ao_pair_offsets[1:] - ao_pair_offsets[:-1])
+    batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
+
+    naux = aux_coef.shape[1]
+    naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
 
     cp.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem(exclude_memory_pool=True)
@@ -463,6 +471,8 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
             cderi_size = cderi_npairs * naux / num_devices * 8e-9
             raise MemoryError(f'Not enough GPU memory. cderi size = {cderi_size:.2f} GB')
         on_gpu = False
+    log.debug1('on_gpu=%s, nao_pairs=%d, naux_per_device=%d, batch_size=%d, num_batches=%d',
+               on_gpu, cderi_npairs, naux_per_device, batch_size, len(bas_ij_batches))
 
     if not on_gpu:
         cderi_cpu = empty_mapped((naux, cderi_npairs))
@@ -476,17 +486,18 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
                     ao_pair_batch_size=batch_size, reorder_aux=True, omega=omega,
                     pair_batch_by_l=needs_recontraction)[0]
 
-            work = cp.empty(naux * batch_size)
+            work = cp.empty(naux_sorted * batch_size)
             if needs_recontraction:
-                work1 = cp.empty(naux * batch_size)
+                work1 = cp.empty(naux_sorted * batch_size)
             work2 = cp.empty(naux * batch_size)
 
             for batch_id in batch_iter:
+                log.debug1('processing cderi batch %d', batch_id)
                 j3c = _eval_j3c(shl_pair_batch_id=batch_id, out=work)
                 if needs_recontraction:
-                    tmp = ndarray((cderi_npairs, naux), buffer=work1)
+                    tmp = ndarray((j3c.shape[0], naux_sorted), buffer=work1)
                     j3c = recontract(batch_id, j3c, out=tmp)
-                cderi_gpu = ndarray((cderi_npairs, naux), buffer=work2)
+                cderi_gpu = ndarray((j3c.shape[0], naux), buffer=work2)
                 cderi_gpu = j3c.dot(aux_coef, out=cderi_gpu)
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 err = libvhf_rys.transpose_write(
@@ -520,7 +531,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
                     pair_batch_by_l=needs_recontraction)[0]
 
             out = cp.empty((cderi_npairs, aux1-aux0))
-            work = cp.empty(naux * batch_size)
+            work = cp.empty(naux_sorted * batch_size)
             if needs_recontraction:
                 work1 = cp.empty((naux_per_device * batch_size))
 
@@ -550,6 +561,8 @@ def _decompose_j2c(auxmol, aux_sorting=None):
     except RuntimeError:
         w, v = cupy.linalg.eigh(j2c)
         idx = cp.where(w > LINEAR_DEP_THR)[0]
+        logger.debug1(auxmol, 'discard %d small eigenvectors for auxiliary dimension',
+                      w.size - len(idx))
         v = v[:,idx] / cupy.sqrt(w[idx])
         aux_coef = auxmol.apply_C_dot(v, axis=0)
         tag = 'ed'
