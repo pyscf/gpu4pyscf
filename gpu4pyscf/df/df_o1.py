@@ -41,9 +41,9 @@ LINEAR_DEP_THR = incore.LINEAR_DEP_THR
 
 class DF(lib.StreamObject):
 
-    use_gpu_memory = True
+    use_host_memory = True
 
-    _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_gpu_memory'}
+    _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_host_memory'}
 
     def __init__(self, mol, auxbasis=None):
         self.mol = mol
@@ -91,7 +91,7 @@ class DF(lib.StreamObject):
         intopt.mol = SortedMole.from_mol(mol, decontract=True)
         intopt.build()
         self._cderi, self._cderi_idx = _cholesky_eri(
-            intopt, omega=None, use_gpu_memory=self.use_gpu_memory)
+            intopt, omega=None, use_host_memory=self.use_host_memory)
         rows, cols = divmod(self._cderi_idx[0], self.nao)
         self.cderi_row  = intopt.cderi_row = rows
         self.cderi_col  = intopt.cderi_col = cols
@@ -188,23 +188,30 @@ class DF(lib.StreamObject):
         else:
             buf = cp.empty((blksize, npairs))
             buf_prefetch = cp.empty_like(buf)
-            cur_stream = cp.cuda.get_current_stream()
-            stream = cp.cuda.stream.Stream(non_blocking=True)
 
-            buf_prefetch.set(cderi_sparse[:blksize], stream=stream)
+            comput_stream = cp.cuda.get_current_stream()
+            compute_event = cp.cuda.Event()
+            io_stream = cp.cuda.stream.Stream(non_blocking=True)
+            io_event = cp.cuda.Event()
+
+            buf_prefetch.set(cderi_sparse[:blksize], stream=io_stream)
+            io_event.record(io_stream)
 
             for p0, p1 in lib.prange(0, naux_slice, blksize):
-                stream.synchronize()
                 buf, buf_prefetch = buf_prefetch, buf
                 cderi_blk = buf[:p1-p0]
+                comput_stream.wait_event(io_event)
 
                 # prefetch the next block
                 p2 = min(naux_slice, p1 + blksize)
                 if p1 < p2:
-                    buf_prefetch[:p2-p1].set(cderi_sparse[p1:p2], stream=stream)
+                    io_stream.wait_event(compute_event)
+                    buf_prefetch[:p2-p1].set(cderi_sparse[p1:p2], stream=io_stream)
+                    io_event.record(io_stream)
 
                 if not unpack:
                     yield None, cderi_blk
+                    compute_event.record(comput_stream)
                     continue
 
                 out = work[:,:,:p1-p0]
@@ -221,6 +228,7 @@ class DF(lib.StreamObject):
                 if err != 0:
                     raise RuntimeError('decompress cderi failed')
                 yield out.transpose(2,0,1), cderi_blk
+                compute_event.record(comput_stream)
 
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
@@ -410,12 +418,13 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
     return
 
-def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
+def _cholesky_eri(intopt, omega=None, use_host_memory=True):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
     if intopt._int3c2e_envs is None:
         intopt.build()
     sorted_mol = intopt.mol
     mol = sorted_mol.mol
+    log = logger.new_logger(mol)
     auxmol = intopt.auxmol
     naux_sorted = auxmol.nao
     num_devices = multi_gpu.num_devices
@@ -467,7 +476,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=True):
         word_avail -= batch_size * naux_per_device
     on_gpu = True
     if cderi_npairs * naux > word_avail * 0.95 * num_devices:
-        if use_gpu_memory:
+        if not use_host_memory:
             cderi_size = cderi_npairs * naux / num_devices * 8e-9
             raise MemoryError(f'Not enough GPU memory. cderi size = {cderi_size:.2f} GB')
         on_gpu = False
