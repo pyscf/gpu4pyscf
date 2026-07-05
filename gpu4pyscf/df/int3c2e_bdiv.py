@@ -570,7 +570,7 @@ def get_ao_pair_loc(uniq_l, bas_ij_cache, cart=True):
         p0, p1 = p1, p1 + nfij * len(bas_ij)
         ao_pair_loc.append(cp.arange(p0, p1, nfij, dtype=np.int32))
     ao_pair_loc.append(np.int32(p1))
-    ao_pair_loc = cp.hstack(ao_pair_loc).astype(np.int32)
+    ao_pair_loc = cp.hstack(ao_pair_loc, dtype=np.int32)
     return ao_pair_loc
 
 def int2c2e(mol):
