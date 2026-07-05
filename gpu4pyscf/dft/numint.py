@@ -2544,7 +2544,7 @@ class _GDFTOpt:
         # Padding zeros to transformation coefficients
         if nao > coeff.shape[0]:
             paddings = nao - coeff.shape[0]
-            coeff = np.vstack([coeff, np.zeros((paddings, coeff.shape[1]))])
+            coeff = cupy.vstack([coeff, cupy.zeros((paddings, coeff.shape[1]))])
         coeff = coeff[self._ao_idx]
         return coeff
 

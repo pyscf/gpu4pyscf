@@ -109,7 +109,6 @@ def get_k(mol, dm, hermi=0, vhfopt=None, omega=None, lr_factor=None, sr_factor=N
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
-    dms = cp.asarray(dms, order='C')
 
     vk = vhfopt.get_k(dms, hermi, log, omega, lr_factor, sr_factor)
     #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
@@ -133,14 +132,13 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     assert n_dm == 1
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
-    dms = cp.asarray(dms, order='C')
     if hermi != 1:
         dms = transpose_sum(dms)
         dms *= .5
 
     vj = vhfopt.get_j(dms, log)
-    #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = vhfopt.apply_coeff_CT_mat_C(cp.asarray(vj))
+    #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
+    vj = vhfopt.apply_coeff_CT_mat_C(vj)
     vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)
     return vj
