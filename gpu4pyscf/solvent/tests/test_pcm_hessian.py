@@ -667,7 +667,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
         assert np.max(np.abs(test_v_d2S_q - ref_v_d2S_q)) < 1e-15
 
-    def test_contract_d2S_lowmem(self):
+    def test_cpcm_lowmem(self):
         mol = pyscf.M(
             atom = """
                 O  0.0000  0.7375 -0.0528
