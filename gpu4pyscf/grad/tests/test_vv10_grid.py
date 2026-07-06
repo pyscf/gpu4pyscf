@@ -490,6 +490,55 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
 
+    def test_grid_response_gradient_ghost_atom_far_away(self):
+        mol = pyscf.M(
+            atom = """
+                O      0.000000    0.000000    0.000000
+                H      0.957200    0.000000    0.000000
+                H     -0.239987    0.927297    0.000000
+                ghost:O      22.000000    0.000000    0.000000
+                ghost:H      22.957200    0.000000    0.000000
+                ghost:O      2.000000    0.000000    0.000000
+                ghost:H      2.957200    0.000000    0.000000
+                ghost:H      1.760013    0.927297    0.000000
+                ghost:O      2.000000    20.000000    0.000000
+                ghost:H      2.957200    20.000000    0.000000
+            """,
+            basis = "sto-6g",
+            verbose = 0,
+        )
+
+        from gpu4pyscf.dft import rks as gpu_rks
+        mf = gpu_rks.RKS(mol, xc = "wb97mv").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+        mf.nlcgrids.atom_grid = (49,110)
+        mf.conv_tol = 1e-12
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+
+        # Reference come from removing the ghost atom far away
+        ref_energy = -76.02662600138008
+        ref_gradient = np.array([
+            [ 0.056476163601484,  0.074442899041095,  0.000000000000001],
+            [-0.063848118077074, -0.010594483907204, -0.000000000000001],
+            [ 0.00184695592196 , -0.063226209272444, -0.000000000000001],
+            [ 0, 0, 0 ],
+            [ 0, 0, 0 ],
+            [ 0.002209756185228,  0.000672985764181,  0.000000000000001],
+            [ 0.000001361947461,  0.000010775254639, -0.               ],
+            [ 0.003313880421019, -0.001305966880173, -0.               ],
+            [ 0, 0, 0 ],
+            [ 0, 0, 0 ],
+        ])
+
+        assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.linalg.norm(test_gradient - ref_gradient) < 1e-7
+
 if __name__ == "__main__":
     print("Full Tests for vv10 gradient, including grid response")
     unittest.main()
