@@ -217,6 +217,41 @@ def get_d2D_d2S(surface, with_S=True, with_D=False, stream=None):
         raise RuntimeError('Failed in generating PCM d2D and d2S matrices.')
     return d2D, d2S
 
+def contract_d2S_offdiagonal(surface, left_vector, right_vector, gridslice, stream = None):
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    n = charge_exp.shape[0]
+    assert left_vector.size == n
+    assert right_vector.size == n
+
+    gridslice = cupy.asarray(gridslice, dtype = cupy.int32, order = "C")
+    natm = gridslice.shape[0]
+    sandwiched_d2S = cupy.empty([3,3,natm,natm], dtype = cupy.float64, order = "C")
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_contract_d2s_offdiagonal(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(sandwiched_d2S.data.ptr, ctypes.c_void_p),
+        ctypes.cast(left_vector.data.ptr, ctypes.c_void_p),
+        ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gridslice.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+        ctypes.c_int(natm),
+    )
+    if err != 0:
+        raise RuntimeError('Failed in left_multiply_dS_offdiagonal')
+
+    reordered_d2S = cupy.zeros([natm,natm,3,3])
+    for i_atom in range(natm):
+        for j_atom in range(natm):
+            reordered_d2S[i_atom, i_atom, :, :] += sandwiched_d2S[:, :, i_atom, j_atom]
+            reordered_d2S[j_atom, j_atom, :, :] += sandwiched_d2S[:, :, i_atom, j_atom]
+            reordered_d2S[i_atom, j_atom, :, :] -= sandwiched_d2S[:, :, i_atom, j_atom]
+            reordered_d2S[j_atom, i_atom, :, :] -= sandwiched_d2S[:, :, i_atom, j_atom]
+    return reordered_d2S
+
 def analytical_hess_nuc(pcmobj, dm, verbose=None):
     if (not pcmobj._intermediates or
         not any(isinstance(x, cupy.ndarray) for x in pcmobj._intermediates.values())):
@@ -493,9 +528,7 @@ def get_v_dot_d2S_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice):
             output[i_atom, j_atom, :, :] -= d2S_atom_ij
             output[j_atom, i_atom, :, :] -= d2S_atom_ij
     return output
-def get_v_dot_d2ST_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice):
-    # S is symmetric
-    return get_v_dot_d2S_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice)
+get_v_dot_d2ST_dot_q = get_v_dot_d2S_dot_q
 
 def get_v_dot_d2A_dot_q(d2A, v_left, q_right):
     return d2A @ (v_left * q_right)

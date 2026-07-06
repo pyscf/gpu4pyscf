@@ -626,6 +626,94 @@ static void _pcm_d2D_d2S(double* __restrict__ matrix_d2D, double* __restrict__ m
     }
 }
 
+template <int n_thread_per_block>
+__global__
+static void _pcm_contract_d2S_offdiagonal(double* __restrict__ output,
+                                          const double* __restrict__ left_vector, const double* __restrict__ right_vector, const int* __restrict__ gridslice,
+                                          const double* __restrict__ coords, const double* __restrict__ charge_exp,
+                                          const int ngrids, const int natm)
+{
+    const int i_atom = blockIdx.x;
+    const int j_atom = blockIdx.y;
+    const int i_grid_start = gridslice[i_atom * 2 + 0];
+    const int i_grid_end = gridslice[i_atom * 2 + 1];
+    const int j_grid_start = gridslice[j_atom * 2 + 0];
+    const int j_grid_end = gridslice[j_atom * 2 + 1];
+
+    double sandwiched_d2S[9] { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+    for (int i_grid = i_grid_start + threadIdx.x; i_grid < i_grid_end; i_grid += n_thread_per_block) {
+        const double ei = charge_exp[i_grid];
+
+        const double rix = coords[3*i_grid];
+        const double riy = coords[3*i_grid+1];
+        const double riz = coords[3*i_grid+2];
+
+        const double left_i = left_vector[i_grid];
+
+        for (int j_grid = j_grid_start + threadIdx.y; j_grid < j_grid_end; j_grid += n_thread_per_block) {
+            const double ej = charge_exp[j_grid];
+            const double eij = ei * ej * rsqrt(ei*ei + ej*ej);
+
+            const double rjx = coords[3*j_grid];
+            const double rjy = coords[3*j_grid+1];
+            const double rjz = coords[3*j_grid+2];
+            const double dx = rix - rjx;
+            const double dy = riy - rjy;
+            const double dz = riz - rjz;
+            const double rij = sqrt(dx*dx + dy*dy + dz*dz);
+
+            const double rij_1 = (i_grid != j_grid) ? (1.0 / rij) : 0.0; // This guarantees that if i == j, all matrix elements = 0
+            const double rij_2 = rij_1 * rij_1;
+            const double rij_3 = rij_2 * rij_1;
+            const double rij_4 = rij_2 * rij_2;
+            const double rij_5 = rij_2 * rij_3;
+            const double eij2 = eij * eij;
+
+            const double eij_rij = eij * rij;
+            const double erf_eij_rij = erf(eij_rij);
+            const double exp_minus_eij2_rij2 = exp(-eij_rij * eij_rij);
+            const double two_eij_over_sqrt_pi = 2.0 * eij / SQRT_PI;
+            const double two_eij_over_sqrt_pi_exp_minus_eij2_rij2 = exp_minus_eij2_rij2 * two_eij_over_sqrt_pi;
+
+            const double S_direct_product_prefactor = -two_eij_over_sqrt_pi_exp_minus_eij2_rij2 * (3 * rij_4 + 2 * eij2 * rij_2)
+                                                      + 3 * rij_5 * erf_eij_rij;
+            const double S_xyz_diagonal_prefactor = two_eij_over_sqrt_pi_exp_minus_eij2_rij2 * rij_2 - rij_3 * erf_eij_rij;
+
+            const double right_j = right_vector[j_grid];
+            const double prefactors = left_i * right_j;
+
+            sandwiched_d2S[0] += prefactors * (dx * dx * S_direct_product_prefactor + S_xyz_diagonal_prefactor);
+            sandwiched_d2S[1] += prefactors * (dx * dy * S_direct_product_prefactor);
+            sandwiched_d2S[2] += prefactors * (dx * dz * S_direct_product_prefactor);
+            sandwiched_d2S[3] += prefactors * (dy * dx * S_direct_product_prefactor);
+            sandwiched_d2S[4] += prefactors * (dy * dy * S_direct_product_prefactor + S_xyz_diagonal_prefactor);
+            sandwiched_d2S[5] += prefactors * (dy * dz * S_direct_product_prefactor);
+            sandwiched_d2S[6] += prefactors * (dz * dx * S_direct_product_prefactor);
+            sandwiched_d2S[7] += prefactors * (dz * dy * S_direct_product_prefactor);
+            sandwiched_d2S[8] += prefactors * (dz * dz * S_direct_product_prefactor + S_xyz_diagonal_prefactor);
+        }
+    }
+
+    __shared__ double sum_shared[n_thread_per_block * n_thread_per_block];
+        const int tid = threadIdx.y * n_thread_per_block + threadIdx.x;
+
+    for (int i_xyz = 0; i_xyz < 9; i_xyz++) {
+        __syncthreads();
+        sum_shared[tid] = sandwiched_d2S[i_xyz];
+        __syncthreads();
+
+        for (int stride = n_thread_per_block * n_thread_per_block / 2; stride > 0; stride >>= 1) {
+            if (tid < stride) {
+                sum_shared[tid] += sum_shared[tid + stride];
+            }
+            __syncthreads();
+        }
+        if (tid == 0) {
+            output[i_xyz * natm * natm + i_atom * natm + j_atom] = sum_shared[0];
+        }
+    }
+}
+
 __global__
 static void _pcm_d2F_to_d2Sii(const double* __restrict__ F, const double* __restrict__ dF, const double* __restrict__ d2F, const double* __restrict__ charge_exp,
                               double* __restrict__ d2Sii, const int n_atom, const int n_grid)
@@ -816,6 +904,25 @@ int pcm_d2d_d2s(cudaStream_t stream, double *matrix_d2D, double *matrix_d2S,
     _pcm_d2D_d2S<<<blocks, threads, 0, stream>>>(matrix_d2D, matrix_d2S, coords, norm_vec, charge_exp, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int pcm_contract_d2s_offdiagonal(const cudaStream_t stream, double *output,
+                                 const double *left_vector, const double *right_vector, const int *gridslice,
+                                 const double *coords, const double *charge_exp,
+                                 const int ngrids, const int natm)
+{
+    constexpr int n_thread_per_block = 16; // 32 will cause "too many resources requested for launch", out of register
+    const dim3 threads(n_thread_per_block, n_thread_per_block);
+    const dim3 blocks(natm, natm);
+    _pcm_contract_d2S_offdiagonal<n_thread_per_block> <<<blocks, threads, 0, stream>>>
+        (output, left_vector, right_vector, gridslice, coords, charge_exp, ngrids, natm);
+    cudaError_t err = cudaGetLastError();
+
+    if (err != cudaSuccess) {
+        printf("pcm_contract_d2s_offdiagonal failed with error %d, error message: %s, ngrids = %d, natm = %d, n_thread_per_block = %d\n", err, cudaGetErrorString(err), ngrids, natm, n_thread_per_block);
         return 1;
     }
     return 0;

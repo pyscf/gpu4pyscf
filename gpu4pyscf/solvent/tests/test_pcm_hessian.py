@@ -609,6 +609,63 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
         assert np.max(np.abs(test_dSdx_dot_q - ref_dSdx_dot_q)) < 1e-15
 
+    def test_contract_d2S_lowmem(self):
+        mol = pyscf.M( # neopentane
+            atom = """
+                C      1.042440    0.085610   -0.011740
+                C      2.570330    0.085610   -0.011740
+                C      3.079630   -0.875920   -1.084370
+                C      3.079630    1.495300   -0.308120
+                C      3.079630   -0.362560    1.357290
+                H      0.649570    0.403960   -0.984220
+                H      0.649560    0.768620    0.750200
+                H      0.649560   -0.915760    0.198800
+                H      2.728230   -0.577130   -2.078680
+                H      2.728220   -1.896850   -0.895670
+                H      4.175330   -0.895490   -1.106200
+                H      2.728220    1.842340   -1.286640
+                H      4.175330    1.523990   -0.314160
+                H      2.728220    2.207010    0.447780
+                H      2.728210   -1.373050    1.595690
+                H      2.728210    0.311330    2.147090
+                H      4.175320   -0.371680    1.385160
+            """,
+            basis = "sto-3g",
+            verbose = 4,
+            output = '/dev/null',
+        )
+
+        mf = scf.hf.RHF(mol)
+        mf = mf.density_fit("def2-universal-jkfit")
+        mf = mf.PCM()
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.lebedev_order = 19
+        mf.with_solvent.radii_table = ["X", 2.49443848 + 1, "He", "Li", "Be", "B", 3.85504129] # necessary to make the center C obtain zero PCM grid points
+
+        mf.conv_tol = 1e0
+        mf.kernel()
+
+        pcmobj = mf.with_solvent
+
+        gridslice = pcmobj.surface['gslice_by_atom']
+        q = pcmobj._intermediates['q']
+        v_grids = pcmobj._intermediates['v_grids']
+        vK_1 = pcmobj.left_solve_K(v_grids, K_transpose = True)
+
+        from gpu4pyscf.solvent.grad.pcm import get_dF_dA
+        from gpu4pyscf.solvent.hessian.pcm import get_d2D_d2S, get_d2F_d2A, get_d2Sii, get_v_dot_d2S_dot_q, contract_d2S_offdiagonal
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False, surface_discretization_method = pcmobj.surface_discretization_method)
+        _, d2S = get_d2D_d2S(pcmobj.surface, with_D=False, with_S=True)
+        d2F, _ = get_d2F_d2A(pcmobj.surface, pcmobj.surface_discretization_method)
+        d2Sii = get_d2Sii(pcmobj.surface, dF, d2F)
+        del dF, d2F
+        ref_v_d2S_q = get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, mol.natm, gridslice)
+
+        test_v_d2S_q = contract_d2S_offdiagonal(pcmobj.surface, vK_1, q, gridslice)
+        # TODO: d2Sii part
+
+        assert np.max(np.abs(test_v_d2S_q - ref_v_d2S_q)) < 1e-15
+
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
     unittest.main()
