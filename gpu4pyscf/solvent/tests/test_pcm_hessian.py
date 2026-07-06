@@ -653,18 +653,51 @@ H       0.7570000000     0.0000000000    -0.4696000000
         vK_1 = pcmobj.left_solve_K(v_grids, K_transpose = True)
 
         from gpu4pyscf.solvent.grad.pcm import get_dF_dA
-        from gpu4pyscf.solvent.hessian.pcm import get_d2D_d2S, get_d2F_d2A, get_d2Sii, get_v_dot_d2S_dot_q, contract_d2S_offdiagonal
+        from gpu4pyscf.solvent.hessian.pcm import get_d2D_d2S, get_d2F_d2A, get_d2Sii, get_v_dot_d2S_dot_q, contract_d2S_offdiagonal, contract_d2S_diagonal
         dF, _ = get_dF_dA(pcmobj.surface, with_dA = False, surface_discretization_method = pcmobj.surface_discretization_method)
         _, d2S = get_d2D_d2S(pcmobj.surface, with_D=False, with_S=True)
         d2F, _ = get_d2F_d2A(pcmobj.surface, pcmobj.surface_discretization_method)
         d2Sii = get_d2Sii(pcmobj.surface, dF, d2F)
-        del dF, d2F
+        del d2F
         ref_v_d2S_q = get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, mol.natm, gridslice)
+        del d2S, d2Sii
 
         test_v_d2S_q = contract_d2S_offdiagonal(pcmobj.surface, vK_1, q, gridslice)
-        # TODO: d2Sii part
+        test_v_d2S_q += contract_d2S_diagonal(pcmobj.surface, dF, vK_1 * q, pcmobj.surface_discretization_method)
 
         assert np.max(np.abs(test_v_d2S_q - ref_v_d2S_q)) < 1e-15
+
+    def test_contract_d2S_lowmem(self):
+        mol = pyscf.M(
+            atom = """
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+            """,
+            basis = "6-31g",
+            verbose = 4,
+            output = '/dev/null',
+        )
+
+        mf = scf.hf.RHF(mol).density_fit("def2-universal-jkfit")
+        mf = mf.PCM()
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.lebedev_order = 17
+
+        mf.conv_tol = 1e0
+        mf.kernel()
+        dm = mf.make_rdm1()
+
+        pcmobj = mf.with_solvent
+        ref_hess = pcmobj.hess(dm)
+
+        from pyscf import lib
+        import gpu4pyscf.solvent.hessian.pcm as pcm_hessian
+        with lib.temporary_env(pcm_hessian, get_avail_mem=(lambda **kw: 0)):
+            test_hess = pcmobj.hess(dm)
+
+        assert np.max(np.abs(test_hess - ref_hess)) < 1e-14
 
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
