@@ -23,6 +23,7 @@ from pyscf.hessian import rhf as rhf_cpu
 from gpu4pyscf.df.hessian import rhf_fast
 from gpu4pyscf.df.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
+from gpu4pyscf.df import df_jk_o1 as df_jk
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 def setUpModule():
@@ -238,7 +239,8 @@ class KnownValues(unittest.TestCase):
         mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
 
-        obj = mol.RHF().to_gpu().density_fit(auxbasis=auxmol.basis).Hessian()
+        mf = mol.RHF().to_gpu()
+        obj = mf.density_fit(auxbasis=auxmol.basis).Hessian()
         obj.auxbasis_response = 2
         vj, vk = _get_jk_ip(obj, mo_coeff, mo_occ)
         ref = vj - 0.5 * vk

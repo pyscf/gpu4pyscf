@@ -24,7 +24,7 @@ from pyscf import lib
 from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, transpose_sum, reduce_to_device, tag_array, CPArrayWithTag)
+    contract, transpose_sum, tag_array, CPArrayWithTag, cholesky)
 from gpu4pyscf.dft import rks, uks, numint, gks
 from gpu4pyscf.scf import hf, uhf, rohf
 from gpu4pyscf.scf.jk import _check_rsh_factors
@@ -120,12 +120,12 @@ class _DFHF:
     def get_k(self, mol=None, dm=None, hermi=1, omega=None,
               lr_factor=None, sr_factor=None):
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
-        vk = self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol)[1]
+        vk = self.with_df.get_jk(dm, hermi, False, True)[1]
         vk *= sr_factor
         if omega == 0:
             return vk
 
-        vklr = self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol, omega)[1]
+        vklr = self.with_df.get_jk(dm, hermi, False, True, omega=omega)[1]
         vklr *= lr_factor - sr_factor
         vk += vklr
         return vk
@@ -143,9 +143,7 @@ class _DFHF:
                     def jkbuild(mol_obj, dm_obj, hermi, omega=None):
                         nao = mol_obj.nao
                         dm_obj = dm_obj.reshape(-1, nao, nao)
-                        return self.with_df.get_jk(dm_obj, hermi,
-                                                   direct_scf_tol=self.direct_scf_tol,
-                                                   omega=omega)
+                        return self.with_df.get_jk(dm_obj, hermi, omega=omega)
                     # Pass with_k=False to get only DF J
                     vj, _ = ghf.get_jk(mol, dm, hermi, True, False,
                                        jkbuild=jkbuild, omega=omega)
@@ -164,16 +162,13 @@ class _DFHF:
                 def jkbuild(mol_obj, dm_obj, hermi, omega=None):
                     nao = mol_obj.nao
                     dm_obj = dm_obj.reshape(-1, nao, nao)
-                    return self.with_df.get_jk(dm_obj, hermi,
-                                               direct_scf_tol=self.direct_scf_tol,
-                                               omega=omega)
+                    return self.with_df.get_jk(dm_obj, hermi, omega=omega)
                 vj, vk = ghf.get_jk(mol, dm, hermi, with_j, with_k,
                                     jkbuild=jkbuild, omega=omega)
             else:
                 # Standard RHF/UHF: Use Master's direct call
-                vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k,
-                                             self.direct_scf_tol, omega)
-                                             
+                vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k, omega=omega)
+
         else:
             # Error handling from Master
             raise ValueError(f"with_df field not found in a df object (type = {type(self)}) during a get_jk() call.")
@@ -410,18 +405,15 @@ class _DFHF:
             obj.spin_samples = self.spin_samples
         return obj
 
-def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
+def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
     '''
     get jk with density fitting
-    outputs and input are on the same device
-    TODO: separate into three cases: j only, k only, j and k
     '''
-
     log = logger.new_logger(dfobj.mol, dfobj.verbose)
     t1 = t0 = log.init_timer()
     if dfobj._cderi is None:
         log.debug('Build CDERI ...')
-        dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
+        dfobj.build(omega=omega)
         t1 = log.timer_debug1('init jk', *t0)
 
     out_cupy = isinstance(dms, cp.ndarray)
@@ -432,18 +424,18 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, 
     dms_3d = cp.asarray(dms).reshape(-1,nao,nao)
     n_dm = dms_3d.shape[0]
 
-    intopt = dfobj.intopt
-
     def proc():
-        factor_l = cp.asarray(dm_factor_l).reshape(n_dm, nao, nocc)
+        factor_l = cp.asarray(dm_factor_l)
+        if factor_l.ndim > 2:
+            factor_l = factor_l.reshape(n_dm, nao, nocc)
         factor_r = dm_factor_r
         if factor_r is not None:
-            factor_r = cp.asarray(factor_r).reshape(n_dm, nao, nocc)
+            factor_r = cp.asarray(factor_r)
+            if factor_r.ndim > 2:
+                factor_r = factor_r.reshape(n_dm, nao, nocc)
 
         vj = vk = None
         if with_j:
-            rows = cp.asarray(intopt.cderi_row)
-            cols = cp.asarray(intopt.cderi_col)
             pair_addresses, diags = dfobj._cderi_idx
             rows, cols = divmod(cp.asarray(pair_addresses), nao)
             dm_sparse = cp.asarray(dms_3d)[:,rows,cols]
@@ -454,12 +446,13 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, 
             dm_sparse[:,cp.asarray(diags)] *= .5
             vj_sparse = cp.zeros_like(dm_sparse)
 
+        mem_avail = get_avail_mem()
+        blksize = int(mem_avail * 0.25 / (nao**2 * 8))
+        blksize = blksize // df.ALIGNED * df.ALIGNED
+        blksize = min(blksize, df.MIN_BLK_SIZE)
+
         if with_k:
             vk = cupy.zeros_like(dms_3d)
-            mem_avail = get_avail_mem()
-            blksize = int(mem_avail * 0.25 / (nao**2 * 8))
-            blksize = blksize // df.ALIGNED * df.ALIGNED
-            blksize = min(blksize, df.MIN_BLK_SIZE)
             dm_batch_size = int(mem_avail * 0.4 / (blksize*nao*nocc * 8))
 
             if factor_r is None:
@@ -480,33 +473,34 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, 
         for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
                 vj_sparse += dm_sparse.dot(cderi_sparse.T).dot(cderi_sparse)
+
             if with_k:
                 nL = len(cderi)
                 if factor_r is None:
                     for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                        rhok = ndarray((i1-i0,nL,nocc,nao), buffer=buf)
-                        contract('Lij,njk->nLki', cderi, factor_l[i0:i1], out=rhok)
-                        contract('nLki,nLkj->nij', rhok, rhok, beta=1, out=vk[i0:i1])
+                        rhok = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
+                        contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
+                        contract('nikL,njkL->nij', rhok, rhok, beta=1, out=vk[i0:i1])
                 elif factor_l.ndim == factor_r.ndim:
                     for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                        rhok, rhok1 = ndarray((2,i1-i0,nL,nocc,nao), buffer=buf)
-                        contract('Lij,njk->nLki', cderi, factor_l[i0:i1], out=rhok)
-                        contract('Lij,njk->nLki', cderi, factor_r[i0:i1], out=rhok1)
-                        contract('nLki,nLkj->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
+                        rhok, rhok1 = ndarray((2,i1-i0,nao,nocc,nL), buffer=buf)
+                        contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
+                        contract('Lij,njk->nikL', cderi, factor_r[i0:i1], out=rhok1)
+                        contract('nikL,njkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
                 elif factor_l.ndim < factor_r.ndim:
-                    rhok = ndarray((nL,nocc,nao), buffer=buf1)
-                    contract('Lij,jk->Lki', cderi, factor_l, out=rhok)
+                    rhok = ndarray((nao,nocc,nL), buffer=buf1)
+                    contract('Lij,jk->ikL', cderi, factor_l, out=rhok)
                     for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                        rhok1 = ndarray((i1-i0,nL,nocc,nao), buffer=buf)
-                        contract('Lij,njk->nLki', cderi, factor_r[i0:i1], out=rhok1)
-                        contract('nLki,Lkj->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
+                        rhok1 = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
+                        contract('Lij,njk->nikL', cderi, factor_r[i0:i1], out=rhok1)
+                        contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
                 else:
-                    rhok1 = ndarray((nL,nocc,nao), buffer=buf1)
-                    contract('Lij,jk->Lki', cderi, factor_r, out=rhok1)
+                    rhok1 = ndarray((nao,nocc,nL), buffer=buf1)
+                    contract('Lij,jk->ikL', cderi, factor_r, out=rhok1)
                     for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                        rhok = ndarray((i1-i0,nL,nocc,nao), buffer=buf)
-                        contract('Lij,njk->nLki', cderi, factor_l[i0:i1], out=rhok)
-                        contract('nLki,Lkj->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
+                        rhok = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
+                        contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
+                        contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
                 rhok1 = rhok = None
         if with_j:
             vj = cp.zeros(dms_3d.shape)
@@ -531,20 +525,36 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, 
     t1 = log.timer_debug1('vj and vk', *t1)
     return vj, vk
 
-def get_j(dfobj, dm, hermi=1, direct_scf_tol=1e-13):
-    intopt = getattr(dfobj, 'intopt', None)
-    if intopt is None:
-        dfobj.build(direct_scf_tol=direct_scf_tol)
-        intopt = dfobj.intopt
-    j2c = dfobj.j2c
-    rhoj = int3c2e.get_j_int3c2e_pass1(intopt, dm)
-    if dfobj.cd_low.tag == 'eig':
-        rhoj, _, _, _ = cupy.linalg.lstsq(j2c, rhoj)
-    else:
-        rhoj = cupy.linalg.solve(j2c, rhoj)
+def get_j(dfobj, dm, hermi=1):
+    from cupyx.scipy.linalg import solve_triangular
+    from gpu4pyscf.df.int3c2e_bdiv import int2c2e
 
-    rhoj *= 2.0
-    vj = int3c2e.get_j_int3c2e_pass2(intopt, rhoj)
+    if dfobj._cderi is not None:
+        return dfobj.get_jk(dm, hermi, with_k=False)
+
+    if dfobj.intopt is None:
+        dfobj.build(build_cderi=False)
+        j2c = int2c2e(dfobj.auxmol)
+        try:
+            dfobj.cd_j2c = cholesky(j2c)
+            dfobj.cd_tag = 'cd'
+        except RuntimeError:
+            dfobj.cd_j2c = j2c
+            dfobj.cd_tag = 'ed'
+
+    intopt = dfobj.intopt
+    mol = intopt.mol
+    auxmol = intopt.auxmol
+    dm = mol.apply_C_mat_CT(dm)
+    rhoj = intopt.contract_dm(dm, hermi=hermi)
+    if dfobj.cd_tag == 'ed':
+        rhoj = cp.linalg.solve(dfobj.cd_j2c, rhoj.T)[0]
+    else:
+        rhoj = solve_triangular(dfobj.cd_j2c, rhoj.T, lower=True)
+        rhoj = solve_triangular(dfobj.cd_j2c.T, rhoj, lower=False)
+
+    auxvec = auxmol.C_dot_mat(rhoj.T)
+    vj = intopt.contract_auxvec(auxvec)
     return vj
 
 density_fit = _density_fit
@@ -627,25 +637,10 @@ def decompose_rdm1_svd(dm, hermi=0):
         return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
 
 def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
-    if factor_r.ndim == 2:
-        dm = factor_l.dot(factor_r.T)
-    elif factor_l.ndim == 2:
-        dm = contract('pi,xqi->xpq', factor_l, factor_r)
-    elif factor_l.ndim == 3:
-        dm = contract('xpi,xqi->xpq', factor_l, factor_r)
-    else:
-        raise RuntimeError(f'{factor_l.shape} not supported')
-
-    if dm.ndim == 2:
-        if symmetrize == 1:
-            dm = dm + dm.T
-        elif symmetrize == 2:
-            dm = dm - dm.T
-    else:
-        if symmetrize == 1:
-            dm = dm + dm.transpose(0,2,1)
-        elif symmetrize == 2:
-            dm = dm - dm.transpose(0,2,1)
+    dm = cp.matmul(factor_l, factor_r.T)
+    if symmetrize == 1 or symmetrize == 2:
+        nao = dm.shape[-1] # dm1 may have dimensions > 3
+        transpose_sum(dm.reshape(-1,nao,nao), inplace=True, hermi=symmetrize)
     return tag_array(dm, factor_l=factor_l, factor_r=factor_r, symmetrize=symmetrize)
 
 def _tag_factorize_dm(dm, hermi=0):

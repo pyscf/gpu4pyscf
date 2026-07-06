@@ -34,6 +34,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess_gpu
 from gpu4pyscf.hessian.rhf import _ao2mo
+from gpu4pyscf.df.df_jk import _make_factorized_dm
 
 GB = 1024*1024*1024
 ALIGNED = 4
@@ -43,6 +44,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               atmlst=None, max_memory=4000, verbose=None):
     ''' Different from PySF, using h1mo instead of h1ao for saving memory
     '''
+    from gpu4pyscf.pbc.gto import int1e
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
 
@@ -89,8 +91,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mo_eb = mo_energy[1][mo_occ[1]>0]
     mocca_e = mocca * mo_ea
     moccb_e = moccb * mo_eb
-    s1a = -mol.intor('int1e_ipovlp', comp=3)
-    s1a = cupy.asarray(s1a)
+    s1a = -int1e.int1e_ipovlp(mol)
 
     aoslices = mol.aoslice_by_atom()
     for i0, (p0, p1) in enumerate(aoslices[:,2:]):
@@ -230,7 +231,8 @@ def get_hcore(mol):
     return h1aa.reshape(3,3,nao,nao), h1ab.reshape(3,3,nao,nao)
 
 def get_ovlp(mol):
-    s1a =-mol.intor('int1e_ipovlp', comp=3)
+    from gpu4pyscf.pbc.gto import int1e
+    s1a = -int1e.int1e_ipovlp(mol)
     nao = s1a.shape[-1]
     s1aa = mol.intor('int1e_ipipovlp', comp=9).reshape(3,3,nao,nao)
     s1ab = mol.intor('int1e_ipovlpip', comp=9).reshape(3,3,nao,nao)
@@ -249,6 +251,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             A function to generate the induced potential.
             See also the function gen_vind.
     '''
+    from gpu4pyscf.pbc.gto import int1e
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
     t0 = log.init_timer()
@@ -289,8 +292,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         v1b[:,occidxb] = 0
         return v.reshape(-1,nmo*nocc)
 
-    ipovlp = -mol.intor('int1e_ipovlp', comp=3)
-    ipovlp = cp.asarray(ipovlp)
+    ipovlp = -int1e.int1e_ipovlp(mol)
     cp.get_default_memory_pool().free_all_blocks()
 
     avail_mem = get_avail_mem()
@@ -378,29 +380,29 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     mo_occ = cupy.asarray(mo_occ)
     nao, nmoa = mo_coeff[0].shape
     nao, nmob = mo_coeff[1].shape
-    mocca = mo_coeff[0][:,mo_occ[0]>0]
-    moccb = mo_coeff[1][:,mo_occ[1]>0]
-    nocca = mocca.shape[1]
-    noccb = moccb.shape[1]
+    orboa = mo_coeff[0][:,mo_occ[0]>0]
+    orbob = mo_coeff[1][:,mo_occ[1]>0]
+    nocca = orboa.shape[1]
+    noccb = orbob.shape[1]
+    assert nmoa == nmob
+    assert nocca >= noccb
+    nocc = nocca
+    orbo = cp.empty((2, nmo, nocc))
+    orbo[0,:,:nocca] = orboa
+    orbo[1,:,:nocca] = orbob
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmoa*nocca+nmob*noccb)
         nset = len(mo1)
-
-        dm1 = cupy.empty([2,nset,nao,nao])
-
-        x = mo1[:,:nmoa*nocca].reshape(nset,nmoa,nocca)
-        mo1_moa = contract('npo,ip->nio', x, mo_coeff[0])
-        dma = contract('nio,jo->nij', mo1_moa, mocca)
-        dm1[0] = transpose_sum(dma)
-
-        x = mo1[:,nmoa*nocca:].reshape(nset,nmob,noccb)
-        mo1_mob = contract('npo,ip->nio', x, mo_coeff[1])
-        dmb = contract('nio,jo->nij', mo1_mob, moccb)
-        dm1[1] = transpose_sum(dmb)
-
-        dm1 = tag_array(dm1, mo1=[mo1_moa,mo1_mob], occ_coeff=[mocca,moccb], mo_occ=mo_occ)
+        mo1_aligned = cp.empty((nset, 2*nmo*nocc))
+        mo1_aligned[:,:nmo*(nocc+noccb)] = mo1
+        mo1_aligned[:,nmo*(nocc+noccb):] = 0.
+        mo1_aligned = mo1.reshape(nset,2,nmo,nocc)
+        mo1_mo = contract('nsai,spa->snpi', mo1_aligned, mo_coeff)
+        dm1 = contract('snpi,sqi->snpq', mo1_mo, orbo)
+        transpose_sum(dm1.reshape(-1,nao,nao), inplace=True, hermi=1)
+        dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=orbo, symmetrize=1)
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
     return fx
 

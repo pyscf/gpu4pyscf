@@ -14,6 +14,7 @@
 
 
 import ctypes
+import contextlib
 import cupy
 import numpy as np
 import cupy as cp
@@ -78,7 +79,7 @@ class DF(lib.StreamObject):
         from pyscf.df.df import DF
         return utils.to_cpu(self, out=DF(self.mol, auxbasis=self.auxbasis))
 
-    def build(self, direct_scf_tol=1e-14, omega=None):
+    def build(self, direct_scf_tol=None, omega=None, build_cderi=True):
         mol = self.mol
         auxmol = self.auxmol
         self.nao = mol.nao
@@ -90,32 +91,16 @@ class DF(lib.StreamObject):
         self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
         intopt.mol = SortedMole.from_mol(mol, decontract=True)
         intopt.build()
-        self._cderi, self._cderi_idx = _cholesky_eri(
-            intopt, omega=None, use_host_memory=self.use_host_memory)
-        rows, cols = divmod(self._cderi_idx[0], self.nao)
-        self.cderi_row  = intopt.cderi_row = rows
-        self.cderi_col  = intopt.cderi_col = cols
-        self.cderi_diag = intopt.cderi_diag = self._cderi_idx[1]
-        log.timer_debug1('cholesky_eri', *t0)
+        if build_cderi:
+            self._cderi, self._cderi_idx = _cholesky_eri(
+                intopt, omega=omega, use_host_memory=self.use_host_memory)
+            log.timer_debug1('cholesky_eri', *t0)
         return self
 
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
-               direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),
-               omega=None):
-        if omega is None:
-            return df_jk_o1.get_jk(self, dm, hermi, with_j, with_k, direct_scf_tol)
-        assert omega >= 0.0
-
-        # A temporary treatment for RSH-DF integrals
-        # TODO: use the range_coulomb context from pyscf
-        key = '%.6f' % omega
-        if key in self._rsh_df:
-            rsh_df = self._rsh_df[key]
-        else:
-            rsh_df = self._rsh_df[key] = self.copy().reset()
-            logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
-
-        return df_jk_o1.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol, omega=omega)
+               direct_scf_tol=None, omega=None):
+        with self.range_coulomb(omega) as dfobj:
+            return df_jk_o1.get_jk(dfobj, dm, hermi, with_j, with_k, omega=omega)
 
     def get_blksize(self, extra=0, nao=None):
         '''
@@ -126,7 +111,7 @@ class DF(lib.StreamObject):
         blksize = int(mem_avail*0.2/8/(nao*nao + extra) / ALIGNED) * ALIGNED
         blksize = min(blksize, MIN_BLK_SIZE)
         log = logger.new_logger(self.mol, self.mol.verbose)
-        device_id = cupy.cuda.Device().id
+        device_id = cp.cuda.Device().id
         log.debug(f"{mem_avail/1e9:.3f} GB memory available on Device {device_id}, block size = {blksize}")
         assert blksize > 0
         return blksize
@@ -138,7 +123,7 @@ class DF(lib.StreamObject):
         if self._cderi is None:
             self.build()
 
-        device_id = cupy.cuda.Device().id
+        device_id = cp.cuda.Device().id
         cderi_sparse = self._cderi[device_id]
         nao = self.nao
         naux_slice = cderi_sparse.shape[0]
@@ -157,33 +142,10 @@ class DF(lib.StreamObject):
                 cderi_blk = cderi_sparse[p0:p1]
                 if not unpack:
                     yield None, cderi_blk
-                    continue
-
-                out = work[:,:,:p1-p0]
-                if cderi_sparse.flags.c_contiguous:
-                    err = libvhf_rys.decompress_and_transpose(
-                        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(blksize),
-                        ctypes.cast(cderi_sparse.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(npairs),
-                        ctypes.c_int(nao),
-                        ctypes.c_int(naux_slice),
-                        ctypes.c_int(p0), ctypes.c_int(p1),
-                        ctypes.c_int(1), ctypes.c_int(0))
                 else:
-                    err = libvhf_rys.decompress_and_fill(
-                        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(blksize),
-                        ctypes.cast(cderi_sparse.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(npairs),
-                        ctypes.c_int(nao),
-                        ctypes.c_int(naux_slice),
-                        ctypes.c_int(p0), ctypes.c_int(p1))
-                if err != 0:
-                    raise RuntimeError('decompress cderi failed')
-                yield out.transpose(2,0,1), cderi_blk
+                    out = _fill_symmetric(work[:,:,:p1-p0], pair_idx,
+                                          cderi_sparse.T, p0, p1)
+                    yield out.transpose(2,0,1), cderi_blk
 
         else:
             buf = cp.empty((blksize, npairs))
@@ -198,6 +160,7 @@ class DF(lib.StreamObject):
             io_event.record(io_stream)
 
             for p0, p1 in lib.prange(0, naux_slice, blksize):
+                compute_event.record(comput_stream)
                 buf, buf_prefetch = buf_prefetch, buf
                 cderi_blk = buf[:p1-p0]
                 comput_stream.wait_event(io_event)
@@ -211,24 +174,10 @@ class DF(lib.StreamObject):
 
                 if not unpack:
                     yield None, cderi_blk
-                    compute_event.record(comput_stream)
-                    continue
-
-                out = work[:,:,:p1-p0]
-                err = libvhf_rys.decompress_and_transpose(
-                    ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(blksize),
-                    ctypes.cast(cderi_blk.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(npairs),
-                    ctypes.c_int(nao),
-                    ctypes.c_int(p1-p0),
-                    ctypes.c_int(0), ctypes.c_int(p1-p0),
-                    ctypes.c_int(1), ctypes.c_int(0))
-                if err != 0:
-                    raise RuntimeError('decompress cderi failed')
-                yield out.transpose(2,0,1), cderi_blk
-                compute_event.record(comput_stream)
+                else:
+                    out = _fill_symmetric(work[:,:,:p1-p0], pair_idx,
+                                          cderi_blk.T, 0, p1-p0)
+                    yield out.transpose(2,0,1), cderi_blk
 
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
@@ -241,6 +190,45 @@ class DF(lib.StreamObject):
         self.nao = None
         self.cd_low = None
         return self
+
+    @contextlib.contextmanager
+    def range_coulomb(self, omega):
+        if omega is None:
+            omega = 0
+
+        if omega == 0:
+            yield self
+            return
+
+        key = '%.6f' % omega
+        if key in self._rsh_df:
+            rsh_df = self._rsh_df[key]
+        else:
+            rsh_df = self._rsh_df[key] = self.copy().reset()
+            if hasattr(self, '_dataname'):
+                rsh_df._dataname = f'{self._dataname}-lr/{key}'
+            logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
+
+        mol = self.mol
+        auxmol = self.auxmol
+
+        mol_omega = mol.omega
+        mol.omega = omega
+        auxmol_omega = None
+        if auxmol is not None:
+            auxmol_omega = auxmol.omega
+            auxmol.omega = omega
+
+        assert rsh_df.mol.omega == omega
+        if rsh_df.auxmol is not None:
+            assert rsh_df.auxmol.omega == omega
+
+        try:
+            yield rsh_df
+        finally:
+            mol.omega = mol_omega
+            if auxmol_omega is not None:
+                auxmol.omega = auxmol_omega
 
     get_ao_eri = get_eri = NotImplemented
     get_mo_eri = ao2mo = NotImplemented
@@ -443,8 +431,9 @@ def _cholesky_eri(intopt, omega=None, use_host_memory=True):
 
     current_device = cp.cuda.device.get_device_id()
     eval_j3c, aux_sorting, ao_pair_offsets, _, bas_ij_batches = intopt.int3c2e_evaluator(
-        ao_pair_batch_size=batch_size, reorder_aux=True, omega=omega,
-        pair_batch_by_l=needs_recontraction, return_bas_ij_batches=True)
+        ao_pair_batch_size=batch_size, reorder_aux=True,
+        pair_batch_by_l=needs_recontraction, return_bas_ij_batches=True,
+        omega=omega)
 
     if needs_recontraction:
         recontract, ao_pair_counts, cderi_pair_counts, pair_addresses = \
@@ -580,3 +569,38 @@ def _decompose_j2c(auxmol, aux_sorting=None):
         aux_coef, tmp = cupy.empty_like(aux_coef), aux_coef
         aux_coef[aux_sorting] = tmp
     return aux_coef, tag
+
+def _fill_symmetric(out, pair_addresses, a, aux0, aux1):
+    '''
+    i, j = divmod(pair_addresses, nao)
+    out[j,i] = out[i,j] = a[:,aux0:aux1]
+    '''
+    assert out.ndim == 3 and a.ndim == 2
+    nao = out.shape[0]
+    out_stride = out.strides[-2] // out.itemsize
+    if a.strides[-1] == 8: # a is in row major
+        a_stride = a.strides[-2] // a.itemsize
+        err = libvhf_rys.decompress_and_fill(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(out_stride),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(pair_addresses)),
+            ctypes.c_int(nao),
+            ctypes.c_int(a_stride),
+            ctypes.c_int(aux0), ctypes.c_int(aux1))
+    else: # a is in column major
+        naux = len(a)
+        err = libvhf_rys.decompress_and_transpose(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(out_stride),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(pair_addresses)),
+            ctypes.c_int(nao),
+            ctypes.c_int(naux),
+            ctypes.c_int(aux0), ctypes.c_int(aux1),
+            ctypes.c_int(1), ctypes.c_int(0))
+    if err != 0:
+        raise RuntimeError('decompress cderi failed')
+    return out

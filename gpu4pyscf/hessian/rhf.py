@@ -43,6 +43,7 @@ from gpu4pyscf.scf.jk import (
 from gpu4pyscf.grad import rhf as rhf_grad
 from . import dispersion
 from gpu4pyscf.gto.mole import extract_pgto_params
+from gpu4pyscf.df.df_jk import _make_factorized_dm
 
 libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int
 libvhf_rys.RYS_per_atom_jk_ip2_type3.restype = ctypes.c_int
@@ -60,6 +61,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               atmlst=None, max_memory=4000, verbose=None):
     ''' Different from PySF, using h1mo instead of h1ao for saving memory
     '''
+    from gpu4pyscf.pbc.gto import int1e
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = log.init_timer()
     mol = hessobj.mol
@@ -97,8 +99,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
     mocc_e = mocc * mo_energy[mo_occ>0]
-    s1a = -mol.intor('int1e_ipovlp', comp=3)
-    s1a = cupy.asarray(s1a)
+    s1a = -int1e.int1e_ipovlp(mol)
 
     aoslices = mol.aoslice_by_atom()
     for i0, (p0, p1) in enumerate(aoslices[:,2:]):
@@ -571,7 +572,8 @@ def get_hcore(mol):
     return h1aa.reshape(3,3,nao,nao), h1ab.reshape(3,3,nao,nao)
 
 def get_ovlp(mol):
-    s1a =-mol.intor('int1e_ipovlp', comp=3)
+    from gpu4pyscf.pbc.gto import int1e
+    s1a = -int1e.int1e_ipovlp(mol)
     nao = s1a.shape[-1]
     s1aa = mol.intor('int1e_ipipovlp', comp=9).reshape(3,3,nao,nao)
     s1ab = mol.intor('int1e_ipovlpip', comp=9).reshape(3,3,nao,nao)
@@ -592,6 +594,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             A function to generate the induced potential.
             See also the function gen_vind.
     '''
+    from gpu4pyscf.pbc.gto import int1e
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
     t0 = log.init_timer()
@@ -622,8 +625,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         v[:,occidx,:] = 0
         return v.reshape(-1,nmo*nocc)
 
-    ipovlp = -mol.intor('int1e_ipovlp', comp=3)
-    ipovlp = cp.asarray(ipovlp)
+    ipovlp = -int1e.int1e_ipovlp(mol)
     cp.get_default_memory_pool().free_all_blocks()
 
     avail_mem = get_avail_mem()
@@ -682,17 +684,17 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
     nao, nmo = mo_coeff.shape
-    mocc = mo_coeff[:,mo_occ>0]
-    nocc = mocc.shape[1]
-    mocc_2 = mocc * 2
+    orbo = mo_coeff[:,mo_occ>0]
+    nocc = orbo.shape[1]
+    orbo_2 = orbo * 2
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmo,nocc)
         mo1_mo = contract('npo,ip->nio', mo1, mo_coeff)
-        dm1 = mo1_mo.dot(mocc_2.T)
-        dm1 = transpose_sum(dm1)
-        dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=mocc, mo_occ=mo_occ)
+        dm1 = contract('npi,qi->npq', mo1_mo, orbo_2)
+        transpose_sum(dm1, inplace=True, hermi=1)
+        dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=orbo, symmetrize=1)
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
     return fx
 

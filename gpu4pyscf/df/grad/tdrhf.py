@@ -25,6 +25,7 @@ from gpu4pyscf.df.grad.rhf import (
 from gpu4pyscf.df import df
 from gpu4pyscf.tdscf import rhf as tdrhf
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
+from gpu4pyscf.gto.mole import SortedMole
 
 __all__ = ['Gradients']
 
@@ -796,7 +797,8 @@ class Gradients(tdrhf_grad.Gradients):
         auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory
         with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+            sorted_mol = SortedMole.from_mol(mol, decontract=True)
+            int3c2e_opt = Int3c2eOpt(sorted_mol, auxmol).build()
 
         if (sum_results and
             # When the input is a list, each density matrix is applied twice in

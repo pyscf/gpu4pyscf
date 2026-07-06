@@ -33,11 +33,13 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e,
     int2c2e_ip1, int3c2e_scheme)
-from gpu4pyscf.df import df
+from gpu4pyscf.df import df_o1 as df
 from gpu4pyscf.df.df_jk import factorize_dm
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.df.hessian import jk
+from gpu4pyscf.gto.mole import SortedMole
+from gpu4pyscf.lib import multi_gpu
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     '''
@@ -58,6 +60,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     natm = mol.natm
     pair_addresses = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=True)[0]
+    pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
     i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
     aux_loc = auxmol.ao_loc
@@ -93,7 +96,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
             j3c = j3c_full[:,:,:dk]
-            j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
+            #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
+            df._fill_symmetric(j3c, pair_addresses, compressed, k0, k1)
             tmp = ndarray((nocc, nao, dk), buffer=buf1)
             contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
             contract('iqr,qj->rij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
@@ -215,7 +219,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
             j3c = j3c_full[:,:,:dk]
             tmp = ndarray((nocc, nao, dk), buffer=buf1)
             for i in range(3):
-                j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[i,:,k0:k1]
+                #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[i,:,k0:k1]
+                df._fill_symmetric(j3c, pair_addresses, compressed[i], k0, k1)
                 contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
                 # Note d/dX = -d/dr, apply alpha=-1
                 contract('iqr,qj->rij', tmp, dm_factor_l, alpha=-1,
@@ -334,12 +339,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
                 dk = k1 - k0
                 aux0, aux1 = aux1, aux1 + dk
                 j3c = j3c_full[:,:,:dk]
-                tmp = _allocate((dk, nao, nocc), work1)[0]
+                tmp = _allocate((nao, nocc, dk), work1)[0]
                 for i in range(3):
                     j3c[j_addr,i_addr] = compressed_dj[i,:,k0:k1]
                     j3c[i_addr,j_addr] = compressed_di[i,:,k0:k1]
-                    tmp = contract('pqr,qi->rpi', j3c, dm_factor_r, out=tmp)
-                    contract('rs,rpi->spi', metric_v[aux0:aux1,v0:v1], tmp,
+                    tmp = contract('pqr,qi->pir', j3c, dm_factor_r, out=tmp)
+                    contract('rs,pir->spi', metric_v[aux0:aux1,v0:v1], tmp,
                              beta=1, out=j3c_100[i])
         t1 = log.timer_debug1(f'fill_int3c2e_ip1 {v0}:{v1}', *t1)
 
@@ -387,10 +392,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
             #:h_ao_aux -= einsum('xrpj,ysr,pi,sji->prxy',
             #:                   j3c_100, j2c_10v_w, dm_factor_l, dm_oo)
             tmp0, work1 = _allocate((naux,p1-p0,nocc), work)
-            tmp1, work1 = _allocate((3,v1-v0,naux), work1)
+            tmp1, work1 = _allocate((3,naux,v1-v0), work1)
             contract('sij,ui->suj', dm_oo, dm_factor_l[p0:p1], out=tmp0)
-            contract('xruj,suj->xrs', j3c_100[:,:,p0:p1], tmp0, out=tmp1)
-            contract('xrs,ysr->sxy', tmp1, j2c_10v_w[:,:,v0:v1], .5*k_factor*2,
+            contract('xruj,suj->xsr', j3c_100[:,:,p0:p1], tmp0, out=tmp1)
+            contract('xsr,ysr->sxy', tmp1, j2c_10v_w[:,:,v0:v1], .5*k_factor*2,
                      1, h_ao_aux[i])
         t1 = log.timer_debug1(f'contract int3c2e_ip1 {v0}:{v1}', *t1)
     t0 = log.timer_debug1('int3c2e_ipaux and int2c2e_ip1 cross term', *t0)
@@ -471,6 +476,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     nao = dm.shape[-1]
     pair_addresses, diag_idx = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=True)
+    pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
     i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
 
@@ -809,7 +815,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
             j3c = j3c_full[:,:,:dk]
-            j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
+            #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
+            df._fill_symmetric(j3c, pair_addresses, compressed, k0, k1)
             contract('pqr,pi->riq', j3c, orbo, out=j3c_00[aux0:aux1])
     j3c_full = buf = eval_j3c = j3c = compressed = None
     t0 = log.timer_debug1('contract dm', *t0)
@@ -964,7 +971,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=Non
             dk = k1 - k0
             j3c = j3c_full[:,:,:dk]
             for i in range(3):
-                j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed_dk[i,:,k0:k1]
+                #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed_dk[i,:,k0:k1]
+                df._fill_symmetric(j3c, pair_addresses, compressed_dk[i], k0, k1)
                 # Note d/dX = -d/dr, apply alpha=-1
                 contract('pqr,pi->riq', j3c, orbo, alpha=-1, out=j3c_aux_tmp[i,k0:k1])
 
@@ -1100,7 +1108,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
 
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    mol = mf.with_df.mol
+    mol = SortedMole.from_mol(mf.with_df.mol, decontract=True)
     auxmol = mf.with_df.auxmol
     mf.with_df.reset() # Release GPU memory
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
@@ -1142,7 +1150,7 @@ def _hcore_energy(hessobj, dm0, dme0):
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mf = hessobj.base
-    mol = mf.with_df.mol
+    mol = SortedMole.from_mol(mf.with_df.mol, decontract=True)
     auxmol = mf.with_df.auxmol
     mf.with_df.reset() # Release GPU memory
     natm = mol.natm
@@ -1153,25 +1161,112 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     h1mo += rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
     return h1mo
 
-def _get_jk_mo(hessobj, mol, dms, mo_coeff, mocc,
-           hermi=1, with_j=True, with_k=True, omega=None):
+def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
+               hermi=1, with_j=True, with_k=True, omega=None):
     mf = hessobj.base
     dfobj = mf.with_df
-    if omega is None:
-        return jk.get_jk(dfobj, dms, mo_coeff, mocc,
-                         hermi=hermi, with_j=with_j, with_k=with_k)
+    with dfobj.range_coulomb(omega) as dfobj:
+        return _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi, with_j, with_k, omega)
 
-    # A temporary treatment for RSH-DF integrals
-    key = '%.6f' % omega
-    if key in dfobj._rsh_df:
-        rsh_df = dfobj._rsh_df[key]
-    else:
-        rsh_df = dfobj._rsh_df[key] = dfobj.copy().reset()
-        logger.info(dfobj, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
+def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, omega=None):
+    ''' Compute J/K in MO for CPHF
+    '''
+    assert hermi == 1
+    log = logger.new_logger(dfobj.mol, dfobj.verbose)
+    t1 = log.init_timer()
 
-    with rsh_df.mol.with_range_coulomb(omega):
-        return jk.get_jk(rsh_df, dms, mo_coeff, mocc,
-                         hermi=hermi, with_j=with_j, with_k=with_k, omega=omega)
+    if dfobj._cderi is None:
+        log.debug('Build CDERI ...')
+        dfobj.build(omega=omega)
+
+    mo1 = dms.mo1
+    occ_coeff = dms.occ_coeff
+    if mo_coeff.ndim == 2: # RHF
+        mo_coeff = mo_coeff[None,:,:]
+        mo1 = mo1[:,None]
+        occ_coeff = occ_coeff[:,None]
+    else: # UHF
+        mo1 = mo1.transpose(1,0,2,3)
+    n_dm, nspin, nao, nocc = mo1.shape
+
+    def proc():
+        vj = vk = None
+        if with_k:
+            vk = cp.zeros_like(mo1)
+            if with_j:
+                vj = cp.zeros_like(vk)
+        elif with_j:
+            pair_addresses, cderi_diag = dfobj._cderi_idx
+            dm_sparse = dms.reshape(-1,nao**2)[:,pair_addresses]
+            dm_sparse *= 2
+            dm_sparse[:,cderi_diag] *= .5
+            vj = cp.zeros_like(dm_sparse)
+
+        mem_avail = get_avail_mem()
+        blksize = int(mem_avail * 0.15 / (nao**2 * 8))
+        blksize = blksize // df.ALIGNED * df.ALIGNED
+        blksize = min(blksize, df.MIN_BLK_SIZE)
+        if with_k:
+            dm_batch_size = int(mem_avail * 0.7 / (blksize*nao*nocc * 8))
+            buf2 = cp.empty((dm_batch_size+1,nspin,nao,nocc,blksize))
+            buf3 = cp.empty((dm_batch_size+1,nspin,nocc,nocc,blksize))
+            buf = buf2[-1]
+            buf1 = buf3[-1]
+
+        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+            if with_k:
+                nL = len(cderi)
+                rhok = ndarray((nspin,nao,nocc,nL), buffer=buf)
+                rhok_oo = ndarray((nspin,nocc,nocc,nL), buffer=buf1)
+                contract('Lpq,sqj->spjL', cderi, occ_coeff, out=rhok)
+                contract('spjL,spi->sijL', rhok, occ_coeff, out=rhok_oo)
+                if with_j:
+                    rhoj = cp.einsum('siiL->L', rhok_oo)
+                for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                    rhok1 = ndarray((i1-i0,nspin,nao,nocc,nL), buffer=buf2)
+                    contract('Lpq,snqi->nspiL', cderi, mo1[i0:i1], out=rhok1)
+                    contract('nspiL,sjiL->nspj', rhok1, rhok_oo, beta=1, out=vk[i0:i1])
+                    if with_j:
+                        contract('nspiL,L->nspi', rhok1, rhoj, beta=1, out=vj)
+
+                    rhok1_oo = ndarray((i1-i0,nspin,nocc,nocc,nL), buffer=buf3)
+                    contract('nspiL,spj->nsjiL', rhok1, occ_coeff, out=rhok1_oo)
+                    contract('spiL,nsjiL->nspj', rhok, rhok1_oo, beta=1, out=vk[i0:i1])
+                    if with_j:
+                        rhoj1 = cp.einsum('nsiiL->nL', rhok1_oo)
+                        contract('spiL,nL->nspi', rhok, rhoj1, beta=1, out=vj)
+            elif with_j:
+                vj += dm_sparse.dot(cderi_sparse.T).dot(cderi_sparse)
+        return vj, vk
+
+    results = multi_gpu.run(proc, non_blocking=True)
+
+    vj = vk = None
+    if with_k:
+        vk = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
+        vk = contract('nspi,spq->nqsi', vk, mo_coeff)
+        if with_j:
+            vj = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+            vj = contract('nspi,spq->nqsi', vj, mo_coeff)
+    elif with_j:
+        vj_sparse = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+        pair_addresses, cderi_diag = dfobj._cderi_idx
+        rows, cols = divmod(cp.asarray(pair_addresses), nao)
+        vj = cp.zeros((n_dm,nao,nao))
+        vj[:,cols,rows] = vj[:,rows,cols] = vj_sparse
+        vj = contract('npq,sqi->npsi', vj, mo_coeff)
+        vj = contract('npsi,spq->nqsi', vj, mo_coeff)
+
+    if nspin == 1: # RHF
+        # * 2 to encounter the double occupancy
+        if with_j: vj = vj[:,:,0] * 2
+        if with_k: vk = vk[:,:,0] * 2
+    else: # UHF
+        nocc_tot = (mo_occ > 0).sum()
+        if with_j: vj = vj.reshape(n_dm,nao,-1)[:,:,:nocc_tot]
+        if with_k: vk = vk.reshape(n_dm,nao,-1)[:,:,:nocc_tot]
+    t1 = log.timer_debug1('vj and vk', *t1)
+    return vj, vk
 
 def _allocate(shape, buf):
     a = ndarray(shape, buffer=buf)

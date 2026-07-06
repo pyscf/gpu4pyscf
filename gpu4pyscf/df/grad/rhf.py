@@ -26,6 +26,7 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df
 from gpu4pyscf.df.df_jk import factorize_dm
+from gpu4pyscf.gto.mole import SortedMole
 
 __all__ = ['Gradients']
 
@@ -352,7 +353,8 @@ class Gradients(rhf_grad.Gradients):
         auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory
         with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+            sorted_mol = SortedMole.from_mol(mol, decontract=True)
+            int3c2e_opt = Int3c2eOpt(sorted_mol, auxmol).build()
         return _jk_energy_per_atom(
             int3c2e_opt, dm, j_factor, k_factor, hermi=hermi,
             auxbasis_response=self.auxbasis_response, verbose=verbose)
