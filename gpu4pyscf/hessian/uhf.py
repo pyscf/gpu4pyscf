@@ -386,8 +386,9 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     noccb = orbob.shape[1]
     assert nmoa == nmob
     assert nocca >= noccb
+    nmo = nmoa
     nocc = nocca
-    orbo = cp.empty((2, nmo, nocc))
+    orbo = cp.zeros((2, nao, nocc))
     orbo[0,:,:nocca] = orboa
     orbo[1,:,:nocca] = orbob
 

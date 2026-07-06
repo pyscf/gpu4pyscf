@@ -19,16 +19,19 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "vhf.cuh"
-#include "rys_roots.cu"
-#include "rys_contract_k.cuh"
+#include "gvhf-rys/vhf.cuh"
+#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/rys_contract_k.cuh"
+#include "gvhf-rys/rys_roots_for_k.cu"
 
 #define THREADS         256
 #define GOUT_IP1_WIDTH  27
 
 __global__ static
-void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
-                    uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
+void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
+                    double omega, double lr_factor, double sr_factor,
+                    int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                    int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int ao_pair_offset, int aux_offset,
                     int nao_pairs, int naux)
 {
@@ -59,7 +62,6 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
         lij = li + lj + 1;
         nroots = (lij + lk) / 2 + 1;
-        double omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -172,8 +174,8 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
             }
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             double theta = aij * ak / (aij + ak);
-            double omega = env[PTR_RANGE_OMEGA];
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, gout_id, gout_stride);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            nst_per_block, gout_stride, gout_id);
             double s0x, s1x, s2x;
             for (int irys = 0; irys < nroots; ++irys) {
                 int stride_j = li + 2;
@@ -330,8 +332,10 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
 }
 
 __global__ static
-void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
-                    uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
+void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
+                    double omega, double lr_factor, double sr_factor,
+                    int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                    int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int ao_pair_offset, int aux_offset,
                     int nao_pairs, int naux)
 {
@@ -362,7 +366,6 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
         lij = li + lj;
         nroots = (lij + lk + 1) / 2 + 1;
-        double omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -475,8 +478,8 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets
             }
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             double theta = aij * ak / (aij + ak);
-            double omega = env[PTR_RANGE_OMEGA];
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, gout_id, gout_stride);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            nst_per_block, gout_stride, gout_id);
             double s0x, s1x, s2x;
             for (int irys = 0; irys < nroots; ++irys) {
                 int stride_j = li + 1;
@@ -633,7 +636,9 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets
 }
 
 extern "C" {
-int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
+int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs,
+                 double omega, double lr_factor, double sr_factor,
+                 int shm_size, int nbatches_shl_pair,
                  int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
                  int ao_pair_offset, int aux_offset, int nao_pairs, int naux)
@@ -641,7 +646,8 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs, int shm_size, int nbatche
     cudaFuncSetAttribute(int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-            out, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
+            out, *envs, omega, lr_factor, sr_factor,
+            shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
             nao_pairs, naux);
     cudaError_t err = cudaGetLastError();
@@ -652,7 +658,9 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs, int shm_size, int nbatche
     return 0;
 }
 
-int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
+int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs,
+                 double omega, double lr_factor, double sr_factor,
+                 int shm_size, int nbatches_shl_pair,
                  int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
                  int ao_pair_offset, int aux_offset, int nao_pairs, int naux)
@@ -660,7 +668,8 @@ int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs, int shm_size, int nbatc
     cudaFuncSetAttribute(int3c2e_ipaux_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     int3c2e_ipaux_kernel<<<blocks, THREADS, shm_size>>>(
-            out, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
+            out, *envs, omega, lr_factor, sr_factor,
+            shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
             nao_pairs, naux);
     cudaError_t err = cudaGetLastError();

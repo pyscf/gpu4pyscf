@@ -20,10 +20,9 @@ import pyscf
 from pyscf import lib
 from pyscf.df.hessian import rhf as df_rhf_cpu
 from pyscf.hessian import rhf as rhf_cpu
-from gpu4pyscf.df.hessian import rhf_fast
+from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.df.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
-from gpu4pyscf.df import df_jk_o1 as df_jk
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 def setUpModule():
@@ -119,7 +118,7 @@ class KnownValues(unittest.TestCase):
         v1vo_cpu = fx_cpu(mo1).reshape(-1,nmo*nocc)
 
         mf = mf.to_gpu()
-        hessobj = rhf_fast.Hessian(mf)
+        hessobj = df_rhf_hess.Hessian(mf)
         fx_gpu = hessobj.gen_vind(mo_coeff, mo_occ)
         mo1 = cp.asarray(mo1)
         v1vo_gpu = fx_gpu(mo1)
@@ -134,7 +133,7 @@ class KnownValues(unittest.TestCase):
         hobj.auxbasis_response = 2
         e1_cpu, ej_cpu, ek_cpu = df_rhf_cpu._partial_hess_ejk(hobj)
         ref = e1_cpu + ej_cpu - ek_cpu
-        dat = rhf_fast.Hessian(mf.to_gpu()).partial_hess_elec().get()
+        dat = df_rhf_hess.Hessian(mf.to_gpu()).partial_hess_elec().get()
         assert abs(ref - dat).max() < 1e-8
 
     def test_make_h1(self):
@@ -155,9 +154,9 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_gpu()
         mf.conv_tol = 1e-10
         mf.conv_tol_cpscf = 1e-8
-        hobj = rhf_fast.Hessian(mf)
+        hobj = df_rhf_hess.Hessian(mf)
         mo_occ = cp.asarray(mo_occ)
-        h1_gpu = rhf_fast.make_h1(hobj, mo_coeff, mo_occ)
+        h1_gpu = df_rhf_hess.make_h1(hobj, mo_coeff, mo_occ)
         h1_gpu = cp.asarray(h1_gpu)
         mo_energy = cp.asarray(mo_energy)
         mo_coeff = cp.asarray(mo_coeff)
@@ -189,7 +188,7 @@ class KnownValues(unittest.TestCase):
         hobj.auxbasis_response = 2
         hess_cpu = hobj.kernel()
         mf = mf.to_gpu()
-        hobj = rhf_fast.Hessian(mf)
+        hobj = df_rhf_hess.Hessian(mf)
         hess_gpu = hobj.kernel()
         assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
@@ -204,12 +203,12 @@ class KnownValues(unittest.TestCase):
         dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
         dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
-        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*auxmol.nao*60)):
-            ref = rhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1e-20)
-            ej = rhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=0)
+        with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: nao**2*auxmol.nao*60)):
+            ref = df_rhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1e-20)
+            ej = df_rhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=0)
             assert abs(ej-ref).max().get() < 5e-8
 
-        ejk = rhf_fast._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1).get()
+        ejk = df_rhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1).get()
         assert abs(ejk.sum(axis=(0,1))).max() < 1e-9
 
         disp = .5e-3
@@ -230,26 +229,8 @@ class KnownValues(unittest.TestCase):
             e2 = eval_grad(i, x, -disp)
             assert abs((e1 - e2)/(2*disp) - ejk[i,:,x]).max() < 1e-5
 
-    def test_jk_ip1(self):
-        from gpu4pyscf.df.hessian.rhf import _get_jk_ip
-        np.random.seed(8)
-        nao = mol.nao
-        nocc = 5
-        mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
-        mo_occ = cp.zeros(nao)
-        mo_occ[:nocc] = 2
-
-        mf = mol.RHF().to_gpu()
-        obj = mf.density_fit(auxbasis=auxmol.basis).Hessian()
-        obj.auxbasis_response = 2
-        vj, vk = _get_jk_ip(obj, mo_coeff, mo_occ)
-        ref = vj - 0.5 * vk
-
-        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
-        veff = rhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
-        assert abs(ref - veff).max() < 1e-8
-
     def test_jk_ip1_finite_diff(self):
+        from pyscf.df import incore
         mol2 = mol + mol
         np.random.seed(9)
         nao = mol2.nao
@@ -259,9 +240,8 @@ class KnownValues(unittest.TestCase):
         mo_occ[:nocc] = 2
 
         opt = int3c2e.Int3c2eOpt(mol2, auxmol).build()
-        veff = rhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
+        veff = df_rhf_hess._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
 
-        from pyscf.df import incore
         disp = .5e-3
         mol0 = mol2.copy(deep=True)
         auxmol0 = auxmol.copy(deep=True)
@@ -297,10 +277,10 @@ class KnownValues(unittest.TestCase):
         mo_occ[:nocc] = 2
         opt = int3c2e.Int3c2eOpt(mol2, auxmol).build()
 
-        ref = rhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
+        ref = df_rhf_hess._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
 
-        with lib.temporary_env(rhf_fast, get_avail_mem=(lambda **kw: nao**2*3*mol2.natm*20)):
-            veff = rhf_fast._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
+        with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: nao**2*3*mol2.natm*20)):
+            veff = df_rhf_hess._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
             assert abs(ref - veff).max() < 1e-9
 
 if __name__ == "__main__":

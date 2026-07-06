@@ -21,7 +21,7 @@ from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.df.df import DF
 from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf.df import df_jk_o1
+from gpu4pyscf.df import df_jk
 
 atom='''
 Ti 0.0 0.0 0.0
@@ -94,8 +94,8 @@ class KnownValues(unittest.TestCase):
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
         mf = gpu_scf.RHF(mol)
-        mf = df_jk_o1.density_fit(mf)
-        vj = df_jk_o1.get_j(mf.with_df, dm)
+        mf = mf.density_fit()
+        vj = df_jk.get_j(mf.with_df, dm)
         ref, _ = mf.get_jk(dm=dm, with_j=True, with_k=False, hermi=1)
         assert cupy.linalg.norm(vj - ref) < 1e-9
     
@@ -146,9 +146,8 @@ class KnownValues(unittest.TestCase):
         assert abs(vj - refj).max() < 1e-9
         assert abs(vk - refk).max() < 1e-9
 
-    def test_limited_mem():
-        from gpu4pyscf.df import df_o1
-        from gpu4pyscf.df import df_jk_o1
+    def test_limited_mem(self):
+        from gpu4pyscf.df import df
         mol = pyscf.M(atom='''
 O       0.873    5.017    1.816
 H       1.128    5.038    2.848
@@ -157,9 +156,10 @@ O       3.665    1.316    1.319
 H       3.904    2.233    1.002
 H       4.224    0.640    0.837
 ''', basis='def2-tzvp')
-        with lib.temporary_env(df_o1, get_avail_mem=lambda *args, **kw: 2000000):
+        with lib.temporary_env(df, get_avail_mem=lambda *args, **kw: 2000000):
             mf = mol.to_gpu().RHF()
-            mf = df_jk_o1.density_fit(mf).run()
+            mf = mf.density_fit().run()
+            assert isinstance(mf.with_df._cderi[0], np.ndarray)
             assert abs(mf.e_tot - -152.09455538734778) < 1e-8
 
 if __name__ == "__main__":
