@@ -31,7 +31,7 @@ def setUpModule():
         verbose = 5,
         output = '/dev/null',
         atom = '''
-#        O   0.   0.       0.
+        O   0.   0.       0.
         H   0.   -0.757   0.587
         H   0.   0.757    0.587''',
         basis = 'sto3g')

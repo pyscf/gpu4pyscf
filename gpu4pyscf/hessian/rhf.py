@@ -630,8 +630,8 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
     avail_mem = get_avail_mem()
     # *4 for input dm, vj, vk, and vxc
-    blksize = int(min(avail_mem*.3 / (8*3*nao*nocc*4), # in MO
-                      avail_mem*.3 / (8*nao*nao*3*3))) # vj, vk, dm in AO
+    blksize = int(min(avail_mem*.5 / (8*3*(nao*nocc*3+nao*nao)), # in MO
+                      avail_mem*.5 / (8*nao*nao*3*3))) # vj, vk, dm in AO
     if blksize < ALIGNED**2:
         raise RuntimeError('GPU memory insufficient for solving CPHF equations')
 
@@ -645,9 +645,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     for i0, i1 in lib.prange(0, natm, blksize):
         log.info('Solving CPHF equation for atoms [%d:%d]', i0, i1)
 
-        h1mo_blk = h1mo[i0:i1]
-        if not isinstance(h1mo, cp.ndarray):
-            h1mo_blk = cp.asarray(h1mo_blk)
+        h1mo_blk = cp.asarray(h1mo[i0:i1])
         s1mo_blk = cp.empty_like(h1mo_blk)
         for k, (p0, p1) in enumerate(aoslices[i0:i1,2:]):
             s1ao = cp.zeros((3,nao,nao))

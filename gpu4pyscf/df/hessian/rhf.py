@@ -28,7 +28,7 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem)
+    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_mapped)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, int2c2e,
@@ -39,6 +39,8 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.df.hessian import jk
 from gpu4pyscf.lib import multi_gpu
+
+num_devices = multi_gpu.num_devices
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
                         verbose=None):
@@ -72,7 +74,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
 
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
-    word_avail -= 3 * naux * nocc**2 # j3c_oo1
+    word_avail -= 4 * naux * nocc**2 # j3c_oo1, dm_oo
+    word_avail -= 6 * naux**2 # j2c_10v_w, j2c_10v
     batch_size = int(word_avail * 0.04) // nao_pair
     assert batch_size > largest_shell_nao, 'Insufficient GPU memory'
     batch_size = min(batch_size, max(largest_shell_nao, naux))
@@ -108,6 +111,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     t0 = log.timer_debug1('contract dm', *t0)
 
     metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, omega > 0)
+    metric_size = metric_v.shape[1]
     dm_oo = contract('uv,uij->vij', metric_v, j3c_oo)
     dm_oo /= metric_w[:,None,None]
     dm_oo = contract('uv,vij->uij', metric_v, dm_oo, out=j3c_oo)
@@ -146,142 +150,79 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     aux_offsets = aux_loc[ksh_offsets_cpu]
     num_aux_batches = len(aux_offsets) - 1
 
-    if j_factor != 0:
-        dm = dm_factor_l.dot(dm_factor_r.T)
+    cp.get_default_memory_pool().free_all_blocks()
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    num_occ_batches = int(nocc*nocc*naux*3 / (mem_avail*0.4)) // 16 * 16
+    num_occ_batches = max(num_occ_batches, num_devices)
+    nocc_per_batch = (nocc + num_occ_batches - 1) // num_occ_batches
+    log.debug1('num_aux_batches=%d num_occ_batches=%d, nocc_per_batch=%d',
+               num_aux_batches, num_occ_batches, nocc_per_batch)
+    dm_oo_full = dm_oo
+    if num_occ_batches > 1 and num_devices == 1:
+        # Move to host to reduce memory usage
+        dm_oo_full = empty_mapped(dm_oo.shape)
+        dm_oo.get(out=dm_oo_full)
+    dm_oo = None
 
-    # (20|0)(0|0)(0|00) + (10|1)(0|0)(0|00)
-    int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern_ip2 = libvhf_rys.ejk_int3c2e_ip2
-    ejk = cp.zeros((natm, natm, 3, 3))
-    aux0 = aux1 = 0
-    buf = cp.empty((nao_pair*batch_size))
-    buf2 = cp.empty((blksize, nao, nao))
-    buf1 = cp.empty((blksize, nao, nocc))
-    for kbatch in range(num_aux_batches):
-        naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
-        aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
-        compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
-        for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-            dk = k1 - k0
-            aux0, aux1 = aux1, aux1 + dk
-            dm_tensor = ndarray((nao,nao,dk), buffer=buf2)
-            tmp = ndarray((nocc,nao,dk), buffer=buf1)
-            beta = 0
-            if j_factor != 0:
-                cp.multiply(dm[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
-                beta = j_factor
-            contract('rji,qj->iqr', dm_oo[aux0:aux1], dm_factor_l, out=tmp)
-            contract('iqr,pi->pqr', tmp, dm_factor_r, -.5*k_factor, beta, out=dm_tensor)
-            cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0, out=compressed[:,k0:k1])
-        err = kern_ip2(
-            ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-            ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
-            lib.c_null_ptr(),
-            ctypes.byref(int3c2e_envs),
-            ctypes.c_int(shm_size_max),
-            ctypes.c_int(len(shl_pair_offsets) - 1),
-            ctypes.c_int(1),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(aux_ao_offset),
-            ctypes.c_int(naux_in_batch))
-        if err != 0:
-            raise RuntimeError('ejk_int3c2e_ip2 failed')
+    def proc(aux_batch_iter):
+        _dm_factor_l = cp.asarray(dm_factor_l)
+        _dm_factor_r = cp.asarray(dm_factor_r)
+        if j_factor != 0:
+            dm = _dm_factor_l.dot(_dm_factor_r.T)
+            _auxvec = cp.asarray(auxvec)
+
+        # (20|0)(0|0)(0|00) + (10|1)(0|0)(0|00)
+        int3c2e_envs = int3c2e_opt.int3c2e_envs
+        kern_ip2 = libvhf_rys.ejk_int3c2e_ip2
+        ejk = cp.zeros((natm, natm, 3, 3))
+        aux0 = aux1 = 0
+        buf = cp.empty((nao_pair*batch_size))
+        buf2 = cp.empty((blksize, nao, nao))
+        buf1 = cp.empty((blksize, nao, nocc))
+        for kbatch in aux_batch_iter:
+            naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
+            aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
+            compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
+            for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                dk = k1 - k0
+                aux0, aux1 = aux1, aux1 + dk
+                dm_tensor = ndarray((nao,nao,dk), buffer=buf2)
+                tmp = ndarray((nocc,nao,dk), buffer=buf1)
+                beta = 0
+                if j_factor != 0:
+                    cp.multiply(dm[:,:,None], _auxvec[aux0:aux1], out=dm_tensor)
+                    beta = j_factor
+                dm_oo = cp.asarray(dm_oo_full[aux0:aux1])
+                contract('rji,qj->iqr', dm_oo, _dm_factor_l, out=tmp)
+                contract('iqr,pi->pqr', tmp, _dm_factor_r, -.5*k_factor, beta, out=dm_tensor)
+                cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0, out=compressed[:,k0:k1])
+            err = kern_ip2(
+                ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
+                lib.c_null_ptr(),
+                ctypes.byref(int3c2e_envs),
+                ctypes.c_int(shm_size_max),
+                ctypes.c_int(len(shl_pair_offsets) - 1),
+                ctypes.c_int(1),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(aux_ao_offset),
+                ctypes.c_int(naux_in_batch))
+            if err != 0:
+                raise RuntimeError('ejk_int3c2e_ip2 failed')
+        return ejk
+
+    aux_batch_iter = iter(range(num_aux_batches))
+    results = multi_gpu.run(proc, args=(aux_batch_iter,), non_blocking=True)
+    ejk = multi_gpu.array_reduce(results, inplace=True)
     ejk = ejk + ejk.transpose(1,0,3,2)
     # *2 for i>=j, *2 for ij <-> kl, *.5 from Coulomb operator
     ejk *= 2 * 2 * .5
     ejk -= ejk_aux
-    buf = buf1 = buf2 = ejk_aux = compressed = dm_tensor = tmp = None
     t0 = log.timer_debug1('contract ejk_int3c2e_ip2', *t0)
-
-    # (00|1)(0|1)(0|00)
-    # (00|1)(1|0)(0|00)
-    # (00|1)(0|0)(1|00)
-    # ...
-    eval_ipaux = _int3c2e_ip1_evaluator(
-        int3c2e_opt, int3c2e_scheme_ipaux(omega, 27), batch_size,
-        'fill_int3c2e_ipaux', omega)[0]
-    eval_ip1 = _int3c2e_ip1_evaluator(
-        int3c2e_opt, int3c2e_scheme_ip1(omega, 27), batch_size,
-        'fill_int3c2e_ip1', omega)[0]
-
-    j3c_full = cp.zeros((nao, nao, blksize))
-    buf = cp.empty((3, nao_pair, batch_size))
-    buf1 = cp.empty((blksize, nocc, nao))
-    j3c_oo1 = cp.empty((3, naux, nocc, nocc)) # = (1|00)
-    aux0 = aux1 = 0
-    for kbatch in range(num_aux_batches):
-        compressed = eval_ipaux(kbatch, out=buf)
-        naux_in_batch = compressed.shape[-1]
-        for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-            dk = k1 - k0
-            aux0, aux1 = aux1, aux1 + dk
-            j3c = j3c_full[:,:,:dk]
-            tmp = ndarray((nocc, nao, dk), buffer=buf1)
-            for i in range(3):
-                #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[i,:,k0:k1]
-                df._fill_symmetric(j3c, pair_addresses, compressed[i], k0, k1)
-                contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
-                # Note d/dX = -d/dr, apply alpha=-1
-                contract('iqr,qj->rij', tmp, dm_factor_l, alpha=-1,
-                         out=j3c_oo1[i,aux0:aux1])
-    j3c_full = buf = buf1 = tmp = compressed = None
-    t0 = log.timer_debug1('fill_int3c2e_ipaux', *t0)
-
-    # note int2c2e_ip1 computs d/dr and d/dX = -d/dr
-    j2c_10 = int2c2e_ip1(auxmol, sort_output=False)
-    j2c_10 *= -1
-    j2c_10, tmp = cp.empty_like(j2c_10), j2c_10
-    j2c_10[:,aux_sorting[:,None], aux_sorting] = tmp
-    j2c_10v = contract('xrs,st->xrt', j2c_10, metric_v)
-    j2c_10v_w = j2c_10v / metric_w
-    # (00|0)(1|0)(0|1)(0|00)
-    j2c_ip2 = contract('xrs,yts->rtxy', j2c_10v_w, j2c_10v)
-    j2c_ip2 *= dm_aux[:,:,None,None]
-    h_aux = j2c_ip2
-    dm_aux = j2c_10v = None
-
-    # j3c_oo1p = (1|0)(0|00) + (1|00)
-    j3c_oo1p = contract('xuv,vij->xuij', j2c_10, dm_oo, alpha=-1, beta=1, out=j3c_oo1)
-    # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
-    if j_factor == 0:
-        dm_aux1 = None
-    else:
-        auxvec_ipauxp = cp.einsum('xrii->xr', j3c_oo1p)
-        dm_aux1 = cp.einsum('xr,t->xrt', auxvec_ipauxp, auxvec)
-    dm_aux1 = contract('xrij,sij->xrs', j3c_oo1p, dm_oo, -.5*k_factor,
-                       beta=j_factor, out=dm_aux1)
-    tmp = contract('xrt,st->xrs', j2c_10v_w, metric_v)
-    w10_100 = contract('xrt,ytr->rtxy', tmp, dm_aux1)
-    h_aux -= w10_100
-    h_aux -= w10_100.transpose(1,0,3,2) # swap the asymetric di,dj indices
-    dm_aux1 = j2c_10 = w10_100 = tmp = None
-
-    # (00|1)(1|0)(0|00) + (00|1)(0|0)(1|00) +
-    # (00|0)(0|1)(1|00) + (00|0)(0|1)(1|0)(0|00)
-    # = 001p * 001p
-    if j_factor == 0:
-        dm_aux11 = None
-    else:
-        dm_aux11 = cp.einsum('xr,ys->rsxy', auxvec_ipauxp, auxvec_ipauxp)
-    dm_aux11 = contract('xrij,ysij->rsxy', j3c_oo1p, j3c_oo1p, -.5*k_factor,
-                        beta=j_factor, out=dm_aux11)
-    j2c_inv = (metric_v / metric_w).dot(metric_v.T)
-    dm_aux11 *= j2c_inv[:,:,None,None]
-    h_aux += dm_aux11
-    # swap the differentiation order
-    # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
-    h_aux = h_aux + h_aux.transpose(1,0,3,2)
-    j2c_inv = None
-
-    atm_labels = _auxbas_atom_labels(auxmol, aux_sorting)
-    ejk_aux = _aggregate_to_atoms(h_aux, natm, atm_labels, axis=(0,1))
-    ejk += ejk_aux * .5
-    dm_aux11 = j3c_oo1 = h_aux = None
-    t1 = t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
     # 3c integrals are computed in Cartesian bases, and sorted in the original
     # AO order.
@@ -290,125 +231,270 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     aoslices = original_mol.aoslice_by_atom(ao_loc=ao_loc)
     nao_on_atom = int((aoslices[:,3] - aoslices[:,2]).max())
 
-    cp.get_default_memory_pool().free_all_blocks()
-    mem_avail = get_avail_mem(exclude_memory_pool=True)
-    word_avail = mem_avail // 8
-    word_avail -= 3 * batch_size * nao_pair * 2 # eval_ip1, eval_ipaux
-    aux_unit1 = 3*nao*nocc + 3*naux # j3c_100
-    aux_batch_size = (min(int(word_avail*.8), word_avail-6*naux*nao_on_atom*nocc)
-                      // (aux_unit1 * 8) * 8)
-    assert aux_batch_size > 0, 'Insufficient GPU memory'
-    metric_size = metric_v.shape[1]
-    aux_batch_size = min(aux_batch_size, metric_size)
-    word_avail -= aux_unit1 * aux_batch_size
-    aux_unit2 = natm*3*nocc*nocc * 2 # j3c_oo_atm
-    aux_blksize = word_avail // (aux_unit2 * 8) * 8
-    assert aux_blksize > 0, 'Insufficient GPU memory'
-    aux_blksize = min(aux_blksize, aux_batch_size)
-    blksize = word_avail // ((nocc+nao)*nao * 8) * 8
-    assert blksize > 0, 'Insufficient GPU memory'
-    blksize = min(blksize, batch_size)
-    log.debug1('mem_avail=%.3f MB, aux_batch_size=%d, aux_blksize=%d, blksize=%d',
-               mem_avail*1e-6, aux_batch_size, aux_blksize, blksize)
+    atm_labels = _auxbas_atom_labels(auxmol, aux_sorting)
 
-    h_ao_aux = cp.zeros((natm,naux,3,3))
-    ejk_ao = cp.zeros((natm,natm,3,3))
+    def proc(occ_batch_iter):
+        t0 = log.init_timer()
 
-    j3c_buf = cp.empty((3,aux_batch_size,nao,nocc))
-    work = cp.empty(
-        max(aux_unit2*aux_blksize,
-            3*nao_pair*batch_size * 2 + (nocc+nao)*nao * blksize,
-            3*naux*nao_on_atom*nocc * 2,
-            3*naux*nao_on_atom*nocc + 3*aux_batch_size*naux))
-    # TODO: for small molecules, merge the kern_ipaux to the previouse case.
-    for v0, v1 in lib.prange(0, metric_size, aux_batch_size):
-        dv = v1 - v0
-        j3c_100 = ndarray((3, dv, nao, nocc), buffer=j3c_buf)
-        j3c_100[:] = 0.
-        j3c_full, work1 = _allocate((nao, nao, blksize), work)
-        j3c_full[:] = 0.
-        buf0, work1 = _allocate((3, nao_pair, batch_size), work1)
-        buf1, work1 = _allocate((3, nao_pair, batch_size), work1)
-        aux0 = aux1 = 0
-        for kbatch in range(num_aux_batches):
-            compressed_di = eval_ip1(kbatch, out=buf0)
-            compressed_dk = eval_ipaux(kbatch, out=buf1)
-            naux_in_batch = compressed_di.shape[-1]
-            # (di/dr j|k) + (i dj/dr|k) + (i j|dk/dr) = 0
-            compressed_dk += compressed_di
-            compressed_dj = compressed_dk # ~ d/dX on j
-            compressed_di *= -1           # ~ d/dX on i
-            for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-                dk = k1 - k0
-                aux0, aux1 = aux1, aux1 + dk
-                j3c = j3c_full[:,:,:dk]
-                tmp = _allocate((nao, nocc, dk), work1)[0]
-                for i in range(3):
-                    j3c[j_addr,i_addr] = compressed_dj[i,:,k0:k1]
-                    j3c[i_addr,j_addr] = compressed_di[i,:,k0:k1]
-                    tmp = contract('pqr,qi->pir', j3c, dm_factor_r, out=tmp)
-                    contract('rs,pir->spi', metric_v[aux0:aux1,v0:v1], tmp,
-                             beta=1, out=j3c_100[i])
-        t1 = log.timer_debug1(f'fill_int3c2e_ip1 {v0}:{v1}', *t1)
+        _aux_sorting = cp.asarray(aux_sorting)
+        _metric_v = cp.asarray(metric_v)
+        _metric_w = cp.asarray(metric_w)
+        _dm_factor_l = cp.asarray(dm_factor_l)
+        _dm_factor_r = cp.asarray(dm_factor_r)
+        if j_factor != 0:
+            dm = _dm_factor_l.dot(_dm_factor_r.T)
 
-        # (10|0)(0|0)(0|01) + (10|0)(0|0)(0|10)
-        # (01|0)(0|0)(0|01) + (01|0)(0|0)(0|10)
-        for k0, k1 in lib.prange(0, dv, aux_blksize):
-            j3c_oo_atm, work1 = _allocate((natm,3,k1-k0,nocc,nocc), work)
-            for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                contract('xruj,ui->xrij', j3c_100[:,k0:k1,p0:p1],
-                         dm_factor_l[p0:p1], out=j3c_oo_atm[i])
-            # di/dX + dj/dX
-            w_part = metric_w[v0+k0:v0+k1]
-            transpose_sum(j3c_oo_atm.reshape(-1,nocc,nocc), inplace=True)
-            j3c_oo_atm_w = ndarray(j3c_oo_atm.shape, buffer=work1)
-            cp.divide(j3c_oo_atm, w_part[:,None,None], out=j3c_oo_atm_w)
-            contract('pxrij,qyrij->pqxy', j3c_oo_atm_w, j3c_oo_atm, -.5*k_factor,
-                     beta=1, out=ejk_ao)
+        # (00|1)(0|1)(0|00)
+        # (00|1)(1|0)(0|00)
+        # (00|1)(0|0)(1|00)
+        # ...
+        eval_ipaux = _int3c2e_ip1_evaluator(
+            int3c2e_opt, int3c2e_scheme_ipaux(omega, 27), batch_size,
+            'fill_int3c2e_ipaux', omega)[0]
+        eval_ip1 = _int3c2e_ip1_evaluator(
+            int3c2e_opt, int3c2e_scheme_ip1(omega, 27), batch_size,
+            'fill_int3c2e_ip1', omega)[0]
 
-            if j_factor != 0:
-                auxvec_100_atm = cp.einsum('pxrii->pxr', j3c_oo_atm)
-                contract('pxr,qyr->pqxy', auxvec_100_atm/w_part, auxvec_100_atm,
-                         j_factor, beta=1, out=ejk_ao)
-                # (10|0)(1|00) + (10|0)(1|0)(0|00)
-                tmp = ndarray((3,naux,k1-k0), buffer=work)
-                cp.multiply(j2c_10v_w[:,:,v0+k0:v0+k1], auxvec[:,None], out=tmp)
-                contract('ys,sr->ysr', auxvec_ipauxp, metric_v[:,v0+k0:v0+k1]/w_part,
-                         beta=-1, out=tmp)
-                # (10|0)(0|1)(0|00)
-                contract('pxr,ysr->psxy', auxvec_100_atm, tmp, j_factor, 1, h_ao_aux)
-                tmp = None
+        if j_factor != 0:
+            auxvec_ipauxp = cp.empty((3, naux))
 
-        for i, (p0, p1) in enumerate(aoslices[:,2:]):
-            # (10|0)(1|0)(0|00) + (10|0)(0|0)(1|00)
-            #:h_ao_aux += einsum('xrpj,sr,pi,ysji->prxy',
-            #:                   j3c_100, metric_v, dm_factor_l, j3c_oo1p)
-            tmp0, work1 = _allocate((3,naux,p1-p0,nocc), work)
-            tmp1, work1 = _allocate((3,naux,p1-p0,nocc), work1)
-            contract('xruj,sr->xsuj', j3c_100[:,:,p0:p1],
-                     metric_v[:,v0:v1]/metric_w[v0:v1], out=tmp0)
-            contract('ysij,ui->ysuj', j3c_oo1p, dm_factor_l[p0:p1], out=tmp1)
-            # *2 corresponds to to di/dX + dj/dX on j3c_100
-            contract('xsuj,ysuj->sxy', tmp0, tmp1, -.5*k_factor*2, 1, h_ao_aux[i])
+        h_ao_aux = cp.zeros((natm,naux,3,3))
+        ejk = cp.zeros((natm,natm,3,3))
 
-            # (10|0)(0|1)(0|00)
-            #:h_ao_aux -= einsum('xrpj,ysr,pi,sji->prxy',
-            #:                   j3c_100, j2c_10v_w, dm_factor_l, dm_oo)
-            tmp0, work1 = _allocate((naux,p1-p0,nocc), work)
-            tmp1, work1 = _allocate((3,naux,v1-v0), work1)
-            contract('sij,ui->suj', dm_oo, dm_factor_l[p0:p1], out=tmp0)
-            contract('xruj,suj->xsr', j3c_100[:,:,p0:p1], tmp0, out=tmp1)
-            contract('xsr,ysr->sxy', tmp1, j2c_10v_w[:,:,v0:v1], .5*k_factor*2,
-                     1, h_ao_aux[i])
-        t1 = log.timer_debug1(f'contract int3c2e_ip1 {v0}:{v1}', *t1)
-    t0 = log.timer_debug1('int3c2e_ipaux and int2c2e_ip1 cross term', *t0)
+        for it, batch_id in enumerate(occ_batch_iter):
+            log.debug1('Processing AO batch %d', batch_id)
+            nocc0 = batch_id * nocc_per_batch
+            nocc1 = min(nocc, nocc0 + nocc_per_batch)
+            nocc_in_batch = nocc1 - nocc0
 
-    ejk_ao_aux = _aggregate_to_atoms(h_ao_aux, natm, atm_labels, axis=1)
+            dm_oo = cp.asarray(dm_oo_full[:,:,nocc0:nocc1])
+            j3c_oo1 = cp.empty((3, naux, nocc, nocc_in_batch)) # = (1|00)
+
+            mem_avail = get_avail_mem(exclude_memory_pool=True)
+            word_avail = mem_avail // 8
+            blksize = min(naux, word_avail // (nao**2*8) * 8)
+            assert blksize > 1, 'Insufficient GPU memory'
+            blksize = min(blksize, batch_size)
+
+            j3c_full = cp.zeros((nao, nao, blksize))
+            buf = cp.empty((3, nao_pair, batch_size))
+            buf1 = cp.empty((blksize, nocc_in_batch, nao))
+            aux0 = aux1 = 0
+            for kbatch in range(num_aux_batches):
+                compressed = eval_ipaux(kbatch, out=buf)
+                naux_in_batch = compressed.shape[-1]
+                for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                    dk = k1 - k0
+                    aux0, aux1 = aux1, aux1 + dk
+                    j3c = j3c_full[:,:,:dk]
+                    tmp = ndarray((nao, nocc_in_batch, dk), buffer=buf1)
+                    for i in range(3):
+                        #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[i,:,k0:k1]
+                        df._fill_symmetric(j3c, pair_addresses, compressed[i], k0, k1)
+                        contract('pqr,qj->pjr', j3c, _dm_factor_l[:,nocc0:nocc1], out=tmp)
+                        # Note d/dX = -d/dr, apply alpha=-1
+                        contract('pjr,pi->rij', tmp, _dm_factor_r, alpha=-1,
+                                 out=j3c_oo1[i,aux0:aux1])
+                        if j_factor != 0 and it == 0:
+                            contract('pqr,pq->r', j3c, dm, -1, out=auxvec_ipauxp[i,aux0:aux1])
+            j3c_full = buf = buf1 = tmp = compressed = None
+            t0 = log.timer_debug1('fill_int3c2e_ipaux', *t0)
+
+            # note int2c2e_ip1 computs d/dr and d/dX = -d/dr
+            j2c_10 = int2c2e_ip1(auxmol, sort_output=False)
+            j2c_10 *= -1
+            j2c_10, tmp = cp.empty_like(j2c_10), j2c_10
+            j2c_10[:,_aux_sorting[:,None], _aux_sorting] = tmp
+            j2c_10v = ndarray((3, naux, metric_size), buffer=tmp)
+            j2c_10v = contract('xrs,st->xrt', j2c_10, _metric_v)
+            j2c_10v_w = j2c_10v / _metric_w
+            # (00|0)(1|0)(0|1)(0|00)
+            if it == 0:
+                j2c_ip2 = contract('xrs,yts->rtxy', j2c_10v_w, j2c_10v)
+                j2c_ip2 *= dm_aux[:,:,None,None]
+                h_aux = j2c_ip2
+            else:
+                h_aux = 0
+            j2c_10v = j2c_ip2 = tmp = None
+
+            # j3c_oo1p = (1|0)(0|00) + (1|00)
+            j3c_oo1p = contract('xuv,vij->xuij', j2c_10, dm_oo, alpha=-1, beta=1, out=j3c_oo1)
+            # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
+            dm_aux1 = contract('xrij,sij->xrs', j3c_oo1p, dm_oo, -.5*k_factor)
+            if j_factor != 0 and it == 0:
+                contract('xuv,v->xu', j2c_10, auxvec, -1, 1, out=auxvec_ipauxp)
+                contract('xr,t->xrt', auxvec_ipauxp, auxvec, j_factor, 1, out=dm_aux1)
+            tmp = contract('xrt,st->xrs', j2c_10v_w, _metric_v)
+            w10_100 = contract('xrt,ytr->rtxy', tmp, dm_aux1)
+            h_aux -= w10_100
+            h_aux -= w10_100.transpose(1,0,3,2) # swap the asymetric di,dj indices
+            dm_aux1 = j2c_10 = w10_100 = tmp = None
+
+            # (00|1)(1|0)(0|00) + (00|1)(0|0)(1|00) +
+            # (00|0)(0|1)(1|00) + (00|0)(0|1)(1|0)(0|00)
+            # = 001p * 001p
+            dm_aux11 = contract('xrij,ysij->rsxy', j3c_oo1p, j3c_oo1p, -.5*k_factor)
+            if j_factor != 0 and it == 0:
+                contract('xr,ys->rsxy', auxvec_ipauxp, auxvec_ipauxp, j_factor, 1, out=dm_aux11)
+            j2c_inv = (_metric_v / _metric_w).dot(_metric_v.T)
+            dm_aux11 *= j2c_inv[:,:,None,None]
+            h_aux += dm_aux11
+
+            # swap the differentiation order
+            # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
+            h_aux = h_aux + h_aux.transpose(1,0,3,2)
+
+            ejk_aux = _aggregate_to_atoms(h_aux, natm, atm_labels, axis=(0,1))
+            ejk += ejk_aux * .5
+            j2c_inv = dm_aux11 = j3c_oo1 = h_aux = None
+            t1 = t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
+
+            mem_avail = get_avail_mem(exclude_memory_pool=True)
+            word_avail = mem_avail // 8
+            word_avail -= 3 * batch_size * nao_pair * 2 # eval_ip1, eval_ipaux
+            if it == 0:
+                aux_unit1 = 3*nao*nocc + 3*naux # j3c_100
+            else:
+                aux_unit1 = 3*nao*nocc_in_batch + 3*naux # j3c_100
+            aux_batch_size = (min(int(word_avail*.8), word_avail-6*naux*nao_on_atom*nocc)
+                              // (aux_unit1 * 8) * 8)
+            assert aux_batch_size > 0, 'Insufficient GPU memory'
+            aux_batch_size = min(aux_batch_size, metric_size)
+            word_avail -= aux_unit1 * aux_batch_size
+            if it == 0:
+                aux_unit2 = natm*3*nocc*nocc * 2 # j3c_oo_atm
+                aux_blksize = word_avail // (aux_unit2 * 8) * 8
+                assert aux_blksize > 0, 'Insufficient GPU memory'
+                aux_blksize = min(aux_blksize, aux_batch_size)
+            else:
+                aux_unit2 = 0
+                aux_blksize = 0
+            blksize = word_avail // ((nocc+nao)*nao * 8) * 8
+            assert blksize > 0, 'Insufficient GPU memory'
+            blksize = min(blksize, batch_size)
+            log.debug1('mem_avail=%.3f MB, aux_batch_size=%d, aux_blksize=%d, blksize=%d',
+                       mem_avail*1e-6, aux_batch_size, aux_blksize, blksize)
+
+            if it == 0:
+                j3c_buf = cp.empty((3,aux_batch_size,nao,nocc))
+            else:
+                j3c_buf = cp.empty((3,aux_batch_size,nao,nocc_in_batch))
+            work = cp.empty(
+                max(aux_unit2*aux_blksize,
+                    3*nao_pair*batch_size * 2 + (nocc+nao)*nao * blksize,
+                    3*naux*nao_on_atom*nocc_in_batch * 2,
+                    3*naux*nao_on_atom*nocc_in_batch + 3*aux_batch_size*naux))
+            for v0, v1 in lib.prange(0, metric_size, aux_batch_size):
+                dv = v1 - v0
+                if it == 0:
+                    j3c_100 = ndarray((3, dv, nao, nocc), buffer=j3c_buf)
+                else:
+                    j3c_100 = ndarray((3, dv, nao, nocc_in_batch), buffer=j3c_buf)
+                j3c_100[:] = 0.
+                j3c_full, work1 = _allocate((nao, nao, blksize), work)
+                j3c_full[:] = 0.
+                buf0, work1 = _allocate((3, nao_pair, batch_size), work1)
+                buf1, work1 = _allocate((3, nao_pair, batch_size), work1)
+                aux0 = aux1 = 0
+                for kbatch in range(num_aux_batches):
+                    compressed_di = eval_ip1(kbatch, out=buf0)
+                    compressed_dk = eval_ipaux(kbatch, out=buf1)
+                    naux_in_batch = compressed_di.shape[-1]
+                    # (di/dr j|k) + (i dj/dr|k) + (i j|dk/dr) = 0
+                    compressed_dk += compressed_di
+                    compressed_dj = compressed_dk # ~ d/dX on j
+                    compressed_di *= -1           # ~ d/dX on i
+                    for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                        dk = k1 - k0
+                        aux0, aux1 = aux1, aux1 + dk
+                        j3c = j3c_full[:,:,:dk]
+                        if it == 0:
+                            tmp = ndarray((nao, nocc, dk), buffer=work1)
+                        else:
+                            tmp = ndarray((nao, nocc_in_batch, dk), buffer=work1)
+                        for i in range(3):
+                            j3c[j_addr,i_addr] = compressed_dj[i,:,k0:k1]
+                            j3c[i_addr,j_addr] = compressed_di[i,:,k0:k1]
+                            if it == 0:
+                                contract('pqr,qi->pir', j3c, _dm_factor_r, out=tmp)
+                            else:
+                                contract('pqr,qi->pir', j3c, _dm_factor_r[:,nocc0:nocc1], out=tmp)
+                            contract('rs,pir->spi', _metric_v[aux0:aux1,v0:v1], tmp,
+                                     beta=1, out=j3c_100[i])
+                t1 = log.timer_debug1(f'fill_int3c2e_ip1 {v0}:{v1}', *t1)
+
+                # (10|0)(0|0)(0|01) + (10|0)(0|0)(0|10)
+                # (01|0)(0|0)(0|01) + (01|0)(0|0)(0|10)
+                if it == 0:
+                    for k0, k1 in lib.prange(0, dv, aux_blksize):
+                        j3c_oo_atm, work1 = _allocate((natm,3,k1-k0,nocc,nocc), work)
+                        for i, (p0, p1) in enumerate(aoslices[:,2:]):
+                            contract('xruj,ui->xrij', j3c_100[:,k0:k1,p0:p1],
+                                     _dm_factor_l[p0:p1], out=j3c_oo_atm[i])
+                        # di/dX + dj/dX
+                        w_part = _metric_w[v0+k0:v0+k1]
+                        transpose_sum(j3c_oo_atm.reshape(-1,nocc,nocc), inplace=True)
+                        j3c_oo_atm_w = ndarray(j3c_oo_atm.shape, buffer=work1)
+                        cp.divide(j3c_oo_atm, w_part[:,None,None], out=j3c_oo_atm_w)
+                        contract('pxrij,qyrij->pqxy', j3c_oo_atm_w, j3c_oo_atm, -.5*k_factor,
+                                 beta=1, out=ejk)
+
+                        if j_factor != 0:
+                            auxvec_100_atm = cp.einsum('pxrii->pxr', j3c_oo_atm)
+                            contract('pxr,qyr->pqxy', auxvec_100_atm/w_part, auxvec_100_atm,
+                                     j_factor, beta=1, out=ejk)
+                            # (10|0)(1|00) + (10|0)(1|0)(0|00)
+                            tmp = ndarray((3,naux,k1-k0), buffer=work)
+                            cp.multiply(j2c_10v_w[:,:,v0+k0:v0+k1], auxvec[:,None], out=tmp)
+                            contract('ys,sr->ysr', auxvec_ipauxp, _metric_v[:,v0+k0:v0+k1]/w_part,
+                                     beta=-1, out=tmp)
+                            # (10|0)(0|1)(0|00)
+                            contract('pxr,ysr->psxy', auxvec_100_atm, tmp, j_factor, 1, h_ao_aux)
+                            tmp = None
+
+                if it == 0:
+                    j3c_100 = j3c_100[:,:,:,nocc0:nocc1]
+                for i, (p0, p1) in enumerate(aoslices[:,2:]):
+                    # (10|0)(1|0)(0|00) + (10|0)(0|0)(1|00)
+                    #:h_ao_aux += einsum('xrpj,sr,pi,ysji->prxy',
+                    #:                   j3c_100, metric_v, dm_factor_l, j3c_oo1p)
+                    tmp0, work1 = _allocate((3,naux,p1-p0,nocc_in_batch), work)
+                    tmp1, work1 = _allocate((3,naux,p1-p0,nocc_in_batch), work1)
+                    contract('xruj,sr->xsuj', j3c_100[:,:,p0:p1],
+                             _metric_v[:,v0:v1]/_metric_w[v0:v1], out=tmp0)
+                    contract('ysij,ui->ysuj', j3c_oo1p, _dm_factor_l[p0:p1], out=tmp1)
+                    # *2 corresponds to to di/dX + dj/dX on j3c_100
+                    contract('xsuj,ysuj->sxy', tmp0, tmp1, -.5*k_factor*2, 1, h_ao_aux[i])
+
+                    # (10|0)(0|1)(0|00)
+                    #:h_ao_aux -= einsum('xrpj,ysr,pi,sji->prxy',
+                    #:                   j3c_100, j2c_10v_w, dm_factor_l, dm_oo)
+                    tmp0, work1 = _allocate((naux,p1-p0,nocc_in_batch), work)
+                    tmp1, work1 = _allocate((3,naux,v1-v0), work1)
+                    contract('sij,ui->suj', dm_oo, _dm_factor_l[p0:p1], out=tmp0)
+                    contract('xruj,suj->xsr', j3c_100[:,:,p0:p1], tmp0, out=tmp1)
+                    contract('xsr,ysr->sxy', tmp1, j2c_10v_w[:,:,v0:v1], .5*k_factor*2,
+                             1, h_ao_aux[i])
+                t1 = log.timer_debug1(f'contract int3c2e_ip1 {v0}:{v1}', *t1)
+            t0 = log.timer_debug1('int3c2e_ipaux and int2c2e_ip1 cross term', *t0)
+            j3c_buf = work = work1 = tmp0 = tmp1 = buf0 = buf1 = None
+            j3c = j3c_full = j3c_100 = j3c_oo_atm = j3c_oo_atm_w = auxvec_100_atm = None
+            compressed_di = compressed_dj = compressed_dk = None
+            j2c_10v_w = j3c_oo1p = auxvec_ipauxp = None
+
+        ejk_ao_aux = _aggregate_to_atoms(h_ao_aux, natm, atm_labels, axis=1)
+        return ejk, ejk_ao_aux
+
+    occ_batch_iter = iter(range(num_occ_batches))
+    results = multi_gpu.run(proc, args=(occ_batch_iter,), non_blocking=True)
+
+    ejk_ao_aux = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
     ejk += ejk_ao_aux
     ejk += ejk_ao_aux.transpose(1,0,3,2)
 
     # scale ejk_ao: *2 for swaping (di/dX j|dk/dY l) -> (di/dY j|dk/dX l)
     # *.5 from Coulomb operator
+    ejk_ao = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
     ejk += ejk_ao
     return ejk
 
@@ -765,30 +851,41 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     natm = mol.natm
     aux_loc = auxmol.ao_loc
     naux = int(aux_loc[-1])
+
+    # 3c integrals are computed in Cartesian bases, and sorted in the original
+    # AO order.
+    original_mol = mol.mol
+    ao_loc = original_mol.ao_loc_nr(cart=True)
+    aoslices = original_mol.aoslice_by_atom(ao_loc=ao_loc)
+    nao_on_atom = int((aoslices[:,3] - aoslices[:,2]).max())
+
     pair_addresses = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=True)[0]
-    pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
-    i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
-
-    vhf_atm = cp.zeros((natm,3,nocc,nao))
-    vhf1 = cp.zeros((3, nao, nao))
 
     cp.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem(exclude_memory_pool=True)
+    assert mem_avail > naux*nocc**2 * 8, 'Insufficient GPU memory'
+
+    num_occ_batches = int(naux*nocc*nao*2 / (mem_avail//8-naux*nocc**2)) // 16 * 16
+    num_occ_batches = max(num_occ_batches, num_devices)
+    nocc_per_batch = (nocc + num_occ_batches - 1) // num_occ_batches
+    log.debug1('num_occ_batches=%d, nocc_per_batch=%d', num_occ_batches, nocc_per_batch)
+
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
-    word_avail -= naux*nocc*nao # dm_3c ~ (aux,i,a)
+    word_avail -= natm*3*nocc*nao # vhf_atm
+    word_avail -= naux*nocc_per_batch*nao # dm_3c ~ (aux,i,a)
     word_avail -= naux**2 * 3 # metric_v
-    word_avail -= naux*nocc**2 # dm_oo ~ (aux,i,j)
+    word_avail -= naux*nocc*nocc_per_batch # dm_oo ~ (aux,i,j)
     assert word_avail > 0, 'Insufficient GPU memory'
 
-    mem_sufficient = natm*3*nao**2 < word_avail * .6
+    mem_sufficient = natm*3*nao*nao < word_avail * .6
     if mem_sufficient:
-        vhf_atm_ao = cp.zeros((natm,3,nao,nao))
-        word_avail -= vhf_atm_ao.size
+        word_avail -= natm * 3 * nao * nao
 
     # size for caching a tensor with the shape (:,nao_pair) or (:,nocc*nao)
-    pair_size_max = max(nao_pair, nocc*nao)
+    pair_size_max = max(nao_pair, nocc_per_batch*nao)
     _unit = 6*pair_size_max
     largest_shell_nao = int((aux_loc[1:] - aux_loc[:-1]).max())
     batch_size = int(word_avail*.8 / _unit)
@@ -802,36 +899,12 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
-    # 3c integrals are computed in Cartesian bases, and sorted in the original
-    # AO order.
-    original_mol = mol.mol
-    ao_loc = original_mol.ao_loc_nr(cart=True)
-    aoslices = original_mol.aoslice_by_atom(ao_loc=ao_loc)
-
-    nao_on_atom = int((aoslices[:,3] - aoslices[:,2]).max())
     blksize = int((word_avail*.95 - batch_size*_unit) /
                   (nao**2 + (nao+nocc)*max(nao_on_atom, nocc))) // 8 * 8
     assert blksize > 1, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, mem_sufficient=%s, aux_batches=%d, batch_size=%d, blksize=%d',
                mem_avail*1e-6, mem_sufficient, num_aux_batches, batch_size, blksize)
-
-    aux0 = aux1 = 0
-    j3c_full = cp.zeros((nao, nao, blksize))
-    buf = cp.empty((batch_size, nao_pair))
-    j3c_00 = cp.empty((naux, nocc, nao))
-    for kbatch in range(num_aux_batches):
-        compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
-        naux_in_batch = compressed.shape[1]
-        for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-            dk = k1 - k0
-            aux0, aux1 = aux1, aux1 + dk
-            j3c = j3c_full[:,:,:dk]
-            #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
-            df._fill_symmetric(j3c, pair_addresses, compressed, k0, k1)
-            contract('pqr,pi->riq', j3c, orbo, out=j3c_00[aux0:aux1])
-    j3c_full = buf = eval_j3c = j3c = compressed = None
-    t0 = log.timer_debug1('contract dm', *t0)
 
     aux_idx, aux_slices = _argsort_aux_by_atom(auxmol, aux_sorting)
 
@@ -844,201 +917,270 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     aux_filling_order = np.empty(naux, dtype=int)
     aux_filling_order[aux_idx] = np.arange(naux)
 
-    metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, omega > 0)
+    def proc(occ_batch_iter):
+        device_id = cp.cuda.device.get_device_id()
+        _pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
+        i_addr, j_addr = divmod(_pair_addresses, nao)
 
-    nw = metric_v.shape[1]
-    work = cp.empty((nw, 16, nao))
-    for i0, i1 in lib.prange(0, nocc, 16):
-        tmp = ndarray((nw, i1-i0, nao), buffer=work)
-        contract('uv,uij->vij', metric_v, j3c_00[:,i0:i1], out=tmp)
-        tmp /= metric_w[:,None,None]
-        contract('uv,vij->uij', metric_v, tmp, out=j3c_00[:,i0:i1])
-    dm_3c = j3c_00
-    j3c_00 = tmp = work = metric_v = metric_w = None
+        _eval_j3c = eval_j3c
+        _aux_sorting = aux_sorting
+        if device_id > 0:
+            _eval_j3c, _aux_sorting = int3c2e_opt.int3c2e_evaluator(
+                aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega)[:2]
 
-    dm_oo = contract('riq,qj->rij', dm_3c, orbo)
-    if j_factor != 0:
-        auxvec = cp.einsum('rii->r', dm_oo)
-        auxvec_by_atm = auxvec[aux_idx]
-        dm = orbo.dot(orbo.T)
+        metric_w, metric_v = _factorize_j2c(auxmol, _aux_sorting, omega > 0)
 
-    # (00|0)(1|0)(0|00)
-    # int2c2e_ip1 computs d/dr. d/dX = -d/dr, the derivative of metric
-    # introduces another -1. The overall factor is 1.
-    j2c_10 = int2c2e_ip1(auxmol, sort_output=False)
+        eval_ip1 = _int3c2e_ip1_evaluator(
+            int3c2e_opt, int3c2e_scheme_ip1(omega, 27), batch_size,
+            'fill_int3c2e_ip1', omega)[0]
+        eval_ipaux = _int3c2e_ip1_evaluator(
+            int3c2e_opt, int3c2e_scheme_ipaux(omega, 27), batch_size,
+            'fill_int3c2e_ipaux', omega)[0]
 
-    # The first AO indices in j2c_10 should be grouped by atoms; The second
-    # indices are sorted to match the aux indices in dm_3c
-    inv_aux_sorting = cp.empty(naux, dtype=int)
-    inv_aux_sorting[aux_sorting] = cp.arange(naux)
-    j2c_10 = j2c_10[:,inv_aux_sorting[aux_idx,None],inv_aux_sorting]
-    naux_in_atm = (aux_slices[:,1] - aux_slices[:,0]).max()
-    buf = cp.empty((3,naux_in_atm,nocc,nao))
-    buf1 = cp.empty((naux_in_atm,nocc,nao))
-    for i, (p0, p1) in enumerate(aux_slices):
+        vhf_atm = cp.zeros((natm,3,nocc,nao))
+        vhf1 = cp.zeros((3, nao, nao))
         if mem_sufficient:
-            dm_3c_atm = cp.take(dm_3c, aux_idx[p0:p1], axis=0, out=buf1[:p1-p0])
-            tmp = ndarray((3,p1-p0,nocc,nao), buffer=buf)
-            j3c_1 = contract('xrs,siq->xriq', j2c_10[:,p0:p1], dm_3c, out=tmp)
-            contract('xrip,riq->xpq', j3c_1, dm_3c_atm, -.5*k_factor, beta=1, out=vhf_atm_ao[i])
-        else:
-            dm_3c_atm = cp.take(dm_3c, aux_idx[p0:p1], axis=0, out=buf1[:p1-p0])
-            dm_oo_atm = dm_oo[aux_idx[p0:p1]]
-            tmp = ndarray((3,p1-p0,nocc,nocc), buffer=buf)
-            tmp = contract('xrs,sij->xrij', j2c_10[:,p0:p1], dm_oo, out=tmp)
-            contract('riq,xrij->xjq', dm_3c_atm, tmp, -.5*k_factor, beta=1, out=vhf_atm[i])
-
-            tmp = ndarray((3,p1-p0,nocc,nao), buffer=buf)
-            j3c_1 = contract('xrs,siq->xriq', j2c_10[:,p0:p1], dm_3c, out=tmp)
-            contract('xriq,rij->xjq', j3c_1, dm_oo_atm, -.5*k_factor, beta=1, out=vhf_atm[i])
+            vhf_atm_ao = cp.zeros((natm,3,nao,nao))
 
         if j_factor != 0:
-            contract('xriq,r->xiq', j3c_1, auxvec_by_atm[p0:p1], j_factor,
-                     beta=1, out=vhf_atm[i])
-            tmp = cp.einsum('xrs,s->xr', j2c_10[:,p0:p1], auxvec)
-            contract('riq,xr->xiq', dm_3c_atm, tmp, j_factor, beta=1, out=vhf_atm[i])
-    tmp = j3c_1 = dm_3c_atm = dm_oo_atm = None
-    buf = buf1 = j2c_10 = None
-    t1 = t0 = log.timer_debug1('contract j2c_10', *t0)
+            auxvec = cp.empty(naux)
+            dm = orbo.dot(orbo.T)
 
-    # (10|0)(0|0)(0|00)
-    eval_ip1 = _int3c2e_ip1_evaluator(
-        int3c2e_opt, int3c2e_scheme_ip1(omega, 27), batch_size,
-        'fill_int3c2e_ip1', omega)[0]
-    eval_ipaux = _int3c2e_ip1_evaluator(
-        int3c2e_opt, int3c2e_scheme_ipaux(omega, 27), batch_size,
-        'fill_int3c2e_ipaux', omega)[0]
+        t0 = log.init_timer()
+        for it, batch_id in enumerate(occ_batch_iter):
+            log.debug1('Processing AO batch %d', batch_id)
+            nocc0 = batch_id * nocc_per_batch
+            nocc1 = min(nocc, nocc0 + nocc_per_batch)
+            nocc_in_batch = nocc1 - nocc0
 
-    work = cp.empty(6*pair_size_max*batch_size +
-                    (nao*nao + (nao+nocc) * max(nao_on_atom, nocc)) * blksize)
-    aux0 = aux1 = 0
-    for kbatch in range(num_aux_batches):
-        naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
-        aux0, aux1 = aux1, aux1 + naux_in_batch
+            aux0 = aux1 = 0
+            j3c_full = cp.zeros((nao, nao, blksize))
+            buf = cp.empty((batch_size, nao_pair))
+            j3c_00 = cp.empty((naux, nocc_in_batch, nao))
+            for kbatch in range(num_aux_batches):
+                compressed = _eval_j3c(aux_batch_id=kbatch, out=buf)
+                naux_in_batch = compressed.shape[1]
+                for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                    dk = k1 - k0
+                    aux0, aux1 = aux1, aux1 + dk
+                    j3c = j3c_full[:,:,:dk]
+                    #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
+                    df._fill_symmetric(j3c, _pair_addresses, compressed, k0, k1)
+                    contract('pqr,pi->riq', j3c, orbo[:,nocc0:nocc1], out=j3c_00[aux0:aux1])
+                    if j_factor != 0 and it == 0:
+                        contract('pqr,pq->r', j3c, dm, out=auxvec[aux0:aux1])
+            j3c_full = buf = buf1 = tmp = j3c = compressed = None
+            t0 = log.timer_debug1('contract dm', *t0)
 
-        j3c_full, work1 = _allocate((nao, nao, blksize), work)
-        j3c_full[:] = 0.
+            if j_factor != 0 and it == 0:
+                auxvec = metric_v.dot(auxvec.dot(metric_v) / metric_w)
+                auxvec_by_atm = auxvec[aux_idx]
 
-        buf0, work1 = _allocate((3, nao_pair, batch_size), work1)
-        buf1, work1 = _allocate((3, nao_pair, batch_size), work1)
-        compressed_dk = eval_ipaux(kbatch, out=buf0)
-        compressed_di = eval_ip1(kbatch, out=buf1)
+            nw = metric_v.shape[1]
+            work = cp.empty((nw, 16, nao))
+            for i0, i1 in lib.prange(0, nocc_in_batch, 16):
+                tmp = ndarray((nw, i1-i0, nao), buffer=work)
+                contract('uv,uij->vij', metric_v, j3c_00[:,i0:i1], out=tmp)
+                tmp /= metric_w[:,None,None]
+                contract('uv,vij->uij', metric_v, tmp, out=j3c_00[:,i0:i1])
+            dm_3c, j3c_00 = j3c_00, None
+            tmp = work = None
 
-        # (10|0)(0|0)(0|00)
-        # (di/dr j|k) + (i dj/dr|k) + (i j|dk/dr) = 0
-        compressed_dk += compressed_di
-        compressed_dj = compressed_dk # ~ d/dX on j
-        compressed_di *= -1           # ~ d/dX on i
-        _aux1 = aux0
-        for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-            dk = k1 - k0
-            _aux0, _aux1 = _aux1, _aux1 + dk
-            j3c = j3c_full[:,:,:dk]
-            for x in range(3):
-                j3c[j_addr,i_addr] = compressed_dj[x,:,k0:k1]
-                j3c[i_addr,j_addr] = compressed_di[x,:,k0:k1]
-                tmp = ndarray((nao, dk, nocc), buffer=work1)
-                j3c_pri = contract('pqr,qi->pri', j3c, orbo, out=tmp)
-                contract('pri,riq->pq', j3c_pri, dm_3c[_aux0:_aux1], -.5*k_factor,
-                         beta=1, out=vhf1[x])
+            dm_oo = contract('riq,qj->rij', dm_3c, orbo)
+
+            # (00|0)(1|0)(0|00)
+            # int2c2e_ip1 computs d/dr. d/dX = -d/dr, the derivative of metric
+            # introduces another -1. The overall factor is 1.
+            j2c_10 = int2c2e_ip1(auxmol, sort_output=False)
+
+            # The first AO indices in j2c_10 should be grouped by atoms; The second
+            # indices are sorted to match the aux indices in dm_3c
+            inv_aux_sorting = cp.empty(naux, dtype=int)
+            inv_aux_sorting[_aux_sorting] = cp.arange(naux)
+            j2c_10 = j2c_10[:,inv_aux_sorting[aux_idx,None],inv_aux_sorting]
+            naux_in_atm = (aux_slices[:,1] - aux_slices[:,0]).max()
+            buf = cp.empty((3,naux_in_atm,nocc_in_batch,nao))
+            buf1 = cp.empty((naux_in_atm,nocc_in_batch,nao))
+            for i, (p0, p1) in enumerate(aux_slices):
                 if mem_sufficient:
-                    for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                        if p1 - p0 < nocc:
-                            tmp = ndarray((p1-p0, dk, nao), buffer=work1)
-                            contract('ui,riq->urq', orbo[p0:p1], dm_3c[_aux0:_aux1], out=tmp)
-                            contract('upr,urq->pq', j3c[p0:p1], tmp,
-                                     -.5*k_factor, beta=1, out=vhf_atm_ao[i,x])
-                        else:
-                            tmp = ndarray((nao, dk, nocc), buffer=work1)
-                            contract('pqr,pi->qri', j3c[p0:p1], orbo[p0:p1], out=tmp)
-                            contract('pri,riq->pq', tmp, dm_3c[_aux0:_aux1],
-                                     -.5*k_factor, beta=1, out=vhf_atm_ao[i,x])
+                    dm_3c_atm = cp.take(dm_3c, aux_idx[p0:p1], axis=0, out=buf1[:p1-p0])
+                    tmp = ndarray((3,p1-p0,nocc_in_batch,nao), buffer=buf)
+                    j3c_1 = contract('xrs,siq->xriq', j2c_10[:,p0:p1], dm_3c, out=tmp)
+                    contract('xrip,riq->xpq', j3c_1, dm_3c_atm, -.5*k_factor,
+                             beta=1, out=vhf_atm_ao[i])
                 else:
-                    for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                        tmp, buf2 = _allocate((p1-p0, dk, nocc), work1)
-                        tmp1 = ndarray((p1-p0, dk, nao), buffer=buf2)
-                        contract('ui,rij->urj', orbo[p0:p1], dm_oo[_aux0:_aux1], out=tmp)
-                        contract('uqr,urj->jq', j3c[p0:p1], tmp,
-                                 -.5*k_factor, beta=1, out=vhf_atm[i,x])
+                    dm_3c_atm = cp.take(dm_3c, aux_idx[p0:p1], axis=0, out=buf1[:p1-p0])
+                    dm_oo_atm = dm_oo[aux_idx[p0:p1]]
+                    tmp = ndarray((3,p1-p0,nocc_in_batch,nocc), buffer=buf)
+                    tmp = contract('xrs,sij->xrij', j2c_10[:,p0:p1], dm_oo, out=tmp)
+                    contract('riq,xrij->xjq', dm_3c_atm, tmp, -.5*k_factor,
+                             beta=1, out=vhf_atm[i])
 
-                        contract('uqr,qj->urj', j3c[p0:p1], orbo, out=tmp)
-                        contract('ui,riq->urq', orbo[p0:p1], dm_3c[_aux0:_aux1], out=tmp1)
-                        contract('urj,urq->jq', tmp, tmp1,
-                                 -.5*k_factor, beta=1, out=vhf_atm[i,x])
+                    tmp = ndarray((3,p1-p0,nocc_in_batch,nao), buffer=buf)
+                    j3c_1 = contract('xrs,siq->xriq', j2c_10[:,p0:p1], dm_3c, out=tmp)
+                    contract('xriq,rij->xjq', j3c_1, dm_oo_atm, -.5*k_factor,
+                             beta=1, out=vhf_atm[i])
 
                 if j_factor != 0:
-                    contract('pqr,r->pq', j3c, auxvec[_aux0:_aux1], j_factor,
-                             beta=1, out=vhf1[x])
-                    for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                        auxvec1 = cp.einsum('pqr,pq->r', j3c[p0:p1], dm[p0:p1])
-                        contract('riq,r->iq', dm_3c[_aux0:_aux1], auxvec1,
-                                 2*j_factor, beta=1, out=vhf_atm[i,x])
+                    contract('xriq,r->xiq', j3c_1, auxvec_by_atm[p0:p1], j_factor,
+                             beta=1, out=vhf_atm[i,:,nocc0:nocc1])
+                    tmp = cp.einsum('xrs,s->xr', j2c_10[:,p0:p1], auxvec)
+                    contract('riq,xr->xiq', dm_3c_atm, tmp, j_factor, beta=1,
+                             out=vhf_atm[i,:,nocc0:nocc1])
+            tmp = j3c_1 = dm_3c_atm = dm_oo_atm = None
+            buf = buf1 = j2c_10 = None
+            t1 = t0 = log.timer_debug1('contract j2c_10', *t0)
 
-        # (00|1)(0|0)(0|00)
-        compressed_dk += compressed_di
-        j3c_aux, work1 = _allocate((3,naux_in_batch,nocc,nao), work)
-        off = max(j3c_full.size + compressed_dk.size, j3c_aux.size)
-        j3c_aux_tmp = ndarray((3,naux_in_batch,nocc,nao), buffer=work[off:])
-        for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-            dk = k1 - k0
-            j3c = j3c_full[:,:,:dk]
-            for i in range(3):
-                #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed_dk[i,:,k0:k1]
-                df._fill_symmetric(j3c, pair_addresses, compressed_dk[i], k0, k1)
-                # Note d/dX = -d/dr, apply alpha=-1
-                contract('pqr,pi->riq', j3c, orbo, alpha=-1, out=j3c_aux_tmp[i,k0:k1])
+            # (10|0)(0|0)(0|00)
+            work = cp.empty(6*pair_size_max*batch_size +
+                            (nao*nao + (nao+nocc) *
+                             max(nao_on_atom, nocc_per_batch)) * blksize)
+            aux0 = aux1 = 0
+            for kbatch in range(num_aux_batches):
+                naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
+                aux0, aux1 = aux1, aux1 + naux_in_batch
 
-        # In a batch of auxiliary basis, sort the aux index based on their atom
-        # Id and stored the tensor in compressed_sorted_aux.
-        idx = np.argsort(aux_filling_order[aux0:aux1])
-        j3c_aux = cp.take(j3c_aux_tmp, idx, axis=1, out=j3c_aux)
+                j3c_full, work1 = _allocate((nao, nao, blksize), work)
+                j3c_full[:] = 0.
 
-        dm_3c_batch, work1 = _allocate((naux_in_batch,nocc,nao), work1)
-        dm_oo_batch, work1 = _allocate((naux_in_batch,nocc,nocc), work1)
-        # the memory spaces of dm_3c_batch and j3c_aux_tmp overlap,
-        # dm_3c_batch must be accessed after copying j3c_aux_tmp to j3c_aux
-        dm_3c_batch = cp.take(dm_3c[aux0:aux1], idx, axis=0, out=dm_3c_batch)
-        dm_oo_batch = cp.take(dm_oo[aux0:aux1], idx, axis=0, out=dm_oo_batch)
-        if j_factor != 0:
-            auxvec_batch = auxvec[aux0:aux1][idx]
+                buf0, work1 = _allocate((3, nao_pair, batch_size), work1)
+                buf1, work1 = _allocate((3, nao_pair, batch_size), work1)
+                compressed_dk = eval_ipaux(kbatch, out=buf0)
+                compressed_di = eval_ip1(kbatch, out=buf1)
 
-        counts = np.bincount(atm_id_for_aux[aux0:aux1])
-        # when nocc/nao is large and the system contains only 2-3 atoms,
-        # the remaining space in work  might be insufficient to cache a tensor
-        # of the shape (3,counts.max(),nocc,nocc)
-        oo_buf = None
-        if work1.size > 3*counts.max()*nocc**2:
-            oo_buf = work1
+                # (10|0)(0|0)(0|00)
+                # (di/dr j|k) + (i dj/dr|k) + (i j|dk/dr) = 0
+                compressed_dk += compressed_di
+                compressed_dj = compressed_dk # ~ d/dX on j
+                compressed_di *= -1           # ~ d/dX on i
+                _aux1 = aux0
+                for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                    dk = k1 - k0
+                    _aux0, _aux1 = _aux1, _aux1 + dk
+                    j3c = j3c_full[:,:,:dk]
+                    for x in range(3):
+                        j3c[j_addr,i_addr] = compressed_dj[x,:,k0:k1]
+                        j3c[i_addr,j_addr] = compressed_di[x,:,k0:k1]
+                        tmp = ndarray((nao, dk, nocc_in_batch), buffer=work1)
+                        contract('pqr,qi->pri', j3c, orbo[:,nocc0:nocc1], out=tmp)
+                        contract('pri,riq->pq', tmp, dm_3c[_aux0:_aux1],
+                                 -.5*k_factor, beta=1, out=vhf1[x])
+                        if mem_sufficient:
+                            for i, (p0, p1) in enumerate(aoslices[:,2:]):
+                                if p1 - p0 < nocc_in_batch:
+                                    tmp = ndarray((p1-p0, dk, nao), buffer=work1)
+                                    contract('ui,riq->urq', orbo[p0:p1,nocc0:nocc1],
+                                             dm_3c[_aux0:_aux1], out=tmp)
+                                    contract('upr,urq->pq', j3c[p0:p1], tmp,
+                                             -.5*k_factor, beta=1, out=vhf_atm_ao[i,x])
+                                else:
+                                    tmp = ndarray((nao, dk, nocc_in_batch), buffer=work1)
+                                    contract('pqr,pi->qri', j3c[p0:p1],
+                                             orbo[p0:p1,nocc0:nocc1], out=tmp)
+                                    contract('pri,riq->pq', tmp, dm_3c[_aux0:_aux1],
+                                             -.5*k_factor, beta=1, out=vhf_atm_ao[i,x])
+                        else:
+                            for i, (p0, p1) in enumerate(aoslices[:,2:]):
+                                tmp, tmp1 = _allocate((p1-p0, dk, nocc), work1)
+                                tmp1 = ndarray((p1-p0, dk, nao), buffer=tmp1)
+                                contract('ui,rij->urj', orbo[p0:p1,nocc0:nocc1],
+                                         dm_oo[_aux0:_aux1], out=tmp)
+                                contract('uqr,urj->jq', j3c[p0:p1], tmp,
+                                         -.5*k_factor, beta=1, out=vhf_atm[i,x])
 
-        p0 = p1 = 0
-        for i, count in enumerate(counts):
-            if count == 0:
-                continue
-            p0, p1 = p1, p1 + count
-            if mem_sufficient:
-                auxvec_ipaux = contract('xrip,pi->xr', j3c_aux[:,p0:p1], orbo)
-                contract('xrip,riq->xpq', j3c_aux[:,p0:p1], dm_3c_batch[p0:p1],
-                         -.5*k_factor, beta=1, out=vhf_atm_ao[i])
-            else:
-                tmp = ndarray((3,p1-p0,nocc,nocc), buffer=oo_buf)
-                j3c_1 = contract('xriq,qj->xrij', j3c_aux[:,p0:p1], orbo, out=tmp)
-                auxvec_ipaux = cp.einsum('xrii->xr', j3c_1)
-                contract('riq,xrij->xjq', dm_3c_batch[p0:p1], j3c_1,
-                         -.5*k_factor, beta=1, out=vhf_atm[i])
-                contract('xriq,rij->xjq', j3c_aux[:,p0:p1], dm_oo_batch[p0:p1],
-                         -.5*k_factor, beta=1, out=vhf_atm[i])
-            if j_factor != 0:
-                contract('riq,xr->xiq', dm_3c_batch[p0:p1], auxvec_ipaux,
-                         j_factor, beta=1, out=vhf_atm[i])
-                contract('xriq,r->xiq', j3c_aux[:,p0:p1], auxvec_batch[p0:p1],
-                         j_factor, beta=1, out=vhf_atm[i])
-        t1 = log.timer_debug1(f'vhf_atm batch {kbatch}', *t1)
-    dm_oo = dm_3c = None
-    t0 = log.timer_debug1('fill_int3c2e_ip1 and fill_int3c2e_ipaux', *t0)
+                                contract('uqr,qj->urj', j3c[p0:p1], orbo, out=tmp)
+                                contract('ui,riq->urq', orbo[p0:p1,nocc0:nocc1],
+                                         dm_3c[_aux0:_aux1], out=tmp1)
+                                contract('urj,urq->jq', tmp, tmp1,
+                                         -.5*k_factor, beta=1, out=vhf_atm[i,x])
 
-    if mem_sufficient:
-        transpose_sum(vhf_atm_ao.reshape(-1,nao,nao), inplace=True)
-        contract('nxpq,qj->nxjp', vhf_atm_ao, orbo, beta=1, out=vhf_atm)
+                        if j_factor != 0:
+                            if it == 0:
+                                contract('pqr,r->pq', j3c, auxvec[_aux0:_aux1],
+                                         j_factor, beta=1, out=vhf1[x])
+                            for i, (p0, p1) in enumerate(aoslices[:,2:]):
+                                auxvec1 = cp.einsum('pqr,pq->r', j3c[p0:p1], dm[p0:p1])
+                                contract('riq,r->iq', dm_3c[_aux0:_aux1], auxvec1,
+                                         2*j_factor, beta=1, out=vhf_atm[i,x,nocc0:nocc1])
+
+                # (00|1)(0|0)(0|00)
+                compressed_dk += compressed_di
+                j3c_aux, work1 = _allocate((3,naux_in_batch,nocc_in_batch,nao), work)
+                off = max(j3c_full.size + compressed_dk.size, j3c_aux.size)
+                j3c_aux_tmp = ndarray((3,naux_in_batch,nocc_in_batch,nao), buffer=work[off:])
+                if j_factor != 0:
+                    auxvec_ipaux = cp.empty((3,naux_in_batch))
+                for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                    dk = k1 - k0
+                    j3c = j3c_full[:,:,:dk]
+                    for i in range(3):
+                        #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed_dk[i,:,k0:k1]
+                        df._fill_symmetric(j3c, _pair_addresses, compressed_dk[i], k0, k1)
+                        # Note d/dX = -d/dr, apply alpha=-1
+                        contract('pqr,pi->riq', j3c, orbo[:,nocc0:nocc1],
+                                 alpha=-1, out=j3c_aux_tmp[i,k0:k1])
+                        if j_factor != 0:
+                            contract('pqr,pq->r', j3c, dm, alpha=-1, out=auxvec_ipaux[i,k0:k1])
+
+                # In a batch of auxiliary basis, sort the aux index based on their atom
+                # Id and stored the tensor in compressed_sorted_aux.
+                idx = np.argsort(aux_filling_order[aux0:aux1])
+                j3c_aux = cp.take(j3c_aux_tmp, idx, axis=1, out=j3c_aux)
+
+                dm_3c_batch, work1 = _allocate((naux_in_batch,nocc_in_batch,nao), work1)
+                dm_oo_batch, work1 = _allocate((naux_in_batch,nocc_in_batch,nocc), work1)
+                # the memory spaces of dm_3c_batch and j3c_aux_tmp overlap,
+                # dm_3c_batch must be accessed after copying j3c_aux_tmp to j3c_aux
+                dm_3c_batch = cp.take(dm_3c[aux0:aux1], idx, axis=0, out=dm_3c_batch)
+                dm_oo_batch = cp.take(dm_oo[aux0:aux1], idx, axis=0, out=dm_oo_batch)
+                if j_factor != 0:
+                    auxvec_batch = auxvec[aux0:aux1][idx]
+                    auxvec_ipaux = auxvec_ipaux[:,idx]
+
+                counts = np.bincount(atm_id_for_aux[aux0:aux1])
+                # when nocc/nao is large and the system contains only 2-3 atoms,
+                # the remaining space in work  might be insufficient to cache a tensor
+                # of the shape (3,counts.max(),nocc,nocc)
+                oo_buf = None
+                if work1.size > 3*counts.max()*nocc*nocc_in_batch:
+                    oo_buf = work1
+
+                p0 = p1 = 0
+                for i, count in enumerate(counts):
+                    if count == 0:
+                        continue
+                    p0, p1 = p1, p1 + count
+                    if mem_sufficient:
+                        contract('xrip,riq->xpq', j3c_aux[:,p0:p1],
+                                 dm_3c_batch[p0:p1], -.5*k_factor, beta=1, out=vhf_atm_ao[i])
+                    else:
+                        tmp = ndarray((3,p1-p0,nocc_in_batch,nocc), buffer=oo_buf)
+                        j3c_1 = contract('xriq,qj->xrij', j3c_aux[:,p0:p1], orbo, out=tmp)
+                        contract('riq,xrij->xjq', dm_3c_batch[p0:p1], j3c_1,
+                                 -.5*k_factor, beta=1, out=vhf_atm[i])
+                        contract('xriq,rij->xjq', j3c_aux[:,p0:p1], dm_oo_batch[p0:p1],
+                                 -.5*k_factor, beta=1, out=vhf_atm[i])
+                    if j_factor != 0:
+                        contract('riq,xr->xiq', dm_3c_batch[p0:p1], auxvec_ipaux[:,p0:p1],
+                                 j_factor, beta=1, out=vhf_atm[i,:,nocc0:nocc1])
+                        contract('xriq,r->xiq', j3c_aux[:,p0:p1], auxvec_batch[p0:p1],
+                                 j_factor, beta=1, out=vhf_atm[i,:,nocc0:nocc1])
+                t1 = log.timer_debug1(f'vhf_atm batch {kbatch}', *t1)
+            work = work1 = buf0 = buf1 = oo_buf = dm_3c_batch = dm_oo_batch = None
+            j3c_full = j3c = j3c_aux = j3c_aux_tmp = tmp = tmp1 = None
+            compressed_di = compressed_dj = compressed_dk = None
+            dm_oo = dm_3c = None
+            t0 = log.timer_debug1('fill_int3c2e_ip1 and fill_int3c2e_ipaux', *t0)
+
+        if mem_sufficient:
+            transpose_sum(vhf_atm_ao.reshape(-1,nao,nao), inplace=True)
+            contract('nxpq,qj->nxjp', vhf_atm_ao, orbo, beta=1, out=vhf_atm)
+        return vhf1, vhf_atm
+
+    occ_batch_iter = iter(range(num_occ_batches))
+    results = multi_gpu.run(proc, args=(occ_batch_iter,), non_blocking=True)
+    vhf1 = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+    vhf_atm = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
 
     # (10|0)(0|0)(0|00)
     # Distribute <d/dR i|Veff|j> to derivatives on atoms
@@ -1050,6 +1192,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     vhf_atm *= 2
 
     vhf_atm = contract('nxjp,pi->nxij', vhf_atm, mo_coeff)
+    t0 = log.timer_debug1('get_veff', *t0)
     return vhf_atm
 
 def int3c2e_scheme_ip2(omega=0, gout_width=None):
@@ -1187,10 +1330,6 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
     log = logger.new_logger(dfobj.mol, dfobj.verbose)
     t1 = log.init_timer()
 
-    if dfobj._cderi is None:
-        log.debug('Build CDERI ...')
-        dfobj.build(omega=omega)
-
     mo1 = dms.mo1
     occ_coeff = dms.occ_coeff
     if mo_coeff.ndim == 2: # RHF
@@ -1200,6 +1339,20 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
     else: # UHF
         mo1 = mo1.transpose(1,0,2,3)
     n_dm, nspin, nao, nocc = mo1.shape
+
+    if dfobj._cderi is None:
+        log.debug('Build CDERI ...')
+        mem_avail = get_avail_mem()
+        dfobj.build(omega=omega)
+        if (isinstance(dfobj._cderi[0], cp.ndarray) and
+            # Leave space for storing Krylov subspace vectors. This can be
+            # dropped after opimizing the storage model of Krylov solver.
+            dfobj._cderi[0].nbytes > 0.4 * mem_avail):
+            def transfer_to_host():
+                device_id = cp.cuda.device.get_device_id()
+                a = empty_mapped(dfobj._cderi[device_id].shape)
+                dfobj._cderi[device_id] = dfobj._cderi[device_id].get(out=a)
+            multi_gpu.run(transfer_to_host, blocking=True)
 
     def proc():
         vj = vk = None
@@ -1214,10 +1367,10 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
             dm_sparse[:,cderi_diag] *= .5
             vj = cp.zeros_like(dm_sparse)
 
-        blksize = dfobj.get_blksize(mem_fraction=0.15)
+        blksize = dfobj.get_blksize(mem_fraction=0.2)
         if with_k:
             mem_avail = get_avail_mem(exclude_memory_pool=True)
-            dm_batch_size = int(mem_avail * 0.8 / (nspin*blksize*(nao+nocc)*nocc * 8))
+            dm_batch_size = int(mem_avail * 0.75 / (nspin*blksize*(nao+nocc)*nocc * 8))
             dm_batch_size = min(dm_batch_size, n_dm)
             buf2 = cp.empty((dm_batch_size+1,nspin,nao,nocc,blksize))
             buf3 = cp.empty((dm_batch_size+1,nspin,nocc,nocc,blksize))
@@ -1232,8 +1385,6 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                 rhok_oo = ndarray((nspin,nocc,nocc,nL), buffer=buf1)
                 contract('Lpq,sqj->spjL', cderi, occ_coeff, out=rhok)
                 contract('spjL,spi->sijL', rhok, occ_coeff, out=rhok_oo)
-                if with_j:
-                    rhoj = cp.einsum('siiL->L', rhok_oo)
                 for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
                     rhok1 = ndarray((i1-i0,nspin,nao,nocc,nL), buffer=buf2)
                     contract('Lpq,nsqi->nspiL', cderi, mo1[i0:i1], out=rhok1)

@@ -253,7 +253,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     j2c_ip2 = contract('xrs,yts->rtxy', j2c_10v_w, j2c_10v)
     j2c_ip2 *= dm_aux[:,:,None,None]
     h_aux = j2c_ip2
-    dm_aux = j2c_10v = None
+    dm_aux = j2c_10v = j2c_ip2 = None
 
     # j3c_oo1p = (1|0)(0|00) + (1|00)
     j3c_oo1p = contract('xuv,vnij->xunij', j2c_10, dm_oo, alpha=-1, beta=1, out=j3c_oo1)
@@ -286,12 +286,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     # swap the differentiation order
     # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
     h_aux = h_aux + h_aux.transpose(1,0,3,2)
-    j2c_inv = None
 
     atm_labels = _auxbas_atom_labels(auxmol, aux_sorting)
     ejk_aux = _aggregate_to_atoms(h_aux, natm, atm_labels, axis=(0,1))
     ejk += ejk_aux * .5
-    dm_aux11 = j3c_oo1 = h_aux = None
+    j2c_inv = dm_aux11 = j3c_oo1 = h_aux = None
     t1 = t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
     # 3c integrals are computed in Cartesian bases, and sorted in the original

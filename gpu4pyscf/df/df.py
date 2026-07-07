@@ -49,7 +49,7 @@ class DF(lib.StreamObject):
     _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_gpu_memory'}
 
     # These attributes are not available in PySCF. When accessing them from an
-    # object created via to_gpu(), they may not be available.
+    # object created by to_gpu(), they may not be available.
     intopt = None
     nao = None
     naux = None
@@ -62,8 +62,6 @@ class DF(lib.StreamObject):
         self._auxbasis = auxbasis
 
         self.auxmol = None
-        self.intopt = None
-        self.nao = None
         self._cderi = None
         self._cderi_idx = None
         self._rsh_df = {}
@@ -125,7 +123,7 @@ class DF(lib.StreamObject):
             # When cderi is stored on host memory, additional memory is required
             # to load data into GPU memory. The available memory for unpacked
             # 3-index cderi is smaller.
-            mem_fraction *= .65
+            mem_fraction *= .5
 
         mem_avail = get_avail_mem()
         word_avail = int(mem_avail * mem_fraction / 8)
@@ -209,8 +207,8 @@ class DF(lib.StreamObject):
             self.auxmol = None
             self.intopt = None
         self._cderi = None
+        self._cderi_idx = None
         self._rsh_df = {}
-        self.nao = None
         return self
 
     @contextlib.contextmanager
@@ -602,6 +600,7 @@ def _fill_symmetric(out, pair_addresses, a, aux0, aux1):
     out[j,i] = out[i,j] = a[:,aux0:aux1]
     '''
     assert out.ndim == 3 and a.ndim == 2
+    assert pair_addresses.dtype == np.int32
     nao = out.shape[0]
     out_stride = out.strides[-2] // out.itemsize
     if a.strides[-1] == 8: # a is in row major
