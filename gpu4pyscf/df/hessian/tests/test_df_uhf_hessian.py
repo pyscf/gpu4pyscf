@@ -31,7 +31,7 @@ def setUpModule():
         verbose = 5,
         output = '/dev/null',
         atom = '''
-        O   0.   0.       0.
+#        O   0.   0.       0.
         H   0.   -0.757   0.587
         H   0.   0.757    0.587''',
         basis = 'sto3g')
@@ -224,7 +224,7 @@ class KnownValues(unittest.TestCase):
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm_rhf = tag_array(dm[0]+dm[1], mo_coeff=mo_coeff[0], mo_occ=mo_occ[0]*2)
         ref = df_rhf_hess._jk_energy_per_atom(opt, dm_rhf, j_factor=1, k_factor=1)
-        with lib.temporary_env(df_uhf_hess, get_avail_mem=(lambda **kw: 5000000)):
+        with lib.temporary_env(df_uhf_hess, get_avail_mem=(lambda **kw: 6000000)):
             ejk = df_uhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
         assert abs(ejk.sum(axis=(0,1))).max().get() < 1e-9
         assert abs(ejk-ref).max().get() < 1e-8

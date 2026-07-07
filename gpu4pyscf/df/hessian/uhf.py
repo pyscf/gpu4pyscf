@@ -78,26 +78,26 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
     word_avail -= 2 * 3 * naux * nocc**2 # j3c_oo1
-    batch_size = int(word_avail * 0.04) // nao_pair
+    batch_size = int(word_avail * 0.05) // nao_pair
     assert batch_size > largest_shell_nao, 'Insufficient GPU memory'
     batch_size = min(batch_size, max(largest_shell_nao, naux))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
-    aux_batches = len(aux_offsets) - 1
+    num_aux_batches = len(aux_offsets) - 1
 
     blksize = min(naux, int(word_avail * 0.5) // (nao**2*8) * 8)
     assert blksize > 1, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, aux_batches=%d, batch_size=%d, blksize=%d',
-                mem_avail*1e-6, aux_batches, batch_size, blksize)
+                mem_avail*1e-6, num_aux_batches, batch_size, blksize)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((batch_size, nao_pair))
     buf1 = cp.empty((blksize, nocc, nao))
     j3c_oo = cp.empty((naux, 2, nocc, nocc))
-    for kbatch in range(aux_batches):
+    for kbatch in range(num_aux_batches):
         compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
         naux_in_batch = compressed.shape[1]
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -151,7 +151,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
     aux_offsets = aux_loc[ksh_offsets_cpu]
-    aux_batches = len(aux_offsets) - 1
+    num_aux_batches = len(aux_offsets) - 1
 
     if j_factor != 0:
         dm = contract('npi,nqi->pq', dm_factor_l, dm_factor_r)
@@ -164,7 +164,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     buf = cp.empty((nao_pair*batch_size))
     buf2 = cp.empty((blksize, nao, nao))
     buf1 = cp.empty((blksize, nao, nocc))
-    for kbatch in range(aux_batches):
+    for kbatch in range(num_aux_batches):
         naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
@@ -222,7 +222,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     buf1 = cp.empty((blksize, nocc, nao))
     j3c_oo1 = cp.empty((3, naux, 2, nocc, nocc)) # = (1|00)
     aux0 = aux1 = 0
-    for kbatch in range(aux_batches):
+    for kbatch in range(num_aux_batches):
         compressed = eval_ipaux(kbatch, out=buf)
         naux_in_batch = compressed.shape[-1]
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -341,7 +341,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
         buf0, work1 = _allocate((3, nao_pair, batch_size), work1)
         buf1, work1 = _allocate((3, nao_pair, batch_size), work1)
         aux0 = aux1 = 0
-        for kbatch in range(aux_batches):
+        for kbatch in range(num_aux_batches):
             compressed_di = eval_ip1(kbatch, out=buf0)
             compressed_dk = eval_ipaux(kbatch, out=buf1)
             naux_in_batch = compressed_di.shape[-1]
@@ -483,7 +483,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
-    aux_batches = len(aux_offsets) - 1
+    num_aux_batches = len(aux_offsets) - 1
 
     # 3c integrals are computed in Cartesian bases, and sorted in the original
     # AO order.
@@ -496,14 +496,14 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
                   (nao**2 + (nao+nocc*2)*max(nao_on_atom, nocc))) // 8 * 8
     assert blksize > 1, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
-    log.debug1('mem_avail=%.3f MB, mem_sufficient=%s, batch_size=%d, blksize=%d',
-               mem_avail*1e-6, mem_sufficient, batch_size, blksize)
+    log.debug1('mem_avail=%.3f MB, mem_sufficient=%s, aux_batches=%d, batch_size=%d, blksize=%d',
+               mem_avail*1e-6, mem_sufficient, num_aux_batches, batch_size, blksize)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((batch_size, nao_pair))
     j3c_00 = cp.empty((naux, 2, nocc, nao))
-    for kbatch in range(aux_batches):
+    for kbatch in range(num_aux_batches):
         compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
         naux_in_batch = compressed.shape[1]
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -598,7 +598,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
         6*pair_size_max*batch_size +
         (nao*nao + (nao+nocc)*2 * max(nao_on_atom, nocc)) * blksize))
     aux0 = aux1 = 0
-    for kbatch in range(aux_batches):
+    for kbatch in range(num_aux_batches):
         naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
         aux0, aux1 = aux1, aux1 + naux_in_batch
 

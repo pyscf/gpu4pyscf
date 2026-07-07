@@ -446,7 +446,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
         if with_k:
             vk = cupy.zeros_like(dms_3d)
             mem_avail = get_avail_mem(exclude_memory_pool=True)
-            dm_batch_size = int(mem_avail * 0.8 / (blksize*nao*nocc * 8))
+            dm_batch_size = int(mem_avail * 0.6 / (blksize*nao*nocc * 8))
             if factor_r is not None and factor_l.ndim == factor_r.ndim:
                 dm_batch_size = dm_batch_size // 2
             dm_batch_size = min(dm_batch_size, n_dm)
