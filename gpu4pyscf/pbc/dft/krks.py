@@ -62,15 +62,6 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             raise NotImplementedError("VV10 not implemented for periodic system")
-            if ni.libxc.is_nlc(ks.xc):
-                xc = ks.xc
-            else:
-                assert ni.libxc.is_nlc(ks.nlc)
-                xc = ks.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm, 0, hermi, kpts)
-            exc += enlc
-            vxc += vnlc
-            log.debug('nelec with nlc grids = %s', n)
         log.timer('vxc', *t0)
 
     vj, vk, vj_sr, vk_sr = _get_jk(
@@ -223,3 +214,51 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
         mf = krks_cpu.KRKS(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     singlet=None, hermi=0, max_memory=None, with_nlc=False):
+        if mo_coeff is None: mo_coeff = self.mo_coeff
+        if mo_occ is None: mo_occ = self.mo_occ
+        cell = self.cell
+        kpts = self.kpts
+
+        if with_nlc and self.do_nlc():
+            raise NotImplementedError
+
+        ni = self._numint
+        hybrid = ni.libxc.is_hybrid_xc(self.xc)
+
+        if singlet is None:  # for newton solver
+            spin = 0
+        else:
+            spin = 1
+        dm0 = self.make_rdm1(mo_coeff, mo_occ)
+        rho0, vxc, fxc = ni.cache_xc_kernel1(
+            cell, self.grids, self.xc, dm0, spin, kpts, is_rhf=True)
+        if singlet is not None:
+            fxc *= .5
+        dm0 = None
+
+        with_j = (singlet is None or singlet) and hermi != 2
+        j_in_xc = isinstance(ni, (multigrid_v2.MultiGridNumInt,
+                                  multigrid.MultiGridNumInt))
+
+        def vind(dm1, kshift=0):
+            assert kshift == 0
+            if with_j:
+                if singlet is None:
+                    v1 = ni.nr_rks_fxc(cell, self.grids, self.xc, dm0, dm1, hermi,
+                                       fxc, kpts, with_j=j_in_xc)
+                else:
+                    v1 = ni.nr_rks_fxc(cell, self.grids, self.xc, dm0, dm1, hermi,
+                                       singlet, fxc, kpts, with_j=j_in_xc)
+            else:
+                v1 = cp.zeros_like(dm1)
+
+            vj, vk = _get_jk(self, cell, dm1, hermi, kpts, with_j=not j_in_xc)[:2]
+            if with_j and not j_in_xc:
+                v1 += vj
+            if hybrid:
+                v1 -= .5 * vk
+            return v1
+        return vind

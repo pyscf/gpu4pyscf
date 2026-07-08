@@ -403,6 +403,25 @@ class KnownValues(unittest.TestCase):
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=3e-6)
 
+    def test_time_reversal_symmetry_broken(self):
+        np.random.seed(3)
+        cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',
+                      a=np.eye(3)*2.4 + (np.random.rand(3,3)*.4 - .3),
+                      basis=[[0,[3.3, 1]], [1,[ .4, 1]]])
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KRKS(kpts=kpts, exxdiv='ewald', xc='pbe').to_gpu()
+        mf = mf.multigrid_numint()
+        mf.run()
+        g = mf.Gradients().kernel()
+
+        mfs = mf.as_scanner()
+        r = cell.atom_coords()
+        r[0,0] += 1e-3
+        e1 = mfs(cell.set_geom_(r, unit='Bohr', inplace=False))
+        r[0,0] -= 2e-3
+        e2 = mfs(cell.set_geom_(r, unit='Bohr', inplace=False))
+        self.assertAlmostEqual(g[0,0], (e1-e2)/2e-3, 6)
+
 if __name__ == "__main__":
     print("Full Tests for KRKS Gradients")
     unittest.main()

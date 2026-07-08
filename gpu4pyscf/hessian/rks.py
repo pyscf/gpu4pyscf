@@ -1078,12 +1078,11 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
 
         assert grids.atm_idx.shape[0] == grids.coords.shape[0]
         grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
+        assert cupy.all(grid_to_atom_index_map >= 0) # There shouldn't be padded grids not from any atom with sort_grids_of_each_atom = True
 
-        grid_offsets_of_atom = cupy.r_[0, cupy.flatnonzero(cupy.diff(grid_to_atom_index_map)) + 1]
-        if grid_to_atom_index_map[-1] < 0:
-            pass # There's padded grids whose index < 0, and the first index of padded grids is the number of valid grids
-        else:
-            grid_offsets_of_atom = cupy.append(grid_offsets_of_atom, grid_to_atom_index_map.shape[0])
+        grid_offsets_of_atom = cupy.bincount(grid_to_atom_index_map, minlength = natm)
+        grid_offsets_of_atom = cupy.concatenate((cupy.array([0]), grid_offsets_of_atom))
+        grid_offsets_of_atom = cupy.cumsum(grid_offsets_of_atom)
         grid_offsets_of_atom = cupy.asarray(grid_offsets_of_atom, dtype = cupy.int32)
 
         assert grid_offsets_of_atom.shape == (natm + 1,)
@@ -2465,12 +2464,11 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     if grid_response:
         assert grids.atm_idx.shape[0] == grids.coords.shape[0]
         grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
+        assert cupy.all(grid_to_atom_index_map >= 0) # There shouldn't be padded grids not from any atom with sort_grids_of_each_atom = True
 
-        grid_offsets_of_atom = cupy.r_[0, cupy.flatnonzero(cupy.diff(grid_to_atom_index_map)) + 1]
-        if grid_to_atom_index_map[-1] < 0:
-            pass # There's padded grids whose index < 0, and the first index of padded grids is the number of valid grids
-        else:
-            grid_offsets_of_atom = cupy.append(grid_offsets_of_atom, grid_to_atom_index_map.shape[0])
+        grid_offsets_of_atom = cupy.bincount(grid_to_atom_index_map, minlength = natm)
+        grid_offsets_of_atom = cupy.concatenate((cupy.array([0]), grid_offsets_of_atom))
+        grid_offsets_of_atom = cupy.cumsum(grid_offsets_of_atom)
         grid_offsets_of_atom = cupy.asarray(grid_offsets_of_atom, dtype = cupy.int32)
 
         assert grid_offsets_of_atom.shape == (natm + 1,)

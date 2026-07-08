@@ -312,7 +312,7 @@ class XCfun:
             if err != 0:
                 raise RuntimeError('Failed in xc_mgga')
         else:
-            raise KeyError("Functional kind not recognized!")
+            raise KeyError(f"Functional kind {self._family} not supported")
 
         return {k: v[0] for k, v in output.items() if v is not None}
 

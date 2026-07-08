@@ -59,18 +59,9 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         j_in_xc = False
         ks.initialize_grids(cell, dm, kpts)
         n, exc, vxc = ni.nr_uks(cell, ks.grids, ks.xc, dm, 0, hermi, kpts, kpts_band)
+        log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             raise NotImplementedError("VV10 not implemented for periodic system")
-            if ni.libxc.is_nlc(ks.xc):
-                xc = ks.xc
-            else:
-                assert ni.libxc.is_nlc(ks.nlc)
-                xc = ks.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm,
-                                          0, hermi, kpts)
-            exc += enlc
-            vxc += vnlc
-        log.debug('nelec by numeric integration = %s', n)
         log.timer('vxc', *t0)
 
     vj, vk, vj_sr, vk_sr = krks._get_jk(
@@ -145,3 +136,45 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         mf = kuks_cpu.KUKS(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     with_j=True, hermi=0, max_memory=None, with_nlc=False):
+        if mo_coeff is None: mo_coeff = self.mo_coeff
+        if mo_occ is None: mo_occ = self.mo_occ
+        cell = self.cell
+        kpts = self.kpts
+
+        if with_nlc and self.do_nlc():
+            raise NotImplementedError
+
+        ni = self._numint
+        hybrid = ni.libxc.is_hybrid_xc(self.xc)
+
+        spin = 1
+        dm0 = self.make_rdm1(mo_coeff, mo_occ)
+        rho0, vxc, fxc = ni.cache_xc_kernel1(
+            cell, self.grids, self.xc, dm0, spin, kpts)
+        nao = dm0.shape[-1]
+        dm0 = None
+        nkpts = len(kpts)
+
+        with_j = with_j and hermi != 2
+        j_in_xc = isinstance(ni, (multigrid_v2.MultiGridNumInt,
+                                  multigrid.MultiGridNumInt))
+
+        def vind(dm1, kshift=0):
+            assert kshift == 0
+            if with_j:
+                v1 = ni.nr_uks_fxc(cell, self.grids, self.xc, dm0, dm1, hermi,
+                                   fxc, kpts, with_j=j_in_xc)
+            else:
+                v1 = cp.zeros_like(dm1)
+
+            vj, vk = krks._get_jk(self, cell, dm1.reshape(-1,nkpts,nao,nao),
+                                  hermi, kpts, with_j=not j_in_xc)[:2]
+            if with_j and not j_in_xc:
+                v1 += vj.reshape(dm1.shape).sum(axis=0)
+            if hybrid:
+                v1 -= vk.reshape(dm1.shape)
+            return v1
+        return vind

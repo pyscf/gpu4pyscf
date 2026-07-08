@@ -430,7 +430,7 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
 
     dm_pair_ordered = cp.asarray(dm_pair_ordered)
 
-    n_threads_per_block_1d = 16
+    n_threads_per_block_1d = 8
     n_max_blocks_per_grid_1d = 65535
     n_max_threads_1d = n_threads_per_block_1d * n_max_blocks_per_grid_1d
     n_grid_split = int(np.ceil(ngrids / n_max_threads_1d))

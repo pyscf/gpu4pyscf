@@ -83,7 +83,7 @@ class KnownValues(unittest.TestCase):
         test_gradient = _compute_gradient(hf_lowmem.RHF(mol_cart))
         diff = np.linalg.norm(reference_gradient - test_gradient)
         print('|| normal - lowmem || = ', diff)
-        assert(diff < g_tolerance)
+        assert(diff < 5e-6)
 
     def test_lowmem_grad_rks_sph(self):
         # reference_gradient = _compute_gradient(dft.RKS(mol_sph, xc='hse06'))
@@ -96,7 +96,7 @@ class KnownValues(unittest.TestCase):
         test_gradient = _compute_gradient(rks_lowmem.RKS(mol_sph, xc='hse06'))
         diff = np.linalg.norm(reference_gradient - test_gradient)
         print('|| normal - lowmem || = ', diff)
-        assert(diff < g_tolerance)
+        assert(diff < 5e-6)
 
     @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_lowmem_grad_rks_cart(self):

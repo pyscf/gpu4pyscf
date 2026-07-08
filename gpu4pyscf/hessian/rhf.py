@@ -51,8 +51,8 @@ GB = 1024*1024*1024
 ALIGNED = 4
 DD_CACHE_MAX = rhf_grad.DD_CACHE_MAX
 
-libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
-libvhf_rys.RYS_build_ejk_ip2_init(ctypes.c_int(SHM_SIZE))
+libvhf_rys.RYS_build_vjk_ip1_init.restype = ctypes.c_int
+libvhf_rys.RYS_build_ejk_ip2_init.restype = ctypes.c_int
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1mo=None,
@@ -209,6 +209,9 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
 
         timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
+        err = libvhf_rys.RYS_build_ejk_ip2_init(ctypes.c_int(SHM_SIZE))
+        if err != 0:
+            raise RuntimeError('RYS build_ejk_ip2 CUDA kernel initialization failed')
         kern1 = libvhf_rys.RYS_per_atom_jk_ip2_type12
         kern2 = libvhf_rys.RYS_per_atom_jk_ip2_type3
 
@@ -426,6 +429,9 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
         timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
         kern = libvhf_rys.RYS_build_jk_ip1
+        err = libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
+        if err != 0:
+            raise RuntimeError('RYS build_vjk_ip1 CUDA kernel initialization failed')
 
         _dms = cp.asarray(dms)
 

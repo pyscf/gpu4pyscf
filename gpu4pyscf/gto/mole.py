@@ -580,6 +580,18 @@ class SortedGTO:
     @classmethod
     def from_mol(cls, mol, *, group_size=None,
                  decontract=False, diffuse_cutoff=None):
+        '''Transforms generally contracted basis to segment contracted basis.
+
+        Parameters
+        ----------
+        decontract : bool, optional
+            If enabled, decontract generally contractions into primitives.
+            Otherwise, simply split general contractions into segment-contracted shells,
+            allowing repeated exponents in different shells.
+        diffuse_cutoff : float or None, optional
+            If set together with `decontract=True`, primitives with exponents
+            below this value are fully decontracted and treated as separate shells.
+        '''
         if isinstance(mol, SortedGTO):
             return mol
         elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
@@ -651,7 +663,7 @@ class SortedGTO:
     def CT_dot_mat(self, mat, out=None):
         '''ctr_coeff.T.dot(mat)
         '''
-        mat = cp.asarray(mat, dtype=np.float64, order='C')
+        mat = cp.asarray(mat, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
             return self.mat_dot_C(mat)
@@ -672,15 +684,18 @@ class SortedGTO:
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
             p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+            recontract_coef = cp.asarray(self.recontract_coef)
+            recontract_bas = cp.asarray(self.recontract_bas)
+            recontraction_idx = cp.asarray(self.recontraction_idx)
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontract_coef.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontract_bas.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+                ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
                 ctypes.c_int(ncol), ctypes.c_int(counts))
             assert err == 0
 
@@ -692,7 +707,7 @@ class SortedGTO:
 
     def C_dot_mat(self, mat, out=None):
         '''ctr_coeff.dot(mat)'''
-        mat = cp.asarray(mat, dtype=np.float64, order='C')
+        mat = cp.asarray(mat, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
             return self.mat_dot_CT(mat)
@@ -713,15 +728,18 @@ class SortedGTO:
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
             p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+            recontract_coef = cp.asarray(self.recontract_coef)
+            recontract_bas = cp.asarray(self.recontract_bas)
+            recontraction_idx = cp.asarray(self.recontraction_idx)
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontract_coef.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontract_bas.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+                ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
                 ctypes.c_int(ncol), ctypes.c_int(counts))
             assert err == 0
 
@@ -756,15 +774,18 @@ class SortedGTO:
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
             p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+            recontract_coef = cp.asarray(self.recontract_coef)
+            recontract_bas = cp.asarray(self.recontract_bas)
+            recontraction_idx = cp.asarray(self.recontraction_idx)
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontract_coef.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontract_bas.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+                ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
                 ctypes.c_int(nrow*counts))
             assert err == 0
 
@@ -804,15 +825,18 @@ class SortedGTO:
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
             p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+            recontract_coef = cp.asarray(self.recontract_coef)
+            recontract_bas = cp.asarray(self.recontract_bas)
+            recontraction_idx = cp.asarray(self.recontraction_idx)
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontract_coef.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontract_bas.data.ptr, ctypes.c_void_p),
+                ctypes.cast(recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+                ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
                 ctypes.c_int(nrow*counts))
             assert err == 0
 

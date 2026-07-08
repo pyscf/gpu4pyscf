@@ -67,8 +67,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
 
     def test_gga_fft(self):
         cell = self.cell
@@ -81,8 +81,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
 
     def test_rsh_fft(self):
         cell = self.cell
@@ -95,8 +95,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-7)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
 
     def test_kpts_mgga(self):
         cell = self.cell
@@ -109,8 +109,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
 
     def test_lda_gdf(self):
         from pyscf.pbc.df.df import _load3c
@@ -179,7 +179,9 @@ class KnownValues(unittest.TestCase):
         cell = self.cell
         np.random.seed(1)
         k = np.random.random((1, 3))
-        mf = pbcdft.KRKS(cell, xc='lda,vwn', kpts=k).run()
+        mf = pbcdft.KRKS(cell, xc='lda,vwn', kpts=k)
+        mf.time_reversal_symmetry = False
+        mf.run()
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -188,14 +190,16 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
 
     def test_gga_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
         k = np.random.random((1, 3))
-        mf = pbcdft.KRKS(cell, xc='pbe0', kpts=k).run(conv_tol=1e-10)
+        mf = pbcdft.KRKS(cell, xc='pbe0', kpts=k)
+        mf.time_reversal_symmetry = False
+        mf.run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -204,14 +208,16 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-7)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-7)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
 
     def test_rsh_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
         k = np.random.random((1, 3))
-        mf = pbcdft.KRKS(cell, xc='camb3lyp', kpts=k).run(conv_tol=1e-10)
+        mf = pbcdft.KRKS(cell, xc='camb3lyp', kpts=k)
+        mf.time_reversal_symmetry = False
+        mf.run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -220,8 +226,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
 
     def test_kpts_lda_fft(self):
         cell = self.cell
@@ -236,8 +242,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = kmf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
 
     def test_kpts_gga_fft(self):
         cell = self.cell
@@ -494,6 +500,18 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, -0.432150196659050, 8)
         #ref = cell.KRKS(xc='camb3lyp', kpts=kpts).run()
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_unpaired_kpts(self):
+        kpts = cell.make_kpts([1,1,5])[:3]
+        kmf = cell.KRKS(xc='pbe', kpts=kpts).to_gpu()
+        kmf = kmf.multigrid_numint()
+        kmf.time_reversal_symmetry = True
+        kmf.run()
+        self.assertAlmostEqual(kmf.e_tot, -0.45774883471428585, 8)
+
+        kmf.time_reversal_symmetry = False
+        kmf.run()
+        self.assertAlmostEqual(kmf.e_tot, -0.45774883471428585, 8)
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.rks")

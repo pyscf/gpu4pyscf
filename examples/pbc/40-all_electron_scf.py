@@ -59,5 +59,12 @@ kpts = cell.make_kpts([2,2,2])
 kmf = cell.KRHF(kpts=kpts).to_gpu().density_fit().run()
 
 kmf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu().density_fit()
+# conv_tol_grad controls the convergence threshold for orbital gradients.
+# It is typically set to sqrt(conv_tol). Because the orbital-gradient norm
+# is accumulated over all k-points, the value increases with the size of the
+# k-point mesh. For large k-point meshes, conv_tol_grad can be scaled by
+# approximately sqrt(Nk) to maintain a comparable convergence criterion.
+kmf.conv_tol_grad = 1e-3
+kmf.conv_tol_grad = 1e-3
 kmf.grids = BeckeGrids(cell)
 kmf.run()

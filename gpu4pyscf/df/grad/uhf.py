@@ -96,7 +96,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     j2c = int2c2e(auxmol)
     if mol.omega <= 0 and not auxmol.mol.cart:
-        metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
     else:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
     j2c = aux_coeff = None

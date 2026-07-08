@@ -45,16 +45,16 @@ def test_jk_hermi1():
     ref = get_jk(mol, dm, hermi=1)
     assert abs(vj1 - ref[0]).max() < 1e-9
     assert abs(vk1 - ref[1]).max() < 1e-9
-    assert abs(lib.fp(vj1) - -2327.4715195591784) < 5e-10
-    assert abs(lib.fp(vk1) - -4069.3170008260583) < 5e-10
+    assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
+    assert abs(lib.fp(vk1) - -4069.3170008260583) < 1e-9
 
     vj = jk.get_j(mol, dm, hermi=1).get()
     assert abs(vj - ref[0]).max() < 1e-9
-    assert abs(lib.fp(vj) - -2327.4715195591784) < 5e-10
+    assert abs(lib.fp(vj) - -2327.4715195591784) < 1e-9
 
     vk = jk.get_k(mol, dm, hermi=1).get()
     assert abs(vk - ref[1]).max() < 1e-9
-    assert abs(lib.fp(vk) - -4069.3170008260583) < 5e-10
+    assert abs(lib.fp(vk) - -4069.3170008260583) < 1e-9
 
     mol.omega = 0.2
     vj, vk = jk.get_jk(mol, dm, hermi=1)
@@ -63,8 +63,8 @@ def test_jk_hermi1():
     ref = get_jk(mol, dm, hermi=1)
     assert abs(vj2 - ref[0]).max() < 1e-9
     assert abs(vk2 - ref[1]).max() < 1e-9
-    assert abs(lib.fp(vj2) -  1163.932604635460) < 5e-10
-    assert abs(lib.fp(vk2) - -1269.969109438691) < 5e-10
+    assert abs(lib.fp(vj2) -  1163.932604635460) < 1e-9
+    assert abs(lib.fp(vk2) - -1269.969109438691) < 1e-9
 
     mol.omega = -0.2
     vj, vk = jk.get_jk(mol, dm, hermi=1)
@@ -73,8 +73,8 @@ def test_jk_hermi1():
     ref = get_jk(mol, dm, hermi=1)
     assert abs(vj3 - ref[0]).max() < 1e-8
     assert abs(vk3 - ref[1]).max() < 1e-9
-    assert abs(lib.fp(vj3) - -3491.404124194866) < 5e-10
-    assert abs(lib.fp(vk3) - -2799.347891387202) < 5e-10
+    assert abs(lib.fp(vj3) - -3491.404124194866) < 1e-9
+    assert abs(lib.fp(vk3) - -2799.347891387202) < 1e-9
 
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9

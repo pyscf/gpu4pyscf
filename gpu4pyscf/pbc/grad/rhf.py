@@ -162,6 +162,9 @@ class Gradients(GradientsBase):
         if mo_occ is None:
             mo_occ = mf.mo_occ
 
+        if getattr(mf, 'with_x2c', None):
+            raise NotImplementedError('X2C gradients')
+
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
         de = self.energy_ee(dm0)
 

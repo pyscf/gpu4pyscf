@@ -16,6 +16,10 @@
 Analytical Fourier transform for orbital-products
 '''
 
+__all__ = [
+    'ft_aopair', 'ft_aopair_kpts', 'ft_ao'
+]
+
 import ctypes
 import math
 import itertools
@@ -32,7 +36,7 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, contract, get_avail_mem, dist_matrix, asarray, ndarray)
+    load_library, contract, get_avail_mem, asarray, ndarray, hermi_triu)
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
@@ -42,16 +46,12 @@ from gpu4pyscf.gto.mole import (
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
 from gpu4pyscf.__config__ import props as gpu_specs
 
-__all__ = [
-    'ft_aopair', 'ft_aopair_kpts', 'ft_ao'
-]
-
 libpbc = load_library('libpbc')
 libpbc.build_ft_ao.restype = ctypes.c_int
 libpbc.build_ft_aopair.restype = ctypes.c_int
 
 LMAX = 4
-GOUT_WIDTH = 29
+GOUT_WIDTH = 30
 THREADS = 256
 POOL_SIZE = 65536
 
@@ -342,7 +342,7 @@ class FTOpt:
             self.build()
 
         cell = self.cell
-        nsp_per_block, gout_stride, shm_size = ft_ao_scheme()
+        nsp_per_block, gout_stride, shm_size = ft_ao_scheme(cache_cart_idx=True)
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
         if bas_ij_aggregated is None:
@@ -374,7 +374,8 @@ class FTOpt:
             ao_pair_offsets = ao_pair_offsets[pair_splits]
 
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, POOL_SIZE), dtype=np.float64)
+        pool = cp.empty(workers*POOL_SIZE+1, dtype=np.float64)
+        head = pool[-1:]
         aft_envs = self.aft_envs
         img_idx = cp.asarray(self.img_idx)
         img_offsets = cp.asarray(self.img_offsets)
@@ -406,6 +407,7 @@ class FTOpt:
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(head.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(shm_size_max),
                 ctypes.c_int(pair_blocks),
                 ctypes.cast(_shl_pair_offsets.data.ptr, ctypes.c_void_p),
@@ -577,25 +579,86 @@ class FTOpt:
             rhoG[p0:p1] = rhoGz.view(np.complex128)
         return rhoG
 
-def ft_ao_scheme():
+    def contract_rhoG(self, rhoG, Gv, kpts=None, sort_output=True):
+        from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
+        cell = self.cell
+        nsp_per_block, gout_stride, shm_size = ft_ao_scheme(nGv_per_block=16)
+        lmax = cell.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:lmax+1,:lmax+1].max()
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(self.bas_ij_cache, 16)
+
+        kern = libpbc.contract_ft_aopair
+        aft_envs = self.aft_envs
+        img_idx = cp.asarray(self.img_idx)
+        img_offsets = cp.asarray(self.img_offsets)
+        head = cp.empty(1, dtype=np.int32)
+        bvk_ncells = len(self.bvkmesh_Ls)
+        nao = cell.nao
+
+        vj = cp.zeros((nao, bvk_ncells, nao))
+        ngrids = len(Gv)
+        GvT = cp.asarray(Gv.T.ravel())
+        pair_blocks = len(shl_pair_offsets) - 1
+        compressing = 0
+        err = kern(
+            ctypes.cast(vj.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rhoG.data.ptr, ctypes.c_void_p),
+            ctypes.byref(aft_envs),
+            ctypes.cast(head.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(shm_size_max),
+            ctypes.c_int(pair_blocks),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids),
+            ctypes.c_int(compressing))
+        if err != 0:
+            raise RuntimeError('contract_ft_pdotp kernel failed')
+
+        if kpts is None or is_zero(kpts):
+            if bvk_ncells != 1:
+                vj = vj.sum(axis=1)[None]
+            else:
+                vj = vj.transpose(1,0,2)
+        else:
+            nkpts = len(kpts)
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            expLkz = expLk.view(np.float64).reshape(bvk_ncells,nkpts,2)
+            vj = contract('Lkz,pLq->kpqz', expLkz, vj)
+            vj = vj.view(np.complex128)[:,:,:,0]
+        vj = hermi_triu(vj)
+        if sort_output:
+            vj = cell.apply_CT_mat_C(vj)
+        return vj
+
+def ft_ao_scheme(shm_size=SHM_SIZE, gout_width=GOUT_WIDTH, deriv=None,
+                 nGv_per_block=32, cache_cart_idx=False):
+    if deriv is None:
+        deriv = (0, 0)
+    i_inc, j_inc = deriv
+
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     nfi = (li + 1) * (li + 2) // 2
     nfj = (lj + 1) * (lj + 2) // 2
     gout_size = nfi * nfj
-    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
+    gout_stride = (gout_size + gout_width-1) // gout_width
     # Round up to the next 2^n
     gout_stride = _nearest_power2(gout_stride, return_leq=False)
 
-    nGv_per_block = 32
-    nsp_max = 8 // gout_stride
+    rem_threads = THREADS // nGv_per_block
+    nsp_max = rem_threads // gout_stride
     assert np.all(nsp_max > 0)
-    g_size = (li+1)*(lj+1)
+    g_size = (li+1+i_inc)*(lj+1+j_inc)
     unit = g_size*3
-    nsp_per_block = _nearest_power2((SHM_SIZE-256) // (nGv_per_block*(unit*16)))
+    nsp_per_block = _nearest_power2(shm_size // (nGv_per_block*(unit*16)))
     nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
-    gout_stride = cp.asarray(8 // nsp_per_block, dtype=np.int32)
+    gout_stride = cp.asarray(rem_threads // nsp_per_block, dtype=np.int32)
     shm_size = nGv_per_block * nsp_per_block * (unit*16)
     shm_size += nsp_per_block * 3 * 8
-    shm_size += (nfi + nfj) * 3 * 4
+    if cache_cart_idx:
+        shm_size += (nfi + nfj) * 3 * 4
     return nsp_per_block, gout_stride, shm_size

@@ -142,6 +142,7 @@ while (1) {
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -555,6 +556,7 @@ while (1) {
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -1185,6 +1187,7 @@ while (1) {
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -2560,6 +2563,7 @@ while (1) {
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -4898,6 +4902,7 @@ while (1) {
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -6293,6 +6298,7 @@ while (1) {
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -8627,6 +8633,7 @@ while (1) {
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
