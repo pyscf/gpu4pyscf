@@ -17,7 +17,7 @@
 #define BLKSIZEX        32
 #define BLKSIZEY        16
 
-SYCL_EXTERNAL __global__
+__global__
 void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, int ngrids, int nao);
 __global__
 void GDFTscale_ao_kernel(double *out, double *ket, double *wv,

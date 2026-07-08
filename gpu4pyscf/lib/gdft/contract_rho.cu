@@ -280,8 +280,14 @@ static __global__
 void zscale_ao_kernel(double *out, double *ket, double *wv,
                       int ngrids, int nao, int nvar)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int grid_id = item.get_global_id(1);
+    int ao_id = item.get_global_id(0);
+#else
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int ao_id = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (grid_id >= ngrids || ao_id >= nao) {
         return;
     }
@@ -466,11 +472,18 @@ int GDFTscale_ao(double *out, double *ket, double *wv,
                  int ngrids, int nao, int nvar, int is_real)
 {
 #ifdef USE_SYCL
+    sycl::queue& stream = *sycl_get_queue();
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks((nao+BLKSIZEY-1)/BLKSIZEY, (ngrids+BLKSIZEX-1)/BLKSIZEX);
-    stream.parallel_for<class GDFTscale_ao_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-      GDFTscale_ao_kernel(out, ket, wv, ngrids, nao, nvar);
-    });
+    if (is_real) {
+        stream.parallel_for<class dscale_ao_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+          dscale_ao_kernel(out, ket, wv, ngrids, nao, nvar);
+        });
+    } else {
+        stream.parallel_for<class zscale_ao_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+          zscale_ao_kernel(out, ket, wv, ngrids, nao, nvar);
+        });
+    }
 #else
     dim3 threads(BLKSIZEX, BLKSIZEY);
     dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);

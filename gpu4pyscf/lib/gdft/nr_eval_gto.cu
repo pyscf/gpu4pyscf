@@ -146,7 +146,7 @@ static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
 
 __global__
 static void _screen_index_legacy(int *non0shl_idx, double cutoff, int ang, int nprim,
-        double *coords, int ngrids, int bas_offset, const GTOValEnvVars &gto_envs){
+        double *coords, int ngrids, int bas_offset, GTOValEnvVars gto_envs){
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
     int grid_id = item.get_global_id(1);
