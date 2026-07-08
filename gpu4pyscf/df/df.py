@@ -28,6 +28,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.df import int3c2e_bdiv
+from gpu4pyscf.df import df_jk
 from gpu4pyscf.gto.mole import SortedMole
 from gpu4pyscf import __config__
 
@@ -106,11 +107,10 @@ class DF(lib.StreamObject):
 
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
                direct_scf_tol=None, omega=None):
-        from gpu4pyscf.df import df_jk
         with self.range_coulomb(omega) as dfobj:
             return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k, omega=omega)
 
-    def get_blksize(self, extra=0, nao=None, mem_fraction=0.2):
+    def get_blksize(self, extra=0, nao=None, mem_fraction=0.3):
         '''
         extra for pre-calculated space for other variables
         '''
@@ -454,11 +454,13 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         ao_pair_batch_size=batch_size, reorder_aux=True,
         pair_batch_by_l=needs_recontraction, return_bas_ij_batches=True,
         omega=omega)
+    cderi_batch_size = batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
 
     if needs_recontraction:
-        recontract, ao_pair_counts, cderi_pair_counts, pair_addresses = \
+        recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses = \
                 int3c2e_bdiv._create_pair_recontraction(sorted_mol, bas_ij_batches)
-        cderi_offsets = np.append(0, np.cumsum(cderi_pair_counts))
+        cderi_offsets = np.append(0, np.cumsum(contracted_ao_pair_counts))
+        cderi_batch_size = int(max(contracted_ao_pair_counts))
         cderi_npairs = len(pair_addresses)
         pair_addresses = asarray(pair_addresses)
         rows, cols = divmod(pair_addresses, mol.nao)
@@ -472,8 +474,6 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         cderi_idx = (pair_addresses, diag_addrs)
 
     aux_coef, tag = _decompose_j2c(auxmol, aux_sorting)
-    batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
-
     naux = aux_coef.shape[1]
     naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
 
@@ -510,8 +510,8 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
 
             work = cp.empty(naux_sorted * batch_size)
             if needs_recontraction:
-                work1 = cp.empty(naux_sorted * batch_size)
-            work2 = cp.empty(naux * batch_size)
+                work1 = cp.empty(naux_sorted * cderi_batch_size)
+            work2 = cp.empty(naux * cderi_batch_size)
 
             for batch_id in batch_iter:
                 log.debug1('processing cderi batch %d', batch_id)
@@ -555,7 +555,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             out = cp.empty((cderi_npairs, aux1-aux0))
             work = cp.empty(naux_sorted * batch_size)
             if needs_recontraction:
-                work1 = cp.empty((naux_per_device * batch_size))
+                work1 = cp.empty(naux_per_device * batch_size)
 
             for batch_id in range(len(bas_ij_batches)):
                 j3c = _eval_j3c(batch_id, out=work)

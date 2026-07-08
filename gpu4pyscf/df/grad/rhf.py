@@ -25,7 +25,7 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, int3c2e_scheme,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df
-from gpu4pyscf.df.df_jk import factorize_dm
+from gpu4pyscf.df.df_jk import factorize_dm, _DFHF
 from gpu4pyscf.gto.mole import SortedMole
 
 __all__ = ['Gradients']

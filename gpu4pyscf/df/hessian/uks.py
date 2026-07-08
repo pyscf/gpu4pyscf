@@ -61,11 +61,11 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dme0_sf  = (mo_coeff[0] * (mo_occ[0]*mo_energy[0])).dot(mo_coeff[0].T)
     dme0_sf += (mo_coeff[1] * (mo_occ[1]*mo_energy[1])).dot(mo_coeff[1].T)
     dm0_sf = dm0[0] + dm0[1]
-    de2 += df_uhf_hess._hcore_energy(hessobj, dm0_sf, dme0_sf)
+    de2 += df_rhf_hess._hcore_energy(hessobj, dm0_sf, dme0_sf)
     log.timer_debug1('hcore contribution', *t1)
 
     max_memory = None
-    de2 += uks_hess._get_exc_deriv2(hessobj, mo_coeff, mo_occ, (dm0a, dm0b), max_memory)
+    de2 += uks_hess._get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory)
     if mf.do_nlc():
         de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
 
@@ -95,19 +95,19 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         h1mo[1] += veff_lr[1]
 
     gobj = hessobj.base.nuc_grad_method()
-    h1moa += rhf_grad.get_grad_hcore(gobj, mo_coeff[0], mo_occ[0])
-    h1mob += rhf_grad.get_grad_hcore(gobj, mo_coeff[1], mo_occ[1])
+    h1mo[0] += rhf_grad.get_grad_hcore(gobj, mo_coeff[0], mo_occ[0])
+    h1mo[1] += rhf_grad.get_grad_hcore(gobj, mo_coeff[1], mo_occ[1])
 
     v1moa, v1mob = uks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
-    h1moa += v1moa
-    h1mob += v1mob
+    h1mo[0] += v1moa
+    h1mo[1] += v1mob
 
     if mf.do_nlc():
         h1moa_nlc, h1mob_nlc = _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
-        h1moa += h1moa_nlc
-        h1mob += h1mob_nlc
+        h1mo[0] += h1moa_nlc
+        h1mo[1] += h1mob_nlc
 
-    return h1moa, h1mob
+    return h1mo
 
 class Hessian(uks_hess.Hessian):
     '''Non-relativistic RKS hessian'''

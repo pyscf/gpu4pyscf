@@ -411,7 +411,7 @@ def test_int3c2e_rsh():
 
 def test_make_cderi():
     from gpu4pyscf.gto.mole import SortedMole
-    from gpu4pyscf.df import df_o1
+    from gpu4pyscf.df import df
     from pyscf.df.incore import aux_e2
     mol = pyscf.M(
         atom='''
@@ -451,13 +451,15 @@ C2   -.3    .2     -.7''',
     ref = np.einsum('ijp,p->ij', j3c, scipy.linalg.solve(j2c, ref))
 
     opt = int3c2e_bdiv.Int3c2eOpt(SortedMole.from_mol(mol, decontract=True), auxmol)
-    cderi, (row, col, diags) = df_o1._cholesky_eri(opt)
+    cderi, (pair_address, diags) = df._cholesky_eri(opt)
+    row, col = divmod(pair_address, nao)
     cderi = _unpack(cderi[0], row, col)
     dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
     assert abs(dat.get() - ref).max() < 1e-10
 
     opt = int3c2e_bdiv.Int3c2eOpt(SortedMole.from_mol(mol, decontract=False), auxmol)
-    cderi, (row, col, diags) = df_o1._cholesky_eri(opt)
+    cderi, (pair_address, diags) = df._cholesky_eri(opt)
+    row, col = divmod(pair_address, nao)
     cderi = _unpack(cderi[0], row, col)
     dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
     assert abs(dat.get() - ref).max() < 1e-10

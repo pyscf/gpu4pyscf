@@ -188,7 +188,7 @@ class Int3c2eOpt:
                     pair_batch_sizes[-1] += bas_ij.size
             ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
             pair_splits = np.append(0, np.searchsorted(
-                ao_pair_offsets, np.cumsum(pair_batch_sizes), side='left'))
+                shl_pair_offsets.get(), np.cumsum(pair_batch_sizes), side='left'))
             ao_pair_offsets = ao_pair_offsets[pair_splits]
             assert max(ao_pair_offsets[1:]-ao_pair_offsets[:-1]) < ao_pair_batch_size
 
@@ -515,7 +515,7 @@ def int3c2e_scheme(*, short_range=False, shm_size=SHM_SIZE, gout_width=None,
     nfk = (lk + 1) * (lk + 2) // 2
     order = angular_inc + li + lj + lk
     nroots = order//2 + 1
-    if short_range < 0:
+    if short_range:
         nroots *= 2
     g_size = (li+1+i_inc)*(lj+1+j_inc)*(lk+1+k_inc)
     unit = g_size*3 + nroots*2 + 7
@@ -760,7 +760,7 @@ def _create_pair_recontraction(mol, bas_ij_batches, cart=None):
         nf = (l * 2 + 1) * nctrs
 
     ao_pair_counts = []
-    orig_ao_pair_counts = []
+    contracted_ao_pair_counts = []
     recontraction_params = []
 
     nbas_sorted = mol.nbas
@@ -792,7 +792,7 @@ def _create_pair_recontraction(mol, bas_ij_batches, cart=None):
             ctypes.c_int(nao))
         count = count.value
         ao_pair_counts.append(count)
-        orig_ao_pair_counts.append(cderi_npairs)
+        contracted_ao_pair_counts.append(cderi_npairs)
         recontraction_params.append(
             (inp_idx[:count], out_idx[:count], coef[:count]))
         offset += cderi_npairs
@@ -800,7 +800,7 @@ def _create_pair_recontraction(mol, bas_ij_batches, cart=None):
 
     def recontract(batch_id, j3c, out=None):
         naux = j3c.shape[1]
-        out_count = orig_ao_pair_counts[batch_id]
+        out_count = contracted_ao_pair_counts[batch_id]
         out = ndarray((out_count, naux), buffer=out)
         if out_count == 0:
             return out
@@ -820,4 +820,4 @@ def _create_pair_recontraction(mol, bas_ij_batches, cart=None):
         if err != 0:
             raise RuntimeError('recontract_ao_pair kernel failed')
         return out
-    return recontract, ao_pair_counts, orig_ao_pair_counts, pair_addresses
+    return recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses

@@ -28,7 +28,6 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.dft import rks, uks, numint, gks
 from gpu4pyscf.scf import hf, uhf, rohf
 from gpu4pyscf.scf.jk import _check_rsh_factors
-from gpu4pyscf.df import df
 from gpu4pyscf.scf import ghf
 from gpu4pyscf.lib.cupy_helper import asarray, ndarray, get_avail_mem
 from gpu4pyscf.lib import multi_gpu
@@ -52,7 +51,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
         fitting integrals to compute J and K
     Examples:
     '''
-
+    from gpu4pyscf.df import df
     assert isinstance(mf, hf.SCF)
 
     if with_df is None:
@@ -442,7 +441,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
             dm_sparse[:,cp.asarray(diags)] *= .5
             vj_sparse = cp.zeros_like(dm_sparse)
 
-        blksize = dfobj.get_blksize(mem_fraction=0.3)
+        blksize = dfobj.get_blksize(mem_fraction=0.4)
         if with_k:
             vk = cupy.zeros_like(dms_3d)
             mem_avail = get_avail_mem(exclude_memory_pool=True)
