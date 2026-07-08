@@ -1748,7 +1748,7 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
     sycl::range<2> blocks(aux_batches, nshl_pair);
     auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class cart2sph_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
-      cart2sph_kernel(out, input, dev_envs, bas_ij_idx, out_offsets, input_offsets, naux, nbas);
+      cart2sph_kernel(out, input, dev_envs, bas_ij_idx, out_offsets, input_offsets, naux, nbas, nao_sph, pair_compressed);
     });
     #else
     dim3 blocks(nshl_pair, aux_batches);
