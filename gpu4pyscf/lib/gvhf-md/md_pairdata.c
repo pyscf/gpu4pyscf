@@ -184,7 +184,7 @@ void Et_dot_auxvec(double *Et_auxvec, double *auxvec, int n_dm, int *aux_xyz_loc
 {
         int Et_size = (L_AUX_MAX+1)*(L_AUX_MAX+2)*(L_AUX_MAX+3)/6*NCART_MAX*NCART_MAX;
         int Ex_size = (2*L_AUX_MAX+1)*(L_AUX_MAX+1)*(L_AUX_MAX+1);
-        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *Et = (double*)malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
         int naux = aux_loc[nbas];
         int Et_auxvec_size = aux_xyz_loc[nbas];
