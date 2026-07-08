@@ -2275,9 +2275,6 @@ int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                   int *shl_pair_offsets, int *gout_stride_lookup)
 {
     cudaFuncSetAttribute(int1e_ovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    PBCInt2c2eBounds bounds = {
-        bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-    };
     LAUNCH_OVERLAP_KERNEL(int1e_ovlp_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     return 0;
@@ -2288,9 +2285,6 @@ int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
                  int *shl_pair_offsets, int *gout_stride_lookup)
 {
     cudaFuncSetAttribute(int1e_kin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    PBCInt2c2eBounds bounds = {
-        bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-    };
     LAUNCH_OVERLAP_KERNEL(int1e_kin_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     return 0;
@@ -2341,9 +2335,6 @@ int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                     int *shl_pair_offsets, int *gout_stride_lookup)
 {
     cudaFuncSetAttribute(int1e_ipovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    PBCInt2c2eBounds bounds = {
-        bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-    };
     LAUNCH_OVERLAP_KERNEL(int1e_ipovlp_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     return 0;
@@ -2354,9 +2345,6 @@ int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
                    int *shl_pair_offsets, int *gout_stride_lookup)
 {
     cudaFuncSetAttribute(int1e_ipkin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    PBCInt2c2eBounds bounds = {
-        bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-    };
     LAUNCH_OVERLAP_KERNEL(int1e_ipkin_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     return 0;
