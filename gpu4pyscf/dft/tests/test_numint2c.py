@@ -126,7 +126,7 @@ class KnownValues(unittest.TestCase):
         dm_1c_test = dm_test[:nao,:nao] + dm_test[nao:,nao:]
         rho_gpu = ni_gpu.get_rho(mol, dm_test, grids_gpu)
         rho_1c_gpu = ni_gpu_1c.get_rho(mol, dm_1c_test.real, grids_gpu)
-        self.assertAlmostEqual(abs(rho_gpu.get() - rho_1c_gpu.get()).max(), 0, 10)
+        self.assertAlmostEqual(abs(rho_gpu - rho_1c_gpu).max().item(), 0, 10)
 
     @unittest.skipIf(mcfun is None, "mcfun library not found.")
     def test_eval_xc_eff(self):
@@ -207,7 +207,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(lib.fp(v1_gpu.get()) - 
             (-9.596802359283691+2.969010922568367e-05j)).max(), 0, 13)
         # Internal consistency check
-        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
+        self.assertAlmostEqual(abs(v0_gpu - v1_gpu).max().item(), 0, 13)
 
         # --- CPU Comparison (Conditional) ---
         if mcfun is not None:
@@ -261,7 +261,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(lib.fp(v0_gpu.get()) - 
             (-9.624260408900755+0.0003122100947141664j)).max(), 0, 13)
         # Internal consistency check
-        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
+        self.assertAlmostEqual(abs(v0_gpu - v1_gpu).max().item(), 0, 13)
 
         # --- CPU Comparison (Conditional) ---
         if mcfun is not None:
@@ -316,7 +316,7 @@ class KnownValues(unittest.TestCase):
             - (-11.359687631112195+6.13828986953566e-22j)).max(), 0, 13)
         
         # Internal consistency check
-        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
+        self.assertAlmostEqual(abs(v0_gpu - v1_gpu).max().item(), 0, 13)
         
         # --- CPU Comparison (Conditional) ---
         if mcfun is not None:

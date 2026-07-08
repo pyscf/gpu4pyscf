@@ -23,7 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells, ewald
+from gpu4pyscf.pbc.grad.rks_stress import ewald
 from gpu4pyscf.pbc.grad.krhf_stress import get_nuc, get_veff
 
 def kernel(mf_grad):

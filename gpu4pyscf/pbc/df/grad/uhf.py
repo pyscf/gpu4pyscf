@@ -300,7 +300,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     ################################
     # SR int3c2e response
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+        gout_width=54, deriv=(1,0,0))
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()

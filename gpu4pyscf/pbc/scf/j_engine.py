@@ -46,6 +46,7 @@ __all__ = [
 ]
 
 libvhf_md.PBC_build_j.restype = ctypes.c_int
+libvhf_md.init_mdj_constant.restype = ctypes.c_int
 
 def get_j(cell, dm, hermi=0, kpts=None, kpts_band=None, vhfopt=None,
           verbose=None):
@@ -150,7 +151,7 @@ class PBCJMatrixOpt:
             dms = transpose_sum(dms)
             dms *= .5
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             if is_single_kpt:
@@ -242,6 +243,9 @@ class PBCJMatrixOpt:
 
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'MD-J kernel init failed on Device {device_id}')
             kern = libvhf_md.PBC_build_j
             rys_envs = self.rys_envs
 

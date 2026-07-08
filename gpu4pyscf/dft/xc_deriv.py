@@ -110,7 +110,7 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0, work=None):
         else:
             vp = cp.empty((nvar, nvar, 2,2,ngrids))
             _stack_frr(frr, out=vp[0,0])
-            i3 = np.arange(3)
+            i3 = cp.arange(3)
             qgg = work = _stack_fgg(fgg, out=work)
             #:qgg = cp.einsum('abcdg,axg->xbcdg', qgg, rho[:,1:4])
             #:qgg = cp.einsum('xbcdg,cyg->xybdg', qgg, rho[:,1:4])
@@ -153,7 +153,7 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0, work=None):
         else:
             vp = cp.empty((nvar, nvar, ngrids))
             vp[0,0] = frr
-            i3 = np.arange(3)
+            i3 = cp.arange(3)
             #:qgg = 4 * fgg * rho[1:4] * rho[1:4,None]
             #:qgg[i3,i3] += fg * 2
             #:vp[1:4,1:4] = qgg
@@ -215,7 +215,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
         else:
             vp = cp.empty((2,nvar, 2,nvar, 2,nvar, ngrids)).transpose(1,3,5,0,2,4,6)
             vp[0,0,0] = _stack_frrr(frrr)
-            i3 = np.arange(3)
+            i3 = cp.arange(3)
             qggg = _stack_fggg(fggg)
             qggg = cp.einsum('abcdefg,axg->xbcdefg', qggg, rho[:,1:4])
             qggg = cp.einsum('xbcdefg,cyg->xybdefg', qggg, rho[:,1:4])
@@ -259,7 +259,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             qggt = cp.einsum('xbcdrg,cyg->xybdrg', qggt, rho[:,1:4])
             # qggt = _stack_fgg(fggt, axis=0, rho=rho).transpose(1,3,0,2,4,5)
             qgt = _stack_fg(fgt.reshape(3,2,ngrids), axis=0)
-            i3 = np.arange(3)
+            i3 = cp.arange(3)
             qggt[i3,i3] += qgt
             vp[1:4,1:4,4] = qggt
             vp[1:4,4,1:4] = qggt.transpose(0,1,2,4,3,5)
@@ -304,7 +304,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
         else:
             vp = cp.empty((nvar, nvar, nvar, ngrids))
             vp[0,0,0] = frrr
-            i3 = np.arange(3)
+            i3 = cp.arange(3)
             qggg = 8 * fggg * rho[1:4] * rho[1:4,None] * rho[1:4,None,None]
             qgg = 4 * fgg * rho[1:4]
             for i in range(3):
@@ -441,7 +441,7 @@ def _stack_frr(frr, axis=0, out=None):
     '''frr [u_u, u_d, d_d] -> [[u_u, u_d], [d_u, d_d]]'''
     assert frr.shape[axis] == 3
     out = ndarray(frr.shape[:axis] + (4,) + frr.shape[axis+1:], buffer=out)
-    cp.take(frr, np.array([0, 1, 1, 2]), axis=axis, out=out)
+    cp.take(frr, cp.asarray([0, 1, 1, 2]), axis=axis, out=out)
     return out.reshape(frr.shape[:axis] + (2, 2) + frr.shape[axis+1:])
 
 def _stack_fgg(fgg, axis=0, out=None):
@@ -453,7 +453,7 @@ def _stack_fgg(fgg, axis=0, out=None):
     '''
     assert fgg.shape[axis] == 6
     tmp = ndarray(fgg.shape[:axis] + (9,) + fgg.shape[axis+1:], buffer=out)
-    cp.take(fgg, np.array([0,1,2, 1,3,4, 2,4,5]), axis=axis, out=tmp)
+    cp.take(fgg, cp.asarray([0,1,2, 1,3,4, 2,4,5]), axis=axis, out=tmp)
     tmp = tmp.reshape(fgg.shape[:axis] + (3, 3) + fgg.shape[axis+1:])
     tmp = _stack_fg(tmp, axis=axis+1)
     return _stack_fg(tmp, axis=axis, out=out)

@@ -1797,6 +1797,16 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
             spin = 0
     xcfuns = ni._init_xcfuns(xc_code, spin)
 
+    if len(xcfuns) == 0: # HF
+        ngrids = rho.shape[-1]
+        out = [None] * 4
+        for m in range(deriv+1):
+            if spin == 0: # RKS
+                out[m] = cupy.zeros([1]*m + [ngrids])
+            else: # UKS
+                out[m] = cupy.zeros([2,1]*m + [ngrids])
+        return out
+
     # Fall back to the libxc library provided by PySCF, evaluate xc on CPUs
     if not all(x.on_gpu for x, w in xcfuns):
         ni_cpu = ni.to_cpu()
@@ -1859,15 +1869,6 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
         xcfun, _ = xcfuns[0]
         xc_res = xcfun.compute(inp, do_exc=True, do_vxc=do_vxc, do_fxc=do_fxc, do_kxc=do_kxc)
         ret_full = xc_res
-    elif len(xcfuns) == 0: # HF
-        ret_full = {}
-        for m in range(deriv+1):
-            k = libxc.LDA_OUTPUT_LABELS[m]
-            if spin == 0: # RKS
-                nvar = 1
-            else: # UKS
-                nvar = m + 1
-            ret_full[k] = cupy.zeros((ngrids, nvar))
     else:
         ret_full = {}
         for xcfun, w in xcfuns:
@@ -2430,29 +2431,28 @@ def _tau_dot_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
 
 def _scale_ao(ao, wv, out=None):
     if wv.ndim == 1:
-        nvar = 1
         nao, ngrids = ao.shape
         assert wv.size == ngrids
         out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
-        if not ao.flags.c_contiguous or ao.dtype != np.float64:
-            return cupy.multiply(ao, wv, out=out)
-    else:
-        nvar, nao, ngrids = ao.shape
-        assert wv.shape == (nvar, ngrids)
-        out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
-        if not ao[0].flags.c_contiguous or ao.dtype != np.float64:
-            return contract('nip,np->ip', ao, wv, out=out)
+        return cupy.multiply(ao, wv, out=out)
 
-    wv = cupy.asarray(wv, order='C')
-    stream = cupy.cuda.get_current_stream()
+    nvar, nao, ngrids = ao.shape
+    assert wv.shape == (nvar, ngrids)
+    out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
+    if not ao.flags.c_contiguous:
+        return contract('nip,np->ip', ao, wv, out=out)
+
+    is_real = ao.dtype == np.float64
+    wv = cupy.asarray(wv, dtype=ao.dtype, order='C')
+
     err = libgdft.GDFTscale_ao(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.cast(ao.data.ptr, ctypes.c_void_p),
         ctypes.cast(wv.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids), ctypes.c_int(nao), ctypes.c_int(nvar))
+        ctypes.c_int(ngrids), ctypes.c_int(nao), ctypes.c_int(nvar),
+        ctypes.c_int(is_real))
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('GDFTscale_ao failed')
     return out
 
 def _tau_dot(bra, ket, wv, buf=None, out=None):
@@ -2544,7 +2544,7 @@ class _GDFTOpt:
         # Padding zeros to transformation coefficients
         if nao > coeff.shape[0]:
             paddings = nao - coeff.shape[0]
-            coeff = np.vstack([coeff, np.zeros((paddings, coeff.shape[1]))])
+            coeff = cupy.vstack([coeff, cupy.zeros((paddings, coeff.shape[1]))])
         coeff = coeff[self._ao_idx]
         return coeff
 

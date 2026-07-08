@@ -26,8 +26,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft import UniformGrids
-from gpu4pyscf.pbc.df import ft_ao, GDF
-from gpu4pyscf.pbc.df.fft import get_SI
+from gpu4pyscf.pbc.df import ft_ao
+from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -57,6 +57,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
 
     if getattr(mf, 'disp', None):
         raise NotImplementedError('dispersion correction')
+
+    if getattr(mf, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
 
     log = logger.new_logger(mf_grad)
     t0 = log.init_timer()
@@ -120,7 +123,7 @@ def get_hcore(cell, kpts):
     '''
     h1 = int1e.int1e_ipkin(cell, kpts)
     if cell._pseudo:
-        SI = cell.get_SI()
+        SI = get_SI(cell)
         Gv_cpu = cell.Gv
         Gv = cp.asarray(Gv_cpu)
         coords = cp.asarray(cell.get_uniform_grids())
@@ -144,10 +147,8 @@ def get_hcore(cell, kpts):
             contract('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow, beta=1, out=h1)
     else:
         mesh = cell.mesh
-        charge = cp.asarray(-cell.atom_charges(), dtype=np.float64)
+        rhoG = _get_ZSI(cell, mesh)
         Gv = cell.get_Gv(mesh)
-        SI = get_SI(cell, mesh=mesh)
-        rhoG = charge.dot(SI)
         coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
         vneG = rhoG * coulG
         vneR = tools.ifft(vneG, mesh).real
@@ -176,10 +177,14 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         kpts = mf_grad.kpts
     else:
         kpts = kpts.reshape(-1, 3)
+
+    if getattr(mf_grad.base, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
+
     h1 = get_hcore(cell, kpts)
 
     aoslices = cell.aoslice_by_atom()
-    SI = cp.asarray(cell.get_SI())
+    SI = get_SI(cell)
     mesh = cell.mesh
     Gv_cpu = cell.Gv
     Gv = cp.asarray(Gv_cpu)

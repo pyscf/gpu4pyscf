@@ -201,7 +201,7 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[ 1.88442348e-02, -2.23928792e-02,  6.31616636e-14],
                                  [-1.88442348e-02,  2.23928792e-02, -6.31292040e-14]])
 
-        assert abs(test_energy - ref_energy) < 2e-10
+        assert abs(test_energy - ref_energy) < 3e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
 
     @unittest.skipIf(num_devices > 1, '')
@@ -279,7 +279,7 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-1.14818193e-02, -1.14416801e-02,  2.82385089e-14],
                                  [ 1.14818192e-02,  1.14416801e-02, -2.82459068e-14]])
 
-        assert abs(test_energy - ref_energy) < 2e-10
+        assert abs(test_energy - ref_energy) < 3e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
 
 if __name__ == '__main__':

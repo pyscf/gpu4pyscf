@@ -22,7 +22,7 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import rhf as rhf_grad
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells, ewald
+from gpu4pyscf.pbc.grad.rks_stress import ewald
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df import aft, aft_jk
 

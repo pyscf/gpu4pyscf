@@ -16,6 +16,10 @@
 Build GDF tensor using the range-separation integral algorithm.
 '''
 
+__all__ = [
+    'build_cderi',
+]
+
 import os
 import math
 import ctypes
@@ -25,8 +29,6 @@ import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.df.rsdf_builder import (
-    estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff)
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import member
@@ -36,6 +38,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.pbc.df import ft_ao
+from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
@@ -822,30 +825,35 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)
-    cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-    omega = 0.2
-    log.debug('omega guess in get_pp_loc_part1 = %g', omega)
 
     is_single_kpt = kpts is not None and kpts.ndim == 1
     is_gamma_point = kpts is None or is_zero(kpts)
-    if is_gamma_point:
-        bvk_kmesh = np.ones(3, dtype=int)
-        bvk_ncells = 1
-    else:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
-        bvk_ncells = np.prod(bvk_kmesh)
     if is_single_kpt:
         kpts = kpts.reshape(1, 3)
+    if is_gamma_point:
+        bvk_kmesh = np.ones(3, dtype=int)
+    else:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+
+    # Guess range-separation parameter based on system size
+    omega = 0.4
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    nGv = np.prod(mesh)
+    ke_cutoff *= (3e3/nGv)**(2./3)
+    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    mesh = cell.symmetrize_mesh(mesh)
+    log.debug('get_pp_loc_part1: omega = %g Ecut = %s mesh = %s',
+              omega, ke_cutoff, mesh)
 
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
     int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
     charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
     nuc = int3c2e_opt.contract_auxvec(charges, kpts)
 
-    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-    mesh = cell.cutoff_to_mesh(ke_cutoff)
-    mesh = cell.symmetrize_mesh(mesh)
-    Gv, (basex, basey, basez), kws = cell.get_Gv_weights(mesh)
+    Gv, _, kws = cell.get_Gv_weights(mesh)
     if with_pseudo:
         #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
         ZG = ft_ao.ft_ao(fakenuc, Gv).conj()
@@ -856,51 +864,11 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
             exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
             ZG[0] -= charges.dot(np.pi/exps) / cell.vol
     else:
-        basex = cp.asarray(basex)
-        basey = cp.asarray(basey)
-        basez = cp.asarray(basez)
-        b = cell.reciprocal_vectors()
-        coords = cell.atom_coords()
-        rb = cp.asarray(coords.dot(b.T))
-        SIx = cp.exp(-1j*rb[:,0,None] * basex)
-        SIy = cp.exp(-1j*rb[:,1,None] * basey)
-        SIz = cp.exp(-1j*rb[:,2,None] * basez)
-        SIx *= cp.asarray(-cell.atom_charges())[:,None]
-        ZG = cp.einsum('qx,qy,qz->xyz', SIx, SIy, SIz).ravel().conj()
+        ZG = _get_ZSI(cell, mesh).conj()
         ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
 
-    ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh).build()
-    cell = ft_opt.cell
-    pair_address = ft_opt.pair_and_diag_indices(cart=True, original_ao_order=False)[0]
-    nao_pairs = len(pair_address)
-
-    eval_ft = ft_opt.ft_evaluator(cart=True, original_ao_order=False)[0]
-
-    mem_free = get_avail_mem(exclude_memory_pool=True)
-    avail_mem = mem_free * .8
-    ngrids = len(Gv)
-    Gblksize = int(avail_mem/(16*nao_pairs)) // 32 * 32
-    if Gblksize == 0:
-        raise RuntimeError('Insufficient GPU memory')
-    log.debug2('ft_ao_iter ngrids = %d Gblksize = %d', ngrids, Gblksize)
-    buf = cp.empty(nao_pairs*Gblksize, dtype=np.complex128)
-    nuc_compressed = 0
-    for p0, p1 in lib.prange(0, ngrids, Gblksize):
-        pqG = eval_ft(Gv[p0:p1], out=buf)
-        nuc_compressed += contract('pG,G->p', pqG, ZG[p0:p1]).real
-    buf = None
-
-    nao = cell.nao
-    nuc_raw = cp.zeros((nao * bvk_ncells * nao))
-    nuc_raw[pair_address] = nuc_compressed
-    nuc_raw = nuc_raw.reshape(nao, bvk_ncells, nao).transpose(1,0,2)
-    nuc_raw = fill_triu_bvk(cp.asarray(nuc_raw, order='C'), nao, bvk_kmesh)
-    nuc_raw = cell.apply_CT_mat_C(nuc_raw)
-
-    if not is_gamma_point:
-        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-        expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
-        nuc_raw = contract('lk,lpq->kpq', expLk, nuc_raw)
+    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+    nuc_raw = ft_opt.contract_rhoG(ZG, Gv, kpts)
 
     nuc += nuc_raw
     if is_single_kpt and nuc.ndim == 3:
@@ -919,7 +887,6 @@ def get_nuc(cell, kpts=None):
 def get_pp(cell, kpts=None):
     '''Get the periodic pseudopotential nuc-el ao matrix, with G=0 removed.
     '''
-    from pyscf.pbc.gto import pseudo
     from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -939,3 +906,40 @@ def get_pp(cell, kpts=None):
 
 class LinearDepencyError(RuntimeError):
     pass
+
+def estimate_ke_cutoff_for_omega(cell, omega, precision=None):
+    '''Energy cutoff for AFTDF to converge attenuated Coulomb in moment space
+    '''
+    if precision is None:
+        precision = cell.precision
+    # Errors are dominated by the Coulomb integrals of the most compact density.
+    # In this case, the error estimation can be approximated as
+    # sum_(G^2>Ecut) 4*pi/G^2 exp(-G^2/(4*omega^2))
+    #     ~ 16\pi^2 \int_sqrt(2*Ecut)^inf exp(-G^2/(4*omega^2)) dG
+    #     < 16\pi^2 * 2*omega^2 / sqrt(2*Ecut) exp(-Ecut/(2*omega^2))
+    exps, cs = extract_pgto_params(cell, 'compact')
+    exp_max = exps.max()
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    fac = 16*np.pi**2/cell.vol * 2*theta / precision
+    Ecut = 20.
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*theta
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*theta
+    return Ecut
+
+def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
+    '''The minimal omega in attenuated Coulomb given energy cutoff
+    '''
+    if precision is None:
+        precision = cell.precision
+    # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
+    # enough to converge the 2-electron integrals. A penalty term here is to
+    # reduce the error in integrals
+    exps, cs = extract_pgto_params(cell, 'compact')
+    exp_max = exps.max()
+    fac = 16*np.pi**2/cell.vol / (2*ke_cutoff)**.5 / precision
+    omega = 0.5
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    omega = (.5 * ke_cutoff / math.log(fac*2*theta))**.5
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    omega = (.5 * ke_cutoff / math.log(fac*2*theta))**.5
+    return omega
