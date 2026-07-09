@@ -782,7 +782,7 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class ft_aopair_ejk_ip1_sycl1>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-        ft_aopair_ejk_ip1_kernel(out, dm, vG, GvT, *envs, ngrids, shm_size,
+        ft_aopair_ejk_ip1_kernel(out, dm, vG, GvT, dev_envs, ngrids, shm_size,
                                  bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry,
                                  item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       });
