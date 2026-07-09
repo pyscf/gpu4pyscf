@@ -194,6 +194,63 @@ class KnownValues(unittest.TestCase):
         ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
+    def test_ghost_atom_close_to_real_atom(self):
+        mol = pyscf.M(
+            atom = """
+            O      0.000000     0.000000     0.000000
+            H      0.960000     0.000000     0.000000
+            H     -0.240000     0.930000     0.000000
+            ghost:H     -0.240000    -0.310000     0.880000
+            """,
+            basis = "def2-TZVPD", # Large and diffuse basis required to reproduce the bug
+            verbose = 0,
+        )
+
+        mf = rks.RKS(mol, xc = "pbe").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99,590)
+        mf.conv_tol = 1e-12
+
+        test_energy = mf.kernel()
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+
+        ### Q-Chem reference input
+        # $molecule
+        # 0 1
+        #     O      0.000000     0.000000     0.000000
+        #     H      0.960000     0.000000     0.000000
+        #     H     -0.240000     0.930000     0.000000
+        #     @H     -0.240000    -0.310000     0.880000
+        # $end
+
+        # $rem
+        # JOBTYPE force
+        # METHOD PBE
+        # XC_GRID       000099000590
+        # BASIS def2-TZVPD
+        # SYMMETRY      FALSE
+        # SYM_IGNORE    TRUE
+        # MAX_SCF_CYCLES 100
+        # PURECART 1111
+        # SCF_CONVERGENCE 10
+        # THRESH        14
+        # ri_j        True
+        # ri_k        True
+        # aux_basis RIJK-def2-TZVP
+        # $end
+        ref_energy = -76.3811987938
+        ref_gradient = np.array([
+            [ 0.0084456, -0.0114582,  0.0030382, -0.0000256],
+            [ 0.0102732,  0.0003065, -0.0105467, -0.0000329],
+            [ 0.0000791, -0.0000347, -0.0000343, -0.0000100],
+        ]).T
+
+        ### The check threshold reflects the difference between Q-Chem and GPU4PySCF without ghost atom
+        assert np.abs(test_energy - ref_energy) < 1e-7
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-6
+
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()
