@@ -61,10 +61,6 @@ if (USE_SYCL)
     "$<$<COMPILE_LANGUAGE:Fortran>:-g>"
   )
 
-  add_compile_options(
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Release>>>:SHELL:-Xarch_host -gline-tables-only>"
-  )
-
   add_link_options(
     -fsycl
     -flink-huge-device-code
