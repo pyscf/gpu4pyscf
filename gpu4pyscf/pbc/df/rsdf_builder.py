@@ -561,7 +561,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
                 p0 = ao_pair_offsets[batch_id]
                 p1 = ao_pair_offsets[batch_id+1]
                 #:cderi[kp][:,p0:p1] = cderi_k.get()
-                libpbc.store_col_segment(
+                libvhf_rys.store_col_segment(
                     cderi[kp].ctypes,
                     ctypes.cast(cderi_k.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux),

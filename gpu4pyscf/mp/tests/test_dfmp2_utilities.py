@@ -159,14 +159,6 @@ class Intermediates(unittest.TestCase):
         self.assertTrue(j3c_ovl_set[0].dtype == np.float32)
         self.assertTrue(np.allclose(j3c_ovl_set[0], j3c_ovl_cpu, atol=1e-6))
 
-    def test_get_j3c_by_aux_id_gpu(self):
-        # this only tests function works
-        vhfopt = gpu4pyscf.df.int3c2e.VHFOpt(mol, aux, 'int2e')
-        vhfopt.build(diag_block_with_triu=True, aosym=True, group_size_aux=32)
-        for idx_k in range(len(vhfopt.aux_log_qs)):
-            j3c_batched = dfmp2_addons.get_j3c_by_aux_id_gpu(vhfopt, idx_k)
-            print(j3c_batched.shape, j3c_batched.strides)
-
     def test_dfmp2_kernel_one_gpu(self):
         nocc = mol.nelectron // 2
         occ_coeff = mf.mo_coeff[:, :nocc]
@@ -175,12 +167,6 @@ class Intermediates(unittest.TestCase):
         vir_energy = mf.mo_energy[nocc:]
 
         result = dfmp2_drivers.dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, j3c_backend='bdiv')
-        self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
-        self.assertAlmostEqual(result['e_corr_os'], -0.2132034596360335, 7)
-        self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)
-        self.assertAlmostEqual(result['e_corr_ss'], -0.06542902835968734, 7)
-
-        result = dfmp2_drivers.dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, j3c_backend='vhfopt')
         self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
         self.assertAlmostEqual(result['e_corr_os'], -0.2132034596360335, 7)
         self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)

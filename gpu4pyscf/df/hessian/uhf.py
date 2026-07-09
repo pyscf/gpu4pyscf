@@ -84,7 +84,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     num_aux_batches = len(aux_offsets) - 1
 
     blksize = min(naux, int(word_avail * 0.5) // (nao**2*8) * 8)
-    assert blksize > 1, 'Insufficient GPU memory'
+    assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, aux_batches=%d, batch_size=%d, blksize=%d',
                 mem_avail*1e-6, num_aux_batches, batch_size, blksize)
@@ -492,7 +492,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
 
     blksize = int((word_avail*.95 - batch_size*_unit) /
                   (nao**2 + (nao+nocc*2)*max(nao_on_atom, nocc))) // 8 * 8
-    assert blksize > 1, 'Insufficient GPU memory'
+    assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, mem_sufficient=%s, aux_batches=%d, batch_size=%d, blksize=%d',
                mem_avail*1e-6, mem_sufficient, num_aux_batches, batch_size, blksize)

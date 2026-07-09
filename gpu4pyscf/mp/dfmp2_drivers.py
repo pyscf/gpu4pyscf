@@ -60,7 +60,7 @@ def dfmp2_kernel_one_gpu(
     idx_device = cupy.cuda.get_device_id()
 
     if j3c_backend == 'bdiv':
-        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux).build()
     else:
         intopt = get_int3c2e_opt(mol, aux, device_list=[idx_device], log=log)
 

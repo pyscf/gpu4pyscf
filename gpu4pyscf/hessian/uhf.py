@@ -390,18 +390,19 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     nocc = nocca
     orbo = cp.zeros((2, nao, nocc))
     orbo[0,:,:nocca] = orboa
-    orbo[1,:,:nocca] = orbob
+    orbo[1,:,:noccb] = orbob
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmoa*nocca+nmob*noccb)
         nset = len(mo1)
-        mo1_aligned = cp.empty((nset, 2*nmo*nocc))
-        mo1_aligned[:,:nmo*(nocc+noccb)] = mo1
-        mo1_aligned[:,nmo*(nocc+noccb):] = 0.
-        mo1_aligned = mo1.reshape(nset,2,nmo,nocc)
+        mo1_aligned = cp.empty((nset, 2, nmo, nocc))
+        mo1_aligned[:,0] = mo1[:,:nmoa*nocca].reshape(nset, nmo, nocca)
+        mo1_aligned[:,1,:,:noccb] = mo1[:,nmoa*nocca:].reshape(nset, nmo, noccb)
+        mo1_aligned[:,1,:,noccb:] = 0.
         mo1_mo = contract('nsai,spa->snpi', mo1_aligned, mo_coeff)
         dm1 = contract('snpi,sqi->snpq', mo1_mo, orbo)
+        dmb = dm1[1].copy()
         transpose_sum(dm1.reshape(-1,nao,nao), inplace=True, hermi=1)
         dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=orbo, symmetrize=1)
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)

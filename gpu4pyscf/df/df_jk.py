@@ -639,7 +639,7 @@ def decompose_rdm1_svd(dm, hermi=0):
         return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
 
 def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
-    dm = cp.matmul(factor_l, factor_r.T)
+    dm = cp.matmul(factor_l, factor_r.swapaxes(-1, -2))
     if symmetrize == 1 or symmetrize == 2:
         nao = dm.shape[-1] # dm1 may have dimensions > 3
         transpose_sum(dm.reshape(-1,nao,nao), inplace=True, hermi=symmetrize)

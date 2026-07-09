@@ -93,7 +93,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     num_aux_batches = len(aux_offsets) - 1
 
     blksize = min(naux, int(word_avail * 0.5) // (nao**2*8) * 8)
-    assert blksize > 1, 'Insufficient GPU memory'
+    assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, aux_batches=%d, batch_size=%d, blksize=%d',
                 mem_avail*1e-6, num_aux_batches, batch_size, blksize)
@@ -268,7 +268,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
             mem_avail = get_avail_mem(exclude_memory_pool=True)
             word_avail = mem_avail // 8
             blksize = min(naux, word_avail // (nao**2*8) * 8)
-            assert blksize > 1, 'Insufficient GPU memory'
+            assert blksize > 0, 'Insufficient GPU memory'
             blksize = min(blksize, batch_size)
 
             j3c_full = cp.zeros((nao, nao, blksize))
@@ -625,7 +625,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     # AO order. atm_ao_counts stores the number of AOs for each atom.
     atm_ao_counts = np.bincount(_bas_atom_labels(mol))
     aoslices = np.append(0, atm_ao_counts.cumsum())
-    nao_on_atom = atm_ao_counts.max()
 
     auxvec_ipaux = cp.empty((3, naux))
     auxvec_100_atm = cp.empty((3, natm, naux))
@@ -922,7 +921,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
 
     blksize = int((word_avail*.95 - batch_size*_unit) /
                   (nao**2 + (nao+nocc)*max(nao_on_atom, nocc))) // 8 * 8
-    assert blksize > 1, 'Insufficient GPU memory'
+    assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, mem_sufficient=%s, aux_batches=%d, batch_size=%d, blksize=%d',
                mem_avail*1e-6, mem_sufficient, num_aux_batches, batch_size, blksize)
@@ -1396,7 +1395,11 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                 vj = cp.zeros_like(vk)
         elif with_j:
             pair_addresses, cderi_diag = dfobj._cderi_idx
-            dm_sparse = dms.reshape(-1,nao**2)[:,pair_addresses]
+            dm_sparse = dms.reshape(nspin,n_dm,nao**2)[:,:,pair_addresses]
+            if nspin == 2:
+                dm_sparse = dm_sparse.sum(axis=0)
+            else:
+                dm_sparse = dm_sparse[0]
             dm_sparse *= 2
             dm_sparse[:,cderi_diag] *= .5
             vj = cp.zeros_like(dm_sparse)
@@ -1462,10 +1465,16 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
         if with_j: vj = vj.reshape(n_dm,-1)
         if with_k: vk = vk.reshape(n_dm,-1)
     else: # UHF
-        nocc_tot = (mo_occ > 0).sum()
-        nmo = mo_coeff.shape[-1]
-        if with_j: vj = vj.reshape(n_dm,-1)[:,:nmo*nocc_tot]
-        if with_k: vk = vk.reshape(n_dm,-1)[:,:nmo*nocc_tot]
+        nocca, noccb = mo_occ.sum(axis=1).get()
+        if nocca != noccb:
+            def format_uhf_output(v):
+                return cp.hstack([v[:,0,:,:nocca].reshape(n_dm,-1),
+                                  v[:,1,:,:noccb].reshape(n_dm,-1)])
+            if with_j: vj = format_uhf_output(vj)
+            if with_k: vk = format_uhf_output(vk)
+        else:
+            if with_j: vj = vj.reshape(n_dm,-1)
+            if with_k: vk = vk.reshape(n_dm,-1)
     t1 = log.timer_debug1('vj and vk', *t1)
     return vj, vk
 
