@@ -51,7 +51,7 @@ static int GINTrun_tasks_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars
     switch (nrys_roots) {
     case 1:
         if (envs->nf == 1) {
-            stream.parallel_for<class GINTint2e_jk_kernel0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_jk_kernel0000(dev_envs, dev_jk, dev_offsets); }):
+            stream.parallel_for<class GINTint2e_jk_kernel0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_jk_kernel0000(dev_envs, dev_jk, dev_offsets); });
         } else {
             stream.parallel_for<class GINTint2e_jk_kernel1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_jk_kernel1000(dev_envs, dev_jk, dev_offsets); });
         }
