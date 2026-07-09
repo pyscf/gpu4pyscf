@@ -30,7 +30,8 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero, group_by_conj_pairs, kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
-from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
+from gpu4pyscf.pbc.df.fft_jk import (
+    _format_dms, _format_jks, _ewald_exxdiv_for_G0, _factorize_dm)
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray, ndarray
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import SortedCell
@@ -110,7 +111,6 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *,
                omega=None, lr_factor=1, sr_factor=1):
-    from gpu4pyscf.pbc.df.df_jk import factorize_dm
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
@@ -129,7 +129,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
-    orbl, orbr = factorize_dm(dm_kpts)
+    orbl, orbr = _factorize_dm(dm_kpts, kpts)
     n_dm, nkpts, nao, nocc = orbl.shape
     if orbr is None or nocc * 2 >= nao:
         orbl = None
@@ -279,7 +279,7 @@ def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
         #:vk[:,ki] += contract('sngik,nglk->snil', tmp, Gpq_conj[kj])
         cp.take(Gpq, kj, axis=0, out=tmp2)
         cp.take(dms, kj, axis=1, out=tmp1)
-        contract('ngij,snjk->sngik', tmp2, tmp1, out=tmp)
+        contract('snjk,ngij->sngik', tmp1, tmp2, out=tmp)
         cp.take(Gpq_conj, kj, axis=0, out=tmp2)
         vk[:,ki] += contract('sngik,nglk->snil', tmp, tmp2, out=tmp1)
 
@@ -294,17 +294,17 @@ def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
             tmp, buf1 = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf)
             tmp1, _ = _allocate((n_dm,nkj,nao,nao), Gpq.dtype, buf1)
             cp.take(dms, idx, axis=1, out=tmp1)
-            contract('ngij,snli->snglj', Gpq, tmp1, out=tmp)
-            contract('nglk,snglj->snkj', Gpq_conj, tmp, beta=1, out=vk)
+            contract('snli,ngij->snglj', tmp1, Gpq, out=tmp)
+            contract('snglj,nglk->snkj', tmp, Gpq_conj, beta=1, out=vk)
         else:
             tmp, buf1 = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf)
             tmp1, buf1 = _allocate((n_dm,nkj,nao,nao), Gpq.dtype, buf1)
             tmp2, _ = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf1)
             cp.take(Gpq, kj, axis=0, out=tmp2)
             cp.take(dms, ki, axis=1, out=tmp1)
-            contract('ngij,snli->snglj', tmp2, tmp1, out=tmp)
+            contract('snli,ngij->snglj', tmp1, tmp2, out=tmp)
             cp.take(Gpq_conj, kj, axis=0, out=tmp2)
-            vk[:,kj] += contract('nglk,snglj->snkj', tmp2, tmp, out=tmp1)
+            vk[:,kj] += contract('snglj,nglk->snkj', tmp, tmp2, out=tmp1)
     return vk
 
 def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,

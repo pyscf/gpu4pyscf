@@ -42,7 +42,7 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
-from gpu4pyscf.pbc.df.df_jk import factorize_dm
+from gpu4pyscf.pbc.df.df_jk import _factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import (
     kpts_to_kmesh, double_translation_indices)
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
@@ -484,7 +484,7 @@ class PBCJKMatrixOpt:
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
 
-        orbl, orbr = factorize_dm(dm)
+        orbl, orbr = _factorize_dm(dm, kpts)
         dm = cp.asarray(dm)
         dms = _format_dms(dm, kpts)
         n_dm, nkpts, nao, nocc = orbl.shape
@@ -2297,7 +2297,7 @@ def _get_vk_wcoulG_and_SR(cell, kpt, kpts, exxdiv, mesh, Gv, Gv_weight,
     # This coulG_SR attemps to remove the low-Ecut part of get_k_sr integrals
     wcoulG_SR = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
                           wrap_around=True, omega=-rsjk_omega, kpts=kpts)
-    if is_zero(Gv[0]+kpt):
+    if is_zero(cp.asnumpy(Gv[0])+kpt):
         wcoulG_SR[0] += np.pi / rsjk_omega**2
     wcoulG_SR *= sr_factor * Gv_weight
     return wcoulG, wcoulG_SR
