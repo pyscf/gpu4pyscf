@@ -61,13 +61,16 @@ if (USE_SYCL)
     "$<$<COMPILE_LANGUAGE:Fortran>:-g>"
   )
 
-  # For non-Release builds, add line-table-only debug info to CXX (SYCL) TUs.
-  # -gline-tables-only emits call-frame + line number tables on the host side
-  # only -- it is NOT forwarded to ocloc, so device code stays fully optimized.
-  # This gives gdb enough info to name the host-side kernel launch site (e.g.
-  # "contract_int3c2e_kernel_sycl") without the device debug overhead of -g.
+  # For non-Release builds, add line-table-only debug info to the HOST pass of
+  # CXX (SYCL) TUs only. Plain `-gline-tables-only` on a `-fsycl` TU is applied
+  # to BOTH the host and the device (SPIR-V) compilation passes; the device
+  # line tables are then carried through AOT into ocloc, which massively slows
+  # the device link (observed ~30min -> ~60min). `-Xarch_host` restricts the
+  # flag to the host compilation only, so ocloc never sees debug info and the
+  # device link stays fast, while gdb still gets host-side line/frame tables to
+  # name the kernel launch site (e.g. "contract_int3c2e_kernel_sycl").
   add_compile_options(
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Release>>>:-gline-tables-only>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Release>>>:SHELL:-Xarch_host -gline-tables-only>"
   )
 
   add_link_options(

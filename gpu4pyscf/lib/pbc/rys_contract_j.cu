@@ -740,7 +740,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
             sycl::range<2> threads(tdims[1], tdims[0]);
             sycl_get_queue()->submit([&](sycl::handler &cgh) {
               sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh);
-              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+              cgh.parallel_for<class pbc_rys_j_kernel_sycl<OFFSET>>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
                 rys_j_kernel<OFFSET>(dev_envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                     supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                     q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
