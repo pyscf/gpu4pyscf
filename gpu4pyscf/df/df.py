@@ -473,7 +473,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
         cderi_idx = (pair_addresses, diag_addrs)
 
-    aux_coef, tag = _decompose_j2c(auxmol, aux_sorting)
+    aux_coef, tag = _decompose_j2c(auxmol, aux_sorting, omega)
     naux = aux_coef.shape[1]
     naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
 
@@ -571,8 +571,8 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         cderi = multi_gpu.run(proc, non_blocking=True)
     return cderi, cderi_idx
 
-def _decompose_j2c(auxmol, aux_sorting=None):
-    j2c = int3c2e_bdiv.int2c2e(auxmol)
+def _decompose_j2c(auxmol, aux_sorting=None, omega=None):
+    j2c = int3c2e_bdiv.int2c2e(auxmol, omega=omega)
 
     try:
         cd_low = cholesky(j2c)

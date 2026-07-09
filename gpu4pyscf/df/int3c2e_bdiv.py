@@ -627,111 +627,15 @@ def get_ao_pair_loc(uniq_l, bas_ij_cache, cart=True):
     ao_pair_loc = cp.asarray(cp.hstack(ao_pair_loc), dtype=np.int32)
     return ao_pair_loc
 
-def int2c2e(mol):
+def int2c2e(mol, sort_output=True, omega=None):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e
-    return int2c2e(mol)
+    return int2c2e(mol, omega=omega)
 
-def int2c2e_ip1(mol, sort_output=True):
+def int2c2e_ip1(mol, sort_output=True, omega=None):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1
-    return int2c2e_ip1(mol, sort_output=sort_output)
-
-def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
-    '''A fast routine to estimate the Schwarz inequality condition
-    log(sqrt(absmax( (ij|ij) ))).
-    Note the high angular momentum bases are excluded.
-    '''
-    raise
-    from gpu4pyscf.pbc.gto import int1e
-    omega = mol.omega
-    ls = np.arange(LMAX+1)
-    li = ls[:,None]
-    lj = ls
-    lij = li + lj
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nroots = lij + 1
-    if omega < 0:
-        nroots *= 2
-
-    SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
-    gout_width = 29
-    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
-    shm_size = 1024 * 48 - 1024
-    nsp_max = _nearest_power2(shm_size // (unit*SIZEOF_FLOAT))
-    gout_size = nfi * nfj
-    gout_stride = (gout_size+gout_width-1) // gout_width
-    gout_stride = _nearest_power2(gout_stride, return_leq=False)
-    nsp_per_block = THREADS // gout_stride
-    # min(nsp_per_block, nsp_max)
-    nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
-    gout_stride = THREADS // nsp_per_block
-    shm_size = nsp_per_block * (unit*SIZEOF_FLOAT)
-    # (pp|pp) requires more shm than this estimation. 5888 is the required size
-    max_shm_size = max(shm_size.max(), 5888*SIZEOF_FLOAT)
-
-    ovlp_mask = int1e._shell_overlap_mask(mol, precision=precision**2)
-    nbas = np.uint32(mol.nbas)
-    assert nbas < 65535
-    uniq_l = uniq_l_ctr[:,0]
-    bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
-    shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
-    sp0 = sp1 = 0
-    for i, li in enumerate(uniq_l):
-        for j, lj in enumerate(uniq_l[:i+1]):
-            if li > LMAX or lj > LMAX:
-                continue
-            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish = cp.arange(ish0, ish1, dtype=np.uint32)
-            jsh = cp.arange(jsh0, jsh1, dtype=np.uint32)
-            mask = ovlp_mask[ish0:ish1,jsh0:jsh1]
-            idx = (ish[:,None] * nbas + jsh)[mask]
-            nshl_pair = len(idx)
-            bas_ij_idx.append(idx)
-            sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = THREADS // gout_stride[li, lj] * 8
-            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
-    ovlp_mask = None
-    shl_pair_offsets.append(np.int32(sp1))
-    shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
-    bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.uint32)
-
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    q_out = cp.full((nbas, nbas), -700, dtype=np.float32)
-    s_out = None
-    s_out_ptr = lib.c_null_ptr()
-    lr_factor = sr_factor = 1
-    if omega < 0:
-        # FIXME: To avoid changing the CUDA kernel function signature,
-        # temporarily attach the extra information to the s_estimator array and
-        # pass it along with s_estimator.
-        # This is a workaround and should be addressed in the future.
-        s_out = cp.full((nbas, nbas), -700, dtype=np.float32)
-        s_out_ptr = ctypes.cast(s_out.data.ptr, ctypes.c_void_p)
-        lr_factor = 0
-    if omega > 0:
-        sr_factor = 0
-    diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
-    diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
-    diffuse_ctr_coef = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
-    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
-    libvhf_rys.int2e_qcond_estimator(
-        ctypes.cast(q_out.data.ptr, ctypes.c_void_p),
-        s_out_ptr,
-        ctypes.byref(envs),
-        ctypes.c_int(max_shm_size),
-        ctypes.c_int(nbatches_shl_pair),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-        ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
-        ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
-        ctypes.c_double(omega),
-        ctypes.c_double(lr_factor),
-        ctypes.c_double(sr_factor))
-    return q_out, s_out
+    return int2c2e_ip1(mol, sort_output=sort_output, omega=omega)
 
 def _create_pair_recontraction(mol, bas_ij_batches, cart=None):
     assert isinstance(mol, SortedMole)

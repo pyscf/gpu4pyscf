@@ -199,6 +199,9 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
     else:
         raise NotImplementedError(f'numint2c.get_vxc for functional {xc_code}')
 
+    if dms.dtype == np.float64:
+        vmat = vmat.real
+
     if hermi:
         vmat = vmat + vmat.conj().transpose(1,0)
 
@@ -631,5 +634,3 @@ class _GDFTOpt2C(numint._GDFTOpt):
         # Perform the unsorting assignment
         out[tuple(fancy_index)] = sorted_mat
         return out
-    
-    

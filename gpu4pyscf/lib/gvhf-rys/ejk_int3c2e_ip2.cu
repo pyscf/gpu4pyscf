@@ -20,15 +20,17 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "vhf.cuh"
-#include "rys_roots.cu"
-#include "rys_contract_k.cuh"
+#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/rys_contract_k.cuh"
+#include "gvhf-rys/rys_roots_for_k.cu"
 
 #define THREADS         256
 #define BLOCK_SIZE      16
 
 __global__ static
 void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
-                            RysIntEnvVars envs, int *shl_pair_offsets,
+                            RysIntEnvVars envs, double omega, double lr_factor,
+                            double sr_factor, int *shl_pair_offsets,
                             uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int naux)
 {
@@ -60,7 +62,6 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
         lij = li + lj + 2;
         nroots = (lij + lk) / 2 + 1;
-        double omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -234,10 +235,9 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                     if (gout_id == 0) {
                         gx[0] = env[ck+kp] / (aij*ak*sqrt(aij+ak));
                     }
-                    double omega = env[PTR_RANGE_OMEGA];
-                    //TODO: rys_roots_for_k
-                    rys_roots_rs(nroots, theta, Rpq[3*nst_per_block], omega,
-                                 rw, nst_per_block, gout_id, gout_stride);
+                    rys_roots_for_k(nroots, theta, Rpq[3*nst_per_block], rw,
+                                    omega, lr_factor, sr_factor,
+                                    nst_per_block, gout_stride, gout_id);
                     for (int irys = 0; irys < nroots; ++irys) {
                         int nsp = nsp_per_block;
                         int nst = nst_per_block;
@@ -622,7 +622,8 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
 
 extern "C" {
 int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
-                    RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
+                    RysIntEnvVars *envs, double omega, double lr_factor,
+                    double sr_factor, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int aux_offset, int naux)
@@ -630,7 +631,8 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
     cudaFuncSetAttribute(ejk_int3c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     ejk_int3c2e_ip2_kernel<<<blocks, THREADS, shm_size>>>(
-            ejk, dm, density_auxvec, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
+            ejk, dm, density_auxvec, *envs, omega, lr_factor, sr_factor,
+            shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

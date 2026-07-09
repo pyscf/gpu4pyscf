@@ -40,7 +40,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
-        from gpu4pyscf.df.grad.uhf import _j_energy_per_atom
+        from gpu4pyscf.df.grad.rhf import _j_energy_per_atom
         return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
                                   auxbasis_response, verbose) * j_factor
 

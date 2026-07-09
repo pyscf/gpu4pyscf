@@ -419,15 +419,28 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
     dm_factor_l, dm_factor_r = factorize_dm(dms, hermi)
     symmetrize = getattr(dms, 'symmetrize', 0)
 
+    if dm_factor_r is None:
+        dm_factor_mode = 0
+    elif dm_factor_l.ndim == dm_factor_r.ndim:
+        dm_factor_mode = 1
+    elif dm_factor_l.ndim < dm_factor_r.ndim:
+        dm_factor_mode = 2
+    else: # dm_factor_l.ndim > dm_factor_r.ndim:
+        dm_factor_mode = 3
+
     nao, nocc = dm_factor_l.shape[-2:]
     dms_3d = cp.asarray(dms).reshape(-1,nao,nao)
     n_dm = dms_3d.shape[0]
 
+    if nocc == 0:
+        # dms equals to 0. vj and vk must be all zeros.
+        return dms, dms
+
     def proc():
-        factor_l = cp.asarray(dm_factor_l)
+        factor_l = cp.asarray(dm_factor_l).reshape(-1,nao,nocc)
         factor_r = dm_factor_r
         if factor_r is not None:
-            factor_r = cp.asarray(factor_r)
+            factor_r = cp.asarray(factor_r).reshape(-1,nao,nocc)
 
         vj = vk = None
         if with_j:
@@ -446,57 +459,47 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
             vk = cupy.zeros_like(dms_3d)
             mem_avail = get_avail_mem(exclude_memory_pool=True)
             dm_batch_size = int(mem_avail * 0.6 / (blksize*nao*nocc * 8))
-            if factor_r is not None and factor_l.ndim == factor_r.ndim:
+            if dm_factor_mode == 1:
                 dm_batch_size = dm_batch_size // 2
             dm_batch_size = min(dm_batch_size, n_dm)
             assert dm_batch_size > 0
             log.debug1('blksize=%d, dm_batch_size=%d', blksize, dm_batch_size)
 
-            if factor_r is None:
-                factor_l = factor_l.reshape(n_dm, nao, nocc)
-                buf = cp.empty(dm_batch_size * blksize * nao*nocc)
-            elif factor_l.ndim == factor_r.ndim:
-                factor_l = factor_l.reshape(n_dm, nao, nocc)
-                factor_r = factor_r.reshape(n_dm, nao, nocc)
-                buf = cp.empty(2 * dm_batch_size * blksize * nao*nocc)
-            elif factor_l.ndim < factor_r.ndim:
-                factor_l = factor_l.reshape(1, nao, nocc)
-                factor_r = factor_r.reshape(n_dm, nao, nocc)
-                buf = cp.empty(dm_batch_size+1, blksize * nao*nocc)
-                buf1 = buf[-1]
+            if dm_factor_mode == 0:
+                buf = cp.empty((dm_batch_size, blksize * nao*nocc))
+            elif dm_factor_mode == 1:
+                buf = cp.empty((2 * dm_batch_size, blksize * nao*nocc))
             else:
-                factor_l = factor_l.reshape(n_dm, nao, nocc)
-                factor_r = factor_r.reshape(1, nao, nocc)
-                buf = cp.empty(dm_batch_size+1, blksize * nao*nocc)
+                buf = cp.empty((dm_batch_size+1, blksize * nao*nocc))
                 buf1 = buf[-1]
 
-        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+        for cderi, cderi_tril in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
-                vj_sparse += dm_sparse.dot(cderi_sparse.T).dot(cderi_sparse)
+                vj_sparse += dm_sparse.dot(cderi_tril.T).dot(cderi_tril)
 
             if with_k:
                 nL = len(cderi)
-                if factor_r is None:
+                if dm_factor_mode == 0:
                     for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
                         rhok = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
                         contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
                         contract('nikL,njkL->nij', rhok, rhok, beta=1, out=vk[i0:i1])
-                elif factor_l.ndim == factor_r.ndim:
+                elif dm_factor_mode == 1:
                     for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
                         rhok, rhok1 = ndarray((2,i1-i0,nao,nocc,nL), buffer=buf)
                         contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
                         contract('Lij,njk->nikL', cderi, factor_r[i0:i1], out=rhok1)
                         contract('nikL,njkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
-                elif factor_l.ndim < factor_r.ndim:
+                elif dm_factor_mode == 2:
                     rhok = ndarray((nao,nocc,nL), buffer=buf1)
-                    contract('Lij,jk->ikL', cderi, factor_l, out=rhok)
+                    contract('Lij,jk->ikL', cderi, factor_l[0], out=rhok)
                     for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
                         rhok1 = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
                         contract('Lij,njk->nikL', cderi, factor_r[i0:i1], out=rhok1)
                         contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
                 else:
                     rhok1 = ndarray((nao,nocc,nL), buffer=buf1)
-                    contract('Lij,jk->ikL', cderi, factor_r, out=rhok1)
+                    contract('Lij,jk->ikL', cderi, factor_r[0], out=rhok1)
                     for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
                         rhok = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
                         contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)

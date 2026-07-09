@@ -22,6 +22,7 @@
 #include "vhf.cuh"
 #include "rys_roots.cu"
 #include "rys_contract_k.cuh"
+#include "gvhf-rys/rys_roots_for_k.cu"
 
 #define THREADS         256
 #define BLOCK_SIZE      16
@@ -30,6 +31,7 @@
 
 __global__ static
 void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
+                          double omega, double lr_factor, double sr_factor,
                           int *shl_pair_offsets, uint32_t *bas_ij_idx,
                           int *gout_stride_lookup)
 {
@@ -54,7 +56,6 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         int lij = li + lj + 2;
         nroots = lij/ 2 + 1;
-        double omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -148,9 +149,8 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 gx[0] = cicj / (ai*aj*sqrt(aij));
             }
             double rr = Rpq[3*nsp_per_block];
-            double omega = env[PTR_RANGE_OMEGA];
-            rys_roots_rs(nroots, theta, rr, omega,
-                         rw, nsp_per_block, gout_id, gout_stride);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            nsp_per_block, gout_stride, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 int stride_j = li + 3;
                 int i_1 =          nsp_per_block;
@@ -356,13 +356,15 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
 }
 
 extern "C" {
-int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs, int shm_size,
-                     int nbatches_shl_pair, int *shl_pair_offsets,
-                     uint32_t *bas_ij_idx, int *gout_stride_lookup)
+int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
+                  double omega, double lr_factor, double sr_factor, int shm_size,
+                  int nbatches_shl_pair, int *shl_pair_offsets,
+                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     e_int2c2e_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            out, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            out, dm, *envs, omega, lr_factor, sr_factor,
+            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_ip2 kernel: %s\n", cudaGetErrorString(err));

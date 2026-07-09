@@ -31,6 +31,7 @@ def setUpModule():
         verbose = 5,
         output = '/dev/null',
         atom = '''
+        GHOST-O -1.  -.5      -.5
         O   0.   0.       0.
         H   0.   -0.757   0.587
         H   0.   0.757    0.587''',
@@ -38,6 +39,7 @@ def setUpModule():
 
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3
+                C3   1.      2.       3.
                 C2   .19   .1      1.1
                 C2   0.   .5      .5
         ''',

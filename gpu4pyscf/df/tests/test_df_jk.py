@@ -21,7 +21,6 @@ from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.df.df import DF
 from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf.df import df_jk
 
 atom='''
 Ti 0.0 0.0 0.0
