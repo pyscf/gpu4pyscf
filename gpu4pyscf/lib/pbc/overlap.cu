@@ -63,6 +63,42 @@ typedef struct {
 // Abstracts 1D kernel launch for overlap integrals. Used 10x in this file.
 // cudaFuncSetAttribute (where needed) must be placed outside this macro.
 #ifdef USE_SYCL
+// Debug helper: print USM pointer type for a void* on the current SYCL context.
+// Logs to stderr. Compile away by defining NDEBUG or removing USE_SYCL_PTR_CHECK.
+#ifdef USE_SYCL_PTR_CHECK
+static inline void _sycl_check_ptr(const char *name, const void *ptr) {
+    if (ptr == nullptr) {
+        fprintf(stderr, "[PTR_CHECK] %-24s = nullptr\n", name);
+        return;
+    }
+    auto ctx = sycl_get_queue()->get_context();
+    auto pt  = sycl::get_pointer_type(ptr, ctx);
+    const char *ts =
+        pt == sycl::usm::alloc::device  ? "device"   :
+        pt == sycl::usm::alloc::shared  ? "shared"   :
+        pt == sycl::usm::alloc::host    ? "host"      :
+        pt == sycl::usm::alloc::unknown ? "unknown"   : "???";
+    fprintf(stderr, "[PTR_CHECK] %-24s = %p  ->  %s%s\n",
+            name, ptr, ts,
+            (pt != sycl::usm::alloc::device && pt != sycl::usm::alloc::shared)
+            ? "  *** NOT GPU-ACCESSIBLE ***" : "");
+}
+#define CHECK_OVERLAP_PTRS(envs_, out_, bas_ij_, shl_off_, gout_) do { \
+    fprintf(stderr, "[PTR_CHECK] --- %s ---\n", __func__); \
+    _sycl_check_ptr("out",               (const void*)(out_)); \
+    _sycl_check_ptr("envs->atm",         (const void*)(envs_)->atm); \
+    _sycl_check_ptr("envs->bas",         (const void*)(envs_)->bas); \
+    _sycl_check_ptr("envs->env",         (const void*)(envs_)->env); \
+    _sycl_check_ptr("envs->ao_loc",      (const void*)(envs_)->ao_loc); \
+    _sycl_check_ptr("envs->img_coords",  (const void*)(envs_)->img_coords); \
+    _sycl_check_ptr("bas_ij_idx",        (const void*)(bas_ij_)); \
+    _sycl_check_ptr("shl_pair_offsets",  (const void*)(shl_off_)); \
+    _sycl_check_ptr("gout_stride_lookup",(const void*)(gout_)); \
+} while(0)
+#else
+#define CHECK_OVERLAP_PTRS(envs_, out_, bas_ij_, shl_off_, gout_) do {} while(0)
+#endif  // USE_SYCL_PTR_CHECK
+
 #define LAUNCH_OVERLAP_KERNEL(KERNEL, nbatches_, ...) { \
     auto dev_envs = *envs; \
     sycl_get_queue()->submit([&](sycl::handler &cgh) { \
@@ -2274,6 +2310,7 @@ int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                   int nbatches_shl_pair, int *bas_ij_idx,
                   int *shl_pair_offsets, int *gout_stride_lookup)
 {
+    CHECK_OVERLAP_PTRS(envs, out, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     cudaFuncSetAttribute(int1e_ovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_ovlp_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
@@ -2284,6 +2321,7 @@ int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
                  int nbatches_shl_pair, int *bas_ij_idx,
                  int *shl_pair_offsets, int *gout_stride_lookup)
 {
+    CHECK_OVERLAP_PTRS(envs, out, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     cudaFuncSetAttribute(int1e_kin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_kin_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
@@ -2294,6 +2332,7 @@ int PBCint1e_r2_origi(double *out, PBCIntEnvVars *envs, int shm_size,
                       int nbatches_shl_pair, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup)
 {
+    CHECK_OVERLAP_PTRS(envs, out, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     cudaFuncSetAttribute(int1e_r2_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_r2_origi_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
@@ -2304,6 +2343,7 @@ int PBCint1e_r4_origi(double *out, PBCIntEnvVars *envs, int shm_size,
                       int nbatches_shl_pair, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup)
 {
+    CHECK_OVERLAP_PTRS(envs, out, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     cudaFuncSetAttribute(int1e_r4_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_r4_origi_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
@@ -2314,6 +2354,7 @@ int PBCint1e_r2_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, int *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup)
 {
+    CHECK_OVERLAP_PTRS(envs, out, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     cudaFuncSetAttribute(int1e_r2_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_r2_origi_ip2_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
@@ -2324,6 +2365,7 @@ int PBCint1e_r4_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, int *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup)
 {
+    CHECK_OVERLAP_PTRS(envs, out, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     cudaFuncSetAttribute(int1e_r4_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_r4_origi_ip2_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
@@ -2334,6 +2376,7 @@ int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                     int nbatches_shl_pair, int *bas_ij_idx,
                     int *shl_pair_offsets, int *gout_stride_lookup)
 {
+    CHECK_OVERLAP_PTRS(envs, out, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     cudaFuncSetAttribute(int1e_ipovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_ipovlp_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
@@ -2344,6 +2387,7 @@ int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
                    int nbatches_shl_pair, int *bas_ij_idx,
                    int *shl_pair_offsets, int *gout_stride_lookup)
 {
+    CHECK_OVERLAP_PTRS(envs, out, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
     cudaFuncSetAttribute(int1e_ipkin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_ipkin_kernel, nbatches_shl_pair,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup);
