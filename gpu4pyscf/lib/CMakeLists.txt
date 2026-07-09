@@ -47,6 +47,7 @@ if (USE_SYCL)
     -fsycl-device-code-split=per_kernel
     -fp-model=precise
     -fno-system-debug
+    -fno-sycl-esimd
     -fsycl-default-sub-group-size=32
     -fsycl-targets=spir64_gen
     "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""

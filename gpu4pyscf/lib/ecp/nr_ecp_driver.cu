@@ -29,6 +29,55 @@
 #include "ecp_type1_ipip.cu"
 #include "ecp_type2_ipip.cu"
 
+#define ECP_ARGS  gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env
+
+#ifdef USE_SYCL
+#define ECP_LAUNCH1(TAG, KPREFIX, LI, LJ) \
+    stream.parallel_for<class TAG>( \
+        sycl::nd_range<1>(blocks * threads, threads), \
+        [=](auto item) [[intel::kernel_args_restrict]] { \
+            KPREFIX<LI,LJ>(ECP_ARGS); \
+        })
+#else
+#define ECP_LAUNCH1(TAG, KPREFIX, LI, LJ) \
+    KPREFIX<LI,LJ><<<blocks, threads>>>(ECP_ARGS)
+#endif
+
+#ifdef USE_SYCL
+#define ECP_LAUNCH2(TAG, KPREFIX, LI, LJ, LC) \
+    stream.parallel_for<class TAG>( \
+        sycl::nd_range<1>(blocks * threads, threads), \
+        [=](auto item) [[intel::kernel_args_restrict]] { \
+            KPREFIX<LI,LJ,LC>(ECP_ARGS); \
+        })
+#else
+#define ECP_LAUNCH2(TAG, KPREFIX, LI, LJ, LC) \
+    KPREFIX<LI,LJ,LC><<<blocks, threads>>>(ECP_ARGS)
+#endif
+
+#ifdef USE_SYCL
+#define ECP_LAUNCH_GENERAL(TAG, SMEM, KFUNC, ...) \
+    stream.submit([&](sycl::handler &cgh) { \
+        sycl::local_accessor<double, 1> local_acc(sycl::range<1>(SMEM), cgh); \
+        cgh.parallel_for<class TAG>( \
+            sycl::nd_range<1>(blocks * threads, threads), \
+            [=](auto item) [[intel::kernel_args_restrict]] { \
+                KFUNC(__VA_ARGS__, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
+            }); \
+    })
+#else
+#define ECP_LAUNCH_GENERAL(TAG, SMEM, KFUNC, ...) do { \
+    cudaError_t _e = cudaFuncSetAttribute( \
+        KFUNC, cudaFuncAttributeMaxDynamicSharedMemorySize, (SMEM)*sizeof(double)); \
+    if (_e != cudaSuccess) { \
+        fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", \
+                __func__, cudaGetErrorString(_e)); \
+        return 1; \
+    } \
+    KFUNC<<<blocks, threads, (SMEM)*sizeof(double)>>>(__VA_ARGS__); \
+} while(0)
+#endif
+
 extern "C" {
 int ECP_cart(double *gctr,
             const int *ao_loc, const int nao,
@@ -48,37 +97,20 @@ int ECP_cart(double *gctr,
     if (lc >= 0){
         int task_type = li * 100 + lj * 10 + lc;
         switch (task_type) {
-#ifdef USE_SYCL
-        case 0:  stream.parallel_for<class type2_cart_000>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,0,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 1:  stream.parallel_for<class type2_cart_001>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,0,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 2:  stream.parallel_for<class type2_cart_002>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,0,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 3:  stream.parallel_for<class type2_cart_003>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,0,3>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 10:  stream.parallel_for<class type2_cart_010>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,1,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 11:  stream.parallel_for<class type2_cart_011>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,1,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 12:  stream.parallel_for<class type2_cart_012>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,1,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 110: stream.parallel_for<class type2_cart_110>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<1,1,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 111: stream.parallel_for<class type2_cart_111>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<1,1,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 112: stream.parallel_for<class type2_cart_112>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<1,1,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 20:  stream.parallel_for<class type2_cart_020>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,2,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 21:  stream.parallel_for<class type2_cart_021>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,2,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 30:  stream.parallel_for<class type2_cart_030>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<0,3,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 120: stream.parallel_for<class type2_cart_120>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart<1,2,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-#else // USE_SYCL
-        case 0:  type2_cart<0,0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 1:  type2_cart<0,0,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 2:  type2_cart<0,0,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 3:  type2_cart<0,0,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 10:  type2_cart<0,1,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 11:  type2_cart<0,1,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 12:  type2_cart<0,1,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 110: type2_cart<1,1,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 111: type2_cart<1,1,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 112: type2_cart<1,1,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 20:  type2_cart<0,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 21:  type2_cart<0,2,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 30:  type2_cart<0,3,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 120: type2_cart<1,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-#endif
+        case 0:   ECP_LAUNCH2(type2_cart_000, type2_cart, 0,0,0); break;
+        case 1:   ECP_LAUNCH2(type2_cart_001, type2_cart, 0,0,1); break;
+        case 2:   ECP_LAUNCH2(type2_cart_002, type2_cart, 0,0,2); break;
+        case 3:   ECP_LAUNCH2(type2_cart_003, type2_cart, 0,0,3); break;
+        case 10:  ECP_LAUNCH2(type2_cart_010, type2_cart, 0,1,0); break;
+        case 11:  ECP_LAUNCH2(type2_cart_011, type2_cart, 0,1,1); break;
+        case 12:  ECP_LAUNCH2(type2_cart_012, type2_cart, 0,1,2); break;
+        case 110: ECP_LAUNCH2(type2_cart_110, type2_cart, 1,1,0); break;
+        case 111: ECP_LAUNCH2(type2_cart_111, type2_cart, 1,1,1); break;
+        case 112: ECP_LAUNCH2(type2_cart_112, type2_cart, 1,1,2); break;
+        case 20:  ECP_LAUNCH2(type2_cart_020, type2_cart, 0,2,0); break;
+        case 21:  ECP_LAUNCH2(type2_cart_021, type2_cart, 0,2,1); break;
+        case 30:  ECP_LAUNCH2(type2_cart_030, type2_cart, 0,3,0); break;
+        case 120: ECP_LAUNCH2(type2_cart_120, type2_cart, 1,2,0); break;
         // General kernel
         default: {
             const int li1 = li+1;
@@ -98,79 +130,31 @@ int ECP_cart(double *gctr,
             int smem_size4 = lj1*nfj*ljc1; // angj
             int smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
 
-#ifdef USE_SYCL
-            stream.submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(smem_size), cgh);
-              cgh.parallel_for<class type2_cart_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-                type2_cart(gctr,
-                           li, lj, lc,
-                           ao_loc, nao,
-                           tasks, ntasks,
-                           ecpbas, ecploc,
-                           atm, bas, env,
-                           item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-              }); });
-#else // USE_SYCL
-            type2_cart<<<blocks, threads, smem_size*sizeof(double)>>>(
-                gctr,
-                li, lj, lc,
-                ao_loc, nao,
-                tasks, ntasks,
-                ecpbas, ecploc,
-                atm, bas, env);
-#endif // USE_SYCL
+            ECP_LAUNCH_GENERAL(type2_cart_sycl, smem_size, type2_cart,
+                               gctr, li, lj, lc, ao_loc, nao,
+                               tasks, ntasks, ecpbas, ecploc, atm, bas, env);
         }}
     } else {
         int task_type = li * 10 + lj;
         switch (task_type)
         {
-#ifdef USE_SYCL
-        case 0:  stream.parallel_for<class type1_cart_00>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<0,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 1:  stream.parallel_for<class type1_cart_01>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<0,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 11: stream.parallel_for<class type1_cart_11>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<1,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 2:  stream.parallel_for<class type1_cart_02>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<0,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 3:  stream.parallel_for<class type1_cart_03>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<0,3>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 12: stream.parallel_for<class type1_cart_12>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<1,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 4:  stream.parallel_for<class type1_cart_04>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<0,4>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 13: stream.parallel_for<class type1_cart_13>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<1,3>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 22: stream.parallel_for<class type1_cart_22>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart<2,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-#else
-        case 0:  type1_cart<0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 1:  type1_cart<0,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 11: type1_cart<1,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 2:  type1_cart<0,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 3:  type1_cart<0,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 12: type1_cart<1,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 4:  type1_cart<0,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 13: type1_cart<1,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 22: type1_cart<2,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-#endif
+        case 0:  ECP_LAUNCH1(type1_cart_00, type1_cart, 0,0); break;
+        case 1:  ECP_LAUNCH1(type1_cart_01, type1_cart, 0,1); break;
+        case 11: ECP_LAUNCH1(type1_cart_11, type1_cart, 1,1); break;
+        case 2:  ECP_LAUNCH1(type1_cart_02, type1_cart, 0,2); break;
+        case 3:  ECP_LAUNCH1(type1_cart_03, type1_cart, 0,3); break;
+        case 12: ECP_LAUNCH1(type1_cart_12, type1_cart, 1,2); break;
+        case 4:  ECP_LAUNCH1(type1_cart_04, type1_cart, 0,4); break;
+        case 13: ECP_LAUNCH1(type1_cart_13, type1_cart, 1,3); break;
+        case 22: ECP_LAUNCH1(type1_cart_22, type1_cart, 2,2); break;
         default: {
             const int lij1 = li+lj+1;
             const int lij3 = lij1*lij1*lij1;
+            int smem_size = lij3 + lij1*lij1;
 
-            int smem_size = 0;
-            smem_size += lij3;      // rad_ang
-            smem_size += lij1*lij1; // rad_all
-            #ifdef USE_SYCL
-            stream.submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(smem_size), cgh);
-              cgh.parallel_for<class type1_cart_kernel>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-                type1_cart(gctr, li, lj,
-                           ao_loc, nao,
-                           tasks, ntasks,
-                           ecpbas, ecploc,
-                           atm, bas, env,
-                           item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-              }); });
-            #else
-            type1_cart<<<blocks, threads, smem_size*sizeof(double)>>>(
-                gctr, li, lj,
-                ao_loc, nao,
-                tasks, ntasks,
-                ecpbas, ecploc,
-                atm, bas, env);
-            #endif
+            ECP_LAUNCH_GENERAL(type1_cart_kernel, smem_size, type1_cart,
+                               gctr, li, lj, ao_loc, nao,
+                               tasks, ntasks, ecpbas, ecploc, atm, bas, env);
         }
         }
     }
@@ -200,89 +184,42 @@ int ECP_ip_cart(double *gctr,
     if (lc < 0){
         int task_type = li * 10 + lj;
         switch (task_type) {
-#ifdef USE_SYCL
-        case 0:  stream.parallel_for<class type1_cart_ip1_00>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<0,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 1:  stream.parallel_for<class type1_cart_ip1_01>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<0,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 11: stream.parallel_for<class type1_cart_ip1_11>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<1,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 2:  stream.parallel_for<class type1_cart_ip1_02>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<0,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 3:  stream.parallel_for<class type1_cart_ip1_03>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<0,3>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 12: stream.parallel_for<class type1_cart_ip1_12>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<1,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 4:  stream.parallel_for<class type1_cart_ip1_04>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<0,4>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 13: stream.parallel_for<class type1_cart_ip1_13>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<1,3>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 22: stream.parallel_for<class type1_cart_ip1_22>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type1_cart_ip1<2,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-#else
-        case 0:  type1_cart_ip1<0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 1:  type1_cart_ip1<0,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 11: type1_cart_ip1<1,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 2:  type1_cart_ip1<0,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 3:  type1_cart_ip1<0,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 12: type1_cart_ip1<1,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 4:  type1_cart_ip1<0,4><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 13: type1_cart_ip1<1,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 22: type1_cart_ip1<2,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-#endif
+        case 0:  ECP_LAUNCH1(type1_cart_ip1_00, type1_cart_ip1, 0,0); break;
+        case 1:  ECP_LAUNCH1(type1_cart_ip1_01, type1_cart_ip1, 0,1); break;
+        case 11: ECP_LAUNCH1(type1_cart_ip1_11, type1_cart_ip1, 1,1); break;
+        case 2:  ECP_LAUNCH1(type1_cart_ip1_02, type1_cart_ip1, 0,2); break;
+        case 3:  ECP_LAUNCH1(type1_cart_ip1_03, type1_cart_ip1, 0,3); break;
+        case 12: ECP_LAUNCH1(type1_cart_ip1_12, type1_cart_ip1, 1,2); break;
+        case 4:  ECP_LAUNCH1(type1_cart_ip1_04, type1_cart_ip1, 0,4); break;
+        case 13: ECP_LAUNCH1(type1_cart_ip1_13, type1_cart_ip1, 1,3); break;
+        case 22: ECP_LAUNCH1(type1_cart_ip1_22, type1_cart_ip1, 2,2); break;
         default: {
             const int lij1 = li+lj+2;
             const int lij3 = lij1*lij1*lij1;
+            int smem_size = lij3 + lij1*lij1;
 
-            int smem_size = 0;
-            smem_size += lij3;      // rad_ang
-            smem_size += lij1*lij1; // rad_all
-            #ifdef USE_SYCL
-            stream.submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(smem_size), cgh);
-              cgh.parallel_for<class type1_cart_ip1_general_kernel>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-                type1_cart_ip1_general(gctr, li, lj,
-                                       ao_loc, nao,
-                                       tasks, ntasks,
-                                       ecpbas, ecploc,
-                                       atm, bas, env,
-                                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-              }); });
-            #else
-            type1_cart_ip1_general<<<blocks, threads, smem_size*sizeof(double)>>>(
-                gctr, li, lj,
-                ao_loc, nao,
-                tasks, ntasks,
-                ecpbas, ecploc,
-                atm, bas, env);
-            #endif
+            ECP_LAUNCH_GENERAL(type1_cart_ip1_general_kernel, smem_size,
+                               type1_cart_ip1_general,
+                               gctr, li, lj, ao_loc, nao,
+                               tasks, ntasks, ecpbas, ecploc, atm, bas, env);
         }}
     } else {
         int task_type = li * 100 + lj * 10 + lc;
         switch (task_type) {
-#ifdef USE_SYCL
-        case 0:  stream.parallel_for<class type2_cart_ip1_000>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,0,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 1:  stream.parallel_for<class type2_cart_ip1_001>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,0,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 2:  stream.parallel_for<class type2_cart_ip1_002>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,0,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 3:  stream.parallel_for<class type2_cart_ip1_003>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,0,3>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 10:  stream.parallel_for<class type2_cart_ip1_010>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,1,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 11:  stream.parallel_for<class type2_cart_ip1_011>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,1,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 12:  stream.parallel_for<class type2_cart_ip1_012>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,1,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 110: stream.parallel_for<class type2_cart_ip1_110>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<1,1,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 111: stream.parallel_for<class type2_cart_ip1_111>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<1,1,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 112: stream.parallel_for<class type2_cart_ip1_112>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<1,1,2>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 20:  stream.parallel_for<class type2_cart_ip1_020>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,2,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 21:  stream.parallel_for<class type2_cart_ip1_021>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,2,1>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 30:  stream.parallel_for<class type2_cart_ip1_030>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<0,3,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-        case 120: stream.parallel_for<class type2_cart_ip1_120>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { type2_cart_ip1<1,2,0>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); }); break;
-#else
-        case 0:  type2_cart_ip1<0,0,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 1:  type2_cart_ip1<0,0,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 2:  type2_cart_ip1<0,0,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 3:  type2_cart_ip1<0,0,3><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 10:  type2_cart_ip1<0,1,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 11:  type2_cart_ip1<0,1,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 12:  type2_cart_ip1<0,1,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 110: type2_cart_ip1<1,1,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 111: type2_cart_ip1<1,1,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 112: type2_cart_ip1<1,1,2><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 20:  type2_cart_ip1<0,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 21:  type2_cart_ip1<0,2,1><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 30:  type2_cart_ip1<0,3,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 120: type2_cart_ip1<1,2,0><<<blocks, threads>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-#endif
-
+        case 0:   ECP_LAUNCH2(type2_cart_ip1_000, type2_cart_ip1, 0,0,0); break;
+        case 1:   ECP_LAUNCH2(type2_cart_ip1_001, type2_cart_ip1, 0,0,1); break;
+        case 2:   ECP_LAUNCH2(type2_cart_ip1_002, type2_cart_ip1, 0,0,2); break;
+        case 3:   ECP_LAUNCH2(type2_cart_ip1_003, type2_cart_ip1, 0,0,3); break;
+        case 10:  ECP_LAUNCH2(type2_cart_ip1_010, type2_cart_ip1, 0,1,0); break;
+        case 11:  ECP_LAUNCH2(type2_cart_ip1_011, type2_cart_ip1, 0,1,1); break;
+        case 12:  ECP_LAUNCH2(type2_cart_ip1_012, type2_cart_ip1, 0,1,2); break;
+        case 110: ECP_LAUNCH2(type2_cart_ip1_110, type2_cart_ip1, 1,1,0); break;
+        case 111: ECP_LAUNCH2(type2_cart_ip1_111, type2_cart_ip1, 1,1,1); break;
+        case 112: ECP_LAUNCH2(type2_cart_ip1_112, type2_cart_ip1, 1,1,2); break;
+        case 20:  ECP_LAUNCH2(type2_cart_ip1_020, type2_cart_ip1, 0,2,0); break;
+        case 21:  ECP_LAUNCH2(type2_cart_ip1_021, type2_cart_ip1, 0,2,1); break;
+        case 30:  ECP_LAUNCH2(type2_cart_ip1_030, type2_cart_ip1, 0,3,0); break;
+        case 120: ECP_LAUNCH2(type2_cart_ip1_120, type2_cart_ip1, 1,2,0); break;
         // General kernel
         default: {
             const int li1 = li+2;
@@ -301,37 +238,12 @@ int ECP_ip_cart(double *gctr,
             int smem_size2 = lj1*(lj1+1)*(lj1+2)/6 * blkj; // omegaj
             int smem_size3 = li1*lic1*nfi; // angi
             int smem_size4 = lj1*ljc1*nfj; // angj
-
             int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
-            #ifdef USE_SYCL
-            stream.submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(dynamic_smem_size), cgh);
-              cgh.parallel_for<class type2_cart_ip1_general_kernel>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-                type2_cart_ip1_general(gctr, li, lj, lc,
-                                       ao_loc, nao,
-                                       tasks, ntasks,
-                                       ecpbas, ecploc,
-                                       atm, bas, env,
-                                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-              }); });
-            #else
-            cudaError_t err = cudaFuncSetAttribute(
-                type2_cart_ip1_general,
-                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                dynamic_smem_size*sizeof(double));
 
-            if (err != cudaSuccess) {
-                fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
-                return 1;
-            }
-
-            type2_cart_ip1_general<<<blocks, threads, dynamic_smem_size*sizeof(double)>>>(
-                gctr, li, lj, lc,
-                ao_loc, nao,
-                tasks, ntasks,
-                ecpbas, ecploc,
-                atm, bas, env);
-            #endif
+            ECP_LAUNCH_GENERAL(type2_cart_ip1_general_kernel, dynamic_smem_size,
+                               type2_cart_ip1_general,
+                               gctr, li, lj, lc, ao_loc, nao,
+                               tasks, ntasks, ecpbas, ecploc, atm, bas, env);
         }}
     }
     cudaError_t err = cudaGetLastError();
@@ -359,32 +271,14 @@ int ECP_ipipv_cart(double *gctr,
 #endif
 
     if (lc < 0){
-        const int lij1 = li+lj+3; //
+        const int lij1 = li+lj+3;
         const int lij3 = lij1*lij1*lij1;
 
-        int smem_size = 0;
-        smem_size += lij3;      // rad_ang
-        smem_size += lij1*lij1; // rad_all
-        #ifdef USE_SYCL
-        stream.submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(smem_size), cgh);
-          cgh.parallel_for<class type1_cart_ipipv_kernel>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            type1_cart_ipipv(gctr, li, lj,
-                             ao_loc, nao,
-                             tasks, ntasks,
-                             ecpbas, ecploc,
-                             atm, bas, env,
-                             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-          }); });
-        #else
-        type1_cart_ipipv<<<blocks, threads, smem_size*sizeof(double)>>>(
-            gctr, li, lj,
-            ao_loc, nao,
-            tasks, ntasks,
-            ecpbas, ecploc,
-            atm, bas, env);
-        #endif
+        int smem_size = lij3 + lij1*lij1;
 
+        ECP_LAUNCH_GENERAL(type1_cart_ipipv_kernel, smem_size, type1_cart_ipipv,
+                           gctr, li, lj, ao_loc, nao,
+                           tasks, ntasks, ecpbas, ecploc, atm, bas, env);
     } else {
         const int li1 = li+3;
         const int lj1 = lj+1;
@@ -403,42 +297,14 @@ int ECP_ipipv_cart(double *gctr,
         int smem_size3 = li1*lic1*nfi; // angi
         int smem_size4 = lj1*ljc1*nfj; // angj
 
-        //int NF2_MAX = (AO_LMAX+3)*(AO_LMAX+4)/2;
         int NF1_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
         int NF0_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
-        //int static_smem_size = NF2_MAX*NF0_MAX;
         int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
         dynamic_smem_size = max(dynamic_smem_size, 3*NF1_MAX*NF0_MAX);
-        //int total_smem_size = static_smem_size + dynamic_smem_size;
 
-        #ifdef USE_SYCL
-        stream.submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(dynamic_smem_size), cgh);
-          cgh.parallel_for<class type2_cart_ipipv_kernel>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            type2_cart_ipipv(gctr, li, lj, lc,
-                             ao_loc, nao,
-                             tasks, ntasks,
-                             ecpbas, ecploc,
-                             atm, bas, env,
-                             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-          }); });
-        #else
-        cudaError_t err = cudaFuncSetAttribute(type2_cart_ipipv,
-                                         cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                         dynamic_smem_size*sizeof(double));
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
-            return 1;
-        }
-
-        type2_cart_ipipv<<<blocks, threads, dynamic_smem_size*sizeof(double)>>>(
-            gctr, li, lj, lc,
-            ao_loc, nao,
-            tasks, ntasks,
-            ecpbas, ecploc,
-            atm, bas, env);
-        #endif
-
+        ECP_LAUNCH_GENERAL(type2_cart_ipipv_kernel, dynamic_smem_size, type2_cart_ipipv,
+                           gctr, li, lj, lc, ao_loc, nao,
+                           tasks, ntasks, ecpbas, ecploc, atm, bas, env);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -465,31 +331,14 @@ int ECP_ipvip_cart(double *gctr,
 #endif
 
     if (lc < 0){
-        const int lij1 = li+lj+3; //
+        const int lij1 = li+lj+3;
         const int lij3 = lij1*lij1*lij1;
 
-        int smem_size = 0;
-        smem_size += lij3;      // rad_ang
-        smem_size += lij1*lij1; // rad_all
-        #ifdef USE_SYCL
-        stream.submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(smem_size), cgh);
-          cgh.parallel_for<class type1_cart_ipvip_kernel>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            type1_cart_ipvip(gctr, li, lj,
-                             ao_loc, nao,
-                             tasks, ntasks,
-                             ecpbas, ecploc,
-                             atm, bas, env,
-                             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-          }); });
-        #else
-        type1_cart_ipvip<<<blocks, threads, smem_size*sizeof(double)>>>(
-            gctr, li, lj,
-            ao_loc, nao,
-            tasks, ntasks,
-            ecpbas, ecploc,
-            atm, bas, env);
-        #endif
+        int smem_size = lij3 + lij1*lij1;
+
+        ECP_LAUNCH_GENERAL(type1_cart_ipvip_kernel, smem_size, type1_cart_ipvip,
+                           gctr, li, lj, ao_loc, nao,
+                           tasks, ntasks, ecpbas, ecploc, atm, bas, env);
     } else {
         const int li1 = li+2;
         const int lj1 = lj+2;
@@ -510,39 +359,12 @@ int ECP_ipvip_cart(double *gctr,
 
         int NF1_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
         int NF0_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
-        //int static_smem_size = NF1_MAX*NF1_MAX;
         int dynamic_smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
         dynamic_smem_size = max(dynamic_smem_size, 3*NF0_MAX*NF1_MAX);
 
-        //int total_smem_size = static_smem_size + dynamic_smem_size;
-        #ifdef USE_SYCL
-        stream.submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(dynamic_smem_size), cgh);
-          cgh.parallel_for<class type2_cart_ipvip_kernel>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            type2_cart_ipvip(gctr, li, lj, lc,
-                             ao_loc, nao,
-                             tasks, ntasks,
-                             ecpbas, ecploc,
-                             atm, bas, env,
-                             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-          }); });
-        #else
-        cudaError_t err = cudaFuncSetAttribute(
-            type2_cart_ipvip,
-            cudaFuncAttributeMaxDynamicSharedMemorySize,
-            dynamic_smem_size*sizeof(double));
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
-            return 1;
-        }
-
-        type2_cart_ipvip<<<blocks, threads, dynamic_smem_size*sizeof(double)>>>(
-            gctr, li, lj, lc,
-            ao_loc, nao,
-            tasks, ntasks,
-            ecpbas, ecploc,
-            atm, bas, env);
-        #endif
+        ECP_LAUNCH_GENERAL(type2_cart_ipvip_kernel, dynamic_smem_size, type2_cart_ipvip,
+                           gctr, li, lj, lc, ao_loc, nao,
+                           tasks, ntasks, ecpbas, ecploc, atm, bas, env);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -552,3 +374,8 @@ int ECP_ipvip_cart(double *gctr,
     return 0;
     }
 }
+
+#undef ECP_ARGS
+#undef ECP_LAUNCH1
+#undef ECP_LAUNCH2
+#undef ECP_LAUNCH_GENERAL
