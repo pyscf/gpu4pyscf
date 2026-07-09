@@ -474,6 +474,11 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         cderi_idx = (pair_addresses, diag_addrs)
 
     aux_coef, tag = _decompose_j2c(auxmol, aux_sorting, omega)
+    if num_devices > 1:
+        # cupy cannot copy non-contiguous array aux_coef[:,aux0:aux1] between
+        # devices. This slicing is a contiguous array in the F-order storage.
+        aux_coef = cp.asarray(aux_coef, order='F')
+
     naux = aux_coef.shape[1]
     naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
 
@@ -502,6 +507,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         def proc(batch_iter):
             device_id = cp.cuda.device.get_device_id()
             stream = cp.cuda.get_current_stream()
+            c = cp.asarray(aux_coef)
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
@@ -520,7 +526,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
                     tmp = ndarray((j3c.shape[0], naux_sorted), buffer=work1)
                     j3c = recontract(batch_id, j3c, out=tmp)
                 cderi_gpu = ndarray((j3c.shape[0], naux), buffer=work2)
-                cderi_gpu = j3c.dot(aux_coef, out=cderi_gpu)
+                cderi_gpu = j3c.dot(c, out=cderi_gpu)
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 err = libvhf_rys.transpose_write(
                     cderi_cpu.ctypes,

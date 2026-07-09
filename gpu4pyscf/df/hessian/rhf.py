@@ -138,6 +138,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     def proc(aux_batch_iter):
         stream = cp.cuda.get_current_stream()
         _dm_factor_l = cp.asarray(dm_factor_l)
+        _pair_addresses = cp.asarray(pair_addresses)
         if j_factor != 0:
             dm = _dm_factor_l.dot(_dm_factor_l.T)
             _auxvec = cp.asarray(auxvec)
@@ -188,7 +189,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
                 dm_oo = cp.asarray(dm_oo_full[aux0:aux1])
                 contract('rji,qj->iqr', dm_oo, _dm_factor_l, out=tmp)
                 contract('iqr,pi->pqr', tmp, _dm_factor_l, -.5*k_factor, beta, out=dm_tensor)
-                cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0, out=compressed[:,k0:k1])
+                cp.take(dm_tensor.reshape(-1,dk), _pair_addresses, axis=0, out=compressed[:,k0:k1])
             err = kern_ip2(
                 ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                 ctypes.cast(compressed.data.ptr, ctypes.c_void_p),

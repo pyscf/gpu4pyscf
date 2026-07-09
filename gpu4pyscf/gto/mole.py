@@ -604,8 +604,8 @@ class SortedGTO:
         else:
             self = self.view(SortedMole)
         self.mol = self.cell = mol
-        self.recontract_bas = cp.asarray(recontract_bas, dtype=np.int32)
-        self.recontract_coef = cp.asarray(recontract_coef)
+        self.recontract_bas = np.asarray(recontract_bas, dtype=np.int32)
+        self.recontract_coef = np.asarray(recontract_coef)
 
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
@@ -636,8 +636,8 @@ class SortedGTO:
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_counts = l_ctr_counts
         self.sorted_idx = sorted_idx
-        inv_sorted = cp.empty(len(self._bas), dtype=np.int32)
-        inv_sorted[sorted_idx] = cp.arange(len(self._bas))
+        inv_sorted = np.empty(len(self._bas), dtype=np.int32)
+        inv_sorted[sorted_idx] = np.arange(len(self._bas))
         # recontraction_idx stores the indices of primitive shells (self._bas)
         # for each original contracted shell (self.mol._bas). The offset of each
         # contracted shell for recontraction_idx is provided by the
@@ -658,7 +658,7 @@ class SortedGTO:
             dims = (l+1)*(l+2)//2 * self.recontract_bas[:,NCTR_OF]
         else:
             dims = (l*2+1) * self.recontract_bas[:,NCTR_OF]
-        return cp.append(np.int32(0), dims.cumsum(dtype=np.int32))
+        return cp.asarray(np.append(np.int32(0), dims.cumsum(dtype=np.int32)))
 
     def CT_dot_mat(self, mat, out=None):
         '''ctr_coeff.T.dot(mat)

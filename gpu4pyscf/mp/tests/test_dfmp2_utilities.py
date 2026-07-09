@@ -53,7 +53,7 @@ def setUpModule():
     mp = pyscf.mp.dfmp2.DFMP2(mf)
     mp.with_df = pyscf.df.DF(mol, auxbasis='def2-TZVPP-ri')
     mp.run()
-    intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+    intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux).build()
 
 
 def tearDownModule():
