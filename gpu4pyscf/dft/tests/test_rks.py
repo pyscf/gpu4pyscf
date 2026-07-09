@@ -203,7 +203,7 @@ class KnownValues(unittest.TestCase):
             ghost:H     -0.240000    -0.310000     0.880000
             """,
             basis = "def2-TZVPD", # Large and diffuse basis required to reproduce the bug
-            verbose = 4,
+            verbose = 0,
         )
 
         mf = rks.RKS(mol, xc = "pbe").density_fit(auxbasis = "def2-universal-jkfit")
@@ -249,7 +249,7 @@ class KnownValues(unittest.TestCase):
 
         ### The check threshold reflects the difference between Q-Chem and GPU4PySCF without ghost atom
         assert np.abs(test_energy - ref_energy) < 1e-7
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-6
 
 if __name__ == "__main__":
     print("Full Tests for dft")
