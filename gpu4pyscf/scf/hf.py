@@ -203,8 +203,8 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = mf.get_veff(mf.mol, dm)
-    e1 = float(cupy.einsum('ij,ji->', h1e, dm).real.get())
-    e2 = float(cupy.einsum('ij,ji->', vhf, dm).real.get()) * .5
+    e1 = cupy.einsum('ij,ji->', h1e, dm).real.item()
+    e2 = cupy.einsum('ij,ji->', vhf, dm).real.item() * .5
     ecoul = vhf.ecoul.real
     exx = e2 - ecoul
     mf.scf_summary['e1'] = e1
@@ -872,6 +872,7 @@ class SCF(pyscf_lib.StreamObject):
     to_gks                   = NotImplemented
     to_ks                    = NotImplemented
     canonicalize             = NotImplemented
+    gen_response             = NotImplemented
     dump_scf_summary         = hf_cpu.dump_scf_summary
 
     smearing = smearing
@@ -909,6 +910,9 @@ class SCF(pyscf_lib.StreamObject):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
         return hf_cpu.quad_moment(mol, cupy.asnumpy(dm), unit, origin, verbose)
+
+    def soscf(self):
+        return self.newton()
 
     def remove_soscf(self):
         if hasattr(self, 'undo_soscf'):

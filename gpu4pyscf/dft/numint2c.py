@@ -527,7 +527,6 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
                 self.build(mol, grids.coords)
                 opt = self.gdftopt
             assert dms.ndim == 2
-            dms = cp.asarray(dms)
             dms = opt.sort_orbitals(dms, axis=[0,1])
             n, exc, vmat = self._gks_mcol_vxc(mol, grids, xc_code, dms, relativity,
                                               hermi, max_memory, verbose)

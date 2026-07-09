@@ -307,7 +307,6 @@ def left_solve_S(surface, right_vector, conv_tol = 1e-10, transpose = None, stre
     else:
         S_diag = surface["S_diag"]
     n = charge_exp.shape[0]
-    assert right_vector.size == n
 
     def _left_multiply_S(v):
         return left_multiply_S(surface, v, stream = stream)
@@ -323,6 +322,8 @@ def left_solve_S(surface, right_vector, conv_tol = 1e-10, transpose = None, stre
     preconditioner_S = LinearOperator(shape = (n, n),
                                       matvec = _S_preconditioner,
                                       dtype = right_vector.dtype)
+
+    assert right_vector.size == n
     b = right_vector.reshape(n)
     x0 = _S_preconditioner(b)
     solution, info = minres(operator_S, b, x0, tol = conv_tol, M = preconditioner_S, maxiter = 100)
@@ -586,6 +587,12 @@ class PCM(lib.StreamObject):
         v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, fakemol_charge)
         v_grids_n = numpy.dot(atom_charges, v_ng)
         self.v_grids_n = cupy.asarray(v_grids_n)
+
+    @property
+    def ngrids(self):
+        if self.surface is None or 'grid_coords' not in self.surface:
+            self.build()
+        return self.surface['grid_coords'].shape[0]
 
     def kernel(self, dm):
         self.e, self.v = self._get_vind(dm)

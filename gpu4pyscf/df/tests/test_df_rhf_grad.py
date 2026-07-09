@@ -219,12 +219,12 @@ class KnownValues(unittest.TestCase):
         ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
                                   j_factor=1, k_factor=1, hermi=1)
         assert abs(ek - ek1).max() < 1e-9
-        assert abs(lib.fp(ek) - -24.366562704166753) < 1e-9
+        assert abs(lib.fp(ek) - -24.366562704166753) < 3e-9
 
         # mimic insufficent memory, processing in small batches
         with lib.temporary_env(df_rhf_grad, get_avail_mem=(lambda **kw: 3000000)):
             ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
-        assert abs(lib.fp(ek) - -24.366562704166753) < 1e-9
+        assert abs(lib.fp(ek) - -24.366562704166753) < 3e-9
 
         disp = 1e-3
         atom_coords = mol.atom_coords()

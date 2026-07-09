@@ -42,6 +42,7 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
+from gpu4pyscf.pbc.df.df_jk import factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import (
     kpts_to_kmesh, double_translation_indices)
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
@@ -55,8 +56,9 @@ __all__ = [
 ]
 
 libpbc.PBC_build_k.restype = ctypes.c_int
-libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
-libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+libpbc.PBC_build_k_init.restype = ctypes.c_int
+libpbc.PBC_build_jk_ip1_init.restype = ctypes.c_int
+libpbc.PBC_build_j_init.restype = ctypes.c_int
 libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
 libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 
@@ -246,7 +248,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
@@ -349,6 +351,9 @@ class PBCJKMatrixOpt:
 
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_k kernel init failed on Device {device_id}')
             kern = libpbc.PBC_build_k
             rys_envs = self.rys_envs
             rsjk_omega = -self.omega
@@ -477,7 +482,7 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
@@ -662,7 +667,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         is_real = True
@@ -711,7 +716,6 @@ class PBCJKMatrixOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
-        libpbc.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
         libpbc.PBC_build_j.restype = ctypes.c_int
 
         uniq_l_ctr = cell.uniq_l_ctr
@@ -747,6 +751,9 @@ class PBCJKMatrixOpt:
 
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_j kernel init failed on Device {device_id}')
             kern = libpbc.PBC_build_j
             rys_envs = self.rys_envs
             rsjk_omega = -self.omega
@@ -952,8 +959,9 @@ class PBCJKMatrixOpt:
             nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
+            # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
             if absmax(dms.imag) > cell.precision*5e2:
-                raise NotImplementedError(
+                raise RuntimeError(
                     'The density matrix in the BvK supercell is expected to be real for '
                     'k-point calculations. However, non-negligible imaginary part is detected. '
                     'This may be caused by time-reversal symmetry breaking.')
@@ -1006,6 +1014,9 @@ class PBCJKMatrixOpt:
             t1 = log.timer_debug1(f'ejk_sr initialization on Device {device_id}', *t0)
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_jk_ip1 kernel init failed on Device {device_id}')
             kern = libpbc.PBC_per_atom_jk_ip1
             rys_envs = self.rys_envs
             omega = -self.omega
@@ -1384,8 +1395,9 @@ class PBCJKMatrixOpt:
             nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
+            # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
             if absmax(dms.imag) > cell.precision*5e2:
-                raise NotImplementedError(
+                raise RuntimeError(
                     'The density matrix in the BvK supercell is expected to be real for '
                     'k-point calculations. However, non-negligible imaginary part is detected. '
                     'This may be caused by time-reversal symmetry breaking.')
@@ -1439,6 +1451,9 @@ class PBCJKMatrixOpt:
             t1 = log.timer_debug1(f'ejk_sr_strain_deriv initialization on Device {device_id}', *t0)
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_jk_ip1 kernel init failed on Device {device_id}')
             kern = libpbc.PBC_jk_strain_deriv
             rys_envs = self.rys_envs
             omega = -self.omega
