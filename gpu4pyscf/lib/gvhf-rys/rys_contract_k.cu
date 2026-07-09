@@ -19,8 +19,6 @@
 #include <stdlib.h>
 #include <type_traits>
 
-template<class> struct rys_k_kernel_sycl_t;
-
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
@@ -739,7 +737,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
             auto dev_envs = *envs;
             sycl_get_queue()->submit([&](sycl::handler &cgh) {
               sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh);
-              cgh.parallel_for<rys_k_kernel_sycl_t<std::integral_constant<int,OFFSET>>>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
                 rys_k_kernel<OFFSET>(dev_envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                                      s_cond_ij, s_cond_kl, diffuse_exps, pool,
                                      head, p_gxyz_offset,
