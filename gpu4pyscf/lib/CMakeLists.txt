@@ -42,9 +42,10 @@ if (USE_SYCL)
   # frames file:line for gdb-oneapi, we downgrade the C++ -g to
   # -gline-tables-only below. Host-side full -g is re-added further down for the
   # host-only (C/Fortran) translation units, which never carry SYCL device code.
-  if (NOT CMAKE_BUILD_TYPE)
+  if (NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
   endif()
+  message(STATUS "SYCL build: CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
 
   # Downgrade any -g the selected build type injects into the C++ per-config
   # flags to host-only line tables. This keeps ocloc device compilation
