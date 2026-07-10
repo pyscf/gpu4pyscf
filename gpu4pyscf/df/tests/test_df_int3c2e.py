@@ -453,14 +453,16 @@ C2   -.3    .2     -.7''',
     opt = int3c2e_bdiv.Int3c2eOpt(SortedMole.from_mol(mol, decontract=True), auxmol)
     cderi, (pair_address, diags) = df._cholesky_eri(opt)
     row, col = divmod(pair_address, nao)
-    cderi = _unpack(cderi[0], row, col)
+    cderi = cp.vstack([cp.asarray(x) for x in cderi])
+    cderi = _unpack(cderi, row, col)
     dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
     assert abs(dat.get() - ref).max() < 1e-10
 
     opt = int3c2e_bdiv.Int3c2eOpt(SortedMole.from_mol(mol, decontract=False), auxmol)
     cderi, (pair_address, diags) = df._cholesky_eri(opt)
     row, col = divmod(pair_address, nao)
-    cderi = _unpack(cderi[0], row, col)
+    cderi = cp.vstack([cp.asarray(x) for x in cderi])
+    cderi = _unpack(cderi, row, col)
     dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
     assert abs(dat.get() - ref).max() < 1e-10
 

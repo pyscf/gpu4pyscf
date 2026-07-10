@@ -118,6 +118,12 @@ class DF(lib.StreamObject):
         device_id = cp.cuda.Device().id
         cderi_sparse = self._cderi[device_id]
         naux_slice = cderi_sparse.shape[0]
+        if naux_slice == 0:
+            # On multiple GPUs, cderi_sparse might be a zero-sized array.
+            # return a non-zero blksize to avoid potential issues in workspace
+            # size estimation and offsets computation.
+            return 1
+
         on_gpu = isinstance(cderi_sparse, cp.ndarray)
         if not on_gpu:
             # When cderi is stored on host memory, additional memory is required
@@ -151,6 +157,10 @@ class DF(lib.StreamObject):
         if blksize is None:
             blksize = self.get_blksize()
         blksize = min(blksize, naux_slice)
+        if blksize == 0:
+            # On multiple GPUs, cderi_sparse might be a zero-sized array
+            return
+
         on_gpu = isinstance(cderi_sparse, cp.ndarray)
 
         if unpack:
@@ -444,10 +454,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
 
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
-    if needs_recontraction:
-        batch_size = int(word_avail * .3) // naux_sorted
-    else:
-        batch_size = int(word_avail * .45) // naux_sorted
+    batch_size = int(word_avail * .2) // naux_sorted
 
     current_device = cp.cuda.device.get_device_id()
     eval_j3c, aux_sorting, ao_pair_offsets, _, bas_ij_batches = intopt.int3c2e_evaluator(
@@ -483,11 +490,9 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
     naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
 
     cp.get_default_memory_pool().free_all_blocks()
-    mem_avail = get_avail_mem(exclude_memory_pool=True)
-    word_avail = mem_avail // 8
     word_avail -= batch_size * naux
     if needs_recontraction:
-        word_avail -= batch_size * naux_per_device
+        word_avail -= cderi_batch_size * naux_per_device
 
     # Put cderi on GPU whenever possible
     on_gpu = True
@@ -498,8 +503,8 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             cderi_size = cderi_npairs * naux / num_devices * 8e-9
             raise MemoryError(f'Not enough GPU memory. cderi size = {cderi_size:.2f} GB')
         on_gpu = False
-    log.debug1('on_gpu=%s, nao_pairs=%d, naux_per_device=%d, batch_size=%d, num_batches=%d',
-               on_gpu, cderi_npairs, naux_per_device, batch_size, len(bas_ij_batches))
+    log.debug1('mem_avail=%.3f MB on_gpu=%s, nao_pairs=%d, naux_per_device=%d, batch_size=%d, num_batches=%d',
+               mem_avail, on_gpu, cderi_npairs, naux_per_device, batch_size, len(bas_ij_batches))
 
     if not on_gpu:
         cderi_cpu = empty_mapped((naux, cderi_npairs))
@@ -528,6 +533,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
                 cderi_gpu = ndarray((j3c.shape[0], naux), buffer=work2)
                 cderi_gpu = j3c.dot(c, out=cderi_gpu)
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
+                # TODO: async-write to host memory in another stream
                 err = libvhf_rys.transpose_write(
                     cderi_cpu.ctypes,
                     ctypes.cast(cderi_gpu.data.ptr, ctypes.c_void_p),
@@ -535,7 +541,6 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
                     ctypes.c_int(p0), ctypes.c_int(p1))
                 if err != 0:
                     raise RuntimeError('transpose_write cderi_cpu failed')
-                stream.synchronize()
 
         batch_iter = range(len(bas_ij_batches))
         multi_gpu.run(proc, args=(batch_iter,), non_blocking=True)

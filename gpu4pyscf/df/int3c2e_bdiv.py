@@ -171,7 +171,7 @@ class Int3c2eOpt:
         ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], bas_ij_cache, cart)
         nao_pair = ao_pair_loc[-1].get()
 
-        if ao_pair_batch_size is None or nao_pair < ao_pair_batch_size:
+        if ao_pair_batch_size is None or nao_pair <= ao_pair_batch_size:
             pair_splits = [0, len(shl_pair_offsets)-1]
             ao_pair_offsets = np.array([0, nao_pair])
 

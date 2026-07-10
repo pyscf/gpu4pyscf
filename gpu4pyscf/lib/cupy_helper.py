@@ -1169,7 +1169,7 @@ def sandwich_dot(a, c, out=None):
         out = out[0]
     return out
 
-MEMPOOL_THRESHOLD = 100000000
+MEMPOOL_THRESHOLD = 100*1024*1024
 
 def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     '''

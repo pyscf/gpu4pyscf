@@ -1386,22 +1386,28 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                 dfobj._cderi[device_id] = a
             multi_gpu.run(transfer_to_host, non_blocking=True)
 
+    if not with_k:
+        assert with_j
+        pair_addresses, cderi_diag = dfobj._cderi_idx
+        dm_sparse = dms.reshape(nspin,n_dm,nao**2)[:,:,pair_addresses]
+        if nspin == 2:
+            dm_sparse = dm_sparse.sum(axis=0)
+        else:
+            dm_sparse = dm_sparse[0]
+        dm_sparse *= 2
+        dm_sparse[:,cderi_diag] *= .5
+
     def proc():
         vj = vk = None
         if with_k:
-            vk = cp.zeros(mo1.shape)
+            _mo1 = cp.asarray(mo1)
+            _occ_coeff = cp.asarray(occ_coeff)
+            vk = cp.zeros_like(_mo1)
             if with_j:
                 vj = cp.zeros_like(vk)
         elif with_j:
-            pair_addresses, cderi_diag = dfobj._cderi_idx
-            dm_sparse = dms.reshape(nspin,n_dm,nao**2)[:,:,cp.asarray(pair_addresses)]
-            if nspin == 2:
-                dm_sparse = dm_sparse.sum(axis=0)
-            else:
-                dm_sparse = dm_sparse[0]
-            dm_sparse *= 2
-            dm_sparse[:,cp.asarray(cderi_diag)] *= .5
-            vj = cp.zeros_like(dm_sparse)
+            _dm_sparse = cp.asarray(dm_sparse)
+            vj = cp.zeros_like(_dm_sparse)
 
         blksize = dfobj.get_blksize(mem_fraction=0.2)
         if with_k:
@@ -1419,21 +1425,21 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                 nL = len(cderi)
                 rhok = ndarray((nspin,nao,nocc,nL), buffer=buf)
                 rhok_oo = ndarray((nspin,nocc,nocc,nL), buffer=buf1)
-                contract('Lpq,sqj->spjL', cderi, occ_coeff, out=rhok)
-                contract('spjL,spi->sijL', rhok, occ_coeff, out=rhok_oo)
+                contract('Lpq,sqj->spjL', cderi, _occ_coeff, out=rhok)
+                contract('spjL,spi->sijL', rhok, _occ_coeff, out=rhok_oo)
                 for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
                     rhok1 = ndarray((i1-i0,nspin,nao,nocc,nL), buffer=buf2)
-                    contract('Lpq,nsqi->nspiL', cderi, mo1[i0:i1], out=rhok1)
+                    contract('Lpq,nsqi->nspiL', cderi, _mo1[i0:i1], out=rhok1)
                     contract('nspiL,sjiL->nspj', rhok1, rhok_oo, beta=1, out=vk[i0:i1])
 
                     rhok1_oo = ndarray((i1-i0,nspin,nocc,nocc,nL), buffer=buf3)
-                    contract('nspiL,spj->nsjiL', rhok1, occ_coeff, out=rhok1_oo)
+                    contract('nspiL,spj->nsjiL', rhok1, _occ_coeff, out=rhok1_oo)
                     contract('spiL,nsjiL->nspj', rhok, rhok1_oo, beta=1, out=vk[i0:i1])
                     if with_j:
                         rhoj1 = cp.einsum('nsiiL->nL', rhok1_oo)
                         contract('spiL,nL->nspi', rhok, rhoj1, beta=1, out=vj[i0:i1])
             elif with_j:
-                vj += dm_sparse.dot(cderi_tril.T).dot(cderi_tril)
+                vj += _dm_sparse.dot(cderi_tril.T).dot(cderi_tril)
         return vj, vk
 
     results = multi_gpu.run(proc, non_blocking=True)
