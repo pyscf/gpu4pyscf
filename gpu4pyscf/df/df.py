@@ -587,16 +587,16 @@ def _decompose_j2c(auxmol, aux_sorting=None, omega=None):
             cd_low, aux_coef.T, lower=True, overwrite_b=True).T
         tag = 'cd'
     except RuntimeError:
-        w, v = cupy.linalg.eigh(j2c)
+        w, v = cp.linalg.eigh(j2c)
         idx = cp.where(w > LINEAR_DEP_THR)[0]
         logger.debug1(auxmol, 'discard %d small eigenvectors for auxiliary dimension',
                       w.size - len(idx))
-        v = v[:,idx] / cupy.sqrt(w[idx])
+        v = v[:,idx] / cp.sqrt(w[idx])
         aux_coef = auxmol.apply_C_dot(v, axis=0)
         tag = 'ed'
 
     if aux_sorting is not None:
-        aux_coef, tmp = cupy.empty_like(aux_coef), aux_coef
+        aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
         aux_coef[aux_sorting] = tmp
     return aux_coef, tag
 

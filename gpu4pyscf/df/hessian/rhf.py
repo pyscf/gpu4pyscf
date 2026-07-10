@@ -288,7 +288,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
                     tmp = ndarray((nocc_in_batch, nao, dk), buffer=buf1)
                     for i in range(3):
                         #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[i,:,k0:k1]
-                        df._fill_symmetric(j3c, pair_addresses, compressed[i], k0, k1)
+                        df._fill_symmetric(j3c, _pair_addresses, compressed[i], k0, k1)
                         contract('pqr,pi->iqr', j3c, _dm_factor_l[:,nocc0:nocc1], out=tmp)
                         # Note d/dX = -d/dr, apply alpha=-1
                         contract('iqr,qj->rij', tmp, _dm_factor_l, alpha=-1,
@@ -324,7 +324,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
                 contract('r,s->rs', _auxvec, _auxvec, j_factor, 1, dm_aux)
             # (00|0)(2|0)(0|00)
             ejk_aux = _int2c2e_ip2_per_atom(
-                auxmol, dm_aux[aux_sorting[:,None], aux_sorting], omega)
+                auxmol, dm_aux[_aux_sorting[:,None], _aux_sorting], omega)
             ejk -= ejk_aux
 
             j2c_ip2 = None
@@ -1394,13 +1394,13 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                 vj = cp.zeros_like(vk)
         elif with_j:
             pair_addresses, cderi_diag = dfobj._cderi_idx
-            dm_sparse = dms.reshape(nspin,n_dm,nao**2)[:,:,pair_addresses]
+            dm_sparse = dms.reshape(nspin,n_dm,nao**2)[:,:,cp.asarray(pair_addresses)]
             if nspin == 2:
                 dm_sparse = dm_sparse.sum(axis=0)
             else:
                 dm_sparse = dm_sparse[0]
             dm_sparse *= 2
-            dm_sparse[:,cderi_diag] *= .5
+            dm_sparse[:,cp.asarray(cderi_diag)] *= .5
             vj = cp.zeros_like(dm_sparse)
 
         blksize = dfobj.get_blksize(mem_fraction=0.2)

@@ -463,3 +463,63 @@ C2   -.3    .2     -.7''',
     cderi = _unpack(cderi[0], row, col)
     dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
     assert abs(dat.get() - ref).max() < 1e-10
+
+def test_general_contraction():
+    from gpu4pyscf.gto.mole import SortedMole
+    auxmol = pyscf.M(
+        atom='''
+O    0.873    5.017    1.816
+H    1.128    5.038    2.848
+H    0.173    4.317    1.960
+C    .1    1.1     -.1
+C    -.3    .2     -.7''',
+        basis=[[0,[1,1]]])
+    naux = auxmol.nao
+
+    def eval_j3c(mol, decontract):
+        int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(
+            SortedMole.from_mol(mol, decontract=decontract), auxmol).build()
+        eval_j3c, _, _, _, bas_ij_batches = int3c2e_opt.int3c2e_evaluator(
+            cart=mol.cart, return_bas_ij_batches=True)
+        aux_coef = int3c2e_opt.aux_coeff
+        j3c = eval_j3c()
+        j3c = j3c.dot(aux_coef)
+        if decontract:
+            recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses = \
+                    int3c2e_bdiv._create_pair_recontraction(int3c2e_opt.mol, bas_ij_batches)
+            j3c = recontract(0, j3c)
+        else:
+            pair_addresses = int3c2e_opt.pair_and_diag_indices()[0]
+        nao = mol.nao
+        rows, cols = divmod(pair_addresses, nao)
+        out = cp.zeros((nao, nao, naux))
+        out[cols,rows] = j3c
+        out[rows,cols] = j3c
+        return out
+
+    mol = auxmol.copy()
+    mol.basis = 'ano'
+    mol.build(0,0)
+    ref = incore.aux_e2(mol, auxmol)
+    dat = eval_j3c(mol, True)
+    assert abs(dat.get() - ref).max() < 1e-10
+    dat = eval_j3c(mol, False)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+    mol = auxmol.copy()
+    mol.basis = 'def2-tzvp'
+    mol.build(0,0)
+    ref = incore.aux_e2(mol, auxmol)
+    dat = eval_j3c(mol, True)
+    assert abs(dat.get() - ref).max() < 1e-10
+    dat = eval_j3c(mol, False)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+    mol = auxmol.copy()
+    mol.basis = 'd-aug-cc-pvdz'
+    mol.build(0,0)
+    ref = incore.aux_e2(mol, auxmol)
+    dat = eval_j3c(mol, True)
+    assert abs(dat.get() - ref).max() < 1e-10
+    dat = eval_j3c(mol, False)
+    assert abs(dat.get() - ref).max() < 1e-10

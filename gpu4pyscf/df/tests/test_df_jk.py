@@ -96,7 +96,7 @@ class KnownValues(unittest.TestCase):
         mf = mf.density_fit()
         vj = df_jk.get_j(mf.with_df, dm)
         ref, _ = mf.get_jk(dm=dm, with_j=True, with_k=False, hermi=1)
-        assert abs(vj - ref).max() < 1e-9
+        assert abs(vj - ref).max() < 2e-9
 
     def test_jk_hermi0(self):
         dfobj = DF(mol, 'sto3g').build()

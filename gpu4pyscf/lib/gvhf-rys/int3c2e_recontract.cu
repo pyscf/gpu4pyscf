@@ -131,6 +131,23 @@ int pair_recontraction_info(int *inp_idx, int *out_idx, double *coef, int *idx_s
                     for (int jc = 0; jc < jctr; ++jc) {
                         int j = j0 + jc * dj + j_in_shell;
                         int ij = i * nao + j;
+                        // Ensure writing to the tril part of the output matrix.
+                        if (i < j) {
+                            // The off-block of the original mol can be both triu
+                            // and tril blocks. When one general contraction shell
+                            // of mol is decontracted to two types of primitive
+                            // shells, such as
+                            // C  S                   C  S
+                            // 9.0  0.7  0.0          9.0  0.7
+                            // 2.5  0.5  0.0    =>    2.5  0.5
+                            // 0.5  0.4  1.0          C  S
+                            //                        0.5  1.0
+                            // the two primitives of different atoms are collected
+                            // into two groups. In the bas_ij_idx of sorted_mol,
+                            // the cross-group block in the tril part can
+                            // contribute to the triu block of the original mol.
+                            ij = j * nao + i;
+                        }
                         if (output_lut[ij] == NOT_INITIALIZED) {
                             orig_ao_pair_id[cderi_npairs] = ij;
                             output_lut[ij] = cderi_npairs;
