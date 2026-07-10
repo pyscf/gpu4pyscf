@@ -155,7 +155,14 @@ O       3.665    1.316    1.319
 H       3.904    2.233    1.002
 H       4.224    0.640    0.837
 ''', basis='def2-tzvp')
-        with lib.temporary_env(df, get_avail_mem=lambda *args, **kw: 2000000):
+        mf = mol.RHF().to_gpu()
+        mf = mf.density_fit()
+        mf.with_df.use_gpu_memory = False
+        mf.run()
+        assert isinstance(mf.with_df._cderi[0], np.ndarray)
+        assert abs(mf.e_tot - -152.09455538734778) < 1e-8
+
+        with lib.temporary_env(df, get_avail_mem=lambda *args, **kw: 3000000):
             mf = mol.RHF().to_gpu()
             mf = mf.density_fit().run()
             assert isinstance(mf.with_df._cderi[0], np.ndarray)

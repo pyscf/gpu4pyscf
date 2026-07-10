@@ -73,7 +73,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     cp.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
-    num_occ_batches = int(nocc*nocc*naux*4*8 / (mem_avail*0.6*num_devices) + 1)
+    num_occ_batches = int(nocc*nocc*naux*4*8 / (mem_avail*0.4*num_devices) + 1)
     num_occ_batches = num_occ_batches * num_devices
     nocc_per_batch = (nocc + num_occ_batches - 1) // num_occ_batches
     # 8-element alignment
@@ -912,8 +912,9 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
         raise MemoryError(f'Insufficient GPU memory. Need {mem_req} MB more.')
     batch_size = min(batch_size, max(largest_shell_nao, naux))
 
-    eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega)
+    eval_j3c, aux_sorting, _, aux_offsets, clone_context = int3c2e_opt.int3c2e_evaluator(
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
+        return_clone_context=True, omega=omega)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
@@ -947,7 +948,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
         _aux_sorting = aux_sorting
         if device_id > 0:
             _eval_j3c, _aux_sorting = int3c2e_opt.int3c2e_evaluator(
-                aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega)[:2]
+                    clone_context=clone_context, omega=omega)[0]
 
         metric_w, metric_v = _factorize_j2c(auxmol, _aux_sorting, omega)
 
@@ -1359,11 +1360,11 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
     occ_coeff = dms.occ_coeff
     if mo_coeff.ndim == 2: # RHF
         mo_coeff = mo_coeff[None,:,:]
-        mo1 = mo1[:,None]
+        mo1 = mo1[None] # additional spin indices
         occ_coeff = occ_coeff[None,:]
     else: # UHF
-        mo1 = mo1.transpose(1,0,2,3)
-    n_dm, nspin, nao, nocc = mo1.shape
+        assert mo1.shape[0] == 2
+    nspin, n_dm, nao, nocc = mo1.shape
 
     if dfobj._cderi is None:
         log.debug('Build CDERI ...')
@@ -1402,7 +1403,7 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
         if with_k:
             _mo1 = cp.asarray(mo1)
             _occ_coeff = cp.asarray(occ_coeff)
-            vk = cp.zeros_like(_mo1)
+            vk = cp.zeros((n_dm, nspin, nao, nocc))
             if with_j:
                 vj = cp.zeros_like(vk)
         elif with_j:
@@ -1428,15 +1429,15 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                 contract('Lpq,sqj->spjL', cderi, _occ_coeff, out=rhok)
                 contract('spjL,spi->sijL', rhok, _occ_coeff, out=rhok_oo)
                 for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                    rhok1 = ndarray((i1-i0,nspin,nao,nocc,nL), buffer=buf2)
-                    contract('Lpq,nsqi->nspiL', cderi, _mo1[i0:i1], out=rhok1)
-                    contract('nspiL,sjiL->nspj', rhok1, rhok_oo, beta=1, out=vk[i0:i1])
+                    rhok1 = ndarray((nspin,i1-i0,nao,nocc,nL), buffer=buf2)
+                    contract('Lpq,snqi->snpiL', cderi, _mo1[:,i0:i1], out=rhok1)
+                    contract('snpiL,sjiL->nspj', rhok1, rhok_oo, beta=1, out=vk[i0:i1])
 
-                    rhok1_oo = ndarray((i1-i0,nspin,nocc,nocc,nL), buffer=buf3)
-                    contract('nspiL,spj->nsjiL', rhok1, _occ_coeff, out=rhok1_oo)
-                    contract('spiL,nsjiL->nspj', rhok, rhok1_oo, beta=1, out=vk[i0:i1])
+                    rhok1_oo = ndarray((nspin,i1-i0,nocc,nocc,nL), buffer=buf3)
+                    contract('snpiL,spj->snjiL', rhok1, _occ_coeff, out=rhok1_oo)
+                    contract('spiL,snjiL->nspj', rhok, rhok1_oo, beta=1, out=vk[i0:i1])
                     if with_j:
-                        rhoj1 = cp.einsum('nsiiL->nL', rhok1_oo)
+                        rhoj1 = cp.einsum('sniiL->nL', rhok1_oo)
                         contract('spiL,nL->nspi', rhok, rhoj1, beta=1, out=vj[i0:i1])
             elif with_j:
                 vj += _dm_sparse.dot(cderi_tril.T).dot(cderi_tril)

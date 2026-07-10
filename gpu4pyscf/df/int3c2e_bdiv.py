@@ -144,7 +144,7 @@ class Int3c2eOpt:
 
     def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None,
                           reorder_aux=False, cart=None, pair_batch_by_l=False,
-                          return_bas_ij_batches=False,
+                          return_clone_context=False, clone_context=None,
                           omega=None, lr_factor=None, sr_factor=None):
         if self._int3c2e_envs is None:
             self.build()
@@ -159,60 +159,87 @@ class Int3c2eOpt:
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
-        if pair_batch_by_l:
-            bas_ij_cache = {k: v for k, v in mol.iter_pair_by_l(self.bas_ij_cache)}
+        if clone_context is None:
+            if cart is None:
+                cart = mol.mol.cart
+
+            if pair_batch_by_l:
+                bas_ij_cache = {k: v for k, v in mol.iter_pair_by_l(self.bas_ij_cache)}
+            else:
+                bas_ij_cache = self.bas_ij_cache
+            bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
+                bas_ij_cache, nsp_per_block[0]*4)
+            ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], bas_ij_cache, cart)
+            nao_pair = ao_pair_loc[-1].get()
+
+            if ao_pair_batch_size is None or nao_pair <= ao_pair_batch_size:
+                pair_splits = np.array([0, len(shl_pair_offsets)-1])
+                ao_pair_offsets = np.array([0, nao_pair])
+
+            elif pair_batch_by_l:
+                uniq_l = mol.uniq_l_ctr[:,0].tolist()
+                pair_batch_sizes = []
+                last_key = None
+                for (i, j), bas_ij in bas_ij_cache.items():
+                    key = (uniq_l[i], uniq_l[j])
+                    if key != last_key:
+                        last_key = key
+                        pair_batch_sizes.append(bas_ij.size)
+                    else:
+                        pair_batch_sizes[-1] += bas_ij.size
+                ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
+                pair_splits = np.append(0, np.searchsorted(
+                    shl_pair_offsets.get(), np.cumsum(pair_batch_sizes), side='left'))
+                ao_pair_offsets = ao_pair_offsets[pair_splits]
+                assert max(ao_pair_offsets[1:]-ao_pair_offsets[:-1]) < ao_pair_batch_size
+
+            else:
+                ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
+                pair_splits = splits_by_blocksize(ao_pair_offsets, ao_pair_batch_size)
+                ao_pair_offsets = ao_pair_offsets[pair_splits]
+
+            l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+            uniq_l_ctr_aux = auxmol.uniq_l_ctr
+            aux_loc = auxmol.ao_loc
+            if aux_batch_size is None:
+                ksh_offsets_cpu = l_ctr_aux_offsets
+                aux_splits = [0, len(ksh_offsets_cpu)-1]
+            else:
+                l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
+                    l_ctr_aux_offsets, uniq_l_ctr_aux, aux_batch_size)
+                ksh_offsets_cpu = l_ctr_aux_offsets
+                aux_splits = range(len(ksh_offsets_cpu))
+            aux_offsets = aux_loc[ksh_offsets_cpu[aux_splits]]
+            if reorder_aux:
+                aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
+            else:
+                aux_sorting = slice(aux_loc[-1])
+
+            # Save the context for rebuilding evaluate_j3c on multiple GPUs
+            clone_context = (bas_ij_idx, shl_pair_offsets, pair_splits, cart,
+                             ksh_offsets_cpu, aux_splits, aux_sorting)
         else:
-            bas_ij_cache = self.bas_ij_cache
-        bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-            bas_ij_cache, nsp_per_block[0]*4)
+            # Restore the context for running evaluate_j3c on multiple GPUs
+            bas_ij_idx, shl_pair_offsets, pair_splits, cart, \
+                    ksh_offsets_cpu, aux_splits, aux_sorting = clone_context
 
-        if cart is None:
-            cart = mol.mol.cart
-        ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], bas_ij_cache, cart)
-        nao_pair = ao_pair_loc[-1].get()
+            bas_ij_idx = cp.asarray(bas_ij_idx)
+            shl_pair_offsets = cp.asarray(shl_pair_offsets)
 
-        if ao_pair_batch_size is None or nao_pair <= ao_pair_batch_size:
-            pair_splits = [0, len(shl_pair_offsets)-1]
-            ao_pair_offsets = np.array([0, nao_pair])
+            ish, jsh = divmod(bas_ij_idx, mol.nbas)
+            ls = mol._bas[:,ANG_OF]
+            if cart:
+                nf = cp.asarray((ls + 1) * (ls + 2) // 2)
+            else:
+                nf = cp.asarray(ls * 2 + 1)
+            ao_pair_counts = nf[ish] * nf[jsh]
+            ao_pair_loc = cp.asarray(cp.append(np.int32(0), ao_pair_counts.cumsum()), dtype=np.int32)
+            ao_pair_offsets = ao_pair_loc[shl_pair_offsets[pair_splits]].get()
 
-        elif pair_batch_by_l:
-            uniq_l = mol.uniq_l_ctr[:,0].tolist()
-            pair_batch_sizes = []
-            last_key = None
-            for (i, j), bas_ij in bas_ij_cache.items():
-                key = (uniq_l[i], uniq_l[j])
-                if key != last_key:
-                    last_key = key
-                    pair_batch_sizes.append(bas_ij.size)
-                else:
-                    pair_batch_sizes[-1] += bas_ij.size
-            ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
-            pair_splits = np.append(0, np.searchsorted(
-                shl_pair_offsets.get(), np.cumsum(pair_batch_sizes), side='left'))
-            ao_pair_offsets = ao_pair_offsets[pair_splits]
-            assert max(ao_pair_offsets[1:]-ao_pair_offsets[:-1]) < ao_pair_batch_size
-
-        else:
-            ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
-            pair_splits = splits_by_blocksize(ao_pair_offsets, ao_pair_batch_size)
-            ao_pair_offsets = ao_pair_offsets[pair_splits]
-
-        l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
-        uniq_l_ctr_aux = auxmol.uniq_l_ctr
-        aux_loc = auxmol.ao_loc
-        if aux_batch_size is None:
-            ksh_offsets_cpu = l_ctr_aux_offsets
-            aux_splits = [0, len(ksh_offsets_cpu)-1]
-        else:
-            l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
-                l_ctr_aux_offsets, uniq_l_ctr_aux, aux_batch_size)
-            ksh_offsets_cpu = l_ctr_aux_offsets
-            aux_splits = range(len(ksh_offsets_cpu))
-        aux_offsets = aux_loc[ksh_offsets_cpu[aux_splits]]
-        if reorder_aux:
-            aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
-        else:
-            aux_sorting = slice(aux_loc[-1])
+            aux_loc = auxmol.ao_loc
+            aux_offsets = aux_loc[ksh_offsets_cpu[aux_splits]]
+            if isinstance(aux_sorting, cp.ndarray):
+                aux_sorting = cp.asarray(aux_sorting)
 
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
         shl_pair_batches = len(ao_pair_offsets) - 1
@@ -263,11 +290,10 @@ class Int3c2eOpt:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out
 
-        if return_bas_ij_batches:
-            bas_ij_splits = shl_pair_offsets[pair_splits].get()
-            bas_ij_batches = cp.split(bas_ij_idx, bas_ij_splits[1:-1])
+
+        if return_clone_context:
             return (evaluate_j3c, aux_sorting, ao_pair_offsets, aux_offsets,
-                    bas_ij_batches)
+                    clone_context)
         else:
             return evaluate_j3c, aux_sorting, ao_pair_offsets, aux_offsets
 
@@ -637,7 +663,7 @@ def int2c2e_ip1(mol, sort_output=True, omega=None):
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1
     return int2c2e_ip1(mol, sort_output=sort_output, omega=omega)
 
-def _create_pair_recontraction(mol, bas_ij_batches, cart=None):
+def _create_pair_recontraction(mol, int3c2e_context):
     assert isinstance(mol, SortedMole)
     recontract_bas = cp.asnumpy(mol.recontract_bas)
     recontract_coef = cp.asnumpy(mol.recontract_coef)
@@ -655,9 +681,12 @@ def _create_pair_recontraction(mol, bas_ij_batches, cart=None):
             np.arange(mol.nbas) - np.repeat(prim_offsets[:-1], nprims)
 
     nctrs = recontract_bas[orig_shell_for_sorted_bas, NCTR_OF]
+
+    bas_ij_idx, shl_pair_offsets, pair_splits, cart = int3c2e_context[:4]
+    bas_ij_splits = shl_pair_offsets[pair_splits].get()
+    bas_ij_batches = cp.split(bas_ij_idx, bas_ij_splits[1:-1])
+
     l = mol._bas[:,ANG_OF]
-    if cart is None:
-        cart = mol.mol.cart
     if cart:
         nf = (l + 1) * (l + 2) // 2 * nctrs
     else:

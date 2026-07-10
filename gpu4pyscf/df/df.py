@@ -457,15 +457,23 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
     batch_size = int(word_avail * .2) // naux_sorted
 
     current_device = cp.cuda.device.get_device_id()
-    eval_j3c, aux_sorting, ao_pair_offsets, _, bas_ij_batches = intopt.int3c2e_evaluator(
+    eval_j3c, aux_sorting, ao_pair_offsets, _, clone_context = intopt.int3c2e_evaluator(
         ao_pair_batch_size=batch_size, reorder_aux=True,
-        pair_batch_by_l=needs_recontraction, return_bas_ij_batches=True,
+        pair_batch_by_l=needs_recontraction, return_clone_context=True,
         omega=omega)
-    cderi_batch_size = batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
+    cderi_batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
+    # The actual batch size (cderi_batch_size) can be larger than batch_size.
+    # * When the get_avail_mem() returns a small amount of memory. In that case,
+    # the eval_j3c function might still run.
+    # * When multi-gpu is enabled, clone_context is used to clone eval_j3c on
+    # different GPUs, to ensure the same offsets, and pair_addresses are created
+    # across devices.
+    batch_size = min(batch_size, cderi_batch_size)
+    num_batches = len(ao_pair_offsets) - 1
 
     if needs_recontraction:
         recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses = \
-                int3c2e_bdiv._create_pair_recontraction(sorted_mol, bas_ij_batches)
+                int3c2e_bdiv._create_pair_recontraction(sorted_mol, clone_context)
         cderi_offsets = np.append(0, np.cumsum(contracted_ao_pair_counts))
         cderi_batch_size = int(max(contracted_ao_pair_counts))
         cderi_npairs = len(pair_addresses)
@@ -504,22 +512,20 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             raise MemoryError(f'Not enough GPU memory. cderi size = {cderi_size:.2f} GB')
         on_gpu = False
     log.debug1('mem_avail=%.3f MB on_gpu=%s, nao_pairs=%d, naux_per_device=%d, batch_size=%d, num_batches=%d',
-               mem_avail, on_gpu, cderi_npairs, naux_per_device, batch_size, len(bas_ij_batches))
+               mem_avail, on_gpu, cderi_npairs, naux_per_device, batch_size, num_batches)
 
     if not on_gpu:
         cderi_cpu = empty_mapped((naux, cderi_npairs))
 
         def proc(batch_iter):
             device_id = cp.cuda.device.get_device_id()
-            stream = cp.cuda.get_current_stream()
             c = cp.asarray(aux_coef)
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
-                    ao_pair_batch_size=batch_size, reorder_aux=True, omega=omega,
-                    pair_batch_by_l=needs_recontraction)[0]
+                    clone_context=clone_context, omega=omega)[0]
 
-            work = cp.empty(naux_sorted * batch_size)
+            work = cp.empty(naux_sorted * cderi_batch_size)
             if needs_recontraction:
                 work1 = cp.empty(naux_sorted * cderi_batch_size)
             work2 = cp.empty(naux * cderi_batch_size)
@@ -542,7 +548,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
                 if err != 0:
                     raise RuntimeError('transpose_write cderi_cpu failed')
 
-        batch_iter = range(len(bas_ij_batches))
+        batch_iter = iter(range(num_batches))
         multi_gpu.run(proc, args=(batch_iter,), non_blocking=True)
 
         # Ensure data are fully written to host memory.
@@ -560,15 +566,14 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
-                    ao_pair_batch_size=batch_size, reorder_aux=True, omega=omega,
-                    pair_batch_by_l=needs_recontraction)[0]
+                    clone_context=clone_context, omega=omega)[0]
 
             out = cp.empty((cderi_npairs, aux1-aux0))
-            work = cp.empty(naux_sorted * batch_size)
+            work = cp.empty(naux_sorted * cderi_batch_size)
             if needs_recontraction:
-                work1 = cp.empty(naux_per_device * batch_size)
+                work1 = cp.empty(naux_per_device * cderi_batch_size)
 
-            for batch_id in range(len(bas_ij_batches)):
+            for batch_id in range(num_batches):
                 j3c = _eval_j3c(batch_id, out=work)
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 if needs_recontraction:
