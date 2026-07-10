@@ -1,8 +1,40 @@
 v1.8.0 (2026-07-20)
 -------------------
-* API updates
-  - The eval_xc_eff function of numint module now returns exc as a 1-dimensional
-    (N,) array instead of a (N, 1) array.
+* New Features
+  - geometry optimization for PM6.
+  - spin_square methods for the RHF and GHF classes
+  - X2C1e support and density fitting for GHF/GKS
+  - Spin-free X2C1e for PBC calculations
+  - Second-order SCF for PBC DFT
+  - Time-reversal symmetry support for k-point sampling calculations
+  - Stress tensor using the multigrid integrator
+* Improvements
+  - Refactore the VV10 Hessian implementation to improve performance.
+  - Eigenvalue decomposition is now used by default to handle the auxiliary basis linear dependency in PBC GDF.
+  - Refactore the molecular J/K matrix construction, improving K-matrix performance for range-separated hybrid functionals.
+  - Optimize int3c2e and auxvec contraction using the MD J-engine algorithm.
+  - Optimize multigrid density kernel (`evaluate_density_kernel`).
+  - Improve the stability of Hessian calculations for very large systems. (#783)
+  - Improve the stability of gradient calculations: changing DF gradient routine full-/short-range j2c inversion algorithm to CD. (#803)
+  - Refactor the density fitting generation code to reduce memory usage, improve density fitting initialization time.
+  - Optimiz density fitting integral evaluation for generally contracted basis sets.
+  - Improve the memory efficiency of loading and decompressing the cderi tensor.
+  - Refactor the density fitting Hessian implementation to reduce memory usage, support larger systems, and enable multi-GPU execution.
+  - Enhance scf_summary to include the energy gap, Ecoul, and Exc.
+  - Reduce memory usage and Optimize memory allocation efficiency in numint.eval_xc_eff (#787)
+  - Reduce memory footprint and increase the speed for C-PCM on large molecule (#809)
+* Fixes
+  - Host memory limit checks and early termination when allocating large mapped memory. (#781)
+  - OOM error in get_j computation for all-electron KHF (#782)
+  - Incorrect gout_pattern in molecular JK build kernel (#791)
+  - pseudopotential gradient when nexp parameter is zero (#795)
+  - Avoid int32 overflow in multigrid v2 kernel
+  - OOM issue caused by low ke_cutoff. (#804)
+  - Setting per-device shared memory attributes on each GPU, fixing shared memory configuration for kernels running on multiple GPUs.
+  - Fix a bug when ghost atom has no grid with significant density, vv10 grid response gradient/hessian fails
+  - Fix bad atomic radii assigned to ghost atom, which causes a bad Becke partition and a negative BSSE (#814)
+* API Updates
+  - Function numint.eval_xc_eff now returns exc as a vector with shape (N,) instead of an array with shape (N, 1).
 
 
 v1.7.5 (2026-07-10)
@@ -28,6 +60,7 @@ v1.7.2 (2026-06-15)
 * Improvements
   - A dedicated SCF class to handle one-electron systems
   - Add spin_square methods for all SCF classes
+  - Add HF1e (#785)
 * Fixes
   - Attempt to improve the stability of Hessian calculation on a very big system (#783)
 
