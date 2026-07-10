@@ -1,8 +1,35 @@
-v1.8.0 (2026-??-??)
+v1.8.0 (2026-07-20)
 -------------------
 * API updates
   - The eval_xc_eff function of numint module now returns exc as a 1-dimensional
     (N,) array instead of a (N, 1) array.
+
+
+v1.7.5 (2026-07-10)
+-------------------
+* Improvements
+  - Update dispersion parser for wb97x-d4 backward compatibility (resolve to d4:wb97x-2008)
+
+
+v1.7.4 (2026-06-23)
+-------------------
+* Improvements
+  - Check host memory limits before allocating large mapped memory
+
+
+v1.7.3 (2026-06-17)
+-------------------
+* Fixes
+  - Restore the grids_response_cc and grids_noresponse_cc APIs that were removed in 1.7.1
+
+
+v1.7.2 (2026-06-15)
+-------------------
+* Improvements
+  - A dedicated SCF class to handle one-electron systems
+  - Add spin_square methods for all SCF classes
+* Fixes
+  - Attempt to improve the stability of Hessian calculation on a very big system (#783)
 
 
 v1.7.1 (2026-05-28)

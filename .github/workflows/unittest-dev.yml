@@ -6,7 +6,7 @@ on:
       pyscf_version:
         required: false
         default: "2.12.2"
-      cupy_versoin:
+      cupy_version:
         required: false
         default: "13.6.0"
       cutensor_version:
@@ -26,6 +26,10 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: Dump inputs
+      run: |
+        echo '${{ toJson(github.event.inputs) }}'
+
     - name: Pull CUDA Devel Image
       run: |
         docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
@@ -41,5 +45,5 @@ jobs:
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.8 \
           /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && \
-                        pip3 install pyscf==${{ github.event.inputs.pyscf_version }} cupy-cuda12x==${{ github.event.inputs.cupy_versoin }} cutensor-cu12==${{ github.event.inputs.cutensor_version }} gpu4pyscf-libxc-cuda12x==${{ github.event.inputs.libxc_version }} pyscf-dispersion==${{ github.event.inputs.dispersion_version }} && \
+                        pip3 install pyscf==${{ github.event.inputs.pyscf_version }} cupy-cuda12x==${{ github.event.inputs.cupy_version }} cutensor-cu12==${{ github.event.inputs.cutensor_version }} gpu4pyscf-libxc-cuda12x==${{ github.event.inputs.libxc_version }} pyscf-dispersion==${{ github.event.inputs.dispersion_version }} && \
                         source build.sh && pytest -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
