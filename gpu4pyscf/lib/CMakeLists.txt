@@ -31,14 +31,31 @@ if (USE_SYCL)
 
   add_compile_definitions(USE_SYCL=1)
 
-  # Force the SYCL build to Release so CMake does NOT inject -g globally.
-  # With AOT (-fsycl-targets=spir64_gen) a -g from RelWithDebInfo is forwarded
-  # into the device path and reaches `ocloc -options "-g"`, which compiles
-  # device code in debug mode (disables optimization). Release keeps the
-  # device backend at its default full optimization. Host-side debug info is
-  # re-added below for the host-only (C/Fortran) translation units, which never
-  # carry SYCL device code.
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+  # Honor a user-supplied CMAKE_BUILD_TYPE (e.g. passed through
+  # CMAKE_CONFIGURE_ARGS="-DCMAKE_BUILD_TYPE=RelWithDebInfo"). When nothing is
+  # supplied, default to Release.
+  #
+  # With AOT (-fsycl-targets=spir64_gen) a -g injected by RelWithDebInfo/Debug
+  # into CMAKE_CXX_FLAGS_<CFG> is forwarded into the device path and reaches
+  # `ocloc -options "-g"`, which compiles device code in debug mode (disables
+  # optimization). To keep the device backend optimized while still giving host
+  # frames file:line for gdb-oneapi, we downgrade the C++ -g to
+  # -gline-tables-only below. Host-side full -g is re-added further down for the
+  # host-only (C/Fortran) translation units, which never carry SYCL device code.
+  if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+  endif()
+
+  # Downgrade any -g the selected build type injects into the C++ per-config
+  # flags to host-only line tables. This keeps ocloc device compilation
+  # optimized (no -options "-g") while preserving host file:line info. C and
+  # Fortran host TUs keep full -g via the generator expressions below.
+  foreach(_cfg RELWITHDEBINFO DEBUG)
+    if (CMAKE_CXX_FLAGS_${_cfg})
+      string(REPLACE "-g" "-gline-tables-only"
+             CMAKE_CXX_FLAGS_${_cfg} "${CMAKE_CXX_FLAGS_${_cfg}}")
+    endif()
+  endforeach()
 
   add_compile_options(
     -fsycl
