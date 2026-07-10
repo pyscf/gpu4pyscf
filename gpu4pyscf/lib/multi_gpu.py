@@ -163,6 +163,13 @@ def array_reduce(array_list, inplace=False):
                         else:
                             dst[p0:p1] += cp.asarray(src[p0:p1])
         step *= 2
+    # It's important to synchronize with the main thread before returning from
+    # this function. The CPU thread may return before the GPU transfers completed.
+    # In the caller, the worker thread contexts (which own the arrays on
+    # the other GPU devices) may be released. Resources on those devices are
+    # recycled while the transfers are still in progress. This can
+    # result in incomplete data transfers or illegal memory accesses.
+    synchronize()
     return array_list[0].reshape(out_shape)
 
 def property(cache=None):

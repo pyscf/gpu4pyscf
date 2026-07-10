@@ -1186,7 +1186,7 @@ def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     cuda_malloc = cupy.cuda.memory._malloc
     default_mempool_malloc = cupy.get_default_memory_pool().malloc
     def malloc(size):
-        if size >= n_bytes_threshold:
+        if size > n_bytes_threshold:
             return cuda_malloc(size)
         return default_mempool_malloc(size)
     cupy.cuda.set_allocator(malloc)

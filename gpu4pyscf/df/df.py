@@ -523,7 +523,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
-                    clone_context=clone_context, omega=omega)[0]
+                    reorder_aux=True, clone_context=clone_context, omega=omega)[0]
 
             work = cp.empty(naux_sorted * cderi_batch_size)
             if needs_recontraction:
@@ -566,7 +566,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
-                    clone_context=clone_context, omega=omega)[0]
+                    reorder_aux=True, clone_context=clone_context, omega=omega)[0]
 
             out = cp.empty((cderi_npairs, aux1-aux0))
             work = cp.empty(naux_sorted * cderi_batch_size)
