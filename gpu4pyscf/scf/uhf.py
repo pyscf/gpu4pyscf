@@ -261,22 +261,22 @@ class UHF(hf.SCF):
 
     def get_occ(self, mo_energy=None, mo_coeff=None):
         if mo_energy is None: mo_energy = self.mo_energy
-        mo_energy = cupy.asnumpy(mo_energy)
-        e_idx_a = np.argsort(mo_energy[0])
-        e_idx_b = np.argsort(mo_energy[1])
+        mo_energy = cupy.asarray(mo_energy)
+        e_idx_a = cupy.argsort(mo_energy[0])
+        e_idx_b = cupy.argsort(mo_energy[1])
         nmo = len(e_idx_a)
         n_a, n_b = self.nelec
 
         if n_a < nmo and n_b < nmo:
-            homo = homo_a = mo_energy[0,e_idx_a[n_a-1]]
+            homo = homo_a = mo_energy[0, e_idx_a[n_a-1]].item()
             homo_b = None
             if n_b > 0:
-                homo_b = mo_energy[1,e_idx_b[n_b-1]]
+                homo_b = mo_energy[1, e_idx_b[n_b-1]].item()
                 homo = max(homo, homo_b)
-            lumo = lumo_b = mo_energy[1,e_idx_b[n_b]]
+            lumo = lumo_b = mo_energy[1, e_idx_b[n_b]].item()
             lumo_a = None
             if n_a < nmo:
-                lumo_a = mo_energy[1,e_idx_a[n_a]]
+                lumo_a = mo_energy[1, e_idx_a[n_a]].item()
                 lumo = min(lumo, lumo_a)
             gap = (lumo - homo) * HARTREE2EV
             self.scf_summary['gap'] = gap
@@ -299,8 +299,8 @@ class UHF(hf.SCF):
                                f'nelec ({n_a}, {n_b}) > Nmo ({nmo})')
 
         mo_occ = cupy.zeros((2, nmo))
-        mo_occ[0,e_idx_a[:n_a]] = 1
-        mo_occ[1,e_idx_b[:n_b]] = 1
+        mo_occ[0, e_idx_a[:n_a]] = 1
+        mo_occ[1, e_idx_b[:n_b]] = 1
 
         if mo_coeff is not None and self.verbose >= logger.DEBUG:
             ss, s = self.spin_square((mo_coeff[0][:,mo_occ[0]>0],

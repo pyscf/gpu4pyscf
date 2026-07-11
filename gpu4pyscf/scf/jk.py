@@ -58,8 +58,8 @@ THREADS = 256
 GROUP_SIZE = 256
 Q_COND_MARGIN = 4.
 
-libvhf_rys.RYS_build_k_init(ctypes.c_int(SHM_SIZE))
-libvhf_rys.RYS_build_jk_init(ctypes.c_int(SHM_SIZE))
+libvhf_rys.RYS_build_k_init.restype = ctypes.c_int
+libvhf_rys.RYS_build_jk_init.restype = ctypes.c_int
 
 def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None):
     '''Compute J, K matrices
@@ -109,7 +109,6 @@ def get_k(mol, dm, hermi=0, vhfopt=None, omega=None, lr_factor=None, sr_factor=N
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
-    dms = cp.asarray(dms, order='C')
 
     vk = vhfopt.get_k(dms, hermi, log, omega, lr_factor, sr_factor)
     #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
@@ -133,14 +132,13 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     assert n_dm == 1
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
-    dms = cp.asarray(dms, order='C')
     if hermi != 1:
         dms = transpose_sum(dms)
         dms *= .5
 
     vj = vhfopt.get_j(dms, log)
-    #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = vhfopt.apply_coeff_CT_mat_C(cp.asarray(vj))
+    #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vj, vhfopt.coeff)
+    vj = vhfopt.apply_coeff_CT_mat_C(vj)
     vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)
     return vj
@@ -444,6 +442,9 @@ class _VHFOpt:
             stream = cp.cuda.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
+            err = libvhf_rys.RYS_build_jk_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError('RYS build_jk CUDA kernel initialization failed')
             dms = cp.asarray(dms) # transfer to current device
             dm_cond = cp.asarray(dm_cond)
 
@@ -739,6 +740,9 @@ class _VHFOpt:
             stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
+            err = libvhf_rys.RYS_build_k_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError('RYS build_k CUDA kernel initialization failed')
             dms = cp.asarray(dms) # transfer to current device
             dm_cond = cp.asarray(dm_cond)
 

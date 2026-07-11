@@ -55,7 +55,7 @@ libvhf_rys.RYS_per_atom_jk_ip1.restype = ctypes.c_int
 #     dd_cache_size = nf * min(THREADS, _nearest_power2(SHM_SIZE//(g_size*3*8)))
 DD_CACHE_MAX = 101250 * (SHM_SIZE//(45*1024))
 
-libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
+libvhf_rys.RYS_build_vjk_ip1_init.restype = ctypes.c_int
 
 def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
     '''
@@ -97,6 +97,9 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
         device_id = cp.cuda.device.get_device_id()
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
+        err = libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
+        if err != 0:
+            raise RuntimeError('RYS build_vjk_ip1 CUDA kernel initialization failed')
 
         timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
@@ -486,10 +489,7 @@ class Gradients(GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
-        ejk = self.energy_ee(mol, dm)
-        # Scale .5 to match the value of the contraction of dm and Veff
-        ejk *= .5
-        return ejk
+        raise DeprecationWarning
 
     def energy_ee(self, mol, dm):
         return self.jk_energy_per_atom(dm)

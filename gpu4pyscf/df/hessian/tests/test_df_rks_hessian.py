@@ -62,11 +62,11 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
 
         hessobj = mf.Hessian()
+        hessobj.auxbasis_response = 2
         hess_cpu = hessobj.kernel()
 
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
-        hessobj.auxbasis_response = 1
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
@@ -78,11 +78,11 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
 
         hessobj = mf.Hessian()
+        hessobj.auxbasis_response = 2
         hess_cpu = hessobj.kernel()
 
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
-        hessobj.auxbasis_response = 1
         hessobj.base.cphf_grids = hessobj.base.grids
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
@@ -95,11 +95,11 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
 
         hessobj = mf.Hessian()
+        hessobj.auxbasis_response = 2
         hess_cpu = hessobj.kernel()
 
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
-        hessobj.auxbasis_response = 1
         hessobj.base.cphf_grids = hessobj.base.grids
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5

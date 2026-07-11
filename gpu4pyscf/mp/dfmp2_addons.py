@@ -344,8 +344,8 @@ def get_j2c_bdiv(intopt):
     cp.ndarray
         2c-2e ERI on GPU.
     """
-    aux = intopt.auxmol.mol
-    return gpu4pyscf.df.int3c2e_bdiv.int2c2e(aux)
+    auxmol = intopt.auxmol
+    return gpu4pyscf.df.int3c2e_bdiv.int2c2e(auxmol)
 
 
 def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):

@@ -29,8 +29,6 @@ import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.df.rsdf_builder import (
-    estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff)
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import member
@@ -39,6 +37,7 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray)
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.__config__ import num_devices
+from gpu4pyscf.df.df import libvhf_rys
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
@@ -398,7 +397,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
             p0 = ao_pair_offsets[batch_id]
             p1 = ao_pair_offsets[batch_id+1]
             #:cderi[:,p0:p1] = j3c.get()
-            libpbc.store_col_segment(
+            libvhf_rys.store_col_segment(
                 cderi.ctypes,
                 ctypes.cast(j3c.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs),
@@ -562,7 +561,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
                 p0 = ao_pair_offsets[batch_id]
                 p1 = ao_pair_offsets[batch_id+1]
                 #:cderi[kp][:,p0:p1] = cderi_k.get()
-                libpbc.store_col_segment(
+                libvhf_rys.store_col_segment(
                     cderi[kp].ctypes,
                     ctypes.cast(cderi_k.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux),
@@ -746,9 +745,9 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     on_host = not isinstance(cderi_compressed, cp.ndarray)
     if cderi_compressed.flags.c_contiguous:
         if cderi_compressed.dtype == np.float64:
-            kern = libpbc.decompress_and_transpose
+            kern = libvhf_rys.decompress_and_transpose
         else:
-            kern = libpbc.z_decompress_and_transpose
+            kern = libvhf_rys.z_decompress_and_transpose
         if on_host:
             j3c_ptr = cderi_compressed.ctypes
         else:
@@ -757,7 +756,8 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
             fill_triu = True
         else:
             fill_triu = False
-        kern(ctypes.cast(cderi.data.ptr, ctypes.c_void_p), j3c_ptr,
+        kern(ctypes.cast(cderi.data.ptr, ctypes.c_void_p), ctypes.c_int(naux),
+             j3c_ptr,
              ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
              ctypes.c_int(nao_pairs), ctypes.c_int(nL*nao), ctypes.c_int(naux),
              ctypes.c_int(0), ctypes.c_int(naux),
@@ -827,9 +827,6 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)
-    cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-    omega = 0.3
-    log.debug('omega guess in get_pp_loc_part1 = %g', omega)
 
     is_single_kpt = kpts is not None and kpts.ndim == 1
     is_gamma_point = kpts is None or is_zero(kpts)
@@ -840,14 +837,24 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     else:
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
-    fakenuc = _fake_nuc(cell, with_pseudo=with_pseudo)
+    # Guess range-separation parameter based on system size
+    omega = 0.4
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    nGv = np.prod(mesh)
+    ke_cutoff *= (3e3/nGv)**(2./3)
+    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    mesh = cell.symmetrize_mesh(mesh)
+    log.debug('get_pp_loc_part1: omega = %g Ecut = %s mesh = %s',
+              omega, ke_cutoff, mesh)
+
+    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
     int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
     charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
     nuc = int3c2e_opt.contract_auxvec(charges, kpts)
 
-    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-    mesh = cell.cutoff_to_mesh(ke_cutoff)
-    mesh = cell.symmetrize_mesh(mesh)
     Gv, _, kws = cell.get_Gv_weights(mesh)
     if with_pseudo:
         #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
@@ -901,3 +908,40 @@ def get_pp(cell, kpts=None):
 
 class LinearDepencyError(RuntimeError):
     pass
+
+def estimate_ke_cutoff_for_omega(cell, omega, precision=None):
+    '''Energy cutoff for AFTDF to converge attenuated Coulomb in moment space
+    '''
+    if precision is None:
+        precision = cell.precision
+    # Errors are dominated by the Coulomb integrals of the most compact density.
+    # In this case, the error estimation can be approximated as
+    # sum_(G^2>Ecut) 4*pi/G^2 exp(-G^2/(4*omega^2))
+    #     ~ 16\pi^2 \int_sqrt(2*Ecut)^inf exp(-G^2/(4*omega^2)) dG
+    #     < 16\pi^2 * 2*omega^2 / sqrt(2*Ecut) exp(-Ecut/(2*omega^2))
+    exps, cs = extract_pgto_params(cell, 'compact')
+    exp_max = exps.max()
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    fac = 16*np.pi**2/cell.vol * 2*theta / precision
+    Ecut = 20.
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*theta
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*theta
+    return Ecut
+
+def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
+    '''The minimal omega in attenuated Coulomb given energy cutoff
+    '''
+    if precision is None:
+        precision = cell.precision
+    # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
+    # enough to converge the 2-electron integrals. A penalty term here is to
+    # reduce the error in integrals
+    exps, cs = extract_pgto_params(cell, 'compact')
+    exp_max = exps.max()
+    fac = 16*np.pi**2/cell.vol / (2*ke_cutoff)**.5 / precision
+    omega = 0.5
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    omega = (.5 * ke_cutoff / math.log(fac*2*theta))**.5
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    omega = (.5 * ke_cutoff / math.log(fac*2*theta))**.5
+    return omega

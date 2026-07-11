@@ -42,6 +42,7 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
+from gpu4pyscf.pbc.df.df_jk import _factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import (
     kpts_to_kmesh, double_translation_indices)
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
@@ -49,14 +50,16 @@ from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 
 __all__ = [
     'get_k',
 ]
 
 libpbc.PBC_build_k.restype = ctypes.c_int
-libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
-libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+libpbc.PBC_build_k_init.restype = ctypes.c_int
+libpbc.PBC_build_jk_ip1_init.restype = ctypes.c_int
+libpbc.PBC_build_j_init.restype = ctypes.c_int
 libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
 libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 
@@ -246,7 +249,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
@@ -349,6 +352,9 @@ class PBCJKMatrixOpt:
 
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_k kernel init failed on Device {device_id}')
             kern = libpbc.PBC_build_k
             rys_envs = self.rys_envs
             rsjk_omega = -self.omega
@@ -477,16 +483,17 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
 
-        mo_coeff = getattr(dm, 'mo_coeff', None)
-        mo_occ = getattr(dm, 'mo_occ', None)
+        orbl, orbr = _factorize_dm(dm, kpts)
         dm = cp.asarray(dm)
         dms = _format_dms(dm, kpts)
-        n_dm, nkpts, nao = dms.shape[:3]
+        n_dm, nkpts, nao, nocc = orbl.shape
+        if orbr is None or nocc * 2 >= nao:
+            orbl = None
 
         vk = cp.zeros((n_dm,nkpts,nao,nao), dtype=np.complex128)
         if (exxdiv == 'ewald' and
@@ -516,14 +523,14 @@ class PBCJKMatrixOpt:
         else:
             k_to_compute = np.ones(nkpts, dtype=np.int8)
 
-        if mo_coeff is None:
+        nao1 = cell.nao
+        if orbl is None:
             #dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
             #dms = dms.reshape(n_dm, nkpts, nao1, nao1)
             if dms.dtype != vk.dtype:
                 dms = dms.astype(vk.dtype)
             update_vk = aft_jk._update_vk_
 
-            nao1 = cell.nao
             Gpq_unit = nao**2*bvk_ncells
             unit = (nao1**2*bvk_ncells + # Gpq
                     max(nao1**2*bvk_ncells,
@@ -531,32 +538,7 @@ class PBCJKMatrixOpt:
                          Gpq_unit + # Gpq_conj[kj_idx]
                          n_dm*nkpts*nao1**2))) # contract('ngij,snjk->sngik', Gpq, dms)
         else:
-            # dm ~= dm_factor * dm_factor.T
-            # mo_coeff, mo_occ may not be a list of aligned array if
-            # remove_lin_dep was applied to scf object.
-            # We assume they are of the same length in this version.
-            mo_coeff = cp.asarray(mo_coeff)
-            mo_occ = cp.asarray(mo_occ)
-            if is_single_kpt:
-                if mo_coeff.ndim == 3:
-                    mo_coeff = mo_coeff[:,None]
-                    mo_occ = mo_occ[:,None]
-                else:
-                    mo_coeff = mo_coeff[None]
-                    mo_occ = mo_occ[None]
-            nocc = int((mo_occ > 0).sum(axis=-1).max().get())
-            if mo_coeff.ndim == 4:  # KUHF
-                occs = cp.array(mo_occ[:,:,:nocc], dtype=np.float64)
-                dm_factor = cp.array(mo_coeff[:,:,:,:nocc],
-                                     dtype=np.complex128, order='C', copy=True)
-            else:  # KRHF
-                occs = cp.asarray(mo_occ[None,:,:nocc], dtype=np.float64)
-                dm_factor = cp.array(mo_coeff[None,:,:,:nocc],
-                                     dtype=np.complex128, order='C', copy=True)
-            dm_factor *= cp.sqrt(occs)[:,:,None,:]
-            dms, dm_factor = dm_factor, None
-
-            nao1 = cell.nao
+            dms = orbl, orbr
             unit = (nao1**2*bvk_ncells + # Gpq
                     max(nao1**2*bvk_ncells,
                         (nao**2*bvk_ncells + # Gpq_conj
@@ -580,14 +562,16 @@ class PBCJKMatrixOpt:
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
         mesh = self.mesh
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
         ngrids = len(Gv)
         # vk can be scale by the Nk weight, by including in coulG weights
         kws /= nkpts
 
         avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .9)
         avail_mem -= n_dm*nkpts*nao1**2 * 16 # intermediates for vk or dms
-        Gblksize = max(16, int(avail_mem/(16*unit))//8*8)
+        Gblksize = int(avail_mem/(16*unit))//8*8
+        if Gblksize < 8:
+            raise MemoryError('Insufficient memory for evaluating ft_aopair')
         Gblksize = min(Gblksize, ngrids, 16384)
         log.debug1('Gblksize = %d', Gblksize)
 
@@ -607,12 +591,12 @@ class PBCJKMatrixOpt:
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
                 log.debug3('update_vk [%s:%s]', p0, p1)
                 Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
-                Gpq1 = _bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
+                Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
                 update_vk(vk, Gpq1, dms, wcoulG[p0:p1], ki_idx, kj_idx,
                           not self_conj, k_to_compute, t_rev_pairs, buf)
                 if exclude_dd_block:
                     Gpq[:,:,diffuse_i,diffuse_j] = 0.
-                    Gpq1 = _bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
+                    Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
                     update_vk(vk, Gpq1, dms, wcoulG_SR[p0:p1], ki_idx, kj_idx,
                               not self_conj, k_to_compute, t_rev_pairs, buf)
                 Gpq = Gpq1 = None
@@ -636,7 +620,7 @@ class PBCJKMatrixOpt:
             mesh = self.mesh
         if omega is None:
             omega = 0
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
         wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
             cell, kpt, kpts, exx, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
         wcoulG -= wcoulG_SR
@@ -662,7 +646,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         is_real = True
@@ -711,7 +695,6 @@ class PBCJKMatrixOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
-        libpbc.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
         libpbc.PBC_build_j.restype = ctypes.c_int
 
         uniq_l_ctr = cell.uniq_l_ctr
@@ -747,6 +730,9 @@ class PBCJKMatrixOpt:
 
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_j kernel init failed on Device {device_id}')
             kern = libpbc.PBC_build_j
             rys_envs = self.rys_envs
             rsjk_omega = -self.omega
@@ -857,7 +843,7 @@ class PBCJKMatrixOpt:
             diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao1)
 
         mesh = self.mesh
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
         ngrids = len(Gv)
         kws /= nkpts
 
@@ -952,8 +938,9 @@ class PBCJKMatrixOpt:
             nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
+            # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
             if absmax(dms.imag) > cell.precision*5e2:
-                raise NotImplementedError(
+                raise RuntimeError(
                     'The density matrix in the BvK supercell is expected to be real for '
                     'k-point calculations. However, non-negligible imaginary part is detected. '
                     'This may be caused by time-reversal symmetry breaking.')
@@ -1006,6 +993,9 @@ class PBCJKMatrixOpt:
             t1 = log.timer_debug1(f'ejk_sr initialization on Device {device_id}', *t0)
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_jk_ip1 kernel init failed on Device {device_id}')
             kern = libpbc.PBC_per_atom_jk_ip1
             rys_envs = self.rys_envs
             omega = -self.omega
@@ -1134,7 +1124,7 @@ class PBCJKMatrixOpt:
             expLk = cp.exp(1j*cp.asarray(ft_opt.bvkmesh_Ls).dot(cp.asarray(kpts).T))
 
         mesh = self.mesh
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
         ngrids = len(Gv)
 
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
@@ -1278,7 +1268,7 @@ class PBCJKMatrixOpt:
                     else:
                         dm_vG *= wcoulG[p0:p1]
                     dm_vG = cp.asarray(dm_vG, order='C')
-                    GvT = cp.asarray((Gv[p0:p1]+kpt).T.ravel())
+                    GvT = (Gv[p0:p1].T + cp.asarray(kpt[:,None])).ravel()
                     err = kern(
                         ctypes.cast(ek.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
@@ -1384,8 +1374,9 @@ class PBCJKMatrixOpt:
             nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
+            # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
             if absmax(dms.imag) > cell.precision*5e2:
-                raise NotImplementedError(
+                raise RuntimeError(
                     'The density matrix in the BvK supercell is expected to be real for '
                     'k-point calculations. However, non-negligible imaginary part is detected. '
                     'This may be caused by time-reversal symmetry breaking.')
@@ -1439,6 +1430,9 @@ class PBCJKMatrixOpt:
             t1 = log.timer_debug1(f'ejk_sr_strain_deriv initialization on Device {device_id}', *t0)
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
+            err = libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+            if err != 0:
+                raise RuntimeError(f'PBC build_jk_ip1 kernel init failed on Device {device_id}')
             kern = libpbc.PBC_jk_strain_deriv
             rys_envs = self.rys_envs
             omega = -self.omega
@@ -1514,8 +1508,7 @@ class PBCJKMatrixOpt:
             omega = self.omega
             wcoulG_for_k = -np.pi / omega**2 / cell.vol
             if exxdiv == 'ewald':
-                from gpu4pyscf.pbc.df.aft_jk import _exxdiv_ewald_strain_deriv
-                exx_0, exx_1 = _exxdiv_ewald_strain_deriv(cell, kpts, -omega)
+                exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, -omega)
                 wcoulG_for_k += exx_0
             s0 = int1e.int1e_ovlp(cell, kpts)
             k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
@@ -1545,7 +1538,6 @@ class PBCJKMatrixOpt:
         '''
         from gpu4pyscf.pbc.grad.rks_stress import (
             _get_weighted_coulG_strain_derivatives as get_wcoulG)
-        from gpu4pyscf.pbc.df.aft_jk import _exxdiv_ewald_strain_deriv
         log = logger.new_logger(self)
         cell = self.cell
         assert cell.dimension == 3
@@ -1582,7 +1574,7 @@ class PBCJKMatrixOpt:
             expLk = cp.exp(1j*cp.asarray(ft_opt.bvkmesh_Ls).dot(cp.asarray(kpts).T))
 
         mesh = self.mesh
-        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
         ngrids = len(Gv)
 
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
@@ -1705,7 +1697,7 @@ class PBCJKMatrixOpt:
             sigma1 = cp.zeros((3, 3))
             for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
                 kpt = kpts[kp]
-                Gvk = Gv + kpt
+                Gvk = Gv + cp.asarray(kpt)
                 remove_G0 = is_zero(kpt)
                 wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, 0)
                 if remove_G0 and exxdiv == 'ewald':
@@ -2319,7 +2311,7 @@ def _get_vk_wcoulG_and_SR(cell, kpt, kpts, exxdiv, mesh, Gv, Gv_weight,
     # This coulG_SR attemps to remove the low-Ecut part of get_k_sr integrals
     wcoulG_SR = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
                           wrap_around=True, omega=-rsjk_omega, kpts=kpts)
-    if is_zero(Gv[0]+kpt):
+    if is_zero(cp.asnumpy(Gv[0])+kpt):
         wcoulG_SR[0] += np.pi / rsjk_omega**2
     wcoulG_SR *= sr_factor * Gv_weight
     return wcoulG, wcoulG_SR
@@ -2358,10 +2350,3 @@ def _generate_shl_pairs(ft_opt, dd_bas_idx):
     bas_ij_img_idx = cp.hstack(bas_ij_img_idx, dtype=np.int32)
     shl_pair_offsets = cp.hstack(shl_pair_offsets, dtype=np.int32)
     return bas_ij_idx, bas_ij_img_idx, shl_pair_offsets
-
-def _bas_recontract_ft_pair(cell, Gpq, out=None, buf=None):
-    pqG = Gpq.transpose(0,2,3,1)
-    assert pqG.flags.c_contiguous
-    tmp = cell.apply_CT_dot(pqG, axis=1, out=buf)
-    out = cell.apply_CT_dot(tmp, axis=2, out=out)
-    return out.transpose(0,3,1,2)

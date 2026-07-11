@@ -71,6 +71,7 @@ class KnownValues(unittest.TestCase):
         k = np.random.random((1, 3))
         cell = self.cell
         kmf = scf.KRHF(cell, k, exxdiv='ewald')
+        kmf.time_reversal_symmetry = False
         e0 = kmf.kernel()
         self.assertAlmostEqual(e0, -4.2048655827967139, 7)
 
@@ -94,6 +95,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         k = np.random.random((1, 3))
         kmf = scf.KRHF(cell, k, exxdiv=None)
+        kmf.time_reversal_symmetry = False
         kmf.init_guess = 'hcore'
         e0 = kmf.kernel()
         self.assertAlmostEqual(e0, -2.7862168430230341, 7)

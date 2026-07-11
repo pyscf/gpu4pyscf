@@ -34,7 +34,9 @@ from gpu4pyscf.gto.mole import (
     groupby, PTR_BAS_COORD, extract_pgto_params, SortedCell,
     PBCIntEnvVars, _scale_sp_ctr_coeff)
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
-from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern
+from gpu4pyscf.df.int3c2e_bdiv import (
+    get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern,
+    int3c2e_scheme as mol_int3c2e_scheme)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, FTOpt
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
@@ -251,7 +253,8 @@ class SRInt3c2eOpt:
         Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
-        logger.debug(cell, 'int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
+        logger.debug(cell, 'int3c2e_kernel omega = %g, rcut = %g, nimgs = %d',
+                     omega, rcut, nimgs)
 
         _atm, _bas, _env = conc_env(
             bvkcell._atm, bvkcell._bas, _scale_sp_ctr_coeff(bvkcell),
@@ -635,41 +638,9 @@ def _conc_locs(ao_loc1, ao_loc2):
 
 def int3c2e_scheme(*, shm_size=SHM_SIZE, gout_width=None, gout_ndim='ijk',
                    deriv=None, cache_cart_idx=False):
-    if deriv is None:
-        deriv = (0, 0, 0)
-    i_inc, j_inc, k_inc = deriv
-
-    li = np.arange(LMAX+1)[:,None]
-    lj = np.arange(LMAX+1)
-    lk = np.arange(L_AUX_MAX+1)[:,None,None]
-    order = li + lj + lk + (i_inc + j_inc + k_inc)
-    nroots = order//2 + 1
-    nroots *= 2 # for short-range Coulomb
-    g_size = (li+1+i_inc)*(lj+1+j_inc)*(lk+1+k_inc)
-    unit = g_size*3 + nroots*2 + 7
-    shm_size = shm_size - 1024
-    nsp_max = _nearest_power2(shm_size // (unit*8))
-    nsp_per_block = THREADS
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfk = (lk + 1) * (lk + 2) // 2
-    if gout_width is not None:
-        if gout_ndim == 'ij':
-            gout_size = nfi * nfj
-        elif gout_ndim == 'k':
-            gout_size = nfk
-        else:
-            gout_size = nfi * nfj * nfk
-        gout_stride = (gout_size + gout_width-1) // gout_width
-        # Round up to the next 2^n
-        gout_stride = _nearest_power2(gout_stride, return_leq=False)
-        nsp_per_block = THREADS // gout_stride
-    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
-    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-    shm_size = nsp_per_block * (unit*8)
-    if cache_cart_idx:
-        shm_size += (nfi + nfj + nfk) * 3 * 4
-    return nsp_per_block, gout_stride, shm_size
+    return mol_int3c2e_scheme(
+        short_range=True, shm_size=shm_size, gout_width=gout_width,
+        gout_ndim=gout_ndim, deriv=deriv, cache_cart_idx=cache_cart_idx)
 
 # This modified rcut estimation function will be available in pyscf-2.8 or newer
 # TODO: improve the rcut estimation for PBCsr_int3c2e_latsum23 kernel

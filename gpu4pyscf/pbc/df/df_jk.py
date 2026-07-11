@@ -27,8 +27,8 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import contract, unpack_tril, ndarray
-from gpu4pyscf.df.df_jk import factorize_dm
-from gpu4pyscf.pbc.df.fft_jk import _ewald_exxdiv_for_G0, _format_dms, _format_jks
+from gpu4pyscf.pbc.df.fft_jk import (
+    _ewald_exxdiv_for_G0, _format_dms, _format_jks, _factorize_dm)
 from gpu4pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.lib.kpts_helper import (
     kk_adapted_iter, fft_matrix, conj_images_in_bvk_cell)
@@ -146,7 +146,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     nband = len(kpts_band)
 
-    dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
 
@@ -226,24 +225,15 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         contract('nikL,nlkL->nil', piL, piL_conj, alpha=sign, beta=1, out=vk)
 
         if kp != kp_conj:
-            if orbr is None:
-                piL = contract('nijL,nil->njlL', pqL, orbl.conj(), out=buf)
-                piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
-            else:
-                piL = contract('nijL,nil->njlL', pqL, orbl.conj(), out=buf)
-                piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
+            piL = contract('nijL,nil->njlL', pqL, orbl.conj(), out=buf)
+            piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
+            if orbr is not None:
                 piL = contract('nijL,nil->njlL', pqL, orbr, out=buf)
             vk[kj_idx] += contract('nklL,njlL->nkj', piL_conj, piL, alpha=sign)
 
     def proc():
-        orbl, orbr = factorize_dm(dm_kpts)
-        if orbl.ndim == 2:
-            orbl = orbl[None,None]
-        elif orbl.ndim == 3:
-            orbl = orbl[None]
-        if orbr is not None:
-            orbr = orbr.reshape(orbl.shape)
-        else:
+        orbl, orbr = _factorize_dm(dm_kpts, kpts)
+        if orbr is None:
             orbr = [None] * nset # to support indexing orbr[i] below
         vk = cp.zeros(dms.shape, dtype=dtype)
         buf = cp.empty((3, nkpts*blksize*nao**2), dtype=dtype)

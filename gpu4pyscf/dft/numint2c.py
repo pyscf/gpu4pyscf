@@ -199,6 +199,9 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
     else:
         raise NotImplementedError(f'numint2c.get_vxc for functional {xc_code}')
 
+    if dms.dtype == np.float64:
+        vmat = vmat.real
+
     if hermi:
         vmat = vmat + vmat.conj().transpose(1,0)
 
@@ -524,7 +527,6 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
                 self.build(mol, grids.coords)
                 opt = self.gdftopt
             assert dms.ndim == 2
-            dms = cp.asarray(dms)
             dms = opt.sort_orbitals(dms, axis=[0,1])
             n, exc, vmat = self._gks_mcol_vxc(mol, grids, xc_code, dms, relativity,
                                               hermi, max_memory, verbose)
@@ -631,5 +633,3 @@ class _GDFTOpt2C(numint._GDFTOpt):
         # Perform the unsorting assignment
         out[tuple(fancy_index)] = sorted_mat
         return out
-    
-    

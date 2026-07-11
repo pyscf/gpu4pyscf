@@ -35,6 +35,7 @@ from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import utils
+from gpu4pyscf import scf
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
     _nearest_power2, _cache_q_cond_and_non0pairs, _check_rsh_factors,
@@ -42,6 +43,7 @@ from gpu4pyscf.scf.jk import (
 from gpu4pyscf.grad import rhf as rhf_grad
 from . import dispersion
 from gpu4pyscf.gto.mole import extract_pgto_params
+from gpu4pyscf.df.df_jk import _make_factorized_dm
 
 libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int
 libvhf_rys.RYS_per_atom_jk_ip2_type3.restype = ctypes.c_int
@@ -51,14 +53,15 @@ GB = 1024*1024*1024
 ALIGNED = 4
 DD_CACHE_MAX = rhf_grad.DD_CACHE_MAX
 
-libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
-libvhf_rys.RYS_build_ejk_ip2_init(ctypes.c_int(SHM_SIZE))
+libvhf_rys.RYS_build_vjk_ip1_init.restype = ctypes.c_int
+libvhf_rys.RYS_build_ejk_ip2_init.restype = ctypes.c_int
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1mo=None,
               atmlst=None, max_memory=4000, verbose=None):
     ''' Different from PySF, using h1mo instead of h1ao for saving memory
     '''
+    from gpu4pyscf.pbc.gto import int1e
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = log.init_timer()
     mol = hessobj.mol
@@ -75,7 +78,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mo_coeff = cupy.asarray(mo_coeff)
     de2 = hessobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                     max_memory, log)
-    t1 = log.timer_debug1('hess elec', *t1)
+    t1 = log.timer_debug1('partial hess elec', *t1)
     if h1mo is None:
         h1mo = hessobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
         if h1mo.size * 8 * 5 > get_avail_mem():
@@ -96,8 +99,7 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     nao = mo_coeff.shape[0]
     mocc = mo_coeff[:,mo_occ>0]
     mocc_e = mocc * mo_energy[mo_occ>0]
-    s1a = -mol.intor('int1e_ipovlp', comp=3)
-    s1a = cupy.asarray(s1a)
+    s1a = -int1e.int1e_ipovlp(mol)
 
     aoslices = mol.aoslice_by_atom()
     for i0, (p0, p1) in enumerate(aoslices[:,2:]):
@@ -209,6 +211,9 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
 
         timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
+        err = libvhf_rys.RYS_build_ejk_ip2_init(ctypes.c_int(SHM_SIZE))
+        if err != 0:
+            raise RuntimeError('RYS build_ejk_ip2 CUDA kernel initialization failed')
         kern1 = libvhf_rys.RYS_per_atom_jk_ip2_type12
         kern2 = libvhf_rys.RYS_per_atom_jk_ip2_type3
 
@@ -426,6 +431,9 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
         timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
         kern = libvhf_rys.RYS_build_jk_ip1
+        err = libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
+        if err != 0:
+            raise RuntimeError('RYS build_vjk_ip1 CUDA kernel initialization failed')
 
         _dms = cp.asarray(dms)
 
@@ -570,7 +578,8 @@ def get_hcore(mol):
     return h1aa.reshape(3,3,nao,nao), h1ab.reshape(3,3,nao,nao)
 
 def get_ovlp(mol):
-    s1a =-mol.intor('int1e_ipovlp', comp=3)
+    from gpu4pyscf.pbc.gto import int1e
+    s1a = -int1e.int1e_ipovlp(mol)
     nao = s1a.shape[-1]
     s1aa = mol.intor('int1e_ipipovlp', comp=9).reshape(3,3,nao,nao)
     s1ab = mol.intor('int1e_ipovlpip', comp=9).reshape(3,3,nao,nao)
@@ -591,6 +600,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             A function to generate the induced potential.
             See also the function gen_vind.
     '''
+    from gpu4pyscf.pbc.gto import int1e
     mol = mf.mol
     log = logger.new_logger(mf, verbose)
     t0 = log.init_timer()
@@ -621,14 +631,13 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         v[:,occidx,:] = 0
         return v.reshape(-1,nmo*nocc)
 
-    ipovlp = -mol.intor('int1e_ipovlp', comp=3)
-    ipovlp = cp.asarray(ipovlp)
+    ipovlp = -int1e.int1e_ipovlp(mol)
     cp.get_default_memory_pool().free_all_blocks()
 
     avail_mem = get_avail_mem()
     # *4 for input dm, vj, vk, and vxc
-    blksize = int(min(avail_mem*.3 / (8*3*nao*nocc*4), # in MO
-                      avail_mem*.3 / (8*nao*nao*3*3))) # vj, vk, dm in AO
+    blksize = int(min(avail_mem*.5 / (8*3*(nao*nocc*3+nao*nao)), # in MO
+                      avail_mem*.5 / (8*nao*nao*3*3))) # vj, vk, dm in AO
     if blksize < ALIGNED**2:
         raise RuntimeError('GPU memory insufficient for solving CPHF equations')
 
@@ -642,9 +651,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     for i0, i1 in lib.prange(0, natm, blksize):
         log.info('Solving CPHF equation for atoms [%d:%d]', i0, i1)
 
-        h1mo_blk = h1mo[i0:i1]
-        if not isinstance(h1mo, cp.ndarray):
-            h1mo_blk = cp.asarray(h1mo_blk)
+        h1mo_blk = cp.asarray(h1mo[i0:i1])
         s1mo_blk = cp.empty_like(h1mo_blk)
         for k, (p0, p1) in enumerate(aoslices[i0:i1,2:]):
             s1ao = cp.zeros((3,nao,nao))
@@ -681,17 +688,17 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
     nao, nmo = mo_coeff.shape
-    mocc = mo_coeff[:,mo_occ>0]
-    nocc = mocc.shape[1]
-    mocc_2 = mocc * 2
+    orbo = mo_coeff[:,mo_occ>0]
+    nocc = orbo.shape[1]
+    orbo_2 = orbo * 2
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmo,nocc)
         mo1_mo = contract('npo,ip->nio', mo1, mo_coeff)
-        dm1 = mo1_mo.dot(mocc_2.T)
-        dm1 = transpose_sum(dm1)
-        dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=mocc, mo_occ=mo_occ)
+        dm1 = contract('npi,qi->npq', mo1_mo, orbo_2)
+        transpose_sum(dm1, inplace=True, hermi=1)
+        dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=orbo, symmetrize=1)
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
     return fx
 
@@ -940,6 +947,7 @@ class Hessian(HessianBase):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
     def __init__(self, scf_method):
+        assert isinstance(scf_method, scf.hf.SCF)
         self.verbose = scf_method.verbose
         self.stdout = scf_method.stdout
         self.mol = scf_method.mol
@@ -958,5 +966,4 @@ class Hessian(HessianBase):
     get_veff_resp_mo = _get_veff_resp_mo
 
 # Inject to RHF class
-from gpu4pyscf import scf
 scf.hf.RHF.Hessian = lib.class_as_method(Hessian)
