@@ -191,7 +191,7 @@ class Int3c2eOpt:
                       shl_pair_batches, aux_batches)
 
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, POOL_SIZE))
+        pool = cp.empty(workers * POOL_SIZE + 1)
         kern = libvhf_rys.fill_int3c2e
         int3c2e_envs = self.int3c2e_envs
 
