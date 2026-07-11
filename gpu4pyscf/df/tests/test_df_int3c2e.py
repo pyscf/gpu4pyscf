@@ -481,14 +481,14 @@ C    -.3    .2     -.7''',
     def eval_j3c(mol, decontract):
         int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(
             SortedMole.from_mol(mol, decontract=decontract), auxmol).build()
-        eval_j3c, _, _, _, bas_ij_batches = int3c2e_opt.int3c2e_evaluator(
-            cart=mol.cart, return_bas_ij_batches=True)
+        eval_j3c, _, _, _, clone_context = int3c2e_opt.int3c2e_evaluator(
+            cart=mol.cart, return_clone_context=True)
         aux_coef = int3c2e_opt.aux_coeff
         j3c = eval_j3c()
         j3c = j3c.dot(aux_coef)
         if decontract:
             recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses = \
-                    int3c2e_bdiv._create_pair_recontraction(int3c2e_opt.mol, bas_ij_batches)
+                    int3c2e_bdiv._create_pair_recontraction(int3c2e_opt.mol, clone_context)
             j3c = recontract(0, j3c)
         else:
             pair_addresses = int3c2e_opt.pair_and_diag_indices()[0]

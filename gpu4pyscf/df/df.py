@@ -462,13 +462,14 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         pair_batch_by_l=needs_recontraction, return_clone_context=True,
         omega=omega)
     cderi_batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
-    # The actual batch size (cderi_batch_size) can be larger than batch_size.
-    # * When the get_avail_mem() returns a small amount of memory. In that case,
-    # the eval_j3c function might still run.
+    batch_size = cderi_batch_size
+    # * When the get_avail_mem() returns a small amount of memory, the actual
+    #   size (cderi_batch_size) can be larger than the input batch_size.
+    #   This cderi_batch_size should not be used to initialize eval_j3c for
+    #   other devices. It may produce a different batches patterns.
     # * When multi-gpu is enabled, clone_context is used to clone eval_j3c on
-    # different GPUs, to ensure the same offsets, and pair_addresses are created
-    # across devices.
-    batch_size = min(batch_size, cderi_batch_size)
+    #   different GPUs, to ensure the same offsets, and same pair_addresses are
+    #   created across devices.
     num_batches = len(ao_pair_offsets) - 1
 
     if needs_recontraction:
@@ -525,7 +526,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
                 _eval_j3c = intopt.int3c2e_evaluator(
                     reorder_aux=True, clone_context=clone_context, omega=omega)[0]
 
-            work = cp.empty(naux_sorted * cderi_batch_size)
+            work = cp.empty(naux_sorted * batch_size)
             if needs_recontraction:
                 work1 = cp.empty(naux_sorted * cderi_batch_size)
             work2 = cp.empty(naux * cderi_batch_size)
@@ -569,9 +570,9 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
                     reorder_aux=True, clone_context=clone_context, omega=omega)[0]
 
             out = cp.empty((cderi_npairs, aux1-aux0))
-            work = cp.empty(naux_sorted * cderi_batch_size)
+            work = cp.empty(naux_sorted * batch_size)
             if needs_recontraction:
-                work1 = cp.empty(naux_per_device * cderi_batch_size)
+                work1 = cp.empty(naux_per_device * batch_size)
 
             for batch_id in range(num_batches):
                 j3c = _eval_j3c(batch_id, out=work)
