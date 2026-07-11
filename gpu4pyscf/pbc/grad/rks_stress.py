@@ -55,7 +55,9 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF, ft_ao
+from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
+from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv, MultiGridNumInt
 from gpu4pyscf.pbc.grad import rks as rks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -91,8 +93,9 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
         cell2.build(False, False)
     return cell1, cell2
 
-def _get_coulG_strain_derivatives(cell, Gv, omega=None, remove_G0=True):
+def _get_coulG_strain_derivatives(cell, Gv, omega=None):
     '''derivatives of 4pi/G^2'''
+    remove_G0 = is_zero(cp.asnumpy(Gv[0]))
     Gv = asarray(Gv)
     G2 = cp.einsum('gx,gx->g', Gv, Gv)
     if remove_G0:
@@ -122,6 +125,19 @@ def _get_weight_strain_derivatives(cell, grids):
     weight_0 = cell.vol / ngrids
     weight_1 = np.eye(3) * weight_0
     return weight_0, weight_1
+
+def _get_weighted_coulG_strain_derivatives(cell, Gv, omega=None):
+    coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv, omega=omega)
+    coulG_0 = asarray(coulG_0)
+    coulG_1 = asarray(coulG_1)
+    vol = cell.vol
+    weight_0 = 1./vol
+    weight_1 = -1./vol * cp.eye(3)
+    wcoulG_0 = weight_0 * coulG_0
+    # wcoulG_1 includes two terms, weight_0*coulG_1 + weight_1*coulG_0
+    wcoulG_1 = weight_0 * coulG_1
+    wcoulG_1 += weight_1[:,:,None] * coulG_0
+    return wcoulG_0, wcoulG_1
 
 def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
                                 opt=None):
@@ -170,25 +186,34 @@ def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
     mf = mf_grad.base
     with_rsjk = mf.rsjk
     ni = mf._numint
+    is_hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
-    if with_rsjk is not None:
-        assert isinstance(with_rsjk, PBCJKMatrixOpt)
-        if with_rsjk.supmol is None:
-            with_rsjk.build()
-        # TODO: with_nuc should be disabled for all-electron calculations
-        sigma = get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=with_nuc)
-        if not ni.libxc.is_hybrid_xc(mf.xc):
-            return sigma
-        j_factor = 1
-        omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
-        sigma += with_rsjk._get_ejk_sr_strain_deriv(
-            dm, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_sr)
-        sigma += with_rsjk._get_ejk_lr_strain_deriv(
-            dm, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_lr)
+    j_factor = 1 if with_j else 0
+    if is_hybrid and with_rsjk is not None:
+        with_j = False
+
+    # TODO: with_nuc should be disabled for all-electron calculations
+    if isinstance(ni, MultiGridNumInt):
+        sigma = _rks_exc_strain_deriv(ni, mf.xc, dm[None], None, with_j, with_nuc)
+    elif isinstance(ni, NumInt):
+        sigma = get_vxc(mf_grad, cell, dm, with_j, with_nuc)
     else:
-        if not ni.libxc.is_hybrid_xc(mf.xc):
-            return get_vxc(mf_grad, cell, dm, with_j, with_nuc)
-        raise NotImplementedError(f'Stress tensor for KHF for {mf.with_df}')
+        raise NotImplementedError(f'RKS stress tensor for {mf.xc}')
+
+    if is_hybrid:
+        if with_rsjk is not None:
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if with_rsjk.supmol is None:
+                with_rsjk.build()
+            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+            sigma += with_rsjk._get_ejk_sr_strain_deriv(
+                dm, exxdiv=mf.exxdiv, omega=omega,
+                j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+            sigma += with_rsjk._get_ejk_lr_strain_deriv(
+                dm, exxdiv=mf.exxdiv, omega=omega,
+                j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+        else:
+            raise NotImplementedError(f'RKS stress tensor for {mf.xc}')
     return sigma
 
 def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
@@ -341,12 +366,10 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
             Ene += cp.einsum('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
             Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm)
         else:
-            charge = -cell.atom_charges()
             # SI corresponds to Fourier components of the fractional atomic
             # positions within the cell. It does not respond to the strain
             # transformation
-            SI = cell.get_SI(mesh=mesh)
-            ZG = asarray(np.dot(charge, SI))
+            ZG = _get_ZSI(cell, mesh)
             vR = pbctools.ifft(ZG * coulG_0, mesh).real
             Ene = cp.einsum('xyg,g->xy', rho1[:,:,0], vR).real.get()
             Ene += cp.einsum('xyg,g,g->xy', coulG_1, rhoG.conj(), ZG).real.get() * (1./ngrids)
@@ -357,7 +380,7 @@ def _get_vpplocG_strain_derivatives(cell, mesh):
     disp = 1e-5
     ngrids = np.prod(mesh)
     v1 = cp.empty((3,3, ngrids), dtype=np.complex128)
-    SI = cell.get_SI(mesh=mesh)
+    SI = get_SI(cell, mesh=mesh)
     for x in range(3):
         for y in range(3):
             cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
@@ -394,7 +417,7 @@ def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
         vol = cell.vol
         b = cell.reciprocal_vectors(norm_to=1)
         Gv = cell.get_Gv(mesh)
-        SI = cell.get_SI(mesh=mesh)
+        SI = get_SI(cell, mesh=mesh)
         # buf for SPG_lmi upto l=0..3 and nl=3
         vppnl = 0
         for k, dm in enumerate(dm_kpts):
@@ -423,9 +446,9 @@ def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
                             qkl = pseudo.pp._qli(G_rad*rl, l, k)
                             pYlm[k] = pYlm_part.T * qkl
                 if p1 > 0:
-                    SPG_lmi = buf[:p1]
+                    SPG_lmi = asarray(buf[:p1])
                     SPG_lmi *= SI[ia].conj()
-                    SPG_lm_aoGs = asarray(SPG_lmi).dot(aokG)
+                    SPG_lm_aoGs = SPG_lmi.dot(aokG)
                     rho = SPG_lm_aoGs.dot(dm).dot(SPG_lm_aoGs.conj().T).real.get()
                     p1 = 0
                     for l, proj in enumerate(pp[5:]):

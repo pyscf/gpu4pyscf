@@ -27,7 +27,7 @@ from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft import UniformGrids
 from gpu4pyscf.pbc.df import ft_ao
-from gpu4pyscf.pbc.df.fft import get_SI
+from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -57,6 +57,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
 
     if getattr(mf, 'disp', None):
         raise NotImplementedError('dispersion correction')
+
+    if getattr(mf, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
 
     log = logger.new_logger(mf_grad)
     t0 = log.init_timer()
@@ -120,7 +123,7 @@ def get_hcore(cell, kpts):
     '''
     h1 = int1e.int1e_ipkin(cell, kpts)
     if cell._pseudo:
-        SI = cell.get_SI()
+        SI = get_SI(cell)
         Gv_cpu = cell.Gv
         Gv = cp.asarray(Gv_cpu)
         coords = cp.asarray(cell.get_uniform_grids())
@@ -144,10 +147,8 @@ def get_hcore(cell, kpts):
             contract('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow, beta=1, out=h1)
     else:
         mesh = cell.mesh
-        charge = cp.asarray(-cell.atom_charges(), dtype=np.float64)
+        rhoG = _get_ZSI(cell, mesh)
         Gv = cell.get_Gv(mesh)
-        SI = get_SI(cell, mesh=mesh)
-        rhoG = charge.dot(SI)
         coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
         vneG = rhoG * coulG
         vneR = tools.ifft(vneG, mesh).real
@@ -176,10 +177,14 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         kpts = mf_grad.kpts
     else:
         kpts = kpts.reshape(-1, 3)
+
+    if getattr(mf_grad.base, 'with_x2c', None):
+        raise NotImplementedError('X2C gradients')
+
     h1 = get_hcore(cell, kpts)
 
     aoslices = cell.aoslice_by_atom()
-    SI = cp.asarray(cell.get_SI())
+    SI = get_SI(cell)
     mesh = cell.mesh
     Gv_cpu = cell.Gv
     Gv = cp.asarray(Gv_cpu)
@@ -266,19 +271,23 @@ class Gradients(GradientsBase):
         '''
         mf = self.base
         ni = mf._numint
-        # For integrators like GDF, j_in_xc cannot be enabled since
-        # the J matrix in SCF is computed using GDF CDERI tensors
-        j_in_xc = mf.j_engine is not None or mf.rsjk is not None
-        j_factor = 1
+        # When J is evaluated using mf.j_engine or mf.rsjk, it is identical to
+        # the J from MultiGridNumInt. The contribution from J matrix can be
+        # efficiently evaluated using the MultiGridNumInt integrator.
+        j_in_xc = ni is not None and isinstance(ni, multigrid_v2.MultiGridNumInt)
         if j_in_xc:
             j_factor = 0
-        # FIXME: do not set j_in_xc for all-electron calculations
-        de = multigrid_v2.get_veff_ip1(
-            ni, 'HF', dm, kpts=kpts, with_j=j_in_xc,
-            with_pseudo_vloc_orbital_derivative=True).get()
-        de /= len(kpts)
+            de = multigrid_v2.get_veff_ip1(
+                ni, 'HF', dm, kpts=kpts, with_j=j_in_xc,
+                with_pseudo_vloc_orbital_derivative=True).get()
+            de /= len(kpts)
+        else:
+            j_factor = 1
+            de = 0
+
         de += jk_energy_per_atom(
-            mf, dm, kpts, j_factor=j_factor, sr_factor=1, exxdiv=mf.exxdiv)
+            mf, dm, kpts, j_factor=j_factor, lr_factor=1, sr_factor=1,
+            exxdiv=mf.exxdiv)
         return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):

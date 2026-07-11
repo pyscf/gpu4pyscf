@@ -51,24 +51,11 @@ class UHF(pbchf.SCF):
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
                  kpt=None, kpts_band=None):
-        if cell is None: cell = self.cell
+        from gpu4pyscf.pbc.scf.kuhf import _get_veff
         if dm is None: dm = self.make_rdm1()
         if kpt is None: kpt = self.kpt
-
-        if isinstance(dm, cp.ndarray) and dm.ndim == 2:
-            dm = cp.repeat(dm[None]*.5, 2, axis=0)
-
-        cpu0 = logger.init_timer(self)
-        if self.rsjk or self.j_engine:
-            vj = self.get_j(cell, dm[0]+dm[1], hermi, kpt, kpts_band)
-            vk = self.get_k(cell, dm, hermi, kpt, kpts_band)
-        else:
-            vj, vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band,
-                                         exxdiv=self.exxdiv)
-            vj = vj[0] + vj[1]
-        logger.timer(self, 'vj and vk', *cpu0)
-        vhf = vj - vk
-        return vhf
+        assert dm.ndim == 3 and len(dm) == 2
+        return _get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
 
     def get_bands(self, kpts_band, cell=None, dm=None, kpt=None):
         if cell is None: cell = self.cell
@@ -102,22 +89,29 @@ class UHF(pbchf.SCF):
         if s1e is None:
             s1e = self.get_ovlp(cell)
         dm = cp.asarray(mol_uhf.UHF.get_init_guess(self, cell, key))
-        ne = cp.einsum('xij,ji->x', dm, s1e).real
-        nelec = cp.asarray(self.nelec)
-        if max(abs(ne - nelec) > 0.01):
+        ne = cp.einsum('xij,ji->x', dm, s1e).real.get()
+        nelec = self.nelec
+        if any(abs(ne - nelec) > 0.01):
             logger.debug(self, 'Big error detected in the electron number '
                          'of initial guess density matrix (Ne/cell = %s)!\n'
                          '  This can cause huge error in Fock matrix and '
                          'lead to instability in SCF for low-dimensional '
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons %s', ne, nelec)
-            dm *= (nelec / ne).reshape(2,1,1)
+            ne[1] += 1e-300 # Number of beta electrons may be 0
+            dm[0] *= nelec[0] / ne[0]
+            dm[1] *= nelec[1] / ne[1]
+            if hasattr(dm, 'mo_coeff'):
+                dm.mo_occ[0] *= nelec[0] / ne[0]
+                dm.mo_occ[1] *= nelec[1] / ne[1]
         return dm
 
-    init_guess_by_1e = mol_uhf.UHF.init_guess_by_1e
-    init_guess_by_chkfile = mol_uhf.UHF.init_guess_by_chkfile
     init_guess_by_minao = mol_uhf.UHF.init_guess_by_minao
     init_guess_by_atom = mol_uhf.UHF.init_guess_by_atom
+    init_guess_by_1e = mol_uhf.UHF.init_guess_by_1e
+    init_guess_by_huckel = mol_uhf.UHF.init_guess_by_huckel
+    init_guess_by_mod_huckel = mol_uhf.UHF.init_guess_by_mod_huckel
+    init_guess_by_chkfile = mol_uhf.UHF.init_guess_by_chkfile
     eig = mol_uhf.UHF.eig
     get_fock = mol_uhf.UHF.get_fock
     get_grad = mol_uhf.UHF.get_grad
@@ -130,15 +124,17 @@ class UHF(pbchf.SCF):
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
     mulliken_meta_spin = NotImplemented
-    canonicalize = NotImplemented
+    canonicalize = mol_uhf.UHF.canonicalize
     spin_square = mol_uhf.UHF.spin_square
     stability = NotImplemented
+    newton = mol_uhf.UHF.newton
 
     dip_moment = NotImplemented
     to_ks = NotImplemented
     convert_from_ = NotImplemented
 
     density_fit = pbchf.RHF.density_fit
+    x2c = x2c1e = sfx2c1e = pbchf.RHF.sfx2c1e
 
     def get_fermi(self):
         nocc_a, nocc_b = self.nelec
@@ -184,3 +180,18 @@ class UHF(pbchf.SCF):
             pop = mulliken_pop(cell, dm, s=s, verbose=log)
         dip = None
         return pop, dip
+
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     with_j=True, hermi=0, max_memory=None, with_nlc=False):
+        from gpu4pyscf.pbc.scf.kuhf import _get_veff
+        cell = self.cell
+        kpts = self.kpt.reshape(1, 3)
+        with_j = with_j and hermi != 2
+        def vind(dm1):
+            dm1_shape = dm1.shape
+            nao = dm1_shape[-1]
+            dm1 = dm1.reshape(2,1,1,nao,nao)
+            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpts,
+                            with_j=with_j, with_ecoul=False)
+            return vhf.view(cp.ndarray).reshape(dm1_shape)
+        return vind

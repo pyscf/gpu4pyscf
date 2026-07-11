@@ -17,8 +17,9 @@ import cupy as cp
 from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
-from pyscf.pbc.tools.pbc import get_monkhorst_pack_size, cutoff_to_mesh
-from gpu4pyscf.lib.cupy_helper import asarray
+from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
+from gpu4pyscf.lib.cupy_helper import asarray, batched_vec_norm2
+from gpu4pyscf.pbc.gto.cell import get_Gv
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.
@@ -100,32 +101,6 @@ def ifftk(g, mesh, expikr):
     '''
     return ifft(g, mesh) * expikr
 
-def _get_Gv(cell, mesh):
-    assert cell.dimension == 3
-    # Default, the 3D uniform grids
-    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
-    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
-    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
-    b = cp.asarray(cell.reciprocal_vectors())
-    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
-    Gv = (rx[:,None,None,None] * b[0] +
-          ry[:,None,None] * b[1] +
-          rz[:,None] * b[2])
-    return Gv.reshape(-1, 3)
-
-def _get_Gv_with_base(cell, mesh):
-    assert cell.dimension == 3
-    # Default, the 3D uniform grids
-    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
-    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
-    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
-    b = cp.asarray(cell.reciprocal_vectors())
-    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
-    Gv = (rx[:,None,None,None] * b[0] +
-          ry[:,None,None] * b[1] +
-          rz[:,None] * b[2])
-    return Gv.reshape(-1, 3), (rx, ry, rz)
-
 def _Gv_wrap_around(cell, Gv, k, mesh):
     '''wrap around the high frequency k+G vectors into their lower frequency
     counterparts. Important if you want the gamma point and k-point answers to
@@ -147,7 +122,7 @@ def _Gv_wrap_around(cell, Gv, k, mesh):
     return kG
 
 def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
-              wrap_around=True, omega=None, kmesh=None, **kwargs):
+              wrap_around=True, omega=None, kpts=None, **kwargs):
     '''Calculate the Coulomb kernel for all G-vectors, handling G=0 and exchange.
 
     Args:
@@ -187,7 +162,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     if mesh is None:
         mesh = cell.mesh
     if Gv is None:
-        Gv = _get_Gv(cell, mesh)
+        Gv = get_Gv(cell, mesh)
     Gv = asarray(Gv)
 
     if omega is None:
@@ -232,7 +207,8 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     else:
         kG = Gv
 
-    absG2 = cp.einsum('gi,gi->g', kG, kG)
+    # absG2 = cp.einsum('gi,gi->g', kG, kG)
+    absG2 = batched_vec_norm2(kG)
     G0_idx = 0
     if not is_gamma_point:
         G0_idx = None
@@ -287,18 +263,17 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     # cancelled out by Coulomb integrals. Its leading term is calculated
     # using Ewald probe charge (the function madelung below)
     if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
-        if kmesh is None:
+        if kpts is None:
             Nk = 1
+            kpts = np.zeros((1, 3))
             if mf is not None:
                 raise DeprecationWarning(
                     'Accessing kpts via mf.kpts is deprecated. '
                     'kpts should be passed to get_coulG explicitly.')
         else:
-            Nk = np.prod(kmesh)
-        if omega is None or omega == 0:
-            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kmesh=kmesh)
-        else: # G=0 term should be handled separately in RSGDF and RSJK
-            raise NotImplementedError(f'exx=ewald for omega={omega}')
+            assert kpts.ndim == 2
+        Nk = len(kpts)
+        coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts, omega)
     return coulG
 
 def probe_charge_sr_coulomb(cell, omega, kmesh=None):

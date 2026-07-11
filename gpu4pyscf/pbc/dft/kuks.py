@@ -59,32 +59,27 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         j_in_xc = False
         ks.initialize_grids(cell, dm, kpts)
         n, exc, vxc = ni.nr_uks(cell, ks.grids, ks.xc, dm, 0, hermi, kpts, kpts_band)
+        log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             raise NotImplementedError("VV10 not implemented for periodic system")
-            if ni.libxc.is_nlc(ks.xc):
-                xc = ks.xc
-            else:
-                assert ni.libxc.is_nlc(ks.nlc)
-                xc = ks.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm,
-                                          0, hermi, kpts)
-            exc += enlc
-            vxc += vnlc
-        log.debug('nelec by numeric integration = %s', n)
         log.timer('vxc', *t0)
 
-    vj, vk = krks._get_jk(ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc,
-                          dm_last, vhf_last)
+    vj, vk, vj_sr, vk_sr = krks._get_jk(
+        ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc, dm_last, vhf_last)
     if not j_in_xc:
         vxc = vxc + vj[0] + vj[1]
         ecoul = None
         if ground_state:
-            ecoul = float(cp.einsum('nKij,mKji->', dm, vj).real.get()) * .5 * weight
+            ecoul = cp.einsum('nKij,mKji->', dm, vj).get() * .5 * weight
     if hybrid:
         vxc = vxc - vk
         if ground_state:
             exc -= float(cp.einsum('nKij,nKji->', dm, vk).real.get()) * .5 * weight
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc)
+    if vj_sr is not None:
+        vxc.vj = vj_sr
+    if vk_sr is not None:
+        vxc.vk = vk_sr
     logger.timer(ks, 'veff', *t0)
     return vxc
 
@@ -97,21 +92,19 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
     weight = 1./len(h1e_kpts)
     e1 = weight * cp.einsum('kij,nkji->', h1e_kpts, dm_kpts).get()
     ecoul = vhf.ecoul
-    exc = vhf.exc
-    if isinstance(ecoul, cp.ndarray):
-        ecoul = ecoul.get()
-    if isinstance(exc, cp.ndarray):
-        exc = exc.get()
-    tot_e = e1 + ecoul + exc
+    exc = vhf.exc.real
+    e2 = ecoul + exc
+    tot_e = e1 + e2
     mf.scf_summary['e1'] = e1.real
+    mf.scf_summary['e2'] = e2.real
     mf.scf_summary['coul'] = ecoul.real
-    mf.scf_summary['exc'] = exc.real
-    logger.debug(mf, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
+    mf.scf_summary['exc'] = exc
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exc)
     if abs(ecoul.imag) > mf.cell.precision*10:
         logger.warn(mf, "Coulomb energy has imaginary part %s. "
                     "Coulomb integrals (e-e, e-N) may not converge !",
                     ecoul.imag)
-    return tot_e.real, ecoul.real + exc.real
+    return tot_e.real, e2.real
 
 
 class KUKS(rks.KohnShamDFT, kuhf.KUHF):
@@ -127,7 +120,6 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         rks.KohnShamDFT.dump_flags(self, verbose)
         return self
 
-    get_hcore = krks.KRKS.get_hcore
     get_veff = get_veff
     energy_elec = energy_elec
     get_rho = kuhf.KUHF.get_rho
@@ -144,3 +136,45 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         mf = kuks_cpu.KUKS(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     with_j=True, hermi=0, max_memory=None, with_nlc=False):
+        if mo_coeff is None: mo_coeff = self.mo_coeff
+        if mo_occ is None: mo_occ = self.mo_occ
+        cell = self.cell
+        kpts = self.kpts
+
+        if with_nlc and self.do_nlc():
+            raise NotImplementedError
+
+        ni = self._numint
+        hybrid = ni.libxc.is_hybrid_xc(self.xc)
+
+        spin = 1
+        dm0 = self.make_rdm1(mo_coeff, mo_occ)
+        rho0, vxc, fxc = ni.cache_xc_kernel1(
+            cell, self.grids, self.xc, dm0, spin, kpts)
+        nao = dm0.shape[-1]
+        dm0 = None
+        nkpts = len(kpts)
+
+        with_j = with_j and hermi != 2
+        j_in_xc = isinstance(ni, (multigrid_v2.MultiGridNumInt,
+                                  multigrid.MultiGridNumInt))
+
+        def vind(dm1, kshift=0):
+            assert kshift == 0
+            if with_j:
+                v1 = ni.nr_uks_fxc(cell, self.grids, self.xc, dm0, dm1, hermi,
+                                   fxc, kpts, with_j=j_in_xc)
+            else:
+                v1 = cp.zeros_like(dm1)
+
+            vj, vk = krks._get_jk(self, cell, dm1.reshape(-1,nkpts,nao,nao),
+                                  hermi, kpts, with_j=not j_in_xc)[:2]
+            if with_j and not j_in_xc:
+                v1 += vj.reshape(dm1.shape).sum(axis=0)
+            if hybrid:
+                v1 -= vk.reshape(dm1.shape)
+            return v1
+        return vind

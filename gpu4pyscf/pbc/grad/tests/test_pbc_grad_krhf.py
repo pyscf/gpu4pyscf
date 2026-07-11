@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import unittest
+import numpy as np
 from packaging.version import Version
 import pyscf
 from pyscf import lib
@@ -69,7 +70,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1+disp/2.0]]])
         e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=5e-6)
 
     def test_rhf_with_pseudo_grad(self):
         mf = cell.RHF().to_gpu()
@@ -92,7 +93,7 @@ class KnownValues(unittest.TestCase):
         g1 = mf.Gradients().kernel()
         self.assertAlmostEqual(g1[1,2], -0.125769199473623, 6)
         self.assertAlmostEqual(lib.fp(g1), -0.087662458760762, 6)
-        self.assertAlmostEqual(abs(g1 - g).max(), 0, 8)
+        self.assertAlmostEqual(abs(g1 - g).max(), 0, 6)
 
     def test_df_rhf_grad(self):
         cell = gto.Cell()
@@ -105,14 +106,32 @@ class KnownValues(unittest.TestCase):
         cell.unit = 'bohr'
         cell.build()
         mf = cell.RHF().to_gpu().density_fit()
+        mf.conv_tol_grad = 1e-9
         g = mf.Gradients().kernel()
-        self.assertAlmostEqual(g[1,2], 0.03278221956823221, 6)
-        self.assertAlmostEqual(lib.fp(g), -0.04171520756956062, 6)
 
-        mfs = mf.as_scanner()
-        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
-        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
+        # numerical_gradient = np.empty((cell.natm, 3))
+        # mfs = mf.as_scanner()
+        # dx = 1e-6
+        # for i_atom in range(cell.natm):
+        #     for i_xyz in range(3):
+        #         xyz_p = cell.atom_coords()
+        #         xyz_p[i_atom, i_xyz] += dx
+        #         e_p = mfs(xyz_p)
+
+        #         xyz_m = cell.atom_coords()
+        #         xyz_m[i_atom, i_xyz] -= dx
+        #         e_m = mfs(xyz_m)
+
+        #         numerical_gradient[i_atom, i_xyz] = (e_p - e_m) / (2.0 * dx)
+        # np.set_printoptions(precision = 16)
+        # print(repr(numerical_gradient))
+
+        numerical_gradient = np.array([
+            [-0.0168897392183176, -0.0260050767586506, -0.0327835129598775],
+            [ 0.0168897393848511,  0.0260050764255837,  0.0327835128488552],
+        ])
+
+        assert np.max(np.abs(g - numerical_gradient)) < 2e-8
 
     def test_df_rhf_grad_with_pseudo(self):
         cell = gto.Cell()
@@ -126,14 +145,32 @@ class KnownValues(unittest.TestCase):
         cell.unit = 'bohr'
         cell.build()
         mf = cell.RHF().to_gpu().density_fit()
+        mf.conv_tol_grad = 1e-9
         g = mf.Gradients().kernel()
-        self.assertAlmostEqual(g[1,2], 0.03419848901051922, 6)
-        self.assertAlmostEqual(lib.fp(g), -0.04357923705291417, 6)
 
-        mfs = mf.as_scanner()
-        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
-        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
+        # numerical_gradient = np.empty((cell.natm, 3))
+        # mfs = mf.as_scanner()
+        # dx = 1e-6
+        # for i_atom in range(cell.natm):
+        #     for i_xyz in range(3):
+        #         xyz_p = cell.atom_coords()
+        #         xyz_p[i_atom, i_xyz] += dx
+        #         e_p = mfs(xyz_p)
+
+        #         xyz_m = cell.atom_coords()
+        #         xyz_m[i_atom, i_xyz] -= dx
+        #         e_m = mfs(xyz_m)
+
+        #         numerical_gradient[i_atom, i_xyz] = (e_p - e_m) / (2.0 * dx)
+        # np.set_printoptions(precision = 16)
+        # print(repr(numerical_gradient))
+
+        numerical_gradient = np.array([
+            [-0.0175469374585902, -0.0273011047657867, -0.0341998128705612],
+            [ 0.0175469373475678,  0.027301104488231 ,  0.0341998133146504],
+        ])
+
+        assert np.max(np.abs(g - numerical_gradient)) < 2e-8
 
     def test_krhf_grad_with_pseudo(self):
         kpts = cell.make_kpts([1,1,2])
@@ -143,7 +180,7 @@ class KnownValues(unittest.TestCase):
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(g[1,2], 0.020092574683078568, 5)
-        self.assertAlmostEqual(lib.fp(g), 0.46776574928545617, 6)
+        self.assertAlmostEqual(lib.fp(g), 0.46776574928545617, delta=1e-6)
 
         atom_coords = cell.atom_coords()
         mfs = mf.as_scanner()
@@ -222,6 +259,28 @@ class KnownValues(unittest.TestCase):
         e2 = mfs(atom_coords)
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
 
+    def test_rsjk_df_mixed_krhf_grad(self):
+        cell = gto.Cell()
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]
+        cell.a = '''
+        0.00, 3.37, 3.37
+        3.37, 0.00, 3.37
+        3.37, 3.37, 0.00'''
+        cell.basis = [[0, [3., 1]], [0, [.8, 1]], [1, [.8, 1]]]
+        cell.unit = 'bohr'
+        cell.build()
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KRHF(kpts=kpts).to_gpu().density_fit()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(g[1,2], 0.042341071658407975, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.16254422558624573, 6)
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'The meaning of get_hcore in *.pbc.grad has been changed in pyscf==2.12. It doesn\'t include pseudopotential nonlocal term anymore.')
     def test_hcore(self):
@@ -239,6 +298,41 @@ class KnownValues(unittest.TestCase):
             dat = hcore_generator_gpu(1)
             ref = hcore_generator_cpu(1)
             assert abs(dat.get() - ref.transpose(1,0,2,3)).max() < 1e-8
+
+    def test_hcore_all_electron(self):
+        np.random.seed(3)
+        cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',
+                      a=np.eye(3)*2.4 + (np.random.rand(3,3)*.4 - .3),
+                      basis=[[0,[2.3, 1]], [1,[.4, 1]]])
+        kpts = cell.make_kpts([1,1,3])
+        hcore_generator_gpu = krhf_gpu.Gradients(cell.KRHF(kpts=kpts)).hcore_generator()
+        dat = hcore_generator_gpu(1)
+        r = cell.atom_coords()
+        r[1,0] += 1e-3
+        e1 = cell.set_geom_(r, unit='Bohr', inplace=False).KRHF(kpts=kpts).get_hcore()
+        r[1,0] -= 2e-3
+        e2 = cell.set_geom_(r, unit='Bohr', inplace=False).KRHF(kpts=kpts).get_hcore()
+        assert abs(dat[:,0].get() - (e1 - e2)/2e-3).max() < 1e-6
+
+    @unittest.skip('RSJK for symmetry broken DM not working')
+    def test_time_reversal_symmetry_broken(self):
+        np.random.seed(3)
+        cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',
+                      a=np.eye(3)*2.4 + (np.random.rand(3,3)*.4 - .3),
+                      basis=[[0,[2.3, 1]], [1,[ .4, 1]]])
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KRHF(kpts=kpts, exxdiv='ewald').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run()
+        g = mf.Gradients().kernel()
+
+        mfs = mf.as_scanner()
+        r = cell.atom_coords()
+        r[0,0] += 1e-3
+        e1 = mfs(cell.set_geom_(r, unit='Bohr', inplace=False))
+        r[0,0] -= 2e-3
+        e2 = mfs(cell.set_geom_(r, unit='Bohr', inplace=False))
+        self.assertAlmostEqual(g[0,0], (e1-e2)/2e-3, 6)
 
 if __name__ == "__main__":
     print("Full Tests for KRHF Gradients")

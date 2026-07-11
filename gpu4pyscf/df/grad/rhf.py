@@ -35,19 +35,23 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
         try:
             j2c = cholesky(int2c)
             def j2c_solver(b):
-                out = solve_triangular(j2c, b.reshape(j2c.shape[0],-1), lower=True,
-                                        overwrite_b=False).reshape(b.shape)
-                return cp.asarray(out, order='A')
+                b_ = b.reshape(j2c.shape[0], -1)
+                y = solve_triangular(j2c, b_, lower=True, overwrite_b=False)
+                x = solve_triangular(j2c.conj().T, y, lower=False, overwrite_b=False)
+                return cp.asarray(x.reshape(b.shape), order='A')
             return j2c_solver
         except RuntimeError:
             pass
 
     w, v = eigh(int2c)
     mask = w > lindep
+    inv_w = 1 / w[mask]
     v1 = v[:,mask]
-    j2c = (v1/w[mask]).dot(v1.conj().T)
     def j2c_solver(b): # noqa: F811
-        return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
+        x = v1.conj().T @ b.reshape(int2c.shape[0],-1)
+        x = x * inv_w[:,None]
+        x = v1 @ x
+        return x.reshape(b.shape)
     return j2c_solver
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
@@ -115,7 +119,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     j2c = int2c2e(auxmol)
     if mol.omega <= 0 and not auxmol.mol.cart:
-        metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
     else:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
     j2c = aux_coeff = None
@@ -249,7 +253,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
 
     auxvec = auxmol.CT_dot_mat(auxvec)
     if mol.omega <= 0 and not auxmol.mol.cart:
-        auxvec = cp.linalg.solve(j2c, auxvec)
+        auxvec = _gen_metric_solver(j2c, 'CD')(auxvec)
     else:
         auxvec = _gen_metric_solver(j2c, 'ED')(auxvec)
     auxvec = auxmol.C_dot_mat(auxvec)

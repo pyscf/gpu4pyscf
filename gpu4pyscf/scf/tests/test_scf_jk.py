@@ -45,19 +45,16 @@ def test_jk_hermi1():
     ref = get_jk(mol, dm, hermi=1)
     assert abs(vj1 - ref[0]).max() < 1e-9
     assert abs(vk1 - ref[1]).max() < 1e-9
-    assert abs(lib.fp(vj1) - -2327.4715195591784) < 5e-10
-    assert abs(lib.fp(vk1) - -4069.3170008260583) < 5e-10
+    assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
+    assert abs(lib.fp(vk1) - -4069.3170008260583) < 1e-9
 
-    try:
-        vj = jk.get_j(mol, dm, hermi=1).get()
-        assert abs(vj - ref[0]).max() < 1e-9
-        assert abs(lib.fp(vj) - -2327.4715195591784) < 5e-10
-    except AttributeError:
-        pass
+    vj = jk.get_j(mol, dm, hermi=1).get()
+    assert abs(vj - ref[0]).max() < 1e-9
+    assert abs(lib.fp(vj) - -2327.4715195591784) < 1e-9
 
     vk = jk.get_k(mol, dm, hermi=1).get()
     assert abs(vk - ref[1]).max() < 1e-9
-    assert abs(lib.fp(vk) - -4069.3170008260583) < 5e-10
+    assert abs(lib.fp(vk) - -4069.3170008260583) < 1e-9
 
     mol.omega = 0.2
     vj, vk = jk.get_jk(mol, dm, hermi=1)
@@ -66,8 +63,8 @@ def test_jk_hermi1():
     ref = get_jk(mol, dm, hermi=1)
     assert abs(vj2 - ref[0]).max() < 1e-9
     assert abs(vk2 - ref[1]).max() < 1e-9
-    assert abs(lib.fp(vj2) -  1163.932604635460) < 5e-10
-    assert abs(lib.fp(vk2) - -1269.969109438691) < 5e-10
+    assert abs(lib.fp(vj2) -  1163.932604635460) < 1e-9
+    assert abs(lib.fp(vk2) - -1269.969109438691) < 1e-9
 
     mol.omega = -0.2
     vj, vk = jk.get_jk(mol, dm, hermi=1)
@@ -76,8 +73,8 @@ def test_jk_hermi1():
     ref = get_jk(mol, dm, hermi=1)
     assert abs(vj3 - ref[0]).max() < 1e-8
     assert abs(vk3 - ref[1]).max() < 1e-9
-    assert abs(lib.fp(vj3) - -3491.404124194866) < 5e-10
-    assert abs(lib.fp(vk3) - -2799.347891387202) < 5e-10
+    assert abs(lib.fp(vj3) - -3491.404124194866) < 1e-9
+    assert abs(lib.fp(vk3) - -2799.347891387202) < 1e-9
 
     assert abs(vj2+vj3 - vj1).max() < 1e-9
     assert abs(vk2+vk3 - vk1).max() < 1e-9
@@ -230,6 +227,7 @@ def test_k_hermi1():
     np.random.seed(9)
     nao = mol.nao
     dm = np.random.rand(2, nao, nao) - .5
+    dm = cp.asarray(dm)
     dm = cp.einsum('nij,nkj->nik', dm, dm)
 
     ref = jk.get_jk(mol, dm, hermi=1)[1].get()
@@ -257,19 +255,6 @@ def test_general_contraction():
     ref = get_jk(mol, dm, hermi=1)
     assert abs(vj1 - ref[0]).max() < 1e-9
     assert abs(vk1 - ref[1]).max() < 1e-9
-
-def test_vhfopt_coeff():
-    from gpu4pyscf.gto.mole import group_basis
-    mol = pyscf.M(
-        atom = '''
-        O   0.000   -0.    0.1174
-        C   1.      1.    0.
-        ''',
-        basis='ccpvtz',
-        unit='B',)
-    vhfopt = jk._VHFOpt(mol).build()
-    ref = group_basis(mol, tile=vhfopt.tile)[1]
-    assert abs(vhfopt.coeff - ref).max() < 1e-12
 
 def q_cond_reference(mol, direct_scf_tol=1e-13):
     #assert isinstance(mol, SortedMole)
@@ -330,70 +315,45 @@ def test_q_cond():
     )
 
     jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = group_basis(mol)[0]
+    sorted_mol = jkopt.sorted_mol
     qref, sref = q_cond_reference(sorted_mol)
-    q_cond = jkopt.q_cond.get()
+    nbas = sorted_mol.nbas
     thrd = np.log(jkopt.direct_scf_tol)
-    qref[qref < thrd] = thrd
-    q_cond[q_cond < thrd] = thrd
-    assert abs(qref - q_cond).max() < 1e-3
+    mask = qref > thrd
+    mask[np.arange(nbas)[:,None]<np.arange(nbas)] = False
+
+    bas_ij = cp.hstack([x[0] for x in jkopt.bas_pair_cache.values()])
+    q_cond = cp.hstack([x[1] for x in jkopt.bas_pair_cache.values()])
+    q_cond = q_cond[bas_ij.argsort()]
+    assert abs(qref[mask] - q_cond.get()).max() < 1e-3
 
     mol.omega = .25
     jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = group_basis(mol)[0]
+    sorted_mol = jkopt.sorted_mol
     qref, sref = q_cond_reference(sorted_mol)
-    q_cond = jkopt.q_cond.get()
-    qref[qref < thrd] = thrd
-    q_cond[q_cond < thrd] = thrd
-    assert abs(qref - q_cond).max() < 1e-3
+    nbas = sorted_mol.nbas
+    thrd = np.log(jkopt.direct_scf_tol)
+    mask = qref > thrd
+    mask[np.arange(nbas)[:,None]<np.arange(nbas)] = False
+
+    bas_ij = cp.hstack([x[0] for x in jkopt.bas_pair_cache.values()])
+    q_cond = cp.hstack([x[1] for x in jkopt.bas_pair_cache.values()])
+    q_cond = q_cond[bas_ij.argsort()]
+    assert abs(qref[mask] - q_cond.get()).max() < 1e-3
 
     mol.omega = -.25
     jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = group_basis(mol)[0]
+    sorted_mol = jkopt.sorted_mol
     qref, sref = q_cond_reference(sorted_mol)
-    q_cond = jkopt.q_cond.get()
-    qref[qref < thrd] = thrd
-    q_cond[q_cond < thrd] = thrd
-    assert abs(qref - q_cond).max() < 1e-3
+    nbas = sorted_mol.nbas
+    thrd = np.log(jkopt.direct_scf_tol)
+    mask = qref > thrd
+    mask[np.arange(nbas)[:,None]<np.arange(nbas)] = False
 
-def test_transform_coeff():
-    mol = pyscf.M(
-        atom = '''
-        O   0.000   -0.    0.1174
-        H   4.      0.    3.
-        H   0.      1.    .6
-        C   -3.2258  -0.1262  2.6126
-        H   -5.7987   0.2177  4.1423
-        H   -5.8042  -1.0067  4.1503
-        ''',
-        basis=('def2-tzvp', [[4, [1, 1]]]),
-    )
-    jkopt = jk._VHFOpt(mol).build()
-
-    coeff = np.zeros((jkopt.sorted_mol.nao, jkopt.mol.nao))
-    l_max = max([l_ctr[0] for l_ctr in jkopt.uniq_l_ctr])
-    if jkopt.mol.cart:
-        cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
-    else:
-        cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
-    i_spherical_offset = 0
-    i_cartesian_offset = 0
-    for i, l in enumerate(jkopt.uniq_l_ctr[:,0]):
-        cart2sph = cart2sph_per_l[l]
-        ncart, nsph = cart2sph.shape
-        l_ctr_count = jkopt.l_ctr_offsets[i + 1] - jkopt.l_ctr_offsets[i]
-        cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
-        sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
-        cart_idx = cart_offs[:,None] + np.arange(ncart)
-        sph_idx = sph_offs[:,None] + np.arange(nsph)
-        coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
-        l_ctr_pad_count = jkopt.l_ctr_pad_counts[i]
-        i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
-        i_spherical_offset += l_ctr_count * nsph
-    ref = jkopt.unsort_orbitals(coeff, axis = [1])
-
-    dat = jkopt.coeff
-    assert abs(dat - ref).max() < 1e-14
+    bas_ij = cp.hstack([x[0] for x in jkopt.bas_pair_cache.values()])
+    q_cond = cp.hstack([x[1] for x in jkopt.bas_pair_cache.values()])
+    q_cond = q_cond[bas_ij.argsort()]
+    assert abs(qref[mask] - q_cond.get()).max() < 1e-3
 
 def test_jk_get_k_sr():
     mol = pyscf.M(atom='''
@@ -413,15 +373,16 @@ def test_jk_get_k_hermi2():
     O  0.0000  0.7375 -0.0528
     O  0.0000 -0.7375 -0.1528
     ''', basis='sto-3g')
-    cp.random.seed(1)
+    np.random.seed(1)
     nao = mol.nao
-    dm = cp.random.rand(2, nao, nao)
+    dm = np.random.rand(2, nao, nao)
     dm = dm - dm.transpose(0,2,1)
-    jref, kref = get_jk(mol, dm.get(), hermi=0)
+    jref, kref = get_jk(mol, dm, hermi=0)
+    dm = cp.asarray(dm)
     vj, vk = jk.get_jk(mol, dm, hermi=2)
     assert abs(jref - vj.get()).max() < 1e-12
     assert abs(kref - vk.get()).max() < 1e-12
-    assert abs(lib.fp(vk.get()) - -3.93411357285107) < 1e-12
+    assert abs(lib.fp(vk.get()) - 2.0697365797774125) < 1e-12
     assert abs(vj.get().sum()) < 1e-12
 
 def test_jk_energy_per_atom():

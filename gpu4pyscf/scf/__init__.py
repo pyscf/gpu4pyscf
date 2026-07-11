@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from . import hf
-from .hf import RHF
 from .hf_lowmem import RHF as LRHF
 from .uhf import UHF
 from .ghf import GHF
@@ -21,7 +20,19 @@ from .rohf import ROHF
 from . import dispersion
 
 def HF(mol, *args):
-    if mol.nelectron == 1 or mol.spin == 0:
-        return RHF(mol, *args)
+    if mol.spin == 0:
+        return hf.RHF(mol, *args)
+    elif mol.nelectron == 1:
+        from .rohf import HF1e
+        return HF1e(mol, *args)
     else:
         return UHF(mol, *args)
+
+def RHF(mol, *args):
+    if mol.spin == 0:
+        return hf.RHF(mol, *args)
+    elif mol.nelectron == 1:
+        from .rohf import HF1e
+        return HF1e(mol, *args)
+    else:
+        return ROHF(mol, *args)

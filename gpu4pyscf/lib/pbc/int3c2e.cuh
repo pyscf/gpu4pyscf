@@ -18,7 +18,13 @@
 
 #include <stdint.h>
 
+// WARP_SIZE: compile-time constant used for shared-memory sizing.
+// `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
+// so we keep a literal here. Guarded so the build can override
+// it (e.g. -DWARP_SIZE=64) for future wider-wavefront targets.
+#ifndef WARP_SIZE
 #define WARP_SIZE       32
+#endif
 // corresponding to 256 threads
 #define WARPS           8
 #define THREADS         (WARP_SIZE*WARPS)

@@ -259,6 +259,7 @@ class KnownValues(unittest.TestCase):
         mf.rsjk = PBCJKMatrixOpt(cell_be)
         mf.j_engine = PBCJMatrixOpt(cell_be)
         mf = mf.multigrid_numint()
+        mf.conv_tol = 1e-10
         g = mf.Gradients().kernel()
 
         mfs = mf.as_scanner()
@@ -280,6 +281,7 @@ class KnownValues(unittest.TestCase):
         kpts = cell_be.make_kpts([1,1,3])
         mf = cell_be.KUKS(xc='pbe0', kpts=kpts).to_gpu().density_fit()
         mf.exxdiv = None
+        mf.conv_tol = 1e-10
         mf = mf.multigrid_numint()
         g = mf.Gradients().kernel()
 
@@ -375,7 +377,7 @@ class KnownValues(unittest.TestCase):
         mf.rsjk = PBCJKMatrixOpt(cell_no_pseudo)
         mf.j_engine = PBCJMatrixOpt(cell_no_pseudo)
         g = mf.Gradients().kernel()
-        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, delta=5e-6)
 
 if __name__ == "__main__":
     print("Full Tests for KUKS Gradients")

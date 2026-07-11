@@ -26,13 +26,13 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
-    dist_matrix, batched_vec3_norm2)
+    dist_matrix, batched_vec_norm2)
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.df.fft import get_SI, _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
+from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.__config__ import shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -535,11 +535,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     rhoR = cp.asarray(rhoR.reshape(nvar,ngrids), order='C')
     nelec = float(rhoR[0].sum().real.get()) * weight
 
-    if xctype == 'LDA':
-        exc, vxc = ni.eval_xc_eff(xc_code, rhoR[0], deriv=1, xctype=xctype)[:2]
-    else:
-        exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum = float(rhoR[0].dot(exc[:,0]).real.get()) * weight
+    exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype, spin=0)[:2]
+    excsum = float(rhoR[0].dot(exc).real.get()) * weight
     wv = weight * vxc
     wv_freq = tools.fft(wv, mesh).reshape(nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
@@ -562,7 +559,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if len(shape) == 3 and shape[0] != kpts_band.shape[0]:
         shape[0] = kpts_band.shape[0]
     veff = veff.reshape(shape)
-    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum)
     return nelec, excsum, veff
 
 # Note nr_uks handles only one set of KUKS density matrices (alpha, beta) in
@@ -637,11 +634,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     rhoR = cp.asarray(rhoR.reshape(2,nvar,ngrids), order='C')
     nelec = rhoR[:,0].sum(axis=-1).get() * weight
 
-    if xctype == 'LDA':
-        exc, vxc = ni.eval_xc_eff(xc_code, rhoR[:,0], deriv=1, xctype=xctype)[:2]
-    else:
-        exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum = float(rhoR[:,0].dot(exc[:,0]).sum().real.get()) * weight
+    exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype, spin=1)[:2]
+    excsum = float(rhoR[:,0].dot(exc).sum().real.get()) * weight
     wv = (weight * vxc).reshape(2*nvar,ngrids)
     wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
@@ -664,7 +658,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if len(shape) == 4 and shape[1] != kpts_band.shape[1]:
         shape[1] = kpts_band.shape[1]
     veff = veff.reshape(shape)
-    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum)
     return nelec, excsum, veff
 
 def get_rho(ni, dm, kpts=None):
@@ -688,7 +682,7 @@ def get_rho(ni, dm, kpts=None):
 def eval_nucG(cell, mesh):
     '''Nuclear attraction potential on Gv'''
     assert cell.dimension == 3
-    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -706,7 +700,7 @@ def eval_nucG_SI_gradient(cell, mesh, rho_g):
     assert rho_g.shape == (ngrids,)
 
     assert cell.dimension == 3
-    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -849,7 +843,7 @@ def eval_vpplocG(cell, mesh):
     '''PRB, 58, 3641 Eq (5)
     '''
     assert cell.dimension == 3
-    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -857,7 +851,7 @@ def eval_vpplocG(cell, mesh):
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
     # G2 = contract('px,px->p', Gv, Gv)
-    G2 = batched_vec3_norm2(Gv)
+    G2 = batched_vec_norm2(Gv)
     charges = cell.atom_charges()
 
     coulG = tools.get_coulG(cell, Gv=Gv)
@@ -871,8 +865,6 @@ def eval_vpplocG(cell, mesh):
 
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
-        if nexp == 0:
-            continue
 
         vlocG0 += 2*np.pi*charges[ia]*rloc**2
 
@@ -885,7 +877,7 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
     ngrids = np.prod(mesh)
     assert rho_g.shape == (ngrids,)
 
-    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -893,13 +885,13 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
     dSI_prefactor = -1j * Gv.T * rho_g.conj()
-    G2 = batched_vec3_norm2(Gv)
+    G2 = batched_vec_norm2(Gv)
     charges = cell.atom_charges()
 
     coulG = tools.get_coulG(cell, Gv=Gv)
     vlocG = cp.zeros(len(G2), dtype=np.complex128)
 
-    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
+    de = cp.zeros([cell.natm, 3], dtype = cp.complex128)
 
     for ia in range(cell.natm):
         symb = cell.atom_symbol(ia)
@@ -908,8 +900,6 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
 
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
-        if nexp == 0:
-            continue
 
         vlocG.fill(0)
         _append_vpplocG_one_atom_without_gamma(ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, G2, coulG, SIx, SIy, SIz, vlocG)
@@ -932,6 +922,7 @@ def get_pp(ni, kpts=None):
     '''
     from pyscf import gto
     from pyscf.pbc.gto.pseudo import pp_int
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     assert kpts is None or is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
@@ -947,7 +938,7 @@ def get_pp(ni, kpts=None):
     vpp = _get_j_pass2(ni, vpplocG[None,:], kpts=kpts)[0]
     t1 = log.timer_debug1('vpploc', *t0)
 
-    vppnl = pp_int.get_pp_nl(cell, kpts)
+    vppnl = get_pp_nl_gpu(cell, kpts)
     for k, kpt in enumerate(kpts):
         if is_zero(kpt):
             vpp[k] += cp.asarray(vppnl[k].real)
@@ -1471,9 +1462,15 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     get_rho = get_rho
     nr_rks = nr_rks
     nr_uks = nr_uks
-    get_vxc = nr_vxc = NotImplemented #numint_cpu.KNumInt.nr_vxc
 
-    eval_xc_eff = numint.eval_xc_eff
+    def get_vxc(self, cell, grids, xc_code, dm_kpts, spin=0, hermi=1,
+                kpts=None, kpts_band=None, with_j=False, verbose=None):
+        fn = self.nr_rks if spin == 0 else self.nr_uks
+        return fn(cell, grids, xc_code, dm_kpts, spin, hermi=hermi,
+                  kpts=kpts, kpts_band=kpts_band, with_j=with_j, verbose=verbose)
+    nr_vxc = get_vxc
+
+    eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 
     nr_rks_fxc = NotImplemented

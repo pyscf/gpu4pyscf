@@ -22,7 +22,13 @@
 #include "gvhf-rys/vhf.cuh"
 
 #define THREADS         256
+// WARP_SIZE: compile-time constant used for shared-memory sizing.
+// `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
+// so we keep a literal here. Guarded so the build can override
+// it (e.g. -DWARP_SIZE=64) for future wider-wavefront targets.
+#ifndef WARP_SIZE
 #define WARP_SIZE       32
+#endif
 #define WARPS           8
 #define REMOTE_THRESHOLD 50
 

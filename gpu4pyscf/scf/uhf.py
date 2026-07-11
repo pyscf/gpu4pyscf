@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import reduce
+import functools
 import numpy as np
 import cupy
 from pyscf.scf import uhf as uhf_cpu
+from pyscf.scf import hf as hf_cpu
 from pyscf import __config__
-
+from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.scf.hf import eigh, damping, level_shift
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
@@ -41,7 +42,7 @@ def make_rdm1(mo_coeff, mo_occ, **kwargs):
     return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
 
-def spin_square(mo, s=1):
+def spin_square(mo, s=None):
     r'''Spin square and multiplicity of UHF determinant
 
     Detailed derivataion please refers to the cpu pyscf.
@@ -50,11 +51,14 @@ def spin_square(mo, s=1):
     mo_a, mo_b = mo
     nocc_a = mo_a.shape[1]
     nocc_b = mo_b.shape[1]
-    s = reduce(cupy.dot, (mo_a.conj().T, cupy.asarray(s), mo_b))
-    ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s)
+    if s is None:
+        s = mo_a.conj().T.dot(mo_b)
+    else:
+        s = mo_a.conj().T.dot(s).dot(mo_b)
+    ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s).real.get()
     ssz = (nocc_b-nocc_a)**2 * .25
-    ss = (ssxy + ssz).real
-    s = cupy.sqrt(ss+.25) - .5
+    ss = float(ssxy) + ssz
+    s = (ss+.25)**.5 - .5
     return ss, s*2+1
 
 
@@ -85,8 +89,8 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
             dampa, dampb = damp_factor
         else:
             dampa = dampb = damp_factor
-        f = cupy.asarray((damping(f[0], fock_last[0], dampa),
-                          damping(f[1], fock_last[1], dampb)))
+        f = cupy.asarray((asarray(damping(f[0], fock_last[0], dampa)),
+                          asarray(damping(f[1], fock_last[1], dampb))))
     if diis and cycle >= diis_start_cycle:
         f = diis.update(s1e, dm, f)
 
@@ -125,21 +129,24 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
         h1e = mf.get_hcore()
     if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
         dm = cupy.array((dm*.5, dm*.5))
-    if vhf is None:
+    if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = mf.get_veff(mf.mol, dm)
     if h1e[0].ndim < dm[0].ndim:  # get [0] because h1e and dm may not be ndarrays
-        h1e = (h1e, h1e)
-    e1 = cupy.einsum('ij,ji->', h1e[0], dm[0])
-    e1+= cupy.einsum('ij,ji->', h1e[1], dm[1])
-    e_coul =(cupy.einsum('ij,ji->', vhf[0], dm[0]) +
-             cupy.einsum('ij,ji->', vhf[1], dm[1])) * .5
+        e1 = cupy.einsum('ij,nji->', h1e, dm)
+    else:
+        e1 = cupy.einsum('nij,nji->', h1e, dm)
+    e2 = cupy.einsum('nij,nji->', vhf, dm) * .5
     e1 = float(e1.real.get())
-    e_coul = float(e_coul.real.get())
-    e_elec = e1 + e_coul
-    mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['e2'] = e_coul
-    logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul)
-    return e_elec, e_coul
+    e2 = float(e2.real.get())
+    e_elec = e1 + e2
+    ecoul = vhf.ecoul.real
+    exx = e2 - ecoul
+    mf.scf_summary['e1'] = e1
+    mf.scf_summary['e2'] = e2
+    mf.scf_summary['coul'] = ecoul
+    mf.scf_summary['exc'] = exx
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exx)
+    return e_elec, e2
 
 def canonicalize(mf, mo_coeff, mo_occ, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
@@ -171,12 +178,56 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
     eig_(fock[1], mo_coeff[1], viridxb, mo_e[1], mo[1])
     return mo_e, mo
 
+def _cast_rhf_init_guess(fn):
+    @functools.wraps(fn)
+    def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None):
+        if mol is None: mol = mf.mol
+        dm = fn(mf, mol)
+        assert dm.ndim == 2
+
+        neleca, nelecb = mf.nelec
+        ne = neleca + nelecb
+        fac_a = neleca / ne
+        fac_b = nelecb / ne
+        if breaksym is None: breaksym = mf.init_guess_breaksym
+        if breaksym and mol.spin == 0 and neleca != 1:
+            fac_a = (neleca+1) / ne
+            fac_b = (neleca-1) / ne
+        if hasattr(dm, 'mo_coeff'):
+            scale = ne / dm.mo_occ.sum()
+            idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
+            mo_coeff = cupy.repeat(asarray(dm.mo_coeff[None,:,idx]), 2, axis=0)
+            mo_occ = cupy.repeat(asarray(dm.mo_occ[None,idx]), 2, axis=0)
+            mo_occ[0] *= fac_a * scale
+            mo_occ[1] *= fac_b * scale
+            dm = cupy.repeat(asarray(dm[None]), 2, axis=0)
+            dm[0] *= fac_a * scale
+            dm[1] *= fac_b * scale
+            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        else:
+            dm = cupy.repeat(asarray(dm[None]), 2, axis=0)
+            dm[0] *= fac_a
+            dm[1] *= fac_b
+        return dm
+    return uhf_from_rhf_init_guess
+
+def _trace_ecoul(vj, ddm, dm_last, vhf_last):
+    ecoul = None
+    if dm_last is not None:
+        if hasattr(vhf_last, 'ecoul') and ddm.ndim == 3:
+            ecoul = float(cupy.einsum('nij,ji->', dm_last, vj).real.get())
+            ecoul += float(cupy.einsum('nij,ji->', ddm, vj).real.get()) * .5
+            ecoul += vhf_last.ecoul
+    elif ddm.ndim == 3:
+        ecoul = float(cupy.einsum('nij,ji->', ddm, vj).real.get()) * .5
+    return ecoul
+
 class UHF(hf.SCF):
     from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'e_disp', 'conv_tol_cpscf', 'h1e', 's1e', 'init_guess_breaksym'}
 
-    init_guess_breaksym = getattr(__config__, 'scf_uhf_init_guess_breaksym', 1)
+    init_guess_breaksym = getattr(__config__, 'scf_uhf_init_guess_breaksym', 0)
 
     def __init__(self, mol):
         hf.SCF.__init__(self, mol)
@@ -195,7 +246,7 @@ class UHF(hf.SCF):
     @property
     def nelectron_alpha(self):
         return self.nelec[0]
-    
+
     @nelectron_alpha.setter
     def nelectron_alpha(self, x):
         logger.warn(self, 'WARN: Attribute .nelectron_alpha is deprecated. '
@@ -207,7 +258,55 @@ class UHF(hf.SCF):
         return
 
     get_fock = get_fock
-    get_occ = uhf_cpu.get_occ
+
+    def get_occ(self, mo_energy=None, mo_coeff=None):
+        if mo_energy is None: mo_energy = self.mo_energy
+        mo_energy = cupy.asarray(mo_energy)
+        e_idx_a = cupy.argsort(mo_energy[0])
+        e_idx_b = cupy.argsort(mo_energy[1])
+        nmo = len(e_idx_a)
+        n_a, n_b = self.nelec
+
+        if n_a < nmo and n_b < nmo:
+            homo = homo_a = mo_energy[0, e_idx_a[n_a-1]].item()
+            homo_b = None
+            if n_b > 0:
+                homo_b = mo_energy[1, e_idx_b[n_b-1]].item()
+                homo = max(homo, homo_b)
+            lumo = lumo_b = mo_energy[1, e_idx_b[n_b]].item()
+            lumo_a = None
+            if n_a < nmo:
+                lumo_a = mo_energy[1, e_idx_a[n_a]].item()
+                lumo = min(lumo, lumo_a)
+            gap = (lumo - homo) * HARTREE2EV
+            self.scf_summary['gap'] = gap
+            if self.verbose >= logger.INFO:
+                if lumo_a is not None:
+                    logger.info(self, 'alpha HOMO = %.12g  LUMO = %.12g', homo_a, lumo_a)
+                else:
+                    logger.info(self, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', homo_a)
+                if homo_b is not None:
+                    logger.info(self, 'beta HOMO = %.12g  LUMO = %.12g', homo_b, lumo_b)
+                else:
+                    logger.info(self, 'beta               LUMO = %.12g', homo_b)
+                if homo+1e-3 > lumo:
+                    logger.warn(self, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
+                else:
+                    logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap/eV = %.5f',
+                                homo, lumo, gap)
+        elif n_a > nmo or n_b > nmo:
+            raise RuntimeError('Failed to assign mo_occ. '
+                               f'nelec ({n_a}, {n_b}) > Nmo ({nmo})')
+
+        mo_occ = cupy.zeros((2, nmo))
+        mo_occ[0, e_idx_a[:n_a]] = 1
+        mo_occ[1, e_idx_b[:n_b]] = 1
+
+        if mo_coeff is not None and self.verbose >= logger.DEBUG:
+            ss, s = self.spin_square((mo_coeff[0][:,mo_occ[0]>0],
+                                      mo_coeff[1][:,mo_occ[1]>0]))
+            logger.debug(self, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
+        return mo_occ
 
     def get_grad(self, mo_coeff, mo_occ, fock=None):
         if fock is None:
@@ -219,14 +318,6 @@ class UHF(hf.SCF):
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
     canonicalize             = canonicalize
-    
-    get_init_guess           = hf.return_cupy_array(uhf_cpu.UHF.get_init_guess)
-    init_guess_by_minao      = uhf_cpu.UHF.init_guess_by_minao
-    init_guess_by_atom       = uhf_cpu.UHF.init_guess_by_atom
-    init_guess_by_huckel     = uhf_cpu.UHF.init_guess_by_huckel
-    init_guess_by_mod_huckel = uhf_cpu.UHF.init_guess_by_mod_huckel
-    init_guess_by_1e         = uhf_cpu.UHF.init_guess_by_1e
-    init_guess_by_chkfile    = uhf_cpu.UHF.init_guess_by_chkfile
     _finalize                = uhf_cpu.UHF._finalize
 
     # TODO: Enable followings after testing
@@ -236,7 +327,45 @@ class UHF(hf.SCF):
     det_ovlp                = NotImplemented
 
     density_fit             = hf.RHF.density_fit
+    x2c = x2c1e = sfx2c1e   = hf.RHF.sfx2c1e
     newton                  = hf.RHF.newton
+
+    init_guess_by_minao      = _cast_rhf_init_guess(hf.RHF.init_guess_by_minao)
+    init_guess_by_atom       = _cast_rhf_init_guess(hf.RHF.init_guess_by_atom)
+    init_guess_by_chkfile    = hf.return_cupy_array(uhf_cpu.UHF.init_guess_by_chkfile)
+
+    def init_guess_by_1e(self, mol=None, breaksym=None):
+        logger.info(self, 'Initial guess from hcore.')
+        h = self.get_hcore(mol)
+        s = self.get_ovlp(mol)
+        e, c = self.eig((h, h), s)
+        mo_occ = self.get_occ(e, c)
+        nocc = int((mo_occ > 0).sum(axis=1).max())
+        dm = self.make_rdm1(c[:,:,:nocc], mo_occ[:,:nocc])
+
+        if breaksym is None: breaksym = self.init_guess_breaksym
+        if breaksym and mol.spin == 0:
+            neleca, nelecb = self.nelec
+            dm[0] *= (neleca+1) / neleca
+            dm[1] *= (neleca-1) / neleca
+        return dm
+
+    @_cast_rhf_init_guess
+    def init_guess_by_huckel(self, mol=None, breaksym=None):
+        if mol is None: mol = self.mol
+        return hf_cpu.init_guess_by_huckel(mol)
+
+    @_cast_rhf_init_guess
+    def init_guess_by_mod_huckel(self, mol=None, breaksym=None):
+        if mol is None: mol = self.mol
+        return hf_cpu.init_guess_by_mod_huckel(mol)
+
+    def get_init_guess(self, mol=None, key='minao', **kwargs):
+        dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
+        if self.verbose >= logger.DEBUG1:
+            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp()).real
+            logger.debug1(self, 'Nelec from initial guess = %s', nelec)
+        return dm
 
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         if mo_coeff is None:
@@ -254,19 +383,26 @@ class UHF(hf.SCF):
         c[1] = c_b
         return cupy.stack((e_a,e_b)), c
 
-    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
         if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
-            dm = cupy.asarray((dm*.5,dm*.5))
+            dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+        ddm = dm = cupy.asarray(dm)
         if dm_last is not None and self.direct_scf:
-            dm = asarray(dm) - asarray(dm_last)
-        vj = self.get_j(mol, dm[0]+dm[1], hermi)
-        vhf = self.get_k(mol, dm, hermi)
+            dm_last = cupy.asarray(dm_last)
+            ddm = ddm - dm_last
+        else:
+            dm_last = None
+        vj = self.get_j(mol, ddm[0]+ddm[1], hermi)
+        ecoul = _trace_ecoul(vj, ddm, dm_last, vhf_last)
+        vhf = self.get_k(mol, ddm, hermi)
         vhf *= -1
         vhf += vj
-        if vhf_last is not None:
-            vhf += asarray(vhf_last)
+        if dm_last is not None:
+            vhf += cupy.asarray(vhf_last)
+        if ecoul is not None:
+            vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
     def spin_square(self, mo_coeff=None, s=None):

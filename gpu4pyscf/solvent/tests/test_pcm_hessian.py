@@ -546,6 +546,159 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
         assert np.max(np.abs(test_hessian - ref_hessian)) < 2e-6
 
+    def test_dSdx_dot_q_lowmem(self):
+        mol = gto.M(
+            atom = """
+                Na     0.000000    0.000000    0.000000
+                Na     0.000000    2.845847    2.845847
+                Na     2.845847    0.000000    2.845847
+                Na     2.845847    2.845847    0.000000
+                Cl     2.845847    0.000000    0.000000
+                Cl     2.845847    2.845847    2.845847
+                Cl     0.000000    0.000000    2.845847
+                Cl     0.000000    2.845847    0.000000
+                Na     5.691694    0.000000    0.000000
+                Na     5.691694    5.691694    0.000000
+                Na     5.691694    0.000000    5.691694
+                Na     0.000000    5.691694    0.000000
+                Na     0.000000    5.691694    5.691694
+                Na     0.000000    0.000000    5.691694
+                Na     5.691694    5.691694    5.691694
+                Na     5.691694    2.845847    2.845847
+                Na     2.845847    5.691694    2.845847
+                Na     2.845847    2.845847    5.691694
+                Cl     2.845847    5.691694    0.000000
+                Cl     2.845847    0.000000    5.691694
+                Cl     2.845847    5.691694    5.691694
+                Cl     5.691694    0.000000    2.845847
+                Cl     5.691694    5.691694    2.845847
+                Cl     0.000000    5.691694    2.845847
+                Cl     5.691694    2.845847    0.000000
+                Cl     5.691694    2.845847    5.691694
+                Cl     0.000000    2.845847    5.691694
+            """,
+            charge = 1,
+            basis = "6-31g",
+            verbose = 0,
+        )
+        mf = dft.rks.RKS(mol, xc="PBE")
+        mf = mf.PCM()
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.lebedev_order = 29
+
+        mf.conv_tol = 1e0
+        mf.kernel()
+
+        pcmobj = mf.with_solvent
+
+        atmlst = range(mol.natm - 1)
+        gridslice = pcmobj.surface['gslice_by_atom']
+        q_sym = pcmobj._intermediates['q_sym']
+
+        from gpu4pyscf.solvent.grad.pcm import get_dF_dA, get_dD_dS, get_dSii
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False, surface_discretization_method = pcmobj.surface_discretization_method)
+        dSii = get_dSii(pcmobj.surface, dF)
+        del dF
+        _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
+
+        from gpu4pyscf.solvent.hessian.pcm import get_dS_dot_q, get_dS_dot_q_lowmem
+        ref_dSdx_dot_q = get_dS_dot_q(dS, dSii, q_sym, atmlst, gridslice)
+        del dS
+
+        test_dSdx_dot_q = get_dS_dot_q_lowmem(dSii, pcmobj.surface, q_sym, atmlst, gridslice, stream = None)
+
+        assert np.max(np.abs(test_dSdx_dot_q - ref_dSdx_dot_q)) < 1e-15
+
+    def test_contract_d2S_lowmem(self):
+        mol = pyscf.M( # neopentane
+            atom = """
+                C      1.042440    0.085610   -0.011740
+                C      2.570330    0.085610   -0.011740
+                C      3.079630   -0.875920   -1.084370
+                C      3.079630    1.495300   -0.308120
+                C      3.079630   -0.362560    1.357290
+                H      0.649570    0.403960   -0.984220
+                H      0.649560    0.768620    0.750200
+                H      0.649560   -0.915760    0.198800
+                H      2.728230   -0.577130   -2.078680
+                H      2.728220   -1.896850   -0.895670
+                H      4.175330   -0.895490   -1.106200
+                H      2.728220    1.842340   -1.286640
+                H      4.175330    1.523990   -0.314160
+                H      2.728220    2.207010    0.447780
+                H      2.728210   -1.373050    1.595690
+                H      2.728210    0.311330    2.147090
+                H      4.175320   -0.371680    1.385160
+            """,
+            basis = "sto-3g",
+            verbose = 4,
+            output = '/dev/null',
+        )
+
+        mf = scf.hf.RHF(mol)
+        mf = mf.density_fit("def2-universal-jkfit")
+        mf = mf.PCM()
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.lebedev_order = 19
+        mf.with_solvent.radii_table = ["X", 2.49443848 + 1, "He", "Li", "Be", "B", 3.85504129] # necessary to make the center C obtain zero PCM grid points
+
+        mf.conv_tol = 1e0
+        mf.kernel()
+
+        pcmobj = mf.with_solvent
+
+        gridslice = pcmobj.surface['gslice_by_atom']
+        q = pcmobj._intermediates['q']
+        v_grids = pcmobj._intermediates['v_grids']
+        vK_1 = pcmobj.left_solve_K(v_grids, K_transpose = True)
+
+        from gpu4pyscf.solvent.grad.pcm import get_dF_dA
+        from gpu4pyscf.solvent.hessian.pcm import get_d2D_d2S, get_d2F_d2A, get_d2Sii, get_v_dot_d2S_dot_q, contract_d2S_offdiagonal, contract_d2S_diagonal
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False, surface_discretization_method = pcmobj.surface_discretization_method)
+        _, d2S = get_d2D_d2S(pcmobj.surface, with_D=False, with_S=True)
+        d2F, _ = get_d2F_d2A(pcmobj.surface, pcmobj.surface_discretization_method)
+        d2Sii = get_d2Sii(pcmobj.surface, dF, d2F)
+        del d2F
+        ref_v_d2S_q = get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, mol.natm, gridslice)
+        del d2S, d2Sii
+
+        test_v_d2S_q = contract_d2S_offdiagonal(pcmobj.surface, vK_1, q, gridslice)
+        test_v_d2S_q += contract_d2S_diagonal(pcmobj.surface, dF, vK_1 * q, pcmobj.surface_discretization_method)
+
+        assert np.max(np.abs(test_v_d2S_q - ref_v_d2S_q)) < 1e-15
+
+    def test_cpcm_lowmem(self):
+        mol = pyscf.M(
+            atom = """
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+            """,
+            basis = "6-31g",
+            verbose = 4,
+            output = '/dev/null',
+        )
+
+        mf = scf.hf.RHF(mol).density_fit("def2-universal-jkfit")
+        mf = mf.PCM()
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.lebedev_order = 17
+
+        mf.conv_tol = 1e0
+        mf.kernel()
+        dm = mf.make_rdm1()
+
+        pcmobj = mf.with_solvent
+        ref_hess = pcmobj.hess(dm)
+
+        from pyscf import lib
+        import gpu4pyscf.solvent.hessian.pcm as pcm_hessian
+        with lib.temporary_env(pcm_hessian, get_avail_mem=(lambda **kw: 0)):
+            test_hess = pcmobj.hess(dm)
+
+        assert np.max(np.abs(test_hess - ref_hess)) < 1e-14
+
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
     unittest.main()

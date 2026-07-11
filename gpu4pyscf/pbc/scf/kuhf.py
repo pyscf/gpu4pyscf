@@ -20,16 +20,20 @@ __all__ = [
     'KUHF'
 ]
 
+import functools
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.data.nist import HARTREE2EV
 from pyscf.pbc.scf import kuhf as kuhf_cpu
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import khf
 from gpu4pyscf.pbc.scf import uhf as pbcuhf
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, contract, tag_array, sandwich_dot)
+    return_cupy_array, contract, tag_array, sandwich_dot, asarray)
 
 
 def make_rdm1(mo_coeff_kpts, mo_occ_kpts, **kwargs):
@@ -70,8 +74,8 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f_a = []
         f_b = []
         for k in range(len(s_kpts)):
-            f_a.append(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa))
-            f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb))
+            f_a.append(asarray(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa)))
+            f_b.append(asarray(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb)))
         f_kpts = cp.asarray([f_a, f_b])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
@@ -83,9 +87,9 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
             shifta, shiftb = level_shift_factor
         else:
             shifta = shiftb = level_shift_factor
-        f_kpts =([mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta)
+        f_kpts =([asarray(mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta))
                   for k, s in enumerate(s_kpts)],
-                 [mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb)
+                 [asarray(mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb))
                   for k, s in enumerate(s_kpts)])
     return cp.asarray(f_kpts)
 
@@ -139,17 +143,42 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         fermi_b = mo_energy_b[nocc_b-1]
         mo_occ_kpts[1] = (mo_energy_kpts[1] <= fermi_b).astype(np.float64)
 
-    if mf.verbose >= logger.DEBUG:
+    if nocc_a < nmo and nocc_b < nmo:
+        homo = homo_a = fermi_a
+        homo_b = None
+        if nocc_b > 0:
+            homo = max(homo, fermi_b)
+        lumo = lumo_b = mo_energy_b[nocc_b]
+        lumo_a = None
         if nocc_a < nmo:
-            logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g',
-                        fermi_a, mo_energy_a[nocc_a])
-        else:
-            logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', fermi_a)
-        if 0 < nocc_b < nmo:
-            logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g',
-                        fermi_b, mo_energy_b[nocc_b])
-        elif 0 < nocc_b:
-            logger.info(mf, 'beta HOMO = %.12g  (no LUMO because of small basis) ', fermi_b)
+            lumo_a = mo_energy_a[nocc_a]
+            lumo = min(lumo, lumo_a)
+        gap = (lumo - homo) * HARTREE2EV
+        mf.scf_summary['gap'] = gap
+        if mf.verbose >= logger.INFO:
+            if lumo_a is not None:
+                logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g', homo_a, lumo_a)
+            else:
+                logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', homo_a)
+            if homo_b is not None:
+                logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g', homo_b, lumo_b)
+            else:
+                logger.info(mf, 'beta               LUMO = %.12g', lumo_b)
+            if homo+1e-3 > lumo:
+                logger.warn(mf, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
+            else:
+                logger.info(mf, '  HOMO = %.12g  LUMO = %.12g  gap/eV = %.5f',
+                            homo, lumo, gap)
+
+        if (mf.time_reversal_symmetry and
+            (lumo_a is not None and homo_a+1e-5 > lumo_a) and
+            (homo_b is not None and homo_b+1e-5 > lumo_b)):
+            idx = np.array([(k, k_conj) for k, k_conj in mf.iter_kpt_pairs()
+                            if k_conj is not None])
+            if not cp.array_equal(mo_occ_kpts[0,idx[:,0]], mo_occ_kpts[0,idx[:,1]]):
+                logger.warn(mf, 'k/-k pairs have unequal alpha occupations.')
+            if not cp.array_equal(mo_occ_kpts[1,idx[:,0]], mo_occ_kpts[1,idx[:,1]]):
+                logger.warn(mf, 'k/-k pairs have unequal beta occupations.')
     return mo_occ_kpts
 
 
@@ -158,19 +187,24 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf_kpts=None):
     '''
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
     if h1e_kpts is None: h1e_kpts = mf.get_hcore()
-    if vhf_kpts is None: vhf_kpts = mf.get_veff(mf.cell, dm_kpts)
+    if vhf_kpts is None or getattr(vhf_kpts, 'ecoul', None) is None:
+        vhf_kpts = mf.get_veff(mf.cell, dm_kpts)
 
     nkpts = len(h1e_kpts)
     e1 = 1./nkpts * cp.einsum('skij,kji->', dm_kpts, h1e_kpts).get()
-    e_coul = 1./nkpts * cp.einsum('skij,skji->', dm_kpts, vhf_kpts).get() * 0.5
+    e2 = 1./nkpts * cp.einsum('skij,skji->', dm_kpts, vhf_kpts).get() * 0.5
+    ecoul = vhf_kpts.ecoul
+    exx = e2 - ecoul
     mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['e2'] = e_coul.real
-    logger.debug(mf, 'E1 = %s  E_coul = %s', e1, e_coul)
-    if abs(e_coul.imag) > mf.cell.precision*10:
+    mf.scf_summary['e2'] = e2.real
+    mf.scf_summary['coul'] = ecoul.real
+    mf.scf_summary['exc'] = exx.real
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exx)
+    if abs(e2.imag) > mf.cell.precision*10:
         logger.warn(mf, "Coulomb energy has imaginary part %s. "
                     "Coulomb integrals (e-e, e-N) may not converge !",
-                    e_coul.imag)
-    return (e1+e_coul).real, e_coul.real
+                    e2.imag)
+    return (e1+e2).real, e2.real
 
 def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
@@ -184,6 +218,25 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     mo_energy = cp.stack([ea, eb])
     mo_coeff = cp.stack([ca, cb])
     return mo_energy, mo_coeff
+
+def _cast_mol_init_guess(fn):
+    @functools.wraps(fn)
+    def fn_init_guess(mf, cell=None, kpts=None):
+        if cell is None: cell = mf.cell
+        if kpts is None: kpts = mf.kpts
+        dm = fn(mf, cell)
+        assert dm.ndim == 3
+        nkpts = len(kpts)
+        if hasattr(dm, 'mo_coeff'):
+            idx = np.where(cp.asnumpy(dm.mo_occ.sum(axis=0)) > 0)[0]
+            mo_coeff = cp.repeat(asarray(dm.mo_coeff[:,None,:,idx]), nkpts, axis=1)
+            mo_occ = cp.repeat(asarray(dm.mo_occ[:,None,idx]), nkpts, axis=1)
+            dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
+            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        else:
+            dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
+        return dm
+    return fn_init_guess
 
 class KUHF(khf.KSCF):
     '''UHF class with k-point sampling.
@@ -205,9 +258,10 @@ class KUHF(khf.KSCF):
 
     nelec = kuhf_cpu.KUHF.nelec
 
-    init_guess_by_1e     = pbcuhf.UHF.init_guess_by_1e
-    init_guess_by_minao  = pbcuhf.UHF.init_guess_by_minao
-    init_guess_by_atom   = pbcuhf.UHF.init_guess_by_atom
+    init_guess_by_minao = _cast_mol_init_guess(pbcuhf.UHF.init_guess_by_minao)
+    init_guess_by_atom = _cast_mol_init_guess(pbcuhf.UHF.init_guess_by_atom)
+    init_guess_by_huckel = _cast_mol_init_guess(pbcuhf.UHF.init_guess_by_huckel)
+    init_guess_by_mod_huckel = _cast_mol_init_guess(pbcuhf.UHF.init_guess_by_mod_huckel)
     get_fock = get_fock
     get_fermi = get_fermi
     get_occ = get_occ
@@ -215,66 +269,78 @@ class KUHF(khf.KSCF):
     get_rho = khf.get_rho
     canonicalize = canonicalize
 
+    def init_guess_by_1e(self, cell=None):
+        if cell is None: cell = self.cell
+        if cell.dimension < 3:
+            logger.warn(self, 'Hcore initial guess is not recommended in '
+                        'the SCF of low-dimensional systems.')
+        logger.info(self, 'Initial guess from hcore.')
+        h = self.get_hcore(cell)
+        s = self.get_ovlp(cell)
+        e, c = self.eig((h, h), s)
+        mo_occ = self.get_occ(e, c)
+        nocc = int((mo_occ > 0).sum(axis=2).max())
+        dm = self.make_rdm1(c[:,:,:,:nocc], mo_occ[:,:,:nocc])
+        return dm
+
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         if s1e is None:
             s1e = self.get_ovlp(cell)
-        dm_kpts = cp.asarray(mol_hf.SCF.get_init_guess(self, cell, key))
-        assert dm_kpts.shape[0] == 2
+        dm = cp.asarray(mol_hf.SCF.get_init_guess(self, cell, key))
         nkpts = len(self.kpts)
-        if dm_kpts.ndim != 4:
-            # dm[spin,nao,nao] at gamma point -> dm_kpts[spin,nkpts,nao,nao]
-            dm_kpts = cp.repeat(dm_kpts[:,None,:,:], nkpts, axis=1)
+        assert dm.ndim == 4 and dm.shape[:2] == (2, nkpts)
 
-        ne = cp.einsum('xkij,kji->x', dm_kpts, s1e).real
-        nelec = cp.asarray(self.nelec)
+        ne = cp.einsum('xkij,kji->x', dm, s1e).real.get()
+        nelec = self.nelec
         if any(abs(ne - nelec) > 0.01*nkpts):
             logger.debug(self, 'Big error detected in the electron number '
                          'of initial guess density matrix (Ne/cell = %g)!\n'
                          '  This can cause huge error in Fock matrix and '
                          'lead to instability in SCF for low-dimensional '
                          'systems.\n  DM is normalized wrt the number '
-                         'of electrons %s', ne.mean()/nkpts, nelec/nkpts)
-            dm_kpts *= (nelec / ne).reshape(2,1,1,1)
-        return dm_kpts
+                         'of electrons (%g, %g)',
+                         ne.mean()/nkpts, nelec[0]/nkpts, nelec[1]/nkpts)
+            ne[1] += 1e-300 # Number of beta electrons may be 0
+            dm[0] *= nelec[0] / ne[0]
+            dm[1] *= nelec[1] / ne[1]
+            if hasattr(dm, 'mo_coeff'):
+                dm.mo_occ[0] *= nelec[0] / ne[0]
+                dm.mo_occ[1] *= nelec[1] / ne[1]
+        return dm
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None):
-        if cell is None: cell = self.cell
-        if dm_kpts is None: dm_kpts = self.make_rdm1()
-        if kpts is None: kpts = self.kpts
-        cpu0 = logger.init_timer(self)
-        if self.rsjk or self.j_engine:
-            vj = self.get_j(cell, dm_kpts[0]+dm_kpts[1], hermi, kpts, kpts_band)
-            vk = self.get_k(cell, dm_kpts, hermi, kpts, kpts_band)
-        else:
-            vj, vk = self.with_df.get_jk(
-                dm_kpts, hermi, kpts, kpts_band, exxdiv=self.exxdiv)
-            vj = vj[0] + vj[1]
-        logger.timer(self, 'vj and vk', *cpu0)
-        vhf = vj - vk
-        return vhf
+        return _get_veff(self, cell, dm_kpts, dm_last, vhf_last, hermi, kpts, kpts_band)
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
         if fock is None:
             dm1 = self.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
             fock = self.get_hcore(self.cell, self.kpts) + self.get_veff(self.cell, dm1)
 
+        nkpts, nao = mo_occ_kpts.shape[1:3]
+
         def grad(mo, mo_occ, fock):
-            occidx = mo_occ > 0
-            viridx = ~occidx
-            g = mo[:,viridx].conj().T.dot(fock.dot(mo[:,occidx]))
-            return g.ravel()
+            omask = mo_occ > 0
+            vmask = ~omask
+            nocc = cp.count_nonzero(omask, axis=1).get()
+            if all(nocc[0] == nocc):
+                o = mo.transpose(0,2,1)[omask].reshape(nkpts,-1,nao)
+                v = mo.transpose(0,2,1)[vmask].reshape(nkpts,-1,nao)
+                g = contract('kpq,kjq->kpj', fock, o)
+                g = contract('kpj,kip->kij', g, v.conj())
+                return g.ravel()
 
-        nkpts = len(mo_occ_kpts[0])
-        grad_kpts = [grad(mo_coeff_kpts[0][k], mo_occ_kpts[0][k], fock[0][k])
-                     for k in range(nkpts)]
-        grad_kpts+= [grad(mo_coeff_kpts[1][k], mo_occ_kpts[1][k], fock[1][k])
-                     for k in range(nkpts)]
-        return cp.hstack(grad_kpts)
+            g = [ck[:,vmask[k]].conj().T.dot(fk.dot(ck[:,omask[k]])).ravel()
+                 for k, (fk, ck) in enumerate(zip(fock, mo))]
+            return cp.hstack(g).ravel()
 
-    def eig(self, h_kpts, s_kpts, overwrite=False, x=None):
-        e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts, x=x)
-        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite, x)
+        return cp.hstack([
+            grad(mo_coeff_kpts[0], mo_occ_kpts[0], fock[0]),
+            grad(mo_coeff_kpts[1], mo_occ_kpts[1], fock[1])])
+
+    def eig(self, h_kpts, s_kpts, overwrite=False, x=None, time_reversal_symmetry=None):
+        e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts, False, x, time_reversal_symmetry)
+        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite, x, time_reversal_symmetry)
         return cp.asarray((e_a,e_b)), cp.asarray((c_a,c_b))
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):
@@ -294,7 +360,10 @@ class KUHF(khf.KSCF):
         fock = self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
         fock += self.get_hcore(cell, kpts_band)
         s1e = self.get_ovlp(cell, kpts_band)
-        e, c = self.eig(fock, s1e)
+
+        x = self.check_linear_dependency(s1e, time_reversal_symmetry=False)
+        e, c = self.eig(fock, s1e, overwrite=True, x=x, time_reversal_symmetry=False)
+
         if single_kpt_band:
             e = e[:,0]
             c = c[:,0]
@@ -312,6 +381,7 @@ class KUHF(khf.KSCF):
     convert_from_ = NotImplemented
 
     density_fit = khf.KRHF.density_fit
+    x2c = x2c1e = sfx2c1e = khf.KRHF.sfx2c1e
 
     def Gradients(self):
         from gpu4pyscf.pbc.grad.kuhf import Gradients
@@ -356,3 +426,103 @@ class KUHF(khf.KSCF):
         pop, chg = mulliken_meta(cell, dm, kpts=kpts, s=s, verbose=verbose)
         dip = None
         return (pop, chg), dip
+
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     with_j=True, hermi=0, max_memory=None, with_nlc=False):
+        cell = self.cell
+        kpts = self.kpts
+        with_j = with_j and hermi != 2
+        def vind(dm1, kshift=0):
+            assert kshift == 0
+            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpts,
+                            with_j=with_j, with_ecoul=False)
+            return vhf.view(cp.ndarray)
+        return vind
+
+    def newton(self):
+        from gpu4pyscf.pbc.scf import soscf
+        return soscf.newton(self)
+
+def _get_veff(mf, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
+              hermi=1, kpts=None, kpts_band=None, with_j=True, with_ecoul=True):
+    if dm_kpts is None: dm_kpts = mf.make_rdm1()
+    if kpts is None: kpts = mf.kpts
+
+    def get_vhf_(vj, vk):
+        vk *= -1.
+        if with_j and vj is not None:
+            vk += vj
+        return vk
+
+    def trace(dm, vj):
+        if kpts_band is not None:
+            return None
+        if not with_ecoul:
+            return None
+        if vj.ndim == 2:
+            return cp.einsum('nij,ji->', dm_kpts, vj).real.get() * .5
+        return cp.einsum('nKij,Kji->', dm_kpts, vj).real.get() * .5
+
+    j_engine = None
+    if with_j:
+        j_engine = mf.j_engine
+
+    if mf.rsjk or isinstance(j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
+        incremental_veff = dm_last is not None and hasattr(vhf_last, 'sr')
+        ddm = dm_kpts
+        if incremental_veff:
+            ddm = dm_kpts - dm_last
+
+        vk_sr = 0
+        vj = vj_sr = None
+        ecoul = ecoul_sr = None
+        if with_j:
+            if isinstance(j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
+                if j_engine.supmol is None:
+                    j_engine.build(kpts)
+                vj_sr = j_engine._get_j_sr(ddm.sum(axis=0), hermi, kpts, kpts_band)
+                vj = j_engine._get_j_lr(dm_kpts.sum(axis=0), hermi, kpts, kpts_band)
+                if with_ecoul:
+                    if incremental_veff:
+                        if hasattr(vhf_last, 'ecoul_sr'):
+                            ecoul_sr = trace(dm_last, vj_sr) * 2
+                            ecoul_sr += trace(ddm, vj_sr)
+                            ecoul_sr += vhf_last.ecoul_sr
+                            ecoul = trace(dm_kpts, vj) + ecoul_sr
+                    else:
+                        ecoul_sr = trace(dm_kpts, vj_sr)
+                        ecoul = trace(dm_kpts, vj) + ecoul_sr
+            else:
+                vj = mf.get_j(cell, dm_kpts.sum(axis=0), hermi, kpts, kpts_band)
+                if with_ecoul:
+                    ecoul = trace(dm_kpts, vj)
+
+        if mf.rsjk:
+            if mf.rsjk.supmol is None:
+                mf.rsjk.build(kpts)
+            vk_sr = mf.rsjk._get_k_sr(ddm, hermi, kpts, kpts_band, mf.exxdiv)
+            vk = mf.rsjk._get_k_lr(dm_kpts, hermi, kpts, kpts_band, mf.exxdiv)
+        else:
+            vk = mf.get_k(cell, dm_kpts, hermi, kpts, kpts_band)
+
+        vhf_sr = get_vhf_(vj_sr, vk_sr)
+        if incremental_veff:
+            vhf_sr += vhf_last.sr
+        vhf = get_vhf_(vj, vk) + vhf_sr
+        vhf = tag_array(vhf, sr=vhf_sr)
+
+        if with_ecoul and ecoul is not None:
+            vhf.ecoul = ecoul
+            if ecoul_sr is not None:
+                vhf.ecoul_sr = ecoul_sr
+    else:
+        vj, vk = mf.with_df.get_jk(
+            dm_kpts, hermi, kpts, kpts_band, with_j=with_j, with_k=True,
+            exxdiv=mf.exxdiv)
+        vj = vj.sum(axis=0)
+        if with_j and with_ecoul:
+            ecoul = trace(dm_kpts, vj)
+            vhf = tag_array(get_vhf_(vj, vk), ecoul=ecoul)
+        else:
+            vhf = get_vhf_(vj, vk)
+    return vhf

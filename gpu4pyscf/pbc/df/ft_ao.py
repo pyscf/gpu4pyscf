@@ -16,6 +16,10 @@
 Analytical Fourier transform for orbital-products
 '''
 
+__all__ = [
+    'ft_aopair', 'ft_aopair_kpts', 'ft_ao'
+]
+
 import ctypes
 import math
 import itertools
@@ -32,26 +36,22 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, contract, get_avail_mem, dist_matrix, asarray, ndarray)
-from gpu4pyscf.gto.mole import group_basis, SortedGTO, PTR_BAS_COORD
+    load_library, contract, get_avail_mem, asarray, ndarray, hermi_triu)
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.gto.mole import (
+    group_basis, SortedGTO, PTR_BAS_COORD,
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
 from gpu4pyscf.__config__ import props as gpu_specs
-
-__all__ = [
-    'ft_aopair', 'ft_aopair_kpts', 'ft_ao'
-]
 
 libpbc = load_library('libpbc')
 libpbc.build_ft_ao.restype = ctypes.c_int
 libpbc.build_ft_aopair.restype = ctypes.c_int
 
 LMAX = 4
-GOUT_WIDTH = 29
+GOUT_WIDTH = 30
 THREADS = 256
 POOL_SIZE = 65536
 
@@ -135,7 +135,6 @@ class FTOpt:
 
         self.rcut = None
         self._aft_envs = None
-        self.bas_ij_cache = None
         self.bvkcell = None
         self.bvkmesh_Ls = None
         self.Ls = None
@@ -214,6 +213,8 @@ class FTOpt:
             ish = cp.arange(ish0, ish1, dtype=np.uint32)
             jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.uint32)
             bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
+            assert np.all(bas_ij < np.iinfo(np.uint32).max), "uint32 overflow"
+            bas_ij = bas_ij.astype(np.uint32)
             sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
             bas_ij = bas_ij[sub_mask]
             bas_ij_cache[i, j] = bas_ij
@@ -263,7 +264,9 @@ class FTOpt:
 
     def estimate_cutoff_with_penalty(self):
         cell = self.cell
-        rcut = cell.rcut
+        rcut = self.rcut
+        if rcut is None:
+            rcut = cell.rcut
         vol = cell.vol
         cell_exp, _, cell_l = most_diffuse_pgto(cell)
         lsum = cell_l * 2 + 1
@@ -339,7 +342,7 @@ class FTOpt:
             self.build()
 
         cell = self.cell
-        nsp_per_block, gout_stride, shm_size = ft_ao_scheme()
+        nsp_per_block, gout_stride, shm_size = ft_ao_scheme(cache_cart_idx=True)
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
         if bas_ij_aggregated is None:
@@ -371,7 +374,8 @@ class FTOpt:
             ao_pair_offsets = ao_pair_offsets[pair_splits]
 
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, POOL_SIZE), dtype=np.float64)
+        pool = cp.empty(workers*POOL_SIZE+1, dtype=np.float64)
+        head = pool[-1:]
         aft_envs = self.aft_envs
         img_idx = cp.asarray(self.img_idx)
         img_offsets = cp.asarray(self.img_offsets)
@@ -403,6 +407,7 @@ class FTOpt:
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(head.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(shm_size_max),
                 ctypes.c_int(pair_blocks),
                 ctypes.cast(_shl_pair_offsets.data.ptr, ctypes.c_void_p),
@@ -423,7 +428,7 @@ class FTOpt:
 
         return evaluate_ft, ao_pair_offsets
 
-    def gen_ft_kernel(self, verbose=None, transform_ao=True):
+    def gen_ft_kernel(self, verbose=None, transform_ao=True, kpts=None):
         r'''
         Generate the analytical fourier transform kernel for AO products
 
@@ -437,12 +442,18 @@ class FTOpt:
         '''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cart = None
-        if not transform_ao:
+        if transform_ao:
+            nao = self.cell.cell.nao_nr()
+        else:
             cart = True
+            nao = self.cell.nao_nr(cart=True)
         eval_ft = self.ft_evaluator(compressing=False, cart=cart,
                                     original_ao_order=transform_ao)[0]
+        kpts_cached = kpts
+        kpts_cached_is_gamma_point = kpts is None or is_zero(kpts)
 
-        pair_address = self.pair_and_diag_indices(cart, original_ao_order=transform_ao)[0]
+        pair_address = self.pair_and_diag_indices(
+            cart, original_ao_order=transform_ao)[0]
         pair_address = cp.asarray(pair_address, dtype=np.int32)
         bvk_ncells = len(self.bvkmesh_Ls)
         if bvk_ncells == 1:
@@ -452,7 +463,6 @@ class FTOpt:
             conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
 
         cell = self.cell.cell
-        nao = cell.nao_nr(cart=cart)
         # tril_idx in the reference cell associated to the pair_address.
         # Note indices within this array does not guarantee i>=j. It only indicates
         # the unique pairs for each unit cell.
@@ -461,7 +471,7 @@ class FTOpt:
         mask = cp.any(mask.reshape(nao, bvk_ncells, nao), axis=1)
         tril_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
 
-        def ft_kernel(Gv, q=None, kpts=None, kj_idx=None):
+        def ft_kernel(Gv, q=None, kpts=None, kj_idx=None, out=None, buf=None):
             '''
             Analytical FT for orbital products. The output tensor has the shape
             [nk, nGv, nao, nao]
@@ -474,11 +484,22 @@ class FTOpt:
             if kj_idx is None and not at_gamma_point and self.permutation_symmetry:
                 raise RuntimeError('kj_idx must be specified when permutation_symmetry is enabled')
 
-            if q is None:
-                out = eval_ft(Gv)
-            else:
+            if q is not None:
                 assert q.shape == (3,)
-                out = eval_ft(Gv+q)
+                Gv = Gv + q
+
+            if kpts is None:
+                kpts = kpts_cached
+                kpts_is_gamma_point = kpts_cached_is_gamma_point
+            else:
+                kpts_is_gamma_point = is_zero(kpts)
+
+            if kpts_is_gamma_point and bvk_ncells == 1:
+                assert at_gamma_point
+                out_buf = out, buf
+            else:
+                out_buf = buf, out
+            out = eval_ft(Gv, out=out_buf[0])
 
             nGv = len(Gv)
             symmetric_for_bvk_orbitals = self.permutation_symmetry and at_gamma_point
@@ -487,9 +508,10 @@ class FTOpt:
                 fill_triu_bvk(out.view(np.float64), nao, self.bvk_kmesh,
                               pair_address, conj_mapping, bvk_axis=1)
 
-            if kpts is None or is_zero(kpts):
+            if kpts_is_gamma_point:
                 if bvk_ncells != 1:
-                    out = out.sum(axis=1)[:,None]
+                    tmp = ndarray((nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
+                    out = out.sum(axis=1, out=tmp)[:,None]
                 if self.permutation_symmetry and not symmetric_for_bvk_orbitals:
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
@@ -502,7 +524,9 @@ class FTOpt:
                 logger.debug1(cell, 'transform BvK-cell to k-points')
                 kpts = asarray(kpts, order='C')
                 expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
-                out = contract('Lk,pLqG->kpqG', expLk, out)
+                nkpts = expLk.shape[1]
+                tmp = ndarray((nkpts,nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
+                out = contract('Lk,pLqG->kpqG', expLk, out, out=tmp)
                 if (kj_idx is not None and
                     self.permutation_symmetry and not symmetric_for_bvk_orbitals):
                     # Using the identity FW(i[ki], j[kj], G+q) == FW(j[-kj], i[-ki], G+q),
@@ -516,7 +540,6 @@ class FTOpt:
                     # The k <-> -k mapping for each ki in this reordered
                     # sequence is conj_mapping[ki_idx[kj_idx.argsort()]],
                     # which is stored in `conj_mapping_ki`.
-                    nkpts = expLk.shape[1]
                     assert bvk_ncells == nkpts
                     conj_mapping_ki = cp.empty(nkpts, dtype=np.int32)
                     conj_mapping_ki[kj_idx] = conj_mapping
@@ -556,25 +579,86 @@ class FTOpt:
             rhoG[p0:p1] = rhoGz.view(np.complex128)
         return rhoG
 
-def ft_ao_scheme():
+    def contract_rhoG(self, rhoG, Gv, kpts=None, sort_output=True):
+        from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
+        cell = self.cell
+        nsp_per_block, gout_stride, shm_size = ft_ao_scheme(nGv_per_block=16)
+        lmax = cell.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:lmax+1,:lmax+1].max()
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(self.bas_ij_cache, 16)
+
+        kern = libpbc.contract_ft_aopair
+        aft_envs = self.aft_envs
+        img_idx = cp.asarray(self.img_idx)
+        img_offsets = cp.asarray(self.img_offsets)
+        head = cp.empty(1, dtype=np.int32)
+        bvk_ncells = len(self.bvkmesh_Ls)
+        nao = cell.nao
+
+        vj = cp.zeros((nao, bvk_ncells, nao))
+        ngrids = len(Gv)
+        GvT = cp.asarray(Gv.T.ravel())
+        pair_blocks = len(shl_pair_offsets) - 1
+        compressing = 0
+        err = kern(
+            ctypes.cast(vj.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rhoG.data.ptr, ctypes.c_void_p),
+            ctypes.byref(aft_envs),
+            ctypes.cast(head.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(shm_size_max),
+            ctypes.c_int(pair_blocks),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids),
+            ctypes.c_int(compressing))
+        if err != 0:
+            raise RuntimeError('contract_ft_pdotp kernel failed')
+
+        if kpts is None or is_zero(kpts):
+            if bvk_ncells != 1:
+                vj = vj.sum(axis=1)[None]
+            else:
+                vj = vj.transpose(1,0,2)
+        else:
+            nkpts = len(kpts)
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            expLkz = expLk.view(np.float64).reshape(bvk_ncells,nkpts,2)
+            vj = contract('Lkz,pLq->kpqz', expLkz, vj)
+            vj = vj.view(np.complex128)[:,:,:,0]
+        vj = hermi_triu(vj)
+        if sort_output:
+            vj = cell.apply_CT_mat_C(vj)
+        return vj
+
+def ft_ao_scheme(shm_size=SHM_SIZE, gout_width=GOUT_WIDTH, deriv=None,
+                 nGv_per_block=32, cache_cart_idx=False):
+    if deriv is None:
+        deriv = (0, 0)
+    i_inc, j_inc = deriv
+
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     nfi = (li + 1) * (li + 2) // 2
     nfj = (lj + 1) * (lj + 2) // 2
     gout_size = nfi * nfj
-    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
+    gout_stride = (gout_size + gout_width-1) // gout_width
     # Round up to the next 2^n
     gout_stride = _nearest_power2(gout_stride, return_leq=False)
 
-    nGv_per_block = 32
-    nsp_max = 8 // gout_stride
+    rem_threads = THREADS // nGv_per_block
+    nsp_max = rem_threads // gout_stride
     assert np.all(nsp_max > 0)
-    g_size = (li+1)*(lj+1)
+    g_size = (li+1+i_inc)*(lj+1+j_inc)
     unit = g_size*3
-    nsp_per_block = _nearest_power2((SHM_SIZE-256) // (nGv_per_block*(unit*16)))
+    nsp_per_block = _nearest_power2(shm_size // (nGv_per_block*(unit*16)))
     nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
-    gout_stride = cp.asarray(8 // nsp_per_block, dtype=np.int32)
+    gout_stride = cp.asarray(rem_threads // nsp_per_block, dtype=np.int32)
     shm_size = nGv_per_block * nsp_per_block * (unit*16)
     shm_size += nsp_per_block * 3 * 8
-    shm_size += (nfi + nfj) * 3 * 4
+    if cache_cart_idx:
+        shm_size += (nfi + nfj) * 3 * 4
     return nsp_per_block, gout_stride, shm_size

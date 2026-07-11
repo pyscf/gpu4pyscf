@@ -16,8 +16,12 @@ from functools import reduce
 from fractions import Fraction
 import itertools
 import numpy as np
+import cupy as cp
 from pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.tools.k2gamma import translation_map
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
+from gpu4pyscf.lib.cupy_helper import asarray
 
 def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
     '''Search the minimal BvK mesh or Monkhorst-Pack k-point mesh
@@ -46,7 +50,7 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
         floats = scaled_kpts[:,i]
         uniq_floats_idx = np.unique((floats/precision+.5).astype(int), return_index=True)[1]
         uniq_floats = floats[uniq_floats_idx]
-        fracs = [Fraction(x).limit_denominator(int(kmesh[i])) for x in uniq_floats]
+        fracs = [Fraction(x).limit_denominator(int(kmesh[i])+10) for x in uniq_floats]
         denominators = np.unique([x.denominator for x in fracs])
         common_denominator = reduce(np.lcm, denominators)
         fs = [(x * common_denominator).numerator for x in fracs]
@@ -60,3 +64,38 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
         elif not bound_by_supmol:
             raise RuntimeError(f'Unable to find Monkhorst-Pack k-point mesh for {kpts}')
     return kmesh
+
+def double_translation_indices(kmesh):
+    '''Indices to utilize the translation symmetry in the 2D matrix.
+
+    D[M,N] = D[N-M]
+
+    The return index maps the 2D subscripts to 1D subscripts.
+
+    D2 = D1[double_translation_indices()]
+
+    D1 holds all the symmetry unique elements in D2
+    '''
+
+    tx = cp.array(translation_map(kmesh[0]), dtype=np.int32)
+    ty = cp.array(translation_map(kmesh[1]), dtype=np.int32)
+    tz = cp.array(translation_map(kmesh[2]), dtype=np.int32)
+    idx = cp.ravel_multi_index([tx[:,None,None,:,None,None],
+                                ty[None,:,None,None,:,None],
+                                tz[None,None,:,None,None,:]], kmesh)
+    nk = np.prod(kmesh)
+    return idx.reshape(nk, nk)
+
+def gamma2k_phase(kmesh, with_gamma_point=True):
+    '''
+    The k_phase can transform the k-points MOs to gamma-point MOs:
+    C_gamma = np.einsum('Rk,kum,kh->Ruhm', fft_matrix(kmesh), C_k, k_phase)
+    '''
+    Nk = np.prod(kmesh)
+    k_phase = np.eye(Nk, dtype=np.complex128)
+    r2x2 = np.array([[1., 1j], [1., -1j]]) * .5**.5
+    pairs = [[k, k_conj] for k, k_conj, _, _ in kk_adapted_iter(kmesh, with_gamma_point)
+             if k != k_conj]
+    for idx in np.array(pairs):
+        k_phase[idx[:,None],idx] = r2x2
+    return asarray(k_phase)

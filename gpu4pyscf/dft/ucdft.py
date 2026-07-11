@@ -21,6 +21,7 @@ from pyscf import gto
 from gpu4pyscf.dft.rkspu import reference_mol, _make_minao_lo
 from gpu4pyscf import dft
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import asarray
 from gpu4pyscf.dft import radi
 from pyscf import __config__
 
@@ -474,8 +475,8 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
                 dampa, dampb = damp_factor
             else:
                 dampa = dampb = damp_factor
-            f = cp.asarray((damping(f[0], fock_last[0], dampa),
-                            damping(f[1], fock_last[1], dampb)))
+            f = cp.asarray((asarray(damping(f[0], fock_last[0], dampa)),
+                            asarray(damping(f[1], fock_last[1], dampb))))
         if diis and cycle >= diis_start_cycle:
             f = diis.update(s1e, dm, f)
 

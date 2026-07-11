@@ -144,7 +144,7 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
         // Note the density matrix is assumed to be real in get_ej_ip1 function
         double *dm_ij;
         if (vG == NULL) {
-            dm_ij = dm + (Gv_id + (j0*nao+i0) * nGv) * OF_COMPLEX;
+            dm_ij = dm + (Gv_id + (size_t)(j0*nao+i0) * nGv) * OF_COMPLEX;
         } else {
             dm_ij = dm + (j0*nao+i0);
         }
@@ -257,7 +257,7 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 uint32_t i = ij - nfi * j;
                 double dm_vR, dm_vI;
                 if (vG == NULL) {
-                    int addr = (j*nao+i)*nGv * OF_COMPLEX;
+                    size_t addr = (size_t)(j*nao+i)*nGv * OF_COMPLEX;
                     dm_vR = dm_ij[addr];
                     dm_vI = dm_ij[addr+1];
                 } else {
@@ -479,7 +479,7 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
         // Note the density matrix is assumed to be real in get_ej_ip1 function
         double *dm_ij;
         if (vG == NULL) {
-            dm_ij = dm + (Gv_id + (j0*nao+i0) * nGv) * OF_COMPLEX;
+            dm_ij = dm + (Gv_id + (size_t)(j0*nao+i0) * nGv) * OF_COMPLEX;
         } else {
             dm_ij = dm + (j0*nao+i0);
         }
@@ -592,7 +592,7 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
                 uint32_t i = ij - nfi * j;
                 double dm_vR, dm_vI;
                 if (vG == NULL) {
-                    int addr = (j*nao+i)*nGv * OF_COMPLEX;
+                    size_t addr = (size_t)(j*nao+i)*nGv * OF_COMPLEX;
                     dm_vR = dm_ij[addr];
                     dm_vI = dm_ij[addr+1];
                 } else {

@@ -210,7 +210,11 @@ class SCF(mol_hf.SCF):
         if 'kpt' in self.__dict__:
             self.kpt = self.__dict__.pop('kpt')
 
-        if self._numint is None:
+        # FFTDF.get_j is identical to MultiGridNumInt.get_j method.
+        # By initializing self._numint, get_j and get_hcore will use the
+        # MultiGridNumInt integrator to evaluate Coulomb integrals, skipping the
+        # self.with_df code path.
+        if isinstance(self.with_df, df.FFTDF) and self._numint is None:
             from gpu4pyscf.pbc.dft import multigrid_v2
             self._numint = multigrid_v2.MultiGridNumInt(self.cell)
 
@@ -230,16 +234,25 @@ class SCF(mol_hf.SCF):
         return int1e.int1e_ovlp(cell, kpt)
 
     def get_hcore(self, cell=None, kpt=None):
-        if kpt is None: kpt = self.kpt
+        from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
         if cell is None: cell = self.cell
-        if cell.pseudo:
-            nuc = self.with_df.get_pp(kpt)
+        if kpt is None: kpt = self.kpt
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+            ni = self._numint
+        elif np.prod(cell.mesh) < 500**3:
+            # In the pseudo and all-electron mixed case, MultiGridNumInt is
+            # still more efficient if Ecut is not too high.
+            ni = multigrid_v2.MultiGridNumInt(cell)
         else:
-            nuc = self.with_df.get_nuc(kpt)
+            ni = self.with_df
+        if cell.pseudo:
+            hcore = ni.get_pp(kpt)
+        else:
+            hcore = ni.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell, kpt)
-        return nuc + t
+        hcore += int1e.int1e_kin(cell, kpt)
+        return hcore
 
     def get_jk(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, **kwargs):
@@ -297,16 +310,10 @@ class SCF(mol_hf.SCF):
         if kpt is None:
             kpt = self.kpt
         if self.rsjk:
-            from gpu4pyscf.pbc.scf.rsjk import get_k
-            sr_factor = lr_factor = None
-            if omega is not None:
-                if omega > 0:
-                    sr_factor, lr_factor = 0, 1
-                elif omega < 0:
-                    omega = -omega
-                    sr_factor, lr_factor = 1, 0
-            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, self.rsjk,
-                       sr_factor, lr_factor, exxdiv=self.exxdiv)
+            if self.rsjk.supmol is None:
+                self.rsjk.build(kpt)
+            vk = self.rsjk._get_k_sr(dm, hermi, kpt, kpts_band, self.exxdiv, omega)
+            vk += self.rsjk._get_k_lr(dm, hermi, kpt, kpts_band, self.exxdiv, omega)
         else:
             vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]
@@ -317,11 +324,7 @@ class SCF(mol_hf.SCF):
         '''Hartree-Fock potential matrix for the given density matrix.
         See :func:`scf.hf.get_veff` and :func:`scf.hf.RHF.get_veff`
         '''
-        if dm is None:
-            dm = self.make_rdm1()
-        vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
-        vhf = vj - vk * .5
-        return vhf
+        raise NotImplementedError
 
     def energy_nuc(self):
         cell = self.cell
@@ -335,11 +338,11 @@ class SCF(mol_hf.SCF):
         dm = normalize_dm_(self, dm, s1e)
         return dm
 
-    _finalize = hf_cpu.SCF._finalize
-
-    init_guess_by_1e = hf_cpu.SCF.init_guess_by_1e
-    init_guess_by_chkfile = hf_cpu.SCF.init_guess_by_chkfile
-    from_chk = hf_cpu.SCF.from_chk
+    # hf_cpu.SCF.init_guess_by_1e calls additional checks. Enabling the
+    # following line to enable this.
+    #init_guess_by_1e = mol_hf._cast_rhf_init_guess(hf_cpu.SCF.init_guess_by_1e)
+    init_guess_by_chkfile = return_cupy_array(hf_cpu.SCF.init_guess_by_chkfile)
+    from_chk = return_cupy_array(hf_cpu.SCF.from_chk)
     analyze = NotImplemented
     mulliken_pop = NotImplemented
     density_fit = NotImplemented
@@ -348,6 +351,7 @@ class SCF(mol_hf.SCF):
     spin_square = NotImplemented
     dip_moment = NotImplemented
     Gradients = NotImplemented
+    gen_response = NotImplemented
     smearing = smearing
 
     def nuc_grad_method(self):
@@ -382,6 +386,15 @@ class KohnShamDFT:
 class RHF(SCF):
 
     energy_elec = mol_hf.RHF.energy_elec
+    newton = mol_hf.RHF.newton
+    canonicalize = mol_hf.RHF.canonicalize
+
+    def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
+                 hermi=1, kpt=None, kpts_band=None):
+        from gpu4pyscf.pbc.scf.khf import _get_veff
+        if dm is None: dm = self.make_rdm1()
+        if kpt is None: kpt = self.kpt
+        return _get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
 
     def density_fit(self, auxbasis=None, with_df=None):
         from gpu4pyscf.pbc.df.df_jk import density_fit
@@ -392,6 +405,11 @@ class RHF(SCF):
     def get_fermi(self):
         nocc = int((self.mo_occ.sum() / 2).round(3))
         return float(self.mo_energy[nocc-1].get())
+
+    def sfx2c1e(self):
+        from gpu4pyscf.pbc.x2c.x2c1e import sfx2c1e
+        return sfx2c1e(self)
+    x2c = x2c1e = sfx2c1e
 
     def Gradients(self):
         from gpu4pyscf.pbc.grad.rhf import Gradients
@@ -428,6 +446,21 @@ class RHF(SCF):
         dip = None
         return pop, dip
 
+    def gen_response(self, mo_coeff=None, mo_occ=None,
+                     singlet=None, hermi=0, max_memory=None, with_nlc=False):
+        from gpu4pyscf.pbc.scf.khf import _get_veff
+        cell = self.cell
+        kpts = self.kpt.reshape(1, 3)
+        with_j = (singlet is None or singlet) and hermi != 2
+        def vind(dm1):
+            dm1_shape = dm1.shape
+            nao = dm1_shape[-1]
+            dm1 = dm1.reshape(1,1,nao,nao)
+            vhf = _get_veff(self, cell, dm1, hermi=hermi, kpts=kpts,
+                            with_j=with_j, with_ecoul=False)
+            return vhf.view(cp.ndarray).reshape(dm1_shape)
+        return vind
+
 def normalize_dm_(mf, dm, s1e=None):
     '''
     Force density matrices integrated to the correct number of electrons.
@@ -440,4 +473,6 @@ def normalize_dm_(mf, dm, s1e=None):
         logger.debug(mf, 'Big errors in the electron number of initial guess '
                      'density matrix (Ne/cell = %g)!', ne)
         dm *= cell.nelectron / ne
+        if hasattr(dm, 'mo_coeff'):
+            dm.mo_occ *= (cell.nelectron / ne)
     return dm

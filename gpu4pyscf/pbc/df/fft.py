@@ -27,10 +27,10 @@ from pyscf.pbc.gto import pseudo
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger, utils
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, asarray
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk, aft
-from gpu4pyscf.pbc.df.aft import _check_kpts
+from gpu4pyscf.pbc.df.aft import _check_kpts, get_SI, _get_ZSI
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 
@@ -45,12 +45,8 @@ def get_nuc(mydf, kpts=None):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
     mesh = mydf.mesh
-    charge = cp.asarray(-cell.atom_charges(), dtype=np.float64)
-    Gv = cell.get_Gv(mesh)
-    SI = get_SI(cell, mesh=mesh)
-    rhoG = charge.dot(SI)
-
-    coulG = tools.get_coulG(cell, mesh=mesh, Gv=Gv)
+    rhoG = _get_ZSI(cell, mesh)
+    coulG = tools.get_coulG(cell, mesh=mesh)
     vneG = rhoG * coulG
     vneR = tools.ifft(vneG, mesh).real
 
@@ -179,50 +175,10 @@ def get_pp(mydf, kpts=None):
         vpp = vpp[0]
     return vpp
 
-def get_SI(cell, Gv=None, mesh=None, atmlst=None):
-    '''Calculate the structure factor (0D, 1D, 2D, 3D) for all atoms; see MH (3.34).
-
-    Args:
-        cell : instance of :class:`Cell`
-
-        Gv : (N,3) array
-            G vectors
-
-        atmlst : list of ints, optional
-            Indices of atoms for which the structure factors are computed.
-
-    Returns:
-        SI : (natm, ngrids) ndarray, dtype=np.complex128
-            The structure factor for each atom at each G-vector.
-    '''
-    coords = cp.asarray(cell.atom_coords())
-    if atmlst is not None:
-        coords = coords[np.asarray(atmlst)]
-    if Gv is None:
-        if mesh is None:
-            mesh = cell.mesh
-        basex, basey, basez = cell.get_Gv_weights(mesh)[1]
-        basex = cp.asarray(basex)
-        basey = cp.asarray(basey)
-        basez = cp.asarray(basez)
-        b = cp.asarray(cell.reciprocal_vectors())
-        rb = coords.dot(b.T)
-        SIx = cp.exp(-1j*rb[:,0,None] * basex)
-        SIy = cp.exp(-1j*rb[:,1,None] * basey)
-        SIz = cp.exp(-1j*rb[:,2,None] * basez)
-        SI = SIx[:,:,None,None] * SIy[:,None,:,None] * SIz[:,None,None,:]
-        natm = coords.shape[0]
-        SI = SI.reshape(natm, -1)
-    else:
-        SI = cp.exp(-1j*coords.dot(cp.asarray(Gv).T))
-    return SI
-
 
 class FFTDF(lib.StreamObject):
     '''Density expansion on plane waves (GPW method)
     '''
-
-    blockdim = 240
 
     _keys = fft_cpu.FFTDF._keys
 
@@ -279,6 +235,7 @@ class FFTDF(lib.StreamObject):
         self._rsh_df = {}
         return self
 
+    weighted_coulG = aft.AFTDF.weighted_coulG
     dump_flags = fft_cpu.FFTDF.dump_flags
     check_sanity = fft_cpu.FFTDF.check_sanity
     build = fft_cpu.FFTDF.build
@@ -293,7 +250,7 @@ class FFTDF(lib.StreamObject):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         if is_single_kpt:
             vj, vk = fft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band,
                                    with_j, with_k, exxdiv)

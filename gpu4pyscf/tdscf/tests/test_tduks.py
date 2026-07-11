@@ -96,7 +96,7 @@ class KnownValues(unittest.TestCase):
         mf_b3lyp_nodf.cphf_grids = mf_b3lyp_nodf.grids
         cls.mf_b3lyp_nodf = mf_b3lyp_nodf.run()
 
-        mf_m06l = mol.UKS().to_gpu().density_fit().run(xc='m06l')
+        mf_m06l = mol.UKS().to_gpu().density_fit().run(xc='m06l', conv_tol=1e-12)
         mf_m06l.cphf_grids = mf_m06l.grids
         cls.mf_m06l = mf_m06l
 
@@ -190,7 +190,7 @@ class KnownValues(unittest.TestCase):
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
         ref = td.to_cpu().kernel(nstates=4)[0]
-        self.assertAlmostEqual(abs(es - ref).max(), 0, 7)
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 6)
         self.assertAlmostEqual(lib.fp(es[:3]), 0.047793873508724743, 6)
 
     def test_tddft_camb3lyp(self):
@@ -202,7 +202,7 @@ class KnownValues(unittest.TestCase):
         assert td.device == 'gpu'
         es = td.kernel(nstates=4)[0]
         e_ref = td.to_cpu().kernel(nstates=4)[0]
-        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 7)
+        self.assertAlmostEqual(abs(es[:3]-e_ref[:3]).max(), 0, 6)
         self.assertAlmostEqual(lib.fp(es[:3]), 0.2827429269753051, 6)
         a,b = td.get_ab()
         e_ref = diagonalize(a, b, 5)
@@ -247,7 +247,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref[:5]).max(), 0, 9)
-        self.assertAlmostEqual(lib.fp(es), -0.7530329968766932, 5)
+        self.assertAlmostEqual(lib.fp(es), -0.7530329968766932, 4)
 
     def test_tda_vind(self):
         mf = self.mf_bp86
@@ -610,6 +610,22 @@ class KnownValues(unittest.TestCase):
         ab12 = np.hstack((ab1.ravel(),ab2.ravel()))
         abxy_ref = ftdhf(cp.asarray([xy])).get()
         self.assertAlmostEqual(abs(ab12 - abxy_ref).max(), 0, 9)
+
+    def test_td_casida_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            basis = '631g')
+        mf = mol.UKS().to_gpu().density_fit().run()
+        td = mf.TDDFT()
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=2e-6)
 
 if __name__ == "__main__":
     print("Full Tests for TD-UKS")

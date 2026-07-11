@@ -15,6 +15,34 @@
  */
 
 #pragma once
+
+// =====================================================================
+// Per-kernel-family constants for the md_j contraction.
+//
+// MD_J_TILE_THREADS
+//   Tile-row width used by the unrolled md_j_*_* kernels. The launch
+//   geometry for those kernels is `dim3 threads(16, 16)` and the
+//   per-row task batching uses `sq_id = tx + 16*ty`. The qd_offset
+//   layered pyramid is therefore indexed at this same width when the
+//   tile16 unrolled path is selected.
+//
+// MD_J_QD_ALIGN
+//   Alignment unit (in elements) for the per-power-of-two strata of
+//   the qd_*_max pyramid in qd_offset_for_threads(). Set to the warp
+//   width assumed by the kernels that consume qd_*_max so the strided
+//   accesses are warp-/cache-line-friendly. `warpSize` is a
+//   device-only built-in; this host-side constant mirrors it.
+//   Centralizing the value here makes a future wider-wavefront port
+//   a single-point change.
+// =====================================================================
+#ifndef MD_J_TILE_THREADS
+#define MD_J_TILE_THREADS 16
+#endif
+
+#ifndef MD_J_QD_ALIGN
+#define MD_J_QD_ALIGN     32
+#endif
+
 typedef struct {
     int li;
     int lj;

@@ -12,16 +12,14 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 480;
     int task_kl0 = blockIdx.y * 480;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping && task_ij0+480 <= task_kl0) {
@@ -38,7 +36,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -134,10 +132,8 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*30] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*30] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*30] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*30] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -220,16 +216,14 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 368;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -243,7 +237,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -336,10 +330,8 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*23] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*23] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -427,16 +419,14 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 160;
     int task_kl0 = blockIdx.y * 160;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping && task_ij0+160 <= task_kl0) {
@@ -453,7 +443,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -549,10 +539,8 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*10] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*10] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*10] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*10] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -695,16 +683,14 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 256;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -718,7 +704,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -811,10 +797,8 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*16] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*16] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -923,16 +907,14 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 480;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -946,7 +928,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -1039,10 +1021,8 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*30] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*30] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1248,16 +1228,14 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 224;
     int task_kl0 = blockIdx.y * 224;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping && task_ij0+224 <= task_kl0) {
@@ -1274,7 +1252,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -1370,10 +1348,8 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*14] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*14] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*14] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*14] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1773,16 +1749,14 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 736;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -1796,7 +1770,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -1889,10 +1863,8 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*46] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*46] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -2036,16 +2008,14 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 
 // TILEX=48, TILEY=24
 __global__ static
-void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 384;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -2059,7 +2029,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -2152,10 +2122,8 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*24] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*24] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -2471,16 +2439,14 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 
 // TILEX=48, TILEY=11
 __global__ static
-void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 176;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -2494,7 +2460,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -2587,10 +2553,8 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -3237,16 +3201,14 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 
 // TILEX=48, TILEY=36
 __global__ static
-void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 576;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -3260,7 +3222,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -3353,10 +3315,8 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*36] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*36] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -3564,16 +3524,14 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 
 // TILEX=48, TILEY=18
 __global__ static
-void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 288;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -3587,7 +3545,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -3680,10 +3638,8 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*18] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*18] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -4174,16 +4130,14 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 
 // TILEX=48, TILEY=26
 __global__ static
-void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
+void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
     int task_kl0 = blockIdx.y * 416;
-    int pair_ij0 = pair_ij_mapping[task_ij0];
-    int pair_kl0 = pair_kl_mapping[task_kl0];
-    float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -4197,7 +4151,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -4290,10 +4244,8 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*26] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*26] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -4719,7 +4671,8 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     }
 }
 
-int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, double omega)
+int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
+                  float *q_cond_ij, float *q_cond_kl, double omega)
 {
     int li = bounds->li;
     int lj = bounds->lj;
@@ -4738,70 +4691,82 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, doubl
     case 0: { // lij=0, lkl=0, tilex=30, tiley=30
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 479) / 480, (npairs_kl + 479) / 480, 1);
-        md_j_0_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_0_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 11: { // lij=1, lkl=0, tilex=48, tiley=23
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 367) / 368, 1);
-        md_j_1_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_1_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 12: { // lij=1, lkl=1, tilex=10, tiley=10
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 159) / 160, (npairs_kl + 159) / 160, 1);
-        md_j_1_1<<<blocks, threads, (2944+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_1_1<<<blocks, threads, (2944+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 22: { // lij=2, lkl=0, tilex=48, tiley=16
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 255) / 256, 1);
-        md_j_2_0<<<blocks, threads, (3040+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_2_0<<<blocks, threads, (3040+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 23: { // lij=2, lkl=1, tilex=48, tiley=30
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 479) / 480, 1);
         cudaFuncSetAttribute(md_j_2_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_2_1<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_2_1<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 24: { // lij=2, lkl=2, tilex=14, tiley=14
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 223) / 224, (npairs_kl + 223) / 224, 1);
         cudaFuncSetAttribute(md_j_2_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        md_j_2_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_2_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 33: { // lij=3, lkl=0, tilex=48, tiley=46
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 735) / 736, 1);
         cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_3_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_3_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 34: { // lij=3, lkl=1, tilex=48, tiley=24
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 383) / 384, 1);
         cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6016+addition_buf)*sizeof(double));
-        md_j_3_1<<<blocks, threads, (6016+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_3_1<<<blocks, threads, (6016+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 35: { // lij=3, lkl=2, tilex=48, tiley=11
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 175) / 176, 1);
         cudaFuncSetAttribute(md_j_3_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        md_j_3_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_3_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 44: { // lij=4, lkl=0, tilex=48, tiley=36
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 575) / 576, 1);
         cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6064+addition_buf)*sizeof(double));
-        md_j_4_0<<<blocks, threads, (6064+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_4_0<<<blocks, threads, (6064+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 45: { // lij=4, lkl=1, tilex=48, tiley=18
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 287) / 288, 1);
         cudaFuncSetAttribute(md_j_4_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6000+addition_buf)*sizeof(double));
-        md_j_4_1<<<blocks, threads, (6000+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_4_1<<<blocks, threads, (6000+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     case 55: { // lij=5, lkl=0, tilex=48, tiley=26
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 415) / 416, 1);
         cudaFuncSetAttribute(md_j_5_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_5_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+        md_j_5_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl);
     } break;
     default: return 0;
     }

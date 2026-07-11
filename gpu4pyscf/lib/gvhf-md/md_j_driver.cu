@@ -43,7 +43,10 @@ int offset_for_Rt2_idx(int lij, int lkl)
 
 int qd_offset_for_threads(int npairs, int threads)
 {
-    int npairs_aligned = (npairs + 31) & 0xffffffe0; // 32-element aligned
+    // Layered pyramid of warp-aligned npairs strata. Alignment unit is
+    // MD_J_QD_ALIGN (defined in md_j.cuh) -- the host-side mirror of
+    // `warpSize` (which is device-only and cannot be used here).
+    int npairs_aligned = (npairs + (MD_J_QD_ALIGN - 1)) & ~(MD_J_QD_ALIGN - 1);
     int address = 0;
     for (int i = 1; i < threads; i *= 2) {
         address += npairs_aligned;
@@ -54,16 +57,19 @@ int qd_offset_for_threads(int npairs, int threads)
 
 extern __global__
 void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley,
                      uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 extern __global__
 void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley, int dm_size,
                      uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 extern __global__
 void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
-                  int threadsx, int threadsy, int tilex, int tiley,
-                  uint16_t *pRt2_kl_ij, int8_t *efg_phase);
+                     float *q_cond_ij, float *q_cond_kl,
+                     int threadsx, int threadsy, int tilex, int tiley,
+                     uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 
 extern "C" {
 int init_mdj_constant(int shm_size)

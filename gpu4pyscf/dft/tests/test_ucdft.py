@@ -84,7 +84,7 @@ class KnownValues(unittest.TestCase):
             atom=atom,
             basis=bas,
             max_memory=32000,
-            verbose = 1,
+            verbose = 6,
             spin = 0,
             charge = 0,
             output = '/dev/null'
@@ -322,4 +322,3 @@ class KnownValues(unittest.TestCase):
 if __name__ == "__main__":
     print("Full Tests for cdft")
     unittest.main()
-

@@ -46,7 +46,8 @@ def int2c2e(auxcell, kpts=None, bvk_kmesh=None):
     return opt.int2c2e(kpts)
 
 def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
-    assert omega < 0
+    if omega > 0:
+        omega = -omega
     # Adjust the rcut because the default cell.rcut is estimated based on
     # overlap integrals
     rcut = _estimate_sr_2c2e_rcut(auxcell, omega, auxcell.precision*1e-6)
@@ -119,8 +120,7 @@ def int2c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
 
 class Int2c2eOpt:
     def __init__(self, cell, bvk_kmesh=None):
-        cell = self.cell = SortedGTO.from_cell(
-            cell, allow_replica=True, allow_split_seg_contraction=False)
+        cell = self.cell = SortedGTO.from_cell(cell)
         assert cell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
 
         if bvk_kmesh is None:

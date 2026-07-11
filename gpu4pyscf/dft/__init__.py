@@ -1,5 +1,5 @@
 from . import rks
-from .rks import RKS, KohnShamDFT
+from .rks import KohnShamDFT
 from .rks_lowmem import RKS as LRKS
 from .uks import UKS
 from .gks import GKS
@@ -11,3 +11,9 @@ def KS(mol, xc='LDA,VWN'):
         return RKS(mol, xc)
     else:
         return UKS(mol, xc)
+
+def RKS(mol, xc='LDA,VWN'):
+    if mol.spin == 0:
+        return rks.RKS(mol, xc)
+    else:
+        return ROKS(mol, xc)

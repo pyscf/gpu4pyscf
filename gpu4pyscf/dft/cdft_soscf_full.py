@@ -214,22 +214,10 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         A_op, M_op, b_vec, constraints_res = self.get_kkt_system(mo_coeff, mo_occ, fock)
         
         grad_norm_current = float(cp.linalg.norm(b_vec))
-        e_last = e_tot
+        e_last = 0
+        lagrange_last, lagrange = 0, e_tot
         imacro = 0
         while imacro < self.max_cycle:
-            
-            max_const_err = cp.max(cp.abs(constraints_res))
-            dE = abs(e_tot - e_last)
-            log.info('Macro %d: E= %.15g  dE= %.5g  |KKT Grad|= %.5g  |Max Constr|= %.5g  TR_Rad= %.4g', 
-                     imacro, e_tot, dE, grad_norm_current, max_const_err, trust_radius)
-            
-            cput1 = log.timer('cycle= %d'%(imacro+1), *cput1)
-            
-            if grad_norm_current < self.conv_tol_grad and max_const_err < self.constraint_tol and dE < self.conv_tol:
-                scf_conv = True
-                log.info('CDFT optimization converged.')
-                break
-            
             mo_coeff_old = mo_coeff.copy()
             v_lagrange_old = self._scf.v_lagrange.copy()
             
@@ -259,7 +247,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             fock_new = self._scf.get_fock(dm=dm)
             
             A_op_new, M_op_new, b_vec_new, constraints_res_new = self.get_kkt_system(mo_coeff, mo_occ, fock_new)
-            
+
             grad_norm_new = float(cp.linalg.norm(b_vec_new))
             actual_reduction = grad_norm_current - grad_norm_new
             
@@ -297,19 +285,36 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
                 continue
                 
             else: # accept
-                e_last = e_tot
-                e_tot = self._scf.energy_tot(dm)
-                
+                e_tot, e_last = self._scf.energy_tot(dm), e_tot
                 A_op = A_op_new
                 M_op = M_op_new
                 b_vec = b_vec_new
                 constraints_res = constraints_res_new
                 grad_norm_current = grad_norm_new
-                
+                lagrange, lagrange_last = (
+                    e_tot + self._scf.v_lagrange.dot(constraints_res.get()), lagrange)
+
                 if rho > 0.75:
                     trust_radius = min(trust_radius * 2.0, max_radius)
                 
                 imacro += 1
+
+            max_const_err = cp.max(cp.abs(constraints_res))
+            dE = e_tot - e_last
+            d_lagrange = lagrange - lagrange_last
+            log.info('Macro %d: E= %.15g  dE= %.5g  dL= %.5g  '
+                     '|KKT Grad|= %.5g  |Max Constr|= %.5g  TR_Rad= %.4g',
+                     imacro, e_tot, dE, d_lagrange, grad_norm_current,
+                     max_const_err, trust_radius)
+
+            cput1 = log.timer(f'cycle= {imacro}', *cput1)
+
+            if (grad_norm_current < self.conv_tol_grad and
+                max_const_err < self.constraint_tol and
+                d_lagrange < self.conv_tol):
+                scf_conv = True
+                log.info('CDFT optimization converged.')
+                break
 
         fock = self._scf.get_fock(dm=dm, level_shift_factor=0)
         mo_energy, mo_coeff1 = self._scf.canonicalize(mo_coeff, mo_occ, fock)

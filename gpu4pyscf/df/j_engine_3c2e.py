@@ -16,75 +16,56 @@ import ctypes
 import math
 import numpy as np
 import cupy as cp
-from pyscf import lib
 from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_EXP, PTR_COORD, conc_env
-from pyscf.scf import _vhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, transpose_sum
-from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, RysIntEnvVars
-from gpu4pyscf.scf.jk import (
-    apply_coeff_C_mat_CT, _scale_sp_ctr_coeff, _nearest_power2, SHM_SIZE)
-from gpu4pyscf.gto.mole import basis_seg_contraction, cart2sph_by_l
-from gpu4pyscf.df.int3c2e_bdiv import (
-    _conc_locs, LMAX, L_AUX_MAX, THREADS)
-from gpu4pyscf.scf.j_engine import libvhf_md, _to_primitive_bas, _estimate_q_cond
+from gpu4pyscf.gto.mole import SortedGTO, PTR_BAS_COORD, RysIntEnvVars
+from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff, _nearest_power2, SHM_SIZE
+from gpu4pyscf.df.int3c2e_bdiv import _conc_locs, LMAX, L_AUX_MAX, THREADS
+from gpu4pyscf.scf.j_engine import libvhf_md, _cache_q_cond_and_non0pairs
 
 def contract_int3c2e_dm(mol, auxmol, dm):
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     return int3c2e_opt.contract_dm(dm)
+
+def contract_int3c2e_auxvec(mol, auxmol, auxvec):
+    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    return int3c2e_opt.contract_auxvec(auxvec)
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
         self.mol = mol
         self.auxmol = auxmol
         self.sorted_mol = None
+        self.sorted_auxmol = None
 
-    def build(self, cutoff=1e-14):
+    def build(self, cutoff=1e-12):
         mol = self.mol
         log = logger.new_logger(mol)
         cput0 = log.init_timer()
-        sorted_mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = \
-                group_basis(mol, 1, sparse_coeff=True)
-        self.sorted_mol = sorted_mol
-        self.ao_idx = ao_idx
-        self.l_ctr_pad_counts = l_ctr_pad_counts
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        mol = self.sorted_mol = SortedGTO.from_mol(
+            self.mol, decontract=True, diffuse_cutoff=1e200)
         # very high angular momentum basis are processed on CPU
-        lmax = uniq_l_ctr[:,0].max()
+        lmax = mol.uniq_l_ctr[:,0].max()
         assert lmax <= LMAX
 
-        prim_mol, self.prim_to_ctr_mapping = _to_primitive_bas(sorted_mol)
-        self.prim_mol = prim_mol
-
-        nbas = prim_mol.nbas
-        ao_loc = prim_mol.ao_loc
-        if 1:
-            q_cond = _estimate_q_cond(prim_mol).get()
-        else:
-            q_cond = np.empty((nbas,nbas))
-            intor = prim_mol._add_suffix('int2e')
-            with prim_mol.with_integral_screen(1e-26):
-                _vhf.libcvhf.CVHFnr_int2e_q_cond(
-                    getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
-                    q_cond.ctypes, ao_loc.ctypes,
-                    prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
-                    prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas),
-                    prim_mol._env.ctypes)
-            q_cond = np.log(q_cond + 1e-300).astype(np.float32)
+        _atm = cp.array(mol._atm)
+        _bas = cp.array(mol._bas)
+        _env = cp.array(_scale_sp_ctr_coeff(mol))
+        ao_loc = cp.array(mol.ao_loc)
+        rys_envs = RysIntEnvVars.new(mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
+        self.bas_pair_cache = _cache_q_cond_and_non0pairs(mol, rys_envs, cutoff)
         log.timer('Initialize q_cond', *cput0)
 
-        auxmol = self.auxmol
-        auxmol, aux_idx = group_basis(self.auxmol, tile=1, sparse_coeff=True)[:2]
-        self.sorted_auxmol = auxmol
-        self.aux_idx = aux_idx
+        auxmol = self.sorted_auxmol = SortedGTO.from_mol(
+            self.auxmol, decontract=True, diffuse_cutoff=1e200)
 
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
-            prim_mol._atm, prim_mol._bas, _scale_sp_ctr_coeff(prim_mol),
+            mol._atm, mol._bas, _scale_sp_ctr_coeff(mol),
             auxmol._atm, auxmol._bas, _scale_sp_ctr_coeff(auxmol))
         #NOTE: PTR_BAS_COORD is not updated in conc_env()
-        off = _bas_cpu[prim_mol.nbas,PTR_EXP] - auxmol._bas[0,PTR_EXP]
-        _bas_cpu[prim_mol.nbas:,PTR_BAS_COORD] += off
+        off = _bas_cpu[mol.nbas,PTR_EXP] - auxmol._bas[0,PTR_EXP]
+        _bas_cpu[mol.nbas:,PTR_BAS_COORD] += off
         self._atm = _atm_cpu
         self._bas = _bas_cpu
         self._env = _env_cpu
@@ -92,35 +73,17 @@ class Int3c2eOpt:
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
-        ao_loc = cp.asarray(_conc_locs(ao_loc, auxmol.ao_loc_nr(cart=True)), dtype=np.int32)
-        log_cutoff = math.log(cutoff)
+        ao_loc = _conc_locs(mol.ao_loc, auxmol.ao_loc_nr(cart=True))
+        ao_loc = cp.asarray(ao_loc, dtype=np.int32)
         self.int3c2e_envs = RysIntEnvVars.new(
-            prim_mol.natm, prim_mol.nbas, _atm, _bas, _env, ao_loc)
+            mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
 
-        l_counts = np.bincount(prim_mol._bas[:,ANG_OF])[:LMAX+1]
-        n_groups = len(l_counts)
-        bas_offsets = np.cumsum(np.append(0, l_counts))
-        ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
-        # The effective shell pair = ish*nbas+jsh
-        shl_pair_idx = []
-        nbas = prim_mol.nbas
-        for i, j in ij_tasks:
-            ish0, ish1 = bas_offsets[i], bas_offsets[i+1]
-            jsh0, jsh1 = bas_offsets[j], bas_offsets[j+1]
-            mask = q_cond[ish0:ish1,jsh0:jsh1] > log_cutoff
-            if i == j:
-                mask = np.tril(mask)
-            t_ij = (np.arange(ish0, ish1, dtype=np.int32)[:,None] * nbas +
-                    np.arange(jsh0, jsh1, dtype=np.int32))
-            pair_idx = t_ij[mask]
-            if pair_idx.size > 0:
-                shl_pair_idx.append(pair_idx)
-
+        shl_pair_idx = [x[0].get() for x in self.bas_pair_cache.values()]
         # the bas_ij_idx offset for each blockIdx.x
         self.shl_pair_offsets = np.cumsum(
-            [0] + [x.size for x in shl_pair_idx], dtype=np.int32)
+            [0] + [len(x) for x in shl_pair_idx], dtype=np.int32)
         self.shl_pair_idx = shl_pair_idx = np.hstack(shl_pair_idx)
-        ls = np.asarray(prim_mol._bas[:,ANG_OF], dtype=np.int32)
+        ls = np.asarray(mol._bas[:,ANG_OF], dtype=np.int32)
         ll = ls[:,None] + ls
         ll = ll.ravel()[shl_pair_idx]
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
@@ -132,27 +95,24 @@ class Int3c2eOpt:
             self.build()
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
-        int3c2e_envs = self.int3c2e_envs
-        sorted_mol = self.sorted_mol
-        ao_loc = sorted_mol.ao_loc
-        naux = self.sorted_auxmol.nao_nr(cart=True)
-        prim_mol = self.prim_mol
+        mol = self.sorted_mol
+        auxmol = self.sorted_auxmol
+        ao_loc = mol.ao_loc
+        naux = auxmol.nao_nr(cart=True)
 
+        lmax = mol.uniq_l_ctr[:,0].max()
+        lmax_aux = auxmol._bas[:,ANG_OF].max()
+        li = np.arange(lmax*2+1)
+        lk = np.arange(lmax_aux+1)
+        order = li[:,None] + lk
+        nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
+        unit = order+1 + nf3ijkl + nf3ijkl*order//(order+3)
+        nsp_per_block = SHM_SIZE //(unit*8)
+        nsp_per_block = _nearest_power2(nsp_per_block)
+        nsp_per_block[nsp_per_block>THREADS] = THREADS
+        shm_size = (nsp_per_block * unit).max() * 8
         nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
-        lmax = self.uniq_l_ctr[:,0].max()
-        lmax_aux = self.sorted_auxmol._bas[:,ANG_OF].max()
-        shm_size = 0
-        for lk in range(lmax_aux+1):
-            for li in range(lmax*2+1):
-                order = li + lk
-                nf3k = (lk + 1) * (lk + 2) * (lk + 3) // 6
-                nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
-                unit = order+1 + nf3ijkl + nf3ijkl*order//(order+3)
-                nsp_per_block = (SHM_SIZE - nf3k*8) //(unit*8)
-                nsp_per_block = min(THREADS, _nearest_power2(nsp_per_block))
-                nsp_lookup[li,lk] = nsp_per_block
-                shm_size = max(shm_size, nsp_per_block * unit + nf3k)
-        shm_size *= 8 # doubles
+        nsp_lookup[:lmax*2+1,:lmax_aux+1] = nsp_per_block
         nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
 
         # Adjust the number of shell-pairs in each group for better balance.
@@ -165,25 +125,23 @@ class Int3c2eOpt:
         dm = cp.asarray(dm)
         assert dm.ndim == 2
         n_dm = 1
-        dm = apply_coeff_C_mat_CT(dm, self.mol, sorted_mol, self.uniq_l_ctr,
-                                  self.l_ctr_offsets, self.ao_idx)
+        dm = mol.apply_C_mat_CT(dm)
         dm = transpose_sum(dm)
         dm_cpu = dm.get()
         dm = None
         dm_xyz_size = self.pair_loc[-1]
         dm_xyz = np.zeros((n_dm, dm_xyz_size))
-        _env = _scale_sp_ctr_coeff(prim_mol)
+        _env = _scale_sp_ctr_coeff(mol)
         libvhf_md.Et_dot_dm(
             dm_xyz.ctypes, dm_cpu.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
             ao_loc.ctypes, self.pair_loc.ctypes,
             shl_pair_idx_cpu.ctypes, ctypes.c_int(len(shl_pair_idx_cpu)),
-            self.prim_to_ctr_mapping.ctypes,
-            ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
-            prim_mol._bas.ctypes, _env.ctypes)
+            ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
         dm_xyz = asarray(dm_xyz)
         pair_loc = asarray(self.pair_loc)
 
+        int3c2e_envs = self.int3c2e_envs
         vj_aux = cp.zeros(naux)
         err = libvhf_md.contract_int3c2e_dm(
             ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
@@ -191,37 +149,118 @@ class Int3c2eOpt:
             ctypes.c_int(n_dm), ctypes.c_int(naux),
             ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
             ctypes.c_int(sp_blocks),
-            ctypes.c_int(self.sorted_auxmol.nbas),
+            ctypes.c_int(auxmol.nbas),
             ctypes.cast(pair_ij_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.cast(nsp_lookup.data.ptr, ctypes.c_void_p),
-            ctypes.c_double(prim_mol.omega))
+            ctypes.c_double(mol.omega))
         if err != 0:
             raise RuntimeError('contract_int3c2e_dm kernel failed')
         if log.verbose >= logger.DEBUG1:
             log.timer_debug1('processing contract_int3c2e_dm', *t0)
 
-        if not self.auxmol.cart:
-            vj_aux = _vector_cart2sph(self.sorted_auxmol, vj_aux)
-
-        vj_aux, tmp = cp.empty_like(vj_aux), vj_aux
-        vj_aux[self.aux_idx] = tmp
+        vj_aux = auxmol.apply_CT_dot(vj_aux)
         return vj_aux
 
-def _vector_cart2sph(auxmol, auxvec):
-    aux_ls = auxmol._bas[:,ANG_OF]
-    lmax = aux_ls.max()
-    aux_loc_cart = auxmol.ao_loc_nr(cart=True)[:-1]
-    aux_loc_sph = auxmol.ao_loc_nr(cart=False)
-    naux_sph = aux_loc_sph[-1]
-    aux_loc_sph = aux_loc_sph[:-1]
-    out = cp.empty(naux_sph)
-    for l in range(lmax+1):
-        nf = (l + 1) * (l + 2) // 2
-        addrs_for_cart = aux_loc_cart[aux_ls == l]
-        addrs_for_sph = aux_loc_sph[aux_ls == l]
-        subvec = auxvec[addrs_for_cart[:,None] + np.arange(nf)]
-        subvec = subvec.dot(cart2sph_by_l(l))
-        out[addrs_for_sph[:,None] + np.arange(l*2+1)] = subvec
-    return out
+    def contract_auxvec(self, auxvec):
+        if self.sorted_mol is None:
+            self.build()
+        log = logger.new_logger(self.mol)
+        t0 = log.init_timer()
+        mol = self.sorted_mol
+        auxmol = self.sorted_auxmol
+        assert auxvec.ndim == 1
+        n_dm = 1
+        auxvec = auxmol.apply_C_dot(cp.asarray(auxvec))
+        aux_loc = auxmol.ao_loc
+        naux = aux_loc[-1]
+
+        l = auxmol._bas[:,ANG_OF]
+        nf3 = (l+1)*(l+2)*(l+3)//6
+        aux_xyz_loc = np.asarray(np.append(0, np.cumsum(nf3)), dtype=np.int32)
+
+        Et_auxvec = np.empty(aux_xyz_loc[-1])
+        auxvec_cpu = auxvec.get()
+        _env = _scale_sp_ctr_coeff(auxmol)
+        libvhf_md.Et_dot_auxvec(
+            Et_auxvec.ctypes, auxvec_cpu.ctypes, ctypes.c_int(n_dm),
+            aux_xyz_loc.ctypes, aux_loc.ctypes,
+            ctypes.c_int(auxmol.nbas), auxmol._bas.ctypes, _env.ctypes)
+
+        lmax = mol.uniq_l_ctr[:,0].max()
+        lmax_aux = auxmol._bas[:,ANG_OF].max()
+        li = np.arange(lmax*2+1)
+        lk = np.arange(lmax_aux+1)
+        order = li[:,None] + lk
+        nf2 = (order + 1) * (order + 2) // 2
+        unit = order+1 + nf2 * (order + 3) // 3 + order * nf2 // 3
+        # Due to the limited number of registers (11) to store the ouput, the
+        # contract_int3c2e_auxvec kernel does not support large shm size.
+        shm_size = min(SHM_SIZE, 1024 * 47)
+        nsp_per_block = shm_size //(unit*8)
+        nsp_per_block = _nearest_power2(nsp_per_block)
+        nsp_per_block[nsp_per_block>THREADS] = THREADS
+        shm_size = (nsp_per_block * unit).max() * 8
+        nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
+        nsp_lookup[:lmax*2+1,:lmax_aux+1] = nsp_per_block
+        nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
+
+        # Adjust the number of shell-pairs in each group for better balance.
+        shl_pair_idx_cpu = np.asarray(self.shl_pair_idx, dtype=np.int32)
+        shl_pair_idx = asarray(self.shl_pair_idx, dtype=np.int32)
+        pair_ij_offsets = cp.asarray(self.shl_pair_offsets, dtype=np.int32)
+        sp_blocks = len(pair_ij_offsets) - 1
+
+        # Split auxbasis into small batches for load balance
+        ksh_offsets = []
+        k0 = k1 = mol.nbas
+        for n in auxmol.l_ctr_counts:
+            k0, k1 = k1, k1 + n
+            ksh_offsets.append(cp.arange(k0, k1, 16, dtype=np.int32))
+        ksh_offsets.append(np.int32(k1))
+        ksh_offsets = cp.hstack(ksh_offsets, dtype=np.int32)
+        ksh_blocks = len(ksh_offsets) - 1
+
+        log.debug1('sp_blocks = %d, ksh_blocks = %d, shm_size = %d B',
+                   sp_blocks, ksh_blocks, shm_size)
+
+        vj_xyz_size = self.pair_loc[-1]
+        vj_xyz = cp.zeros(vj_xyz_size)
+        auxvec = asarray(Et_auxvec)
+        int3c2e_envs = self.int3c2e_envs
+        aux_xyz_loc = asarray(aux_xyz_loc)
+        pair_loc = asarray(self.pair_loc)
+        err = libvhf_md.contract_int3c2e_auxvec(
+            ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
+            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_dm), ctypes.c_int(naux),
+            ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
+            ctypes.c_int(sp_blocks),
+            ctypes.c_int(ksh_blocks),
+            ctypes.cast(pair_ij_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(aux_xyz_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(nsp_lookup.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(mol.omega))
+        if err != 0:
+            raise RuntimeError('contract_int3c2e_auxvec kernel failed')
+        if log.verbose >= logger.DEBUG1:
+            log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
+
+        ao_loc = mol.ao_loc
+        nao = ao_loc[-1]
+        vj_xyz = vj_xyz.get()
+        vj = np.zeros((nao, nao))
+        _env = _scale_sp_ctr_coeff(mol)
+        libvhf_md.jengine_dot_Et(
+            vj.ctypes, vj_xyz.ctypes,
+            ctypes.c_int(n_dm), ctypes.c_int(vj_xyz_size),
+            ao_loc.ctypes, self.pair_loc.ctypes,
+            shl_pair_idx_cpu.ctypes, ctypes.c_int(len(shl_pair_idx_cpu)),
+            ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
+        vj = transpose_sum(asarray(vj))
+        vj = mol.apply_CT_mat_C(vj)
+        return vj

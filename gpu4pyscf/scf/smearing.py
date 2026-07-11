@@ -137,6 +137,9 @@ class _SmearingSCF:
         else:
             f_occ = _gaussian_smearing_occ
 
+        # Intentional GPU->CPU transfer: smearing routines (_fermi_smearing_occ,
+        # _gaussian_smearing_occ, _smearing_optimize) are PySCF CPU-only numpy
+        # implementations. mo_occs is uploaded back to GPU at the end of this method.
         mo_energy = mo_energy.get()
         if self.fix_spin and is_uhf:  # spin separated fermi level
             mo_es = mo_energy
@@ -227,7 +230,7 @@ class _SmearingSCF:
                 mo_occs = mo_occs.reshape(2, -1)
             if self.verbose >= logger.DEBUG:
                 print_mo_energy_occ(self, mo_energy, mo_occs, is_uhf)
-        return cp.asarray(mo_occs)
+        return cp.asarray(mo_occs)  # CPU->GPU: upload smearing-computed occupancies
 
     _get_entropy = cpu_addons._SmearingSCF._get_entropy
 

@@ -27,6 +27,7 @@ from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.__config__ import num_devices, _p2p_access
+from gpu4pyscf import __config__
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -801,6 +802,13 @@ def _gen_x0(v, xs):
         x0 = x0[0]
     return x0
 
+_MAX_MEMORY = os.getenv('PYSCF_MAX_MEMORY')
+if _MAX_MEMORY is None and __config__.MAX_MEMORY != 4000:
+    # 4000 MB is the built-in default initialized in pyscf.__config__.
+    # If MAX_MEMORY has been explicitly configured (e.g. in ~/.pyscf_conf.py),
+    # use that value when the environment variable is not set.
+    _MAX_MEMORY = __config__.MAX_MEMORY
+
 def empty_mapped(shape, dtype=float, order='C'):
     '''(experimental)
     Returns a new, uninitialized NumPy array with the given shape and dtype.
@@ -812,6 +820,15 @@ def empty_mapped(shape, dtype=float, order='C'):
     size = int(np.prod(shape))
     nbytes = size * int(np.dtype(dtype).itemsize)
     assert nbytes >= 0, f"nbytes = {nbytes} is negative, type(nbytes) = {type(nbytes)}, please check if overflow happens"
+
+    if _MAX_MEMORY is not None:
+        mem_used = lib.current_memory()[0] # in MB
+        mem_limit = float(_MAX_MEMORY)
+        if nbytes*1e-6 + mem_used > mem_limit:
+            raise MemoryError(
+                f'Cannot allocate {nbytes} bytes of host memory '
+                f'(current: {mem_used:.1f} MB, limit: {mem_limit:.1f} MB).')
+
     mem = cupy.cuda.PinnedMemoryPointer(
         cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
@@ -820,6 +837,17 @@ def empty_mapped(shape, dtype=float, order='C'):
 def ndarray(shape, dtype=np.float64, buffer=None):
     '''
     Construct CuPy ndarray object using the NumPy ndarray API
+
+    Args:
+        shape : tuple or int
+            Shape of the array to allocate.
+
+    Kwargs:
+        dtype : Numpy data type.
+
+        buffer : CuPy array or CuPy memory object
+            If buffer is specified, used to fill the array. Otherwise, a new
+            memory space will be allocated to store data.
     '''
     if buffer is None:
         return cupy.empty(shape, dtype)
@@ -1000,6 +1028,14 @@ def grouped_gemm(As, Bs, Cs=None):
         raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
 
+def absmax(a):
+    '''abs(a).max() while limiting temporary memory use. The optimization is
+    only valid for real-valued arrays.
+    '''
+    if a.dtype == np.complex128 or a.nbytes < 100000000:
+        return abs(a).max()
+    return max(a.max(), -a.min())
+
 def condense(opname, a, loc_x, loc_y=None):
     '''Aggregate the last two dimensions of an array using the specified operation.
 
@@ -1076,14 +1112,14 @@ def condense(opname, a, loc_x, loc_y=None):
             code = 'double tmp = a[ip*nj+jp]; val += tmp * tmp;'
             result_code = 'fsqrt(val)'
 
-        kernel_code = (f'''\
+        kernel_code = ('''\
 extern "C" __global__
-void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
-               long long nloc_x, long long nloc_y, long long counts)'''
-'''
+void ''' + fn_name + '''(double *out, double *a, int *loc_x, int *loc_y,
+        long long nloc_x, long long nloc_y, long long counts)
 {
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int blocks_y = (nloc_y + 15) / 16;
+    int i = (blockIdx.x / blocks_y) * 16 + threadIdx.y;
+    int j = (blockIdx.x % blocks_y) * 16 + threadIdx.x;
     if (i >= nloc_x || j >= nloc_y) {
         return;
     }
@@ -1109,10 +1145,11 @@ void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
 
     kernel = _kernel_registery[fn_name]
     out = cupy.zeros((nloc_x, nloc_y))
-    blocks = ((nloc_y+15)//16, (nloc_x+15)//16)
+    blocks_x = (nloc_x + 15) // 16
+    blocks_y = (nloc_y + 15) // 16
+    blocks = (blocks_x * blocks_y,)
     threads = (16, 16)
     kernel(blocks, threads, (out, a, loc_x, loc_y, nloc_x, nloc_y, counts))
-    cupy.cuda.Stream.null.synchronize()
     if do_transpose:
         out = out.T
     return out
@@ -1136,7 +1173,9 @@ def sandwich_dot(a, c, out=None):
         out = out[0]
     return out
 
-def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
+MEMPOOL_THRESHOLD = 100000000
+
+def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     '''
     Customize CuPy memory allocator.
 
@@ -1157,34 +1196,123 @@ def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
     cupy.cuda.set_allocator(malloc)
 
 def batched_vec3_norm2(batched_vec3):
+    '''
+    einsum('gx,gx->g', vec3, vec3) for the (N,3)-array vec3
+    '''
     assert type(batched_vec3) is cupy.ndarray
     assert batched_vec3.dtype == cupy.float64
     assert batched_vec3.ndim == 2
-    assert batched_vec3.shape[1] == 3
+    assert batched_vec3.shape[0] == 3 or batched_vec3.shape[1] == 3
     assert batched_vec3.flags.c_contiguous
 
-    fn_name = "vec3_norm2_kernel"
+    order = "c" if batched_vec3.shape[1] == 3 else "f"
+
+    n = batched_vec3.shape[0] if order == "c" else batched_vec3.shape[1]
+    assert n != 3, "Ambiguous array order, cannot determine if the array is C or Fortran order from the shape"
+    assert n * 3 < np.iinfo(np.int32).max
+
+    if order == "c":
+        return batched_vec_norm2(batched_vec3)
+    else:
+        return batched_vec_norm2(batched_vec3.T)
+
+def batched_vec_norm2(vec, out=None):
+    '''
+    einsum('gx,gx->g', vec, vec)
+    '''
+    vec = cupy.asarray(vec)
+    assert vec.dtype == cupy.float64
+    assert vec.ndim == 2
+    n, x = vec.shape
+    c_order = vec.flags.c_contiguous
+
+    if c_order:
+        fn_name = f'vec{x}_norm2_kernel_c_order'
+    else:
+        assert vec.flags.f_contiguous
+        fn_name = f'vec{x}_norm2_kernel_f_order'
+
     if fn_name not in _kernel_registery:
-        kernel_code = r'''
-            extern "C" __global__
-            void vec3_norm2_kernel(const double* __restrict__ vec3, double* __restrict__ norm2, const int n) {
-                const int i = blockDim.x * blockIdx.x + threadIdx.x;
-                if (i >= n) return;
-                const double x = vec3[i * 3 + 0];
-                const double y = vec3[i * 3 + 1];
-                const double z = vec3[i * 3 + 2];
-                norm2[i] = x*x + y*y + z*z;
-            }
-        '''
+        if c_order:
+            loop = ('for (int j = 0; j < ' + str(x) + '; j++) {'
+                    'double s = vec[i*' + str(x) + '+j];'
+                    'val += s * s; }')
+        else:
+            loop = ('for (int j = 0; j < ' + str(x) + '; j++) {'
+                    'double s = vec[n*j+i];'
+                    'val += s * s; }')
+        kernel_code = (
+            r'''extern "C" __global__ void ''' +
+            fn_name + r'''(double* __restrict__ vec, double* __restrict__ norm2, long long n, long long m) {
+                size_t off = (size_t)blockIdx.x * m * blockDim.x;
+                for (int k = 0; k < m; k++) {
+                    size_t i = off + blockDim.x * k + threadIdx.x;
+                    if (i >= n) break;
+                    double val = 0;
+                    ''' + loop + '''
+                    norm2[i] = val;
+                }
+            }''')
         _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+
     kernel = _kernel_registery[fn_name]
+    out = ndarray(n, np.float64, out)
+    m = max(n // (2000 * 1024), 1)
+    kernel(((n + m*1024 - 1) // (m*1024),), (1024,), (vec, out, n, m))
+    return out
 
-    n = batched_vec3.shape[0]
-    assert n < np.iinfo(np.int32).max
-    batched_norm2 = cupy.zeros(n, dtype = cupy.float64)
-    kernel(((n + 1024 - 1) // 1024,), (1024,), (batched_vec3, batched_norm2, cupy.int32(n)))
+def batched_vec_dot(vec1, vec2, out=None):
+    '''
+    einsum('gx,gx->g', vec1, vec2)
+    '''
+    vec1 = cupy.asarray(vec1)
+    vec2 = cupy.asarray(vec2)
+    assert vec1.dtype == cupy.float64
+    assert vec2.dtype == cupy.float64
+    assert vec1.ndim == 2
+    assert vec1.shape == vec2.shape
+    n, x = vec1.shape
+    c_order = vec1.flags.c_contiguous
 
-    return batched_norm2
+    if c_order:
+        assert vec2.flags.c_contiguous
+        fn_name = f'vec{x}_dot_kernel_c_order'
+    else:
+        assert vec1.flags.f_contiguous
+        assert vec2.flags.f_contiguous
+        fn_name = f'vec{x}_dot_kernel_f_order'
+
+    if fn_name not in _kernel_registery:
+        if c_order:
+            loop = ('for (int j = 0; j < ' + str(x) + '; j++) {'
+                    'double s1 = vec1[i*' + str(x) + '+j];'
+                    'double s2 = vec2[i*' + str(x) + '+j];'
+                    'val += s1 * s2; }')
+        else:
+            loop = ('for (int j = 0; j < ' + str(x) + '; j++) {'
+                    'double s1 = vec1[n*j+i];'
+                    'double s2 = vec2[n*j+i];'
+                    'val += s1 * s2; }')
+        kernel_code = (
+            r'''extern "C" __global__ void ''' +
+            fn_name + r'''(double* __restrict__ vec1, double* __restrict__ vec2,
+                double* __restrict__ norm2, long long n, long long m) {
+                size_t off = (size_t)blockIdx.x * m * blockDim.x;
+                for (int k = 0; k < m; k++) {
+                    size_t i = off + blockDim.x * k + threadIdx.x;
+                    if (i >= n) break;
+                    double val = 0;
+                    ''' + loop + '''
+                    norm2[i] = val;
+                }
+            }''')
+        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+
+    kernel = _kernel_registery[fn_name]
+    out = ndarray(n, np.float64, out)
+    m = max(n // (2000 * 1024), 1)
+    kernel(((n + m*1024 - 1) // (m*1024),), (1024,), (vec1, vec2, out, n, m))
+    return out
 
 cholesky = cusolver.cholesky
 
@@ -1237,3 +1365,27 @@ def stack_with_padding(arrays):
         if nmo < max_nmo:
             out[k,:,nmo:] = 0
     return out
+
+def empty_aligned(shape, dtype, alignment=128):
+    '''
+    Allocate an array with a memory alignment.
+
+    Args:
+        shape : tuple or int
+            Shape of the array to allocate.
+
+    Kwargs:
+        dtype : Numpy data type.
+
+        alignment : int
+            Byte alignment for the underlying device memory pointer.
+            128 bytes is optimal for coalesced global memory access on most CUDA
+            architectures.
+
+    '''
+    dtype = np.dtype(dtype)
+    size = int(np.prod(shape))
+    nbytes = size * dtype.itemsize + alignment
+    buf = cupy.empty(nbytes, dtype=np.uint8)
+    offset = (alignment - buf.data.ptr % alignment) % alignment
+    return ndarray(shape, dtype, buf[offset:])

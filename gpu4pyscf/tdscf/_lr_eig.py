@@ -26,14 +26,20 @@ from gpu4pyscf.tdscf import math_helper
 from functools import partial
 from pyscf.lib.parameters import MAX_MEMORY
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import asarray
 from pyscf.lib.linalg_helper import _sort_elast, _outprod_to_subspace
 try:
     from pyscf.lib.exceptions import LinearDependencyError
 except ImportError:
     class LinearDependencyError(RuntimeError): pass
 
-# Add at most 20 states in each iteration
-MAX_SPACE_INC = 20
+# This parameter allows adding more states in each iteration of the Davidson algorithm.
+# For example, setting "MAX_SPACE_INC = 20" will allow up to 20 states to be added per iteration.
+# This can potentially reduce the total number of iterations. However, each
+# iteration may become slower. The overall cost of Davidson might not be
+# actually improved. Set this parameter with cautious, after benchmarking
+# performance.
+MAX_SPACE_INC = None
 
 def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
          x0sym=None, pick=None, max_cycle=50, max_memory=MAX_MEMORY,
@@ -116,11 +122,15 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
         xt_ir = cp.asarray(x0sym)
         xs_ir = cp.array([], dtype=xt_ir.dtype)
 
+    # At least perform one iteration to generate eigenvalues
+    max_cycle = max(1, max_cycle)
+
     for icyc in range(max_cycle):
         xt, xt_idx = _qr(xt, lindep)
         # Generate at most space_inc trial vectors
-        xt = xt[:space_inc]
-        xt_idx = xt_idx[:space_inc]
+        if icyc != 0:  # keep all the initial guess vectors in the first iteration
+            xt = xt[:space_inc]
+            xt_idx = xt_idx[:space_inc]
 
         row0 = len(xs)
         axt = aop(xt)
@@ -220,7 +230,8 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
         # remove subspace linear dependency
         r_index = dx_norm > tol_residual
         xt[r_index] = precond(xt[r_index], w[:t_size][r_index])
-        xt -= xs.conj().dot(xt.T).T.dot(xs)
+        for _ in range(2):  # double Gram-Schmidt orthogonalization
+            xt -= xs.conj().dot(xt.T).T.dot(xs)
         xt_norm = cp.linalg.norm(xt, axis=1)
 
         remaining = []
@@ -247,7 +258,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
     if len(x0) < min(x0_size, nroots):
         log.warn(f'Not enough eigenvectors (len(x0)={len(x0)}, nroots={nroots})')
 
-    return conv, e.get(), x0.get()
+    return conv, e.get(), x0
 
 def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         max_cycle=50, max_memory=MAX_MEMORY, lindep=1e-12, verbose=logger.WARN):
@@ -304,9 +315,9 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
     else:
         log = logger.Logger(sys.stdout, verbose)
 
-    if isinstance(x0, np.ndarray) and x0.ndim == 1:
+    if isinstance(x0, cp.ndarray) and x0.ndim == 1:
         x0 = x0[None,:]
-    x0 = np.asarray(x0)
+    x0 = cp.asarray(x0)
     x0_size = x0.shape[1]
     if MAX_SPACE_INC is None:
         space_inc = nroots
@@ -334,8 +345,8 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
             x0_orth.append(xt_sub)
             x0_orth_ir.append([ir] * len(xt_sub))
         if x0_orth:
-            x0 = np.vstack(x0_orth)
-            x0_ir = np.hstack(x0_orth_ir)
+            x0 = cp.vstack(x0_orth)
+            x0_ir = cp.hstack(x0_orth_ir)
         else:
             x0 = []
         x0_orth = x0_orth_ir = xt_sub = None
@@ -346,7 +357,10 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
     e = None
     v = None
     vlast = None
-    conv_last = conv = np.zeros(nroots, dtype=bool)
+    conv_last = conv = cp.zeros(nroots, dtype=bool)
+
+    # At least perform one iteration to generate eigenvalues
+    max_cycle = max(1, max_cycle)
 
     half_size = x0[0].size // 2
     fresh_start = True
@@ -354,31 +368,31 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         if fresh_start:
             vlast = None
             conv_last = conv = np.zeros(nroots, dtype=bool)
-            xs = np.zeros((0, x0_size))
-            ax = np.zeros((0, x0_size))
+            xs = cp.zeros((0, x0_size))
+            ax = cp.zeros((0, x0_size))
             row1 = 0
             xt = x0
             if x0sym is not None:
                 xs_ir = x0_ir
 
         axt = aop(xt)
-        xs = np.vstack([xs, xt])
-        ax = np.vstack([ax, axt])
+        xs = cp.vstack([xs, xt])
+        ax = cp.vstack([ax, axt])
         row0, row1 = row1, row1+len(xt)
 
         if heff is None:
             dtype = np.result_type(axt, xt)
             heff = np.empty((max_space*2,max_space*2), dtype=dtype)
 
-        h11 = xs[:row0].conj().dot(axt.T).astype(dtype)
-        h21 = _conj_dot(xs[:row0], axt).astype(dtype)
+        h11 = xs[:row0].conj().dot(axt.T).astype(dtype).get()
+        h21 = _conj_dot(xs[:row0], axt).astype(dtype).get()
         heff[0:row0*2:2, row0*2+0:row1*2:2] = h11
         heff[1:row0*2:2, row0*2+0:row1*2:2] = h21
         heff[0:row0*2:2, row0*2+1:row1*2:2] = -h21.conj()
         heff[1:row0*2:2, row0*2+1:row1*2:2] = -h11.conj()
 
-        h11 = xt.conj().dot(ax.T).astype(dtype)
-        h21 = _conj_dot(xt, ax).astype(dtype)
+        h11 = xt.conj().dot(ax.T).astype(dtype).get()
+        h21 = _conj_dot(xt, ax).astype(dtype).get()
         heff[row0*2+0:row1*2:2, 0:row1*2:2] = h11
         heff[row0*2+1:row1*2:2, 0:row1*2:2] = h21
         heff[row0*2+0:row1*2:2, 1:row1*2:2] = -h21.conj()
@@ -387,7 +401,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         if x0sym is None:
             w, v = scipy.linalg.eig(heff[:row1*2,:row1*2])
         else:
-            # Diagonalize within eash symmetry sectors
+            # Diagonalize within each symmetry sectors
             xs_ir2 = np.repeat(xs_ir, 2)
             w = np.empty(row1*2, dtype=np.complex128)
             v = np.zeros((row1*2, row1*2), dtype=np.complex128)
@@ -423,15 +437,15 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         else:
             de = e - elast
 
-        x0 = _gen_x0(v, xs)
-        ax0 = xt = _gen_ax0(v, ax)
+        x0 = _gen_x0(asarray(v), xs)
+        ax0 = xt = _gen_ax0(asarray(v), ax)
         xt -= w[:,None] * x0
         ax0 = None
         if x0sym is not None:
             xt_ir = v_ir[:space_inc]
             x0_ir = v_ir[:nroots]
 
-        dx_norm = np.linalg.norm(xt, axis=1)
+        dx_norm = cp.linalg.norm(xt, axis=1)
         max_dx_norm = max(dx_norm[:nroots])
         conv = dx_norm[:nroots] < tol_residual
         for k, ek in enumerate(e[:nroots]):
@@ -459,7 +473,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
 
         # Remove quasi linearly dependent bases, as they cause more numerical
         # errors in _symmetric_orth
-        xt_norm = np.linalg.norm(xt, axis=1)
+        xt_norm = cp.linalg.norm(xt, axis=1)
         xt_to_keep = (dx_norm > tol_residual) & (xt_norm > max(lindep**.5, tol_residual))
         xt = xt[xt_to_keep]
         if len(xt) > 0:
@@ -476,8 +490,8 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
                     xt_orth.append(xt_sub)
                     xt_orth_ir.append([ir] * len(xt_sub))
                 if xt_orth:
-                    xt = np.vstack(xt_orth)
-                    xs_ir = np.hstack([xs_ir, *xt_orth_ir])
+                    xt = cp.vstack(xt_orth)
+                    xs_ir = cp.hstack([xs_ir, *xt_orth_ir])
                 else:
                     xt = []
                 xt_orth = xt_orth_ir = xt_sub = None
@@ -488,7 +502,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         log.debug1('Generate %d trial vectors. Drop %d vectors',
                    len(xt), dx_norm.size - len(xt))
 
-        xt_norm = np.linalg.norm(xt, axis=1)
+        xt_norm = cp.linalg.norm(xt, axis=1)
         norm_min = xt_norm.min()
         log.debug('lr_eig %d %d  |r|= %4.3g  e= %s  max|de|= %4.3g  lindep= %4.3g',
                   icyc, len(xs), max_dx_norm, e, de[ide], norm_min)
@@ -590,6 +604,9 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
     v_sub = None
     vlast = None
     conv_last = conv = cp.zeros(nroots, dtype=bool)
+
+    # At least perform one iteration to generate eigenvalues
+    max_cycle = max(1, max_cycle)
 
     fresh_start = True
     for icyc in range(max_cycle):
@@ -763,7 +780,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
     if len(x0[0]) < min(A_size, nroots):
         log.warn(f'Not enough eigenvectors (len(x0)={len(x0[0])}, nroots={nroots})')
 
-    return conv[:nroots], e[:nroots].get(), cp.hstack(x0).get()
+    return conv[:nroots], e[:nroots].get(), cp.hstack(x0)
 
 def _gen_x0(v, xs):
     out = _outprod_to_subspace(v[::2], xs)
@@ -1220,6 +1237,9 @@ def Davidson(matrix_vector_product,
     t_fill_holder = [0] * len(cpu0)
     t_total       = [0] * len(cpu0)
 
+    # At least perform one iteration to generate eigenvalues
+    max_iter = max(1, max_iter)
+
     for ii in range(max_iter):
 
         '''matrix vector product'''
@@ -1563,3 +1583,189 @@ def Davidson_Casida(matrix_vector_product,
 
     return conv, omega, X_full, Y_full
 
+
+def davidson_nosym1(
+    aop,
+    x0,
+    precond,
+    tol=1e-12,
+    max_cycle=50,
+    lindep=1e-12,
+    callback=None,
+    max_space=20,
+    max_memory=MAX_MEMORY,
+    nroots=1,
+    pick=None,
+    verbose=logger.WARN,
+):
+    """
+    slightly modified from pyscf.lib.linalg.davidson_nosym1 with vectorization support
+    """
+
+    def _qr(xs, lindep=1e-14):
+        q, r = cp.linalg.qr(xs.T, mode='reduced')
+        r_diag = cp.abs(cp.diag(r))
+        mask = r_diag > lindep
+        qs = q.T[mask]
+        return qs, cp.where(mask)[0]
+
+    assert callable(pick)
+    assert callable(precond)
+
+    if isinstance(verbose, logger.Logger):
+        log = verbose
+    else:
+        log = logger.Logger(sys.stdout, verbose)
+
+    toloose = tol**0.5
+    log.debug1('tol %g  toloose %g', tol, toloose)
+
+    if isinstance(x0, np.ndarray) and x0.ndim == 1:
+        x0 = x0[None, :]
+    x0 = cp.asarray(x0)
+    x0_size = x0.shape[1]
+
+    if MAX_SPACE_INC is None:
+        space_inc = nroots
+    else:
+        space_inc = max(nroots, min(MAX_SPACE_INC, x0_size // 2))
+    max_space = int(max_memory * 1e6 / 8 / x0_size / 2 - nroots - space_inc)
+    if max_space < nroots * 4 < x0_size:
+        log.warn('Not enough memory to store trial space in _lr_eig.eigh')
+    max_space = max(max_space, nroots * 4)
+    max_space = min(max_space, x0_size)
+    log.debug(f'Set max_space {max_space}, space_inc {space_inc}')
+
+    xs = cp.empty((max_space, x0_size), dtype=x0.dtype)
+    ax = cp.empty((max_space, x0_size), dtype=x0.dtype)
+    heff = cp.empty((max_space, max_space), dtype=x0.dtype)
+    fresh_start = True
+    space = 0
+    e = None
+    v = None
+    conv = cp.zeros(nroots, dtype=bool)
+    conv_last = cp.zeros(nroots, dtype=bool)
+
+    max_cycle = max(1, max_cycle)
+
+    for icyc in range(max_cycle):
+        if fresh_start:
+            xs = cp.empty_like(xs)
+            ax = cp.empty_like(ax)
+            space = 0
+            x0len = len(x0)
+            xt, _ = _qr(x0, lindep)
+            if len(xt) != x0len:
+                log.warn(
+                    'QR decomposition removed %d vectors. '
+                    'Check to see if `pick` function :%s: is providing linear dependent '
+                    'vectors' % (x0len - len(xt), pick.__name__)
+                )
+        elif len(xt) > 1:
+            xt, _ = _qr(xt, lindep)
+        if icyc != 0:
+            xt = xt[:space_inc]
+
+        add = xt.shape[0]
+        axt = aop(xt)
+        xs[space : space + add] = xt
+        ax[space : space + add] = axt
+        space_old = space
+        space += add
+        if fresh_start:
+            heff.fill(0)
+        heff[:space_old, space_old:space] = xs[:space_old].conj().dot(ax[space_old:space].T)
+        heff[space_old:space, :space_old] = xs[space_old:space].conj().dot(ax[:space_old].T)
+        heff[space_old:space, space_old:space] = xs[space_old:space].conj().dot(ax[space_old:space].T)
+        xt = axt = None
+
+        elast = e
+        vlast = v
+        conv_last = conv
+
+        w_cpu, v_cpu = scipy.linalg.eig(heff[:space, :space].get())
+        w, v = cp.asarray(w_cpu), cp.asarray(v_cpu)
+        w, v, idx = pick(w, v, nroots, locals())
+        if len(w) == 0:
+            raise RuntimeError('Not enough eigenvalues')
+
+        e = w[:nroots]
+        v = v[:, :nroots]
+        if not fresh_start:
+            elast, conv_last = _sort_elast_gpu(elast, conv_last, vlast, v, log)
+
+        if elast is None:
+            de = e
+        elif elast.size != e.size:
+            log.debug('Number of roots different from the previous step (%d,%d)', e.size, elast.size)
+            de = e
+        else:
+            de = e - elast
+
+        x0 = v.T.dot(xs[:space])
+        ax0 = v.T.dot(ax[:space])
+
+        xt = ax0[:nroots] - e[:, None] * x0[:nroots]
+        ax0 = None
+
+        dx_norm = cp.linalg.norm(xt, axis=1)
+        conv = (abs(de) < tol) & (dx_norm < toloose)
+        for k, ek in enumerate(e):
+            if conv[k] and not conv_last[k]:
+                log.debug('root %d converged  |r|= %4.3g  e= %s  max|de|= %4.3g', k, dx_norm[k], ek, de[k])
+        ax0 = None
+        max_dx_norm = max(dx_norm)
+        max_de = max(abs(de))
+        if all(conv):
+            log.debug('converged %d %d  |r|= %4.3g  e= %s  max|de|= %4.3g', icyc, len(xs), max_dx_norm, e, max_de)
+            break
+
+        mask = (~conv) & (dx_norm**2 > lindep)
+        xt = precond(xt[mask], e[0], x0[mask])
+        valid_xs = xs[:space]
+        for _ in range(2):
+            xt -= cp.dot(cp.dot(xt, valid_xs.T.conj()), valid_xs)
+        xt_norm = cp.linalg.norm(xt, axis=1)
+        keep_mask = xt_norm**2 > lindep
+        xt = xt[keep_mask]
+        xt_norm = xt_norm[keep_mask]
+
+        if len(xt) == 0:
+            log.debug('Linear dependency in trial subspace. |r| for each state %s', dx_norm)
+            conv = dx_norm < toloose
+            break
+        log.debug(
+            'davidson %d %d  |r|= %4.3g  e= %s  max|de|= %4.3g  lindep= %4.3g',
+            icyc,
+            space,
+            max_dx_norm,
+            e,
+            max_de,
+            cp.linalg.norm(xt, axis=1).min(),
+        )
+
+        xt /= xt_norm[:, None]
+
+        fresh_start = space + len(xt) > max_space
+        if callable(callback):
+            callback(locals())
+
+    return conv, e.get(), x0
+
+
+def _eigs_cmplx2real(w, v, real_idx, real_eigenvectors=True):
+    """
+    copied from pyscf.lib.linalg._eigs_cmplx2real
+    """
+    idx = real_idx[w[real_idx].real.argsort()]
+    w = w[idx]
+    v = v[:, idx]
+
+    if real_eigenvectors:
+        degen_idx = cp.where(w.imag != 0)[0]
+        if degen_idx.size > 0:
+            # Take the imaginary part of the "degenerated" eigenvectors as an
+            # independent eigenvector then discard the imaginary part of v
+            v[:, degen_idx[1::2]] = v[:, degen_idx[1::2]].imag
+        v = v.real
+    return w.real, v, idx

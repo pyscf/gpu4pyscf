@@ -28,7 +28,7 @@ from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
           max_cycle=50, tol=1e-7, hermi=False, verbose=logger.WARN,
-          level_shift=0):
+          level_shift=0, mo10=None):
     '''
     Args:
         fvind : function
@@ -36,20 +36,24 @@ def solve(fvind, mo_energy, mo_occ, h1, s1=None,
     Kwargs:
         hermi : boolean
             Whether the matrix defined by fvind is Hermitian or not.
+        mo10 : ndarray
+            Initial guess for the first order orbitals.
     '''
 
     if s1 is None:
         return solve_nos1(fvind, mo_energy, mo_occ, h1,
-                          max_cycle, tol, hermi, verbose)
+                          max_cycle, tol, hermi, verbose, 
+                          level_shift=level_shift, mo10=mo10)
     else:
         return solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
-                            max_cycle, tol, hermi, verbose)
+                            max_cycle, tol, hermi, verbose, 
+                            level_shift=level_shift, mo10=mo10)
 kernel = solve
 
 # h1 shape is (:,nvir,nocc)
 def solve_nos1(fvind, mo_energy, mo_occ, h1,
                max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN,
-               level_shift=0):
+               level_shift=0, mo10=None):
     '''For field independent basis. First order overlap matrix is zero'''
     log = logger.new_logger(verbose=verbose)
     t0 = log.init_timer()
@@ -66,15 +70,17 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
             v -= mo1 * level_shift
         v *= e_ai
         return v.reshape(-1,nvir*nocc)
-    mo1 = krylov(vind_vo, mo1base.reshape(-1,nvir*nocc),
-                     tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
+    
+    x0 = mo10.reshape(-1,nvir*nocc) if mo10 is not None else None
+    mo1 = krylov(vind_vo, mo1base.reshape(-1,nvir*nocc), x0=x0,
+                 tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
     log.timer('krylov solver in CPHF', *t0)
     return mo1.reshape(h1.shape), None
 
 # h1 shape is (:,nocc+nvir,nocc)
 def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
                 max_cycle=50, tol=1e-9, hermi=False,
-                verbose=logger.WARN, level_shift=0):
+                verbose=logger.WARN, level_shift=0, mo10=None):
     '''For field dependent basis. First order overlap matrix is non-zero.
     The first order orbitals are set to
     C^1_{ij} = -1/2 S1
@@ -82,6 +88,8 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     Kwargs:
         hermi : boolean
             Whether the matrix defined by fvind is Hermitian or not.
+        mo10 : ndarray
+            Initial guess for the first order orbitals.
     Returns:
         First order orbital coefficients (in MO basis) and first order orbital
         energy matrix
@@ -113,8 +121,9 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
         v[:,occidx,:] = 0
         return v.reshape(-1,nmo*nocc)
     
-    mo1 = krylov(vind_vo, mo1base.reshape(-1,nmo*nocc),
-                     tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
+    x0 = mo10.reshape(-1,nmo*nocc) if mo10 is not None else None
+    mo1 = krylov(vind_vo, mo1base.reshape(-1,nmo*nocc), x0=x0,
+                 tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
     mo1 = mo1.reshape(mo1base.shape)
     mo1[:,occidx] = mo1base[:,occidx]
     log.timer('krylov solver in CPHF', *t0)

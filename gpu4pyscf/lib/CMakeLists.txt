@@ -123,6 +123,7 @@ add_subdirectory(gint)
 add_subdirectory(gvhf)
 add_subdirectory(gdft)
 add_subdirectory(cupy_helper)
+add_subdirectory(sem)
 
 option(BUILD_SOLVENT "Using SMD solvent" ON)
 if(BUILD_SOLVENT)

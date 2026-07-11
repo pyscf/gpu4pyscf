@@ -7,38 +7,15 @@
 
 __global__ static
 void rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -51,40 +28,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -95,10 +99,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -113,17 +115,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -160,24 +160,23 @@ while (1) {
                 dd_cache0 += fac * (dm[(l0+0)*nao+(k0+0)]+dmb[(l0+0)*nao+(k0+0)]) * (dm[(j0+0)*nao+(i0+0)]+dmb[(j0+0)*nao+(i0+0)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -193,9 +192,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -291,38 +290,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -335,40 +311,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -379,10 +382,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -397,17 +398,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -454,24 +453,23 @@ while (1) {
                 dd_cache2 += fac * (dm[(l0+0)*nao+(k0+0)]+dmb[(l0+0)*nao+(k0+0)]) * (dm[(j0+0)*nao+(i0+2)]+dmb[(j0+0)*nao+(i0+2)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -487,9 +485,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -664,38 +662,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -708,40 +683,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -752,10 +754,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -770,17 +770,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -857,24 +855,23 @@ while (1) {
                 dd_cache8 += fac * (dm[(l0+0)*nao+(k0+2)]+dmb[(l0+0)*nao+(k0+2)]) * (dm[(j0+0)*nao+(i0+2)]+dmb[(j0+0)*nao+(i0+2)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -890,9 +887,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -1290,38 +1287,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1334,40 +1308,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -1378,10 +1379,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -1396,17 +1395,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -1573,24 +1570,23 @@ while (1) {
                 dd_cache26 += fac * (dm[(l0+2)*nao+(k0+2)]+dmb[(l0+2)*nao+(k0+2)]) * (dm[(j0+0)*nao+(i0+2)]+dmb[(j0+0)*nao+(i0+2)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -1606,9 +1602,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -2672,38 +2668,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2716,40 +2689,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -2760,10 +2760,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -2778,17 +2776,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -2865,24 +2861,23 @@ while (1) {
                 dd_cache8 += fac * (dm[(l0+0)*nao+(k0+0)]+dmb[(l0+0)*nao+(k0+0)]) * (dm[(j0+2)*nao+(i0+2)]+dmb[(j0+2)*nao+(i0+2)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -2898,9 +2893,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -3306,38 +3301,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -3350,40 +3322,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -3394,10 +3393,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -3412,17 +3409,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -3589,24 +3584,23 @@ while (1) {
                 dd_cache26 += fac * (dm[(l0+0)*nao+(k0+2)]+dmb[(l0+0)*nao+(k0+2)]) * (dm[(j0+2)*nao+(i0+2)]+dmb[(j0+2)*nao+(i0+2)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -3622,9 +3616,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -4694,39 +4688,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * 2592 + sq_id;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -4735,6 +4705,7 @@ while (1) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+    int gout_id = threadIdx.y;
     extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -4742,40 +4713,68 @@ while (1) {
     double *rw = shared_memory + nsq_per_block * 114 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (114+nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 2592 + sq_id;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -4786,10 +4785,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -4804,17 +4801,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
             rlrk[0] = xlxk;
             rlrk[32] = ylyk;
@@ -4890,12 +4885,11 @@ while (1) {
                 dd_cache[n*32] = fac_sym * dd;
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
@@ -4907,24 +4901,24 @@ while (1) {
                 double ylyk = rlrk[32];
                 double zlzk = rlrk[64];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
-                double xkl = rk[0] + rlrk[0] * al_akl;
-                double ykl = rk[1] + rlrk[32] * al_akl;
-                double zkl = rk[2] + rlrk[64] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
+                double xkl = env[rk+0] + rlrk[0] * al_akl;
+                double ykl = env[rk+1] + rlrk[32] * al_akl;
+                double zkl = env[rk+2] + rlrk[64] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -6700,38 +6694,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -6744,40 +6715,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -6788,10 +6786,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -6806,17 +6802,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -6878,24 +6872,23 @@ while (1) {
                 dd_cache5 += fac * (dm[(l0+0)*nao+(k0+0)]+dmb[(l0+0)*nao+(k0+0)]) * (dm[(j0+0)*nao+(i0+5)]+dmb[(j0+0)*nao+(i0+5)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -6911,9 +6904,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -7199,38 +7192,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -7243,40 +7213,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -7287,10 +7284,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -7305,17 +7300,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -7437,24 +7430,23 @@ while (1) {
                 dd_cache17 += fac * (dm[(l0+0)*nao+(k0+2)]+dmb[(l0+0)*nao+(k0+2)]) * (dm[(j0+0)*nao+(i0+5)]+dmb[(j0+0)*nao+(i0+5)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -7470,9 +7462,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -8197,39 +8189,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    constexpr int nsq_per_block = 32;
-    constexpr int gout_stride = 8;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * 1728 + sq_id;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -8238,6 +8206,7 @@ while (1) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+    int gout_id = threadIdx.y;
     extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -8245,40 +8214,68 @@ while (1) {
     double *rw = shared_memory + nsq_per_block * 78 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (78+nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -8289,10 +8286,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -8307,21 +8302,19 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
             rlrk[0] = xlxk;
-            rlrk[32] = ylyk;
-            rlrk[64] = zlzk;
+            rlrk[64] = ylyk;
+            rlrk[128] = zlzk;
         }
         double v_kx = 0;
         double v_ky = 0;
@@ -8337,7 +8330,7 @@ while (1) {
         int do_j = jk.j_factor != 0.;
         int do_k = jk.k_factor != 0.;
         if (jk.n_dm == 1) {
-            for (int n = gout_id; n < 54; n+=8) {
+            for (int n = gout_id; n < 54; n+=4) {
                 int kl = n / 6;
                 int ij = n % 6;
                 int i = ij % 6;
@@ -8361,11 +8354,11 @@ while (1) {
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
                 }
-                dd_cache[n*32] = fac_sym * dd;
+                dd_cache[n*64] = fac_sym * dd;
             }
         } else {
             double *dmb = dm + nao * nao;
-            for (int n = gout_id; n < 54; n+=8) {
+            for (int n = gout_id; n < 54; n+=4) {
                 int kl = n / 6;
                 int ij = n % 6;
                 int i = ij % 6;
@@ -8390,15 +8383,14 @@ while (1) {
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
-                dd_cache[n*32] = fac_sym * dd;
+                dd_cache[n*64] = fac_sym * dd;
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
@@ -8407,27 +8399,27 @@ while (1) {
             __syncthreads();
             if (gout_id == 0) {
                 double xlxk = rlrk[0];
-                double ylyk = rlrk[32];
-                double zlzk = rlrk[64];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
-                double xkl = rk[0] + rlrk[0] * al_akl;
-                double ykl = rk[1] + rlrk[32] * al_akl;
-                double zkl = rk[2] + rlrk[64] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
+                double xkl = env[rk+0] + rlrk[0] * al_akl;
+                double ykl = env[rk+1] + rlrk[64] * al_akl;
+                double zkl = env[rk+2] + rlrk[128] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -8436,1174 +8428,1166 @@ while (1) {
                 __syncthreads();
                 if (gout_id == 0) {
                     Rpq[0] = xpq;
-                    Rpq[32] = ypq;
-                    Rpq[64] = zpq;
+                    Rpq[64] = ypq;
+                    Rpq[128] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[768] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[1536] = cicj / (aij*akl*sqrt(aij+akl));
                 }
                 int nroots = bounds.nroots;
                 rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor);
                 double s0, s1, s2;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
-                    double rt = rw[irys*64];
+                    double rt = rw[irys*128];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double rt_akl = rt_aa * aij;
                     double b00 = .5 * rt_aa;
                     double b10 = .5/aij * (1 - rt_aij);
                     double b01 = .5/akl * (1 - rt_akl);
-                    for (int n = gout_id; n < 3; n += 8) {
+                    for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gx[1536] = rw[irys*64+32];
+                            gx[3072] = rw[irys*128+64];
                         }
-                        double *_gx = gx + n * 768;
+                        double *_gx = gx + n * 1536;
                         double xjxi = rjri[n];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n*32];
+                        double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
-                        _gx[32] = s1;
+                        _gx[64] = s1;
                         s2 = c0x * s1 + 1 * b10 * s0;
-                        _gx[64] = s2;
+                        _gx[128] = s2;
                         s0 = s1;
                         s1 = s2;
                         s2 = c0x * s1 + 2 * b10 * s0;
-                        _gx[96] = s2;
-                        double xlxk = rlrk[n*32];
+                        _gx[192] = s2;
+                        double xlxk = rlrk[n*64];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n*32];
+                        double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
-                        _gx[128] = s1;
+                        _gx[256] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        _gx[256] = s2;
+                        _gx[512] = s2;
                         s0 = s1;
                         s1 = s2;
                         s2 = cpx*s1 + 2 * b01 *s0;
-                        _gx[384] = s2;
-                        s0 = _gx[32];
+                        _gx[768] = s2;
+                        s0 = _gx[64];
                         s1 = cpx * s0;
                         s1 += 1 * b00 * _gx[0];
-                        _gx[160] = s1;
+                        _gx[320] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 1 * b00 * _gx[128];
-                        _gx[288] = s2;
-                        s0 = s1;
-                        s1 = s2;
-                        s2 = cpx*s1 + 2 * b01 *s0;
                         s2 += 1 * b00 * _gx[256];
-                        _gx[416] = s2;
-                        s0 = _gx[64];
-                        s1 = cpx * s0;
-                        s1 += 2 * b00 * _gx[32];
-                        _gx[192] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 2 * b00 * _gx[160];
-                        _gx[320] = s2;
+                        _gx[576] = s2;
                         s0 = s1;
                         s1 = s2;
                         s2 = cpx*s1 + 2 * b01 *s0;
-                        s2 += 2 * b00 * _gx[288];
-                        _gx[448] = s2;
-                        s0 = _gx[96];
-                        s1 = cpx * s0;
-                        s1 += 3 * b00 * _gx[64];
-                        _gx[224] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 3 * b00 * _gx[192];
-                        _gx[352] = s2;
-                        s0 = s1;
-                        s1 = s2;
-                        s2 = cpx*s1 + 2 * b01 *s0;
-                        s2 += 3 * b00 * _gx[320];
-                        _gx[480] = s2;
-                        s1 = _gx[384];
-                        s0 = _gx[256];
-                        _gx[640] = s1 - xlxk * s0;
-                        s1 = s0;
+                        s2 += 1 * b00 * _gx[512];
+                        _gx[832] = s2;
                         s0 = _gx[128];
-                        _gx[512] = s1 - xlxk * s0;
+                        s1 = cpx * s0;
+                        s1 += 2 * b00 * _gx[64];
+                        _gx[384] = s1;
+                        s2 = cpx*s1 + 1 * b01 *s0;
+                        s2 += 2 * b00 * _gx[320];
+                        _gx[640] = s2;
+                        s0 = s1;
+                        s1 = s2;
+                        s2 = cpx*s1 + 2 * b01 *s0;
+                        s2 += 2 * b00 * _gx[576];
+                        _gx[896] = s2;
+                        s0 = _gx[192];
+                        s1 = cpx * s0;
+                        s1 += 3 * b00 * _gx[128];
+                        _gx[448] = s1;
+                        s2 = cpx*s1 + 1 * b01 *s0;
+                        s2 += 3 * b00 * _gx[384];
+                        _gx[704] = s2;
+                        s0 = s1;
+                        s1 = s2;
+                        s2 = cpx*s1 + 2 * b01 *s0;
+                        s2 += 3 * b00 * _gx[640];
+                        _gx[960] = s2;
+                        s1 = _gx[768];
+                        s0 = _gx[512];
+                        _gx[1280] = s1 - xlxk * s0;
+                        s1 = s0;
+                        s0 = _gx[256];
+                        _gx[1024] = s1 - xlxk * s0;
                         s1 = s0;
                         s0 = _gx[0];
-                        _gx[384] = s1 - xlxk * s0;
-                        s1 = _gx[416];
-                        s0 = _gx[288];
-                        _gx[672] = s1 - xlxk * s0;
+                        _gx[768] = s1 - xlxk * s0;
+                        s1 = _gx[832];
+                        s0 = _gx[576];
+                        _gx[1344] = s1 - xlxk * s0;
                         s1 = s0;
-                        s0 = _gx[160];
-                        _gx[544] = s1 - xlxk * s0;
-                        s1 = s0;
-                        s0 = _gx[32];
-                        _gx[416] = s1 - xlxk * s0;
-                        s1 = _gx[448];
                         s0 = _gx[320];
-                        _gx[704] = s1 - xlxk * s0;
-                        s1 = s0;
-                        s0 = _gx[192];
-                        _gx[576] = s1 - xlxk * s0;
+                        _gx[1088] = s1 - xlxk * s0;
                         s1 = s0;
                         s0 = _gx[64];
-                        _gx[448] = s1 - xlxk * s0;
-                        s1 = _gx[480];
-                        s0 = _gx[352];
-                        _gx[736] = s1 - xlxk * s0;
+                        _gx[832] = s1 - xlxk * s0;
+                        s1 = _gx[896];
+                        s0 = _gx[640];
+                        _gx[1408] = s1 - xlxk * s0;
                         s1 = s0;
-                        s0 = _gx[224];
-                        _gx[608] = s1 - xlxk * s0;
+                        s0 = _gx[384];
+                        _gx[1152] = s1 - xlxk * s0;
                         s1 = s0;
-                        s0 = _gx[96];
-                        _gx[480] = s1 - xlxk * s0;
+                        s0 = _gx[128];
+                        _gx[896] = s1 - xlxk * s0;
+                        s1 = _gx[960];
+                        s0 = _gx[704];
+                        _gx[1472] = s1 - xlxk * s0;
+                        s1 = s0;
+                        s0 = _gx[448];
+                        _gx[1216] = s1 - xlxk * s0;
+                        s1 = s0;
+                        s0 = _gx[192];
+                        _gx[960] = s1 - xlxk * s0;
                     }
                     __syncthreads();
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
                     double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
+                    double ylyk = rlrk[64];
+                    double zlzk = rlrk[128];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
-                        Ix = gx[576];
-                        Iy = gx[768];
-                        Iz = gx[1536];
+                        Ix = gx[1152];
+                        Iy = gx[1536];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[608] - 2 * gx[544]) * prod_yz;
-                        v_kx += (ak2 * gx[704] - 1 * gx[448]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[608] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[704] - xlxk * Ix) - 1 * gx[192]) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[1216] - 2 * gx[1088]) * prod_yz;
+                        v_kx += (ak2 * gx[1408] - 1 * gx[896]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[1216] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1408] - xlxk * Ix) - 1 * gx[384]) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[256];
-                        Ix = gx[416];
-                        Iy = gx[896];
-                        Iz = gx[1568];
+                        Ix = gx[1024];
+                        Iy = gx[1600];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[448] - 1 * gx[384]) * prod_yz;
-                        v_kx += ak2 * gx[544] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += (ak2 * gx[1024] - 1 * gx[768]) * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1696] * prod_xy;
-                        v_jx += aj2 * (gx[448] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[544] - xlxk * Ix) - 1 * gx[32]) * prod_yz;
-                        v_jy += aj2 * (gx[928] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1696] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[1088] * prod_yz;
+                        v_kx += (ak2 * gx[1280] - 1 * gx[768]) * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[1856] * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3392] * prod_xy;
+                        v_jx += aj2 * (gx[1088] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1280] - xlxk * Ix) - 1 * gx[256]) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1856] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3392] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[512];
-                        Ix = gx[384];
-                        Iy = gx[800];
-                        Iz = gx[1696];
+                        Ix = gx[832];
+                        Iy = gx[1792];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += ak2 * gx[512] * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[928] * prod_xz;
-                        v_iz += (ai2 * gx[1728] - 1 * gx[1664]) * prod_xy;
-                        v_kz += (ak2 * gx[1824] - 1 * gx[1568]) * prod_xy;
-                        v_jx += aj2 * (gx[416] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[512] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[928] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1728] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[896] - 1 * gx[768]) * prod_yz;
+                        v_kx += ak2 * gx[1088] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3392] * prod_xy;
+                        v_jx += aj2 * (gx[896] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1088] - xlxk * Ix) - 1 * gx[64]) * prod_yz;
+                        v_jy += aj2 * (gx[1856] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3392] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[768];
-                        Ix = gx[64];
-                        Iy = gx[1280];
-                        Iz = gx[1536];
+                        Ix = gx[896];
+                        Iy = gx[1536];
+                        Iz = gx[3328];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[96] - 2 * gx[32]) * prod_yz;
-                        v_kx += ak2 * gx[192] * prod_yz;
-                        v_iy += ai2 * gx[1312] * prod_xz;
-                        v_ky += (ak2 * gx[1408] - 1 * gx[1152]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[96] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[192] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1312] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1408] - ylyk * Iy) - 1 * gx[896]) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[960] - 2 * gx[832]) * prod_yz;
+                        v_kx += ak2 * gx[1152] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += (ak2 * gx[3584] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[960] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1152] - xlxk * Ix) - 1 * gx[128]) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3392] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1024];
-                        Ix = gx[32];
-                        Iy = gx[1152];
-                        Iz = gx[1696];
+                        Ix = gx[768];
+                        Iy = gx[1600];
+                        Iz = gx[3392];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[160] * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += ak2 * gx[1280] * prod_xz;
-                        v_iz += (ai2 * gx[1728] - 1 * gx[1664]) * prod_xy;
-                        v_kz += (ak2 * gx[1824] - 1 * gx[1568]) * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[160] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1184] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1280] - ylyk * Iy) - 1 * gx[768]) * prod_xz;
-                        v_jz += aj2 * (gx[1728] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += ak2 * gx[1024] * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[1856] * prod_xz;
+                        v_iz += (ai2 * gx[3456] - 1 * gx[3328]) * prod_xy;
+                        v_kz += (ak2 * gx[3648] - 1 * gx[3136]) * prod_xy;
+                        v_jx += aj2 * (gx[832] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1024] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1856] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3456] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1280];
-                        Ix = gx[128];
-                        Iy = gx[800];
-                        Iz = gx[1952];
+                        Ix = gx[320];
+                        Iy = gx[2304];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += (ak2 * gx[256] - 1 * gx[0]) * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[928] * prod_xz;
-                        v_iz += (ai2 * gx[1984] - 1 * gx[1920]) * prod_xy;
-                        v_kz += ak2 * gx[2080] * prod_xy;
-                        v_jx += aj2 * (gx[160] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[928] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1984] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2080] - zlzk * Iz) - 1 * gx[1568]) * prod_xy;
+                        v_ix += (ai2 * gx[384] - 1 * gx[256]) * prod_yz;
+                        v_kx += (ak2 * gx[576] - 1 * gx[64]) * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += ak2 * gx[2560] * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3392] * prod_xy;
+                        v_jx += aj2 * (gx[384] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2368] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2560] - ylyk * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3392] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1536];
-                        Ix = gx[64];
-                        Iy = gx[768];
-                        Iz = gx[2048];
+                        Ix = gx[128];
+                        Iy = gx[2560];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[96] - 2 * gx[32]) * prod_yz;
-                        v_kx += ak2 * gx[192] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += ai2 * gx[2080] * prod_xy;
-                        v_kz += (ak2 * gx[2176] - 1 * gx[1920]) * prod_xy;
-                        v_jx += aj2 * (gx[96] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[192] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[2080] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2176] - zlzk * Iz) - 1 * gx[1664]) * prod_xy;
+                        v_ix += (ai2 * gx[192] - 2 * gx[64]) * prod_yz;
+                        v_kx += ak2 * gx[384] * prod_yz;
+                        v_iy += ai2 * gx[2624] * prod_xz;
+                        v_ky += (ak2 * gx[2816] - 1 * gx[2304]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2624] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2816] - ylyk * Iy) - 1 * gx[1792]) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1792];
+                        Ix = gx[0];
+                        Iy = gx[2624];
+                        Iz = gx[3136];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += (ai2 * gx[2688] - 1 * gx[2560]) * prod_xz;
+                        v_ky += (ak2 * gx[2880] - 1 * gx[2368]) * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3392] * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2688] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2880] - ylyk * Iy) - 1 * gx[1856]) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3392] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2048];
+                        Ix = gx[64];
+                        Iy = gx[2304];
+                        Iz = gx[3392];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[320] * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += ak2 * gx[2560] * prod_xz;
+                        v_iz += (ai2 * gx[3456] - 1 * gx[3328]) * prod_xy;
+                        v_kz += (ak2 * gx[3648] - 1 * gx[3136]) * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2368] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2560] - ylyk * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_jz += aj2 * (gx[3456] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2304];
+                        Ix = gx[384];
+                        Iy = gx[1536];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[448] - 2 * gx[320]) * prod_yz;
+                        v_kx += (ak2 * gx[640] - 1 * gx[128]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += ak2 * gx[4096] * prod_xy;
+                        v_jx += aj2 * (gx[448] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3904] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4096] - zlzk * Iz) - 1 * gx[3072]) * prod_xy;
+                        dd = dd_cache[2560];
+                        Ix = gx[256];
+                        Iy = gx[1600];
+                        Iz = gx[3904];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[1856] * prod_xz;
+                        v_iz += (ai2 * gx[3968] - 1 * gx[3840]) * prod_xy;
+                        v_kz += ak2 * gx[4160] * prod_xy;
+                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1856] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3968] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4160] - zlzk * Iz) - 1 * gx[3136]) * prod_xy;
+                        dd = dd_cache[2816];
+                        Ix = gx[64];
+                        Iy = gx[1792];
+                        Iz = gx[3904];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[320] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xz;
+                        v_iz += (ai2 * gx[3968] - 1 * gx[3840]) * prod_xy;
+                        v_kz += ak2 * gx[4160] * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1856] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3968] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4160] - zlzk * Iz) - 1 * gx[3136]) * prod_xy;
+                        dd = dd_cache[3072];
+                        Ix = gx[128];
+                        Iy = gx[1536];
+                        Iz = gx[4096];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[192] - 2 * gx[64]) * prod_yz;
+                        v_kx += ak2 * gx[384] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += ai2 * gx[4160] * prod_xy;
+                        v_kz += (ak2 * gx[4352] - 1 * gx[3840]) * prod_xy;
+                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[4160] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4352] - zlzk * Iz) - 1 * gx[3328]) * prod_xy;
+                        dd = dd_cache[3328];
+                        Ix = gx[0];
+                        Iy = gx[1600];
+                        Iz = gx[4160];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[1856] * prod_xz;
+                        v_iz += (ai2 * gx[4224] - 1 * gx[4096]) * prod_xy;
+                        v_kz += (ak2 * gx[4416] - 1 * gx[3904]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1856] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[4224] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4416] - zlzk * Iz) - 1 * gx[3392]) * prod_xy;
                         break;
                     case 1:
-                        dd = dd_cache[32];
-                        Ix = gx[544];
-                        Iy = gx[800];
-                        Iz = gx[1536];
+                        dd = dd_cache[64];
+                        Ix = gx[1088];
+                        Iy = gx[1600];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[576] - 1 * gx[512]) * prod_yz;
-                        v_kx += (ak2 * gx[672] - 1 * gx[416]) * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[928] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[576] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[672] - xlxk * Ix) - 1 * gx[160]) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[928] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[288];
-                        Ix = gx[384];
-                        Iy = gx[960];
-                        Iz = gx[1536];
+                        v_ix += (ai2 * gx[1152] - 1 * gx[1024]) * prod_yz;
+                        v_kx += (ak2 * gx[1344] - 1 * gx[832]) * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[1856] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[1152] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1344] - xlxk * Ix) - 1 * gx[320]) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1856] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[320];
+                        Ix = gx[1024];
+                        Iy = gx[1536];
+                        Iz = gx[3200];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += ak2 * gx[512] * prod_yz;
-                        v_iy += (ai2 * gx[992] - 2 * gx[928]) * prod_xz;
-                        v_ky += (ak2 * gx[1088] - 1 * gx[832]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[416] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[512] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
-                        v_jy += aj2 * (gx[992] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1088] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[544];
-                        Ix = gx[384];
-                        Iy = gx[768];
-                        Iz = gx[1728];
+                        v_ix += ai2 * gx[1088] * prod_yz;
+                        v_kx += (ak2 * gx[1280] - 1 * gx[768]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += (ai2 * gx[3264] - 2 * gx[3136]) * prod_xy;
+                        v_kz += ak2 * gx[3456] * prod_xy;
+                        v_jx += aj2 * (gx[1088] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1280] - xlxk * Ix) - 1 * gx[256]) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3264] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3456] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[576];
+                        Ix = gx[768];
+                        Iy = gx[1920];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += ak2 * gx[512] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += (ai2 * gx[1760] - 2 * gx[1696]) * prod_xy;
-                        v_kz += (ak2 * gx[1856] - 1 * gx[1600]) * prod_xy;
-                        v_jx += aj2 * (gx[416] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[512] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1760] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1856] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[800];
-                        Ix = gx[32];
-                        Iy = gx[1312];
-                        Iz = gx[1536];
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += ak2 * gx[1024] * prod_yz;
+                        v_iy += (ai2 * gx[1984] - 2 * gx[1856]) * prod_xz;
+                        v_ky += (ak2 * gx[2176] - 1 * gx[1664]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[832] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1024] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
+                        v_jy += aj2 * (gx[1984] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2176] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[832];
+                        Ix = gx[832];
+                        Iy = gx[1600];
+                        Iz = gx[3328];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[160] * prod_yz;
-                        v_iy += (ai2 * gx[1344] - 1 * gx[1280]) * prod_xz;
-                        v_ky += (ak2 * gx[1440] - 1 * gx[1184]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[160] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1344] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1440] - ylyk * Iy) - 1 * gx[928]) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1056];
+                        v_ix += (ai2 * gx[896] - 1 * gx[768]) * prod_yz;
+                        v_kx += ak2 * gx[1088] * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[1856] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += (ak2 * gx[3584] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[896] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1088] - xlxk * Ix) - 1 * gx[64]) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1856] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3392] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1088];
+                        Ix = gx[768];
+                        Iy = gx[1536];
+                        Iz = gx[3456];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += ak2 * gx[1024] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += (ai2 * gx[3520] - 2 * gx[3392]) * prod_xy;
+                        v_kz += (ak2 * gx[3712] - 1 * gx[3200]) * prod_xy;
+                        v_jx += aj2 * (gx[832] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1024] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3520] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3712] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1344];
+                        Ix = gx[256];
+                        Iy = gx[2432];
+                        Iz = gx[3072];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
+                        v_iy += (ai2 * gx[2496] - 2 * gx[2368]) * prod_xz;
+                        v_ky += ak2 * gx[2688] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2496] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2688] - ylyk * Iy) - 1 * gx[1664]) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1600];
+                        Ix = gx[64];
+                        Iy = gx[2624];
+                        Iz = gx[3072];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[320] * prod_yz;
+                        v_iy += (ai2 * gx[2688] - 1 * gx[2560]) * prod_xz;
+                        v_ky += (ak2 * gx[2880] - 1 * gx[2368]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2688] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2880] - ylyk * Iy) - 1 * gx[1856]) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1856];
                         Ix = gx[0];
-                        Iy = gx[1216];
-                        Iz = gx[1664];
+                        Iy = gx[2560];
+                        Iz = gx[3200];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += (ai2 * gx[1248] - 2 * gx[1184]) * prod_xz;
-                        v_ky += ak2 * gx[1344] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += (ak2 * gx[1792] - 1 * gx[1536]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1248] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1344] - ylyk * Iy) - 1 * gx[832]) * prod_xz;
-                        v_jz += aj2 * (gx[1696] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1312];
-                        Ix = gx[128];
-                        Iy = gx[768];
-                        Iz = gx[1984];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += (ak2 * gx[256] - 1 * gx[0]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += (ai2 * gx[2016] - 2 * gx[1952]) * prod_xy;
-                        v_kz += ak2 * gx[2112] * prod_xy;
-                        v_jx += aj2 * (gx[160] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[2016] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2112] - zlzk * Iz) - 1 * gx[1600]) * prod_xy;
-                        dd = dd_cache[1568];
-                        Ix = gx[32];
-                        Iy = gx[800];
-                        Iz = gx[2048];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[160] * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[928] * prod_xz;
-                        v_iz += ai2 * gx[2080] * prod_xy;
-                        v_kz += (ak2 * gx[2176] - 1 * gx[1920]) * prod_xy;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += ai2 * gx[2624] * prod_xz;
+                        v_ky += (ak2 * gx[2816] - 1 * gx[2304]) * prod_xz;
+                        v_iz += (ai2 * gx[3264] - 2 * gx[3136]) * prod_xy;
+                        v_kz += ak2 * gx[3456] * prod_xy;
                         v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[160] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[928] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[2080] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2176] - zlzk * Iz) - 1 * gx[1664]) * prod_xy;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2624] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2816] - ylyk * Iy) - 1 * gx[1792]) * prod_xz;
+                        v_jz += aj2 * (gx[3264] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3456] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2112];
+                        Ix = gx[0];
+                        Iy = gx[2432];
+                        Iz = gx[3328];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += (ai2 * gx[2496] - 2 * gx[2368]) * prod_xz;
+                        v_ky += ak2 * gx[2688] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += (ak2 * gx[3584] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2496] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2688] - ylyk * Iy) - 1 * gx[1664]) * prod_xz;
+                        v_jz += aj2 * (gx[3392] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2368];
+                        Ix = gx[320];
+                        Iy = gx[1600];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[384] - 1 * gx[256]) * prod_yz;
+                        v_kx += (ak2 * gx[576] - 1 * gx[64]) * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[1856] * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += ak2 * gx[4096] * prod_xy;
+                        v_jx += aj2 * (gx[384] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1856] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3904] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4096] - zlzk * Iz) - 1 * gx[3072]) * prod_xy;
+                        dd = dd_cache[2624];
+                        Ix = gx[256];
+                        Iy = gx[1536];
+                        Iz = gx[3968];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += (ai2 * gx[4032] - 2 * gx[3904]) * prod_xy;
+                        v_kz += ak2 * gx[4224] * prod_xy;
+                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[4032] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4224] - zlzk * Iz) - 1 * gx[3200]) * prod_xy;
+                        dd = dd_cache[2880];
+                        Ix = gx[0];
+                        Iy = gx[1920];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += (ai2 * gx[1984] - 2 * gx[1856]) * prod_xz;
+                        v_ky += (ak2 * gx[2176] - 1 * gx[1664]) * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += ak2 * gx[4096] * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1984] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2176] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3904] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4096] - zlzk * Iz) - 1 * gx[3072]) * prod_xy;
+                        dd = dd_cache[3136];
+                        Ix = gx[64];
+                        Iy = gx[1600];
+                        Iz = gx[4096];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[320] * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[1856] * prod_xz;
+                        v_iz += ai2 * gx[4160] * prod_xy;
+                        v_kz += (ak2 * gx[4352] - 1 * gx[3840]) * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1856] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[4160] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4352] - zlzk * Iz) - 1 * gx[3328]) * prod_xy;
+                        dd = dd_cache[3392];
+                        Ix = gx[0];
+                        Iy = gx[1536];
+                        Iz = gx[4224];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += (ai2 * gx[4288] - 2 * gx[4160]) * prod_xy;
+                        v_kz += (ak2 * gx[4480] - 1 * gx[3968]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[4288] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4480] - zlzk * Iz) - 1 * gx[3456]) * prod_xy;
                         break;
                     case 2:
-                        dd = dd_cache[64];
-                        Ix = gx[544];
-                        Iy = gx[768];
-                        Iz = gx[1568];
+                        dd = dd_cache[128];
+                        Ix = gx[1088];
+                        Iy = gx[1536];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[576] - 1 * gx[512]) * prod_yz;
-                        v_kx += (ak2 * gx[672] - 1 * gx[416]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1696] * prod_xy;
-                        v_jx += aj2 * (gx[576] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[672] - xlxk * Ix) - 1 * gx[160]) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1696] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[320];
+                        v_ix += (ai2 * gx[1152] - 1 * gx[1024]) * prod_yz;
+                        v_kx += (ak2 * gx[1344] - 1 * gx[832]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3392] * prod_xy;
+                        v_jx += aj2 * (gx[1152] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1344] - xlxk * Ix) - 1 * gx[320]) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3392] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[384];
+                        Ix = gx[896];
+                        Iy = gx[1792];
+                        Iz = gx[3072];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[960] - 2 * gx[832]) * prod_yz;
+                        v_kx += ak2 * gx[1152] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[960] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1152] - xlxk * Ix) - 1 * gx[128]) * prod_yz;
+                        v_jy += aj2 * (gx[1856] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[640];
+                        Ix = gx[768];
+                        Iy = gx[1856];
+                        Iz = gx[3136];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += ak2 * gx[1024] * prod_yz;
+                        v_iy += (ai2 * gx[1920] - 1 * gx[1792]) * prod_xz;
+                        v_ky += (ak2 * gx[2112] - 1 * gx[1600]) * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3392] * prod_xy;
+                        v_jx += aj2 * (gx[832] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1024] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
+                        v_jy += aj2 * (gx[1920] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3392] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[896];
+                        Ix = gx[832];
+                        Iy = gx[1536];
+                        Iz = gx[3392];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[896] - 1 * gx[768]) * prod_yz;
+                        v_kx += ak2 * gx[1088] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += (ai2 * gx[3456] - 1 * gx[3328]) * prod_xy;
+                        v_kz += (ak2 * gx[3648] - 1 * gx[3136]) * prod_xy;
+                        v_jx += aj2 * (gx[896] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1088] - xlxk * Ix) - 1 * gx[64]) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3456] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1152];
                         Ix = gx[384];
-                        Iy = gx[928];
-                        Iz = gx[1568];
+                        Iy = gx[2304];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += ak2 * gx[512] * prod_yz;
-                        v_iy += (ai2 * gx[960] - 1 * gx[896]) * prod_xz;
-                        v_ky += (ak2 * gx[1056] - 1 * gx[800]) * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1696] * prod_xy;
-                        v_jx += aj2 * (gx[416] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[512] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
-                        v_jy += aj2 * (gx[960] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1696] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[576];
-                        Ix = gx[192];
-                        Iy = gx[1152];
-                        Iz = gx[1536];
+                        v_ix += (ai2 * gx[448] - 2 * gx[320]) * prod_yz;
+                        v_kx += (ak2 * gx[640] - 1 * gx[128]) * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += ak2 * gx[2560] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[448] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2368] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2560] - ylyk * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1408];
+                        Ix = gx[256];
+                        Iy = gx[2368];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[224] - 2 * gx[160]) * prod_yz;
-                        v_kx += (ak2 * gx[320] - 1 * gx[64]) * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += ak2 * gx[1280] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[224] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1184] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1280] - ylyk * Iy) - 1 * gx[768]) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[832];
-                        Ix = gx[32];
-                        Iy = gx[1280];
-                        Iz = gx[1568];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[160] * prod_yz;
-                        v_iy += ai2 * gx[1312] * prod_xz;
-                        v_ky += (ak2 * gx[1408] - 1 * gx[1152]) * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1696] * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[160] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1312] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1408] - ylyk * Iy) - 1 * gx[896]) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1696] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1088];
-                        Ix = gx[0];
-                        Iy = gx[1184];
-                        Iz = gx[1696];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += (ai2 * gx[1216] - 1 * gx[1152]) * prod_xz;
-                        v_ky += ak2 * gx[1312] * prod_xz;
-                        v_iz += (ai2 * gx[1728] - 1 * gx[1664]) * prod_xy;
-                        v_kz += (ak2 * gx[1824] - 1 * gx[1568]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1216] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1312] - ylyk * Iy) - 1 * gx[800]) * prod_xz;
-                        v_jz += aj2 * (gx[1728] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1344];
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
+                        v_iy += (ai2 * gx[2432] - 1 * gx[2304]) * prod_xz;
+                        v_ky += ak2 * gx[2624] * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3392] * prod_xy;
+                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2432] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2624] - ylyk * Iy) - 1 * gx[1600]) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3392] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1664];
                         Ix = gx[64];
-                        Iy = gx[896];
-                        Iz = gx[1920];
+                        Iy = gx[2560];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[96] - 2 * gx[32]) * prod_yz;
-                        v_kx += ak2 * gx[192] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += (ak2 * gx[1024] - 1 * gx[768]) * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += ak2 * gx[2048] * prod_xy;
-                        v_jx += aj2 * (gx[96] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[192] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[928] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1952] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2048] - zlzk * Iz) - 1 * gx[1536]) * prod_xy;
-                        dd = dd_cache[1600];
-                        Ix = gx[32];
-                        Iy = gx[768];
-                        Iz = gx[2080];
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[320] * prod_yz;
+                        v_iy += ai2 * gx[2624] * prod_xz;
+                        v_ky += (ak2 * gx[2816] - 1 * gx[2304]) * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3392] * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2624] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2816] - ylyk * Iy) - 1 * gx[1792]) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3392] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1920];
+                        Ix = gx[128];
+                        Iy = gx[2304];
+                        Iz = gx[3328];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[160] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += (ai2 * gx[2112] - 1 * gx[2048]) * prod_xy;
-                        v_kz += (ak2 * gx[2208] - 1 * gx[1952]) * prod_xy;
+                        v_ix += (ai2 * gx[192] - 2 * gx[64]) * prod_yz;
+                        v_kx += ak2 * gx[384] * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += ak2 * gx[2560] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += (ak2 * gx[3584] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2368] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2560] - ylyk * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_jz += aj2 * (gx[3392] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2176];
+                        Ix = gx[0];
+                        Iy = gx[2368];
+                        Iz = gx[3392];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += (ai2 * gx[2432] - 1 * gx[2304]) * prod_xz;
+                        v_ky += ak2 * gx[2624] * prod_xz;
+                        v_iz += (ai2 * gx[3456] - 1 * gx[3328]) * prod_xy;
+                        v_kz += (ak2 * gx[3648] - 1 * gx[3136]) * prod_xy;
                         v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[160] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[2112] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2208] - zlzk * Iz) - 1 * gx[1696]) * prod_xy;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2432] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2624] - ylyk * Iy) - 1 * gx[1600]) * prod_xz;
+                        v_jz += aj2 * (gx[3456] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2432];
+                        Ix = gx[320];
+                        Iy = gx[1536];
+                        Iz = gx[3904];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[384] - 1 * gx[256]) * prod_yz;
+                        v_kx += (ak2 * gx[576] - 1 * gx[64]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += (ai2 * gx[3968] - 1 * gx[3840]) * prod_xy;
+                        v_kz += ak2 * gx[4160] * prod_xy;
+                        v_jx += aj2 * (gx[384] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3968] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4160] - zlzk * Iz) - 1 * gx[3136]) * prod_xy;
+                        dd = dd_cache[2688];
+                        Ix = gx[128];
+                        Iy = gx[1792];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[192] - 2 * gx[64]) * prod_yz;
+                        v_kx += ak2 * gx[384] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += ak2 * gx[4096] * prod_xy;
+                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1856] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3904] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4096] - zlzk * Iz) - 1 * gx[3072]) * prod_xy;
+                        dd = dd_cache[2944];
+                        Ix = gx[0];
+                        Iy = gx[1856];
+                        Iz = gx[3904];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += (ai2 * gx[1920] - 1 * gx[1792]) * prod_xz;
+                        v_ky += (ak2 * gx[2112] - 1 * gx[1600]) * prod_xz;
+                        v_iz += (ai2 * gx[3968] - 1 * gx[3840]) * prod_xy;
+                        v_kz += ak2 * gx[4160] * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1920] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3968] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4160] - zlzk * Iz) - 1 * gx[3136]) * prod_xy;
+                        dd = dd_cache[3200];
+                        Ix = gx[64];
+                        Iy = gx[1536];
+                        Iz = gx[4160];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[320] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[1792] * prod_xz;
+                        v_iz += (ai2 * gx[4224] - 1 * gx[4096]) * prod_xy;
+                        v_kz += (ak2 * gx[4416] - 1 * gx[3904]) * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1792] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[4224] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4416] - zlzk * Iz) - 1 * gx[3392]) * prod_xy;
                         break;
                     case 3:
-                        dd = dd_cache[96];
-                        Ix = gx[512];
-                        Iy = gx[832];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[544] * prod_yz;
-                        v_kx += (ak2 * gx[640] - 1 * gx[384]) * prod_yz;
-                        v_iy += (ai2 * gx[864] - 2 * gx[800]) * prod_xz;
-                        v_ky += ak2 * gx[960] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[544] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[640] - xlxk * Ix) - 1 * gx[128]) * prod_yz;
-                        v_jy += aj2 * (gx[864] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[960] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[352];
-                        Ix = gx[384];
-                        Iy = gx[896];
-                        Iz = gx[1600];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += ak2 * gx[512] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += (ak2 * gx[1024] - 1 * gx[768]) * prod_xz;
-                        v_iz += (ai2 * gx[1632] - 2 * gx[1568]) * prod_xy;
-                        v_kz += ak2 * gx[1728] * prod_xy;
-                        v_jx += aj2 * (gx[416] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[512] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
-                        v_jy += aj2 * (gx[928] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1632] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1728] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[608];
-                        Ix = gx[160];
-                        Iy = gx[1184];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[192] - 1 * gx[128]) * prod_yz;
-                        v_kx += (ak2 * gx[288] - 1 * gx[32]) * prod_yz;
-                        v_iy += (ai2 * gx[1216] - 1 * gx[1152]) * prod_xz;
-                        v_ky += ak2 * gx[1312] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1216] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1312] - ylyk * Iy) - 1 * gx[800]) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[864];
-                        Ix = gx[0];
-                        Iy = gx[1344];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += (ai2 * gx[1376] - 2 * gx[1312]) * prod_xz;
-                        v_ky += (ak2 * gx[1472] - 1 * gx[1216]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1376] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1472] - ylyk * Iy) - 1 * gx[960]) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1120];
-                        Ix = gx[0];
-                        Iy = gx[1152];
-                        Iz = gx[1728];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += ak2 * gx[1280] * prod_xz;
-                        v_iz += (ai2 * gx[1760] - 2 * gx[1696]) * prod_xy;
-                        v_kz += (ak2 * gx[1856] - 1 * gx[1600]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1184] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1280] - ylyk * Iy) - 1 * gx[768]) * prod_xz;
-                        v_jz += aj2 * (gx[1760] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1856] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1376];
-                        Ix = gx[32];
-                        Iy = gx[928];
-                        Iz = gx[1920];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[160] * prod_yz;
-                        v_iy += (ai2 * gx[960] - 1 * gx[896]) * prod_xz;
-                        v_ky += (ak2 * gx[1056] - 1 * gx[800]) * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += ak2 * gx[2048] * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[160] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[960] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1952] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2048] - zlzk * Iz) - 1 * gx[1536]) * prod_xy;
-                        dd = dd_cache[1632];
-                        Ix = gx[0];
-                        Iy = gx[832];
-                        Iz = gx[2048];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += (ai2 * gx[864] - 2 * gx[800]) * prod_xz;
-                        v_ky += ak2 * gx[960] * prod_xz;
-                        v_iz += ai2 * gx[2080] * prod_xy;
-                        v_kz += (ak2 * gx[2176] - 1 * gx[1920]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[864] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[960] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[2080] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2176] - zlzk * Iz) - 1 * gx[1664]) * prod_xy;
-                        break;
-                    case 4:
-                        dd = dd_cache[128];
-                        Ix = gx[512];
-                        Iy = gx[800];
-                        Iz = gx[1568];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[544] * prod_yz;
-                        v_kx += (ak2 * gx[640] - 1 * gx[384]) * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[928] * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1696] * prod_xy;
-                        v_jx += aj2 * (gx[544] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[640] - xlxk * Ix) - 1 * gx[128]) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[928] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1696] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[384];
-                        Ix = gx[448];
-                        Iy = gx[768];
-                        Iz = gx[1664];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[480] - 2 * gx[416]) * prod_yz;
-                        v_kx += ak2 * gx[576] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += (ak2 * gx[1792] - 1 * gx[1536]) * prod_xy;
-                        v_jx += aj2 * (gx[480] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[576] - xlxk * Ix) - 1 * gx[64]) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1696] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[640];
-                        Ix = gx[160];
-                        Iy = gx[1152];
-                        Iz = gx[1568];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[192] - 1 * gx[128]) * prod_yz;
-                        v_kx += (ak2 * gx[288] - 1 * gx[32]) * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += ak2 * gx[1280] * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1696] * prod_xy;
-                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1184] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1280] - ylyk * Iy) - 1 * gx[768]) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1696] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[896];
-                        Ix = gx[0];
-                        Iy = gx[1312];
-                        Iz = gx[1568];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += (ai2 * gx[1344] - 1 * gx[1280]) * prod_xz;
-                        v_ky += (ak2 * gx[1440] - 1 * gx[1184]) * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1696] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1344] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1440] - ylyk * Iy) - 1 * gx[928]) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1696] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1152];
-                        Ix = gx[192];
-                        Iy = gx[768];
-                        Iz = gx[1920];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[224] - 2 * gx[160]) * prod_yz;
-                        v_kx += (ak2 * gx[320] - 1 * gx[64]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += ak2 * gx[2048] * prod_xy;
-                        v_jx += aj2 * (gx[224] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1952] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2048] - zlzk * Iz) - 1 * gx[1536]) * prod_xy;
-                        dd = dd_cache[1408];
-                        Ix = gx[32];
-                        Iy = gx[896];
-                        Iz = gx[1952];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[160] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += (ak2 * gx[1024] - 1 * gx[768]) * prod_xz;
-                        v_iz += (ai2 * gx[1984] - 1 * gx[1920]) * prod_xy;
-                        v_kz += ak2 * gx[2080] * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[160] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[928] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1984] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2080] - zlzk * Iz) - 1 * gx[1568]) * prod_xy;
-                        dd = dd_cache[1664];
-                        Ix = gx[0];
-                        Iy = gx[800];
-                        Iz = gx[2080];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[928] * prod_xz;
-                        v_iz += (ai2 * gx[2112] - 1 * gx[2048]) * prod_xy;
-                        v_kz += (ak2 * gx[2208] - 1 * gx[1952]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[928] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[2112] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2208] - zlzk * Iz) - 1 * gx[1696]) * prod_xy;
-                        break;
-                    case 5:
-                        dd = dd_cache[160];
-                        Ix = gx[512];
-                        Iy = gx[768];
-                        Iz = gx[1600];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[544] * prod_yz;
-                        v_kx += (ak2 * gx[640] - 1 * gx[384]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += (ai2 * gx[1632] - 2 * gx[1568]) * prod_xy;
-                        v_kz += ak2 * gx[1728] * prod_xy;
-                        v_jx += aj2 * (gx[544] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[640] - xlxk * Ix) - 1 * gx[128]) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1632] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1728] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[416];
-                        Ix = gx[416];
-                        Iy = gx[800];
-                        Iz = gx[1664];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[448] - 1 * gx[384]) * prod_yz;
-                        v_kx += ak2 * gx[544] * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[928] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += (ak2 * gx[1792] - 1 * gx[1536]) * prod_xy;
-                        v_jx += aj2 * (gx[448] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[544] - xlxk * Ix) - 1 * gx[32]) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[928] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1696] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[672];
-                        Ix = gx[128];
-                        Iy = gx[1216];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += (ak2 * gx[256] - 1 * gx[0]) * prod_yz;
-                        v_iy += (ai2 * gx[1248] - 2 * gx[1184]) * prod_xz;
-                        v_ky += ak2 * gx[1344] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[160] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1248] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1344] - ylyk * Iy) - 1 * gx[832]) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[928];
-                        Ix = gx[0];
-                        Iy = gx[1280];
-                        Iz = gx[1600];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += ai2 * gx[1312] * prod_xz;
-                        v_ky += (ak2 * gx[1408] - 1 * gx[1152]) * prod_xz;
-                        v_iz += (ai2 * gx[1632] - 2 * gx[1568]) * prod_xy;
-                        v_kz += ak2 * gx[1728] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1312] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1408] - ylyk * Iy) - 1 * gx[896]) * prod_xz;
-                        v_jz += aj2 * (gx[1632] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1728] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1184];
-                        Ix = gx[160];
-                        Iy = gx[800];
-                        Iz = gx[1920];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[192] - 1 * gx[128]) * prod_yz;
-                        v_kx += (ak2 * gx[288] - 1 * gx[32]) * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[928] * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += ak2 * gx[2048] * prod_xy;
-                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[928] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1952] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2048] - zlzk * Iz) - 1 * gx[1536]) * prod_xy;
-                        dd = dd_cache[1440];
-                        Ix = gx[0];
-                        Iy = gx[960];
-                        Iz = gx[1920];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += (ai2 * gx[992] - 2 * gx[928]) * prod_xz;
-                        v_ky += (ak2 * gx[1088] - 1 * gx[832]) * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += ak2 * gx[2048] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[992] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1088] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1952] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2048] - zlzk * Iz) - 1 * gx[1536]) * prod_xy;
-                        dd = dd_cache[1696];
-                        Ix = gx[0];
-                        Iy = gx[768];
-                        Iz = gx[2112];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += (ai2 * gx[2144] - 2 * gx[2080]) * prod_xy;
-                        v_kz += (ak2 * gx[2240] - 1 * gx[1984]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[2144] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2240] - zlzk * Iz) - 1 * gx[1728]) * prod_xy;
-                        break;
-                    case 6:
                         dd = dd_cache[192];
-                        Ix = gx[448];
-                        Iy = gx[896];
-                        Iz = gx[1536];
+                        Ix = gx[1024];
+                        Iy = gx[1664];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[480] - 2 * gx[416]) * prod_yz;
-                        v_kx += ak2 * gx[576] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += (ak2 * gx[1024] - 1 * gx[768]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[480] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[576] - xlxk * Ix) - 1 * gx[64]) * prod_yz;
-                        v_jy += aj2 * (gx[928] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[1088] * prod_yz;
+                        v_kx += (ak2 * gx[1280] - 1 * gx[768]) * prod_yz;
+                        v_iy += (ai2 * gx[1728] - 2 * gx[1600]) * prod_xz;
+                        v_ky += ak2 * gx[1920] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[1088] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1280] - xlxk * Ix) - 1 * gx[256]) * prod_yz;
+                        v_jy += aj2 * (gx[1728] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1920] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[448];
-                        Ix = gx[416];
-                        Iy = gx[768];
-                        Iz = gx[1696];
+                        Ix = gx[832];
+                        Iy = gx[1856];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[448] - 1 * gx[384]) * prod_yz;
-                        v_kx += ak2 * gx[544] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += (ai2 * gx[1728] - 1 * gx[1664]) * prod_xy;
-                        v_kz += (ak2 * gx[1824] - 1 * gx[1568]) * prod_xy;
-                        v_jx += aj2 * (gx[448] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[544] - xlxk * Ix) - 1 * gx[32]) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1728] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[896] - 1 * gx[768]) * prod_yz;
+                        v_kx += ak2 * gx[1088] * prod_yz;
+                        v_iy += (ai2 * gx[1920] - 1 * gx[1792]) * prod_xz;
+                        v_ky += (ak2 * gx[2112] - 1 * gx[1600]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[896] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1088] - xlxk * Ix) - 1 * gx[64]) * prod_yz;
+                        v_jy += aj2 * (gx[1920] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[704];
-                        Ix = gx[128];
-                        Iy = gx[1184];
-                        Iz = gx[1568];
+                        Ix = gx[768];
+                        Iy = gx[1792];
+                        Iz = gx[3200];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += (ak2 * gx[256] - 1 * gx[0]) * prod_yz;
-                        v_iy += (ai2 * gx[1216] - 1 * gx[1152]) * prod_xz;
-                        v_ky += ak2 * gx[1312] * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1696] * prod_xy;
-                        v_jx += aj2 * (gx[160] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1216] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1312] - ylyk * Iy) - 1 * gx[800]) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1696] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += ak2 * gx[1024] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xz;
+                        v_iz += (ai2 * gx[3264] - 2 * gx[3136]) * prod_xy;
+                        v_kz += ak2 * gx[3456] * prod_xy;
+                        v_jx += aj2 * (gx[832] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1024] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
+                        v_jy += aj2 * (gx[1856] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3264] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3456] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[960];
-                        Ix = gx[64];
-                        Iy = gx[1152];
-                        Iz = gx[1664];
+                        Ix = gx[768];
+                        Iy = gx[1664];
+                        Iz = gx[3328];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[96] - 2 * gx[32]) * prod_yz;
-                        v_kx += ak2 * gx[192] * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += ak2 * gx[1280] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += (ak2 * gx[1792] - 1 * gx[1536]) * prod_xy;
-                        v_jx += aj2 * (gx[96] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[192] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1184] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1280] - ylyk * Iy) - 1 * gx[768]) * prod_xz;
-                        v_jz += aj2 * (gx[1696] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += ak2 * gx[1024] * prod_yz;
+                        v_iy += (ai2 * gx[1728] - 2 * gx[1600]) * prod_xz;
+                        v_ky += ak2 * gx[1920] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += (ak2 * gx[3584] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[832] - xjxi * Ix) * prod_yz;
+                        v_lx += (al2 * (gx[1024] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
+                        v_jy += aj2 * (gx[1728] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1920] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3392] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1216];
-                        Ix = gx[160];
-                        Iy = gx[768];
-                        Iz = gx[1952];
+                        Ix = gx[320];
+                        Iy = gx[2368];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[192] - 1 * gx[128]) * prod_yz;
-                        v_kx += (ak2 * gx[288] - 1 * gx[32]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[896] * prod_xz;
-                        v_iz += (ai2 * gx[1984] - 1 * gx[1920]) * prod_xy;
-                        v_kz += ak2 * gx[2080] * prod_xy;
-                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[896] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1984] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2080] - zlzk * Iz) - 1 * gx[1568]) * prod_xy;
+                        v_ix += (ai2 * gx[384] - 1 * gx[256]) * prod_yz;
+                        v_kx += (ak2 * gx[576] - 1 * gx[64]) * prod_yz;
+                        v_iy += (ai2 * gx[2432] - 1 * gx[2304]) * prod_xz;
+                        v_ky += ak2 * gx[2624] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
+                        v_jx += aj2 * (gx[384] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2432] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2624] - ylyk * Iy) - 1 * gx[1600]) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1472];
+                        Ix = gx[256];
+                        Iy = gx[2304];
+                        Iz = gx[3200];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += ak2 * gx[2560] * prod_xz;
+                        v_iz += (ai2 * gx[3264] - 2 * gx[3136]) * prod_xy;
+                        v_kz += ak2 * gx[3456] * prod_xy;
+                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2368] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2560] - ylyk * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_jz += aj2 * (gx[3264] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3456] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1728];
                         Ix = gx[0];
-                        Iy = gx[928];
-                        Iz = gx[1952];
+                        Iy = gx[2688];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += (ai2 * gx[960] - 1 * gx[896]) * prod_xz;
-                        v_ky += (ak2 * gx[1056] - 1 * gx[800]) * prod_xz;
-                        v_iz += (ai2 * gx[1984] - 1 * gx[1920]) * prod_xy;
-                        v_kz += ak2 * gx[2080] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[960] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1984] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2080] - zlzk * Iz) - 1 * gx[1568]) * prod_xy;
-                        break;
-                    case 7:
-                        dd = dd_cache[224];
-                        Ix = gx[416];
-                        Iy = gx[928];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[448] - 1 * gx[384]) * prod_yz;
-                        v_kx += ak2 * gx[544] * prod_yz;
-                        v_iy += (ai2 * gx[960] - 1 * gx[896]) * prod_xz;
-                        v_ky += (ak2 * gx[1056] - 1 * gx[800]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1664] * prod_xy;
-                        v_jx += aj2 * (gx[448] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[544] - xlxk * Ix) - 1 * gx[32]) * prod_yz;
-                        v_jy += aj2 * (gx[960] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1664] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[480];
-                        Ix = gx[384];
-                        Iy = gx[832];
-                        Iz = gx[1664];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += ak2 * gx[512] * prod_yz;
-                        v_iy += (ai2 * gx[864] - 2 * gx[800]) * prod_xz;
-                        v_ky += ak2 * gx[960] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += (ak2 * gx[1792] - 1 * gx[1536]) * prod_xy;
-                        v_jx += aj2 * (gx[416] - xjxi * Ix) * prod_yz;
-                        v_lx += (al2 * (gx[512] - xlxk * Ix) - 1 * gx[0]) * prod_yz;
-                        v_jy += aj2 * (gx[864] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[960] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1696] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[736];
-                        Ix = gx[128];
-                        Iy = gx[1152];
-                        Iz = gx[1600];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += (ak2 * gx[256] - 1 * gx[0]) * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += ak2 * gx[1280] * prod_xz;
-                        v_iz += (ai2 * gx[1632] - 2 * gx[1568]) * prod_xy;
-                        v_kz += ak2 * gx[1728] * prod_xy;
-                        v_jx += aj2 * (gx[160] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1184] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1280] - ylyk * Iy) - 1 * gx[768]) * prod_xz;
-                        v_jz += aj2 * (gx[1632] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1728] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[992];
-                        Ix = gx[32];
-                        Iy = gx[1184];
-                        Iz = gx[1664];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[160] * prod_yz;
-                        v_iy += (ai2 * gx[1216] - 1 * gx[1152]) * prod_xz;
-                        v_ky += ak2 * gx[1312] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += (ak2 * gx[1792] - 1 * gx[1536]) * prod_xy;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += (ai2 * gx[2752] - 2 * gx[2624]) * prod_xz;
+                        v_ky += (ak2 * gx[2944] - 1 * gx[2432]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3328] * prod_xy;
                         v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[160] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1216] - yjyi * Iy) * prod_xz;
-                        v_ly += (al2 * (gx[1312] - ylyk * Iy) - 1 * gx[800]) * prod_xz;
-                        v_jz += aj2 * (gx[1696] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1248];
-                        Ix = gx[128];
-                        Iy = gx[832];
-                        Iz = gx[1920];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += (ak2 * gx[256] - 1 * gx[0]) * prod_yz;
-                        v_iy += (ai2 * gx[864] - 2 * gx[800]) * prod_xz;
-                        v_ky += ak2 * gx[960] * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += ak2 * gx[2048] * prod_xy;
-                        v_jx += aj2 * (gx[160] - xjxi * Ix) * prod_yz;
                         v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[864] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[960] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1952] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2048] - zlzk * Iz) - 1 * gx[1536]) * prod_xy;
-                        dd = dd_cache[1504];
-                        Ix = gx[0];
-                        Iy = gx[896];
-                        Iz = gx[1984];
+                        v_jy += aj2 * (gx[2752] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2944] - ylyk * Iy) - 1 * gx[1920]) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3328] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1984];
+                        Ix = gx[64];
+                        Iy = gx[2368];
+                        Iz = gx[3328];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[128] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += (ak2 * gx[1024] - 1 * gx[768]) * prod_xz;
-                        v_iz += (ai2 * gx[2016] - 2 * gx[1952]) * prod_xy;
-                        v_kz += ak2 * gx[2112] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[128] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[928] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[2016] - zjzi * Iz) * prod_xy;
-                        v_lz += (al2 * (gx[2112] - zlzk * Iz) - 1 * gx[1600]) * prod_xy;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[320] * prod_yz;
+                        v_iy += (ai2 * gx[2432] - 1 * gx[2304]) * prod_xz;
+                        v_ky += ak2 * gx[2624] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += (ak2 * gx[3584] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2432] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2624] - ylyk * Iy) - 1 * gx[1600]) * prod_xz;
+                        v_jz += aj2 * (gx[3392] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2240];
+                        Ix = gx[0];
+                        Iy = gx[2304];
+                        Iz = gx[3456];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += ak2 * gx[2560] * prod_xz;
+                        v_iz += (ai2 * gx[3520] - 2 * gx[3392]) * prod_xy;
+                        v_kz += (ak2 * gx[3712] - 1 * gx[3200]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2368] - yjyi * Iy) * prod_xz;
+                        v_ly += (al2 * (gx[2560] - ylyk * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_jz += aj2 * (gx[3520] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3712] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2496];
+                        Ix = gx[256];
+                        Iy = gx[1664];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
+                        v_iy += (ai2 * gx[1728] - 2 * gx[1600]) * prod_xz;
+                        v_ky += ak2 * gx[1920] * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += ak2 * gx[4096] * prod_xy;
+                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1728] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1920] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3904] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4096] - zlzk * Iz) - 1 * gx[3072]) * prod_xy;
+                        dd = dd_cache[2752];
+                        Ix = gx[64];
+                        Iy = gx[1856];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[320] * prod_yz;
+                        v_iy += (ai2 * gx[1920] - 1 * gx[1792]) * prod_xz;
+                        v_ky += (ak2 * gx[2112] - 1 * gx[1600]) * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += ak2 * gx[4096] * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1920] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3904] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4096] - zlzk * Iz) - 1 * gx[3072]) * prod_xy;
+                        dd = dd_cache[3008];
+                        Ix = gx[0];
+                        Iy = gx[1792];
+                        Iz = gx[3968];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xz;
+                        v_iz += (ai2 * gx[4032] - 2 * gx[3904]) * prod_xy;
+                        v_kz += ak2 * gx[4224] * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1856] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[4032] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4224] - zlzk * Iz) - 1 * gx[3200]) * prod_xy;
+                        dd = dd_cache[3264];
+                        Ix = gx[0];
+                        Iy = gx[1664];
+                        Iz = gx[4096];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[256] * prod_yz;
+                        v_iy += (ai2 * gx[1728] - 2 * gx[1600]) * prod_xz;
+                        v_ky += ak2 * gx[1920] * prod_xz;
+                        v_iz += ai2 * gx[4160] * prod_xy;
+                        v_kz += (ak2 * gx[4352] - 1 * gx[3840]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1728] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[1920] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[4160] - zjzi * Iz) * prod_xy;
+                        v_lz += (al2 * (gx[4352] - zlzk * Iz) - 1 * gx[3328]) * prod_xy;
                         break;
                     }
                 }
@@ -9636,38 +9620,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -9680,40 +9641,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -9724,10 +9712,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -9742,17 +9728,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -9964,24 +9948,23 @@ while (1) {
                 dd_cache35 += fac * (dm[(l0+0)*nao+(k0+5)]+dmb[(l0+0)*nao+(k0+5)]) * (dm[(j0+0)*nao+(i0+5)]+dmb[(j0+0)*nao+(i0+5)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -9997,9 +9980,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -11375,39 +11358,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -11416,6 +11375,7 @@ while (1) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+    int gout_id = threadIdx.y;
     extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -11423,40 +11383,68 @@ while (1) {
     double *rw = shared_memory + nsq_per_block * 102 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (102+nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -11467,10 +11455,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -11485,17 +11471,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
             rlrk[0] = xlxk;
             rlrk[32] = ylyk;
@@ -11571,12 +11555,11 @@ while (1) {
                 dd_cache[n*32] = fac_sym * dd;
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
@@ -11588,24 +11571,24 @@ while (1) {
                 double ylyk = rlrk[32];
                 double zlzk = rlrk[64];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
-                double xkl = rk[0] + rlrk[0] * al_akl;
-                double ykl = rk[1] + rlrk[32] * al_akl;
-                double zkl = rk[2] + rlrk[64] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
+                double xkl = env[rk+0] + rlrk[0] * al_akl;
+                double ykl = env[rk+1] + rlrk[32] * al_akl;
+                double zkl = env[rk+2] + rlrk[64] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -13871,38 +13854,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -13915,40 +13875,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -13959,10 +13946,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -13977,17 +13962,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -14109,24 +14092,23 @@ while (1) {
                 dd_cache17 += fac * (dm[(l0+0)*nao+(k0+0)]+dmb[(l0+0)*nao+(k0+0)]) * (dm[(j0+2)*nao+(i0+5)]+dmb[(j0+2)*nao+(i0+5)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -14142,9 +14124,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -14877,39 +14859,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    constexpr int nsq_per_block = 32;
-    constexpr int gout_stride = 8;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * 1728 + sq_id;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -14918,6 +14876,7 @@ while (1) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+    int gout_id = threadIdx.y;
     extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -14925,40 +14884,68 @@ while (1) {
     double *rw = shared_memory + nsq_per_block * 78 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (78+nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -14969,10 +14956,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -14987,21 +14972,19 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
             rlrk[0] = xlxk;
-            rlrk[32] = ylyk;
-            rlrk[64] = zlzk;
+            rlrk[64] = ylyk;
+            rlrk[128] = zlzk;
         }
         double v_kx = 0;
         double v_ky = 0;
@@ -15017,7 +15000,7 @@ while (1) {
         int do_j = jk.j_factor != 0.;
         int do_k = jk.k_factor != 0.;
         if (jk.n_dm == 1) {
-            for (int n = gout_id; n < 54; n+=8) {
+            for (int n = gout_id; n < 54; n+=4) {
                 int kl = n / 18;
                 int ij = n % 18;
                 int i = ij % 6;
@@ -15041,11 +15024,11 @@ while (1) {
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
                 }
-                dd_cache[n*32] = fac_sym * dd;
+                dd_cache[n*64] = fac_sym * dd;
             }
         } else {
             double *dmb = dm + nao * nao;
-            for (int n = gout_id; n < 54; n+=8) {
+            for (int n = gout_id; n < 54; n+=4) {
                 int kl = n / 18;
                 int ij = n % 18;
                 int i = ij % 6;
@@ -15070,15 +15053,14 @@ while (1) {
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
-                dd_cache[n*32] = fac_sym * dd;
+                dd_cache[n*64] = fac_sym * dd;
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
@@ -15087,27 +15069,27 @@ while (1) {
             __syncthreads();
             if (gout_id == 0) {
                 double xlxk = rlrk[0];
-                double ylyk = rlrk[32];
-                double zlzk = rlrk[64];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
-                double xkl = rk[0] + rlrk[0] * al_akl;
-                double ykl = rk[1] + rlrk[32] * al_akl;
-                double zkl = rk[2] + rlrk[64] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
+                double xkl = env[rk+0] + rlrk[0] * al_akl;
+                double ykl = env[rk+1] + rlrk[64] * al_akl;
+                double zkl = env[rk+2] + rlrk[128] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -15116,1166 +15098,1158 @@ while (1) {
                 __syncthreads();
                 if (gout_id == 0) {
                     Rpq[0] = xpq;
-                    Rpq[32] = ypq;
-                    Rpq[64] = zpq;
+                    Rpq[64] = ypq;
+                    Rpq[128] = zpq;
                     double cicj = cicj_cache[ijp];
-                    gx[768] = cicj / (aij*akl*sqrt(aij+akl));
+                    gx[1536] = cicj / (aij*akl*sqrt(aij+akl));
                 }
                 int nroots = bounds.nroots;
                 rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor);
                 double s0, s1, s2;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
-                    double rt = rw[irys*64];
+                    double rt = rw[irys*128];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double rt_akl = rt_aa * aij;
                     double b00 = .5 * rt_aa;
                     double b10 = .5/aij * (1 - rt_aij);
                     double b01 = .5/akl * (1 - rt_akl);
-                    for (int n = gout_id; n < 3; n += 8) {
+                    for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gx[1536] = rw[irys*64+32];
+                            gx[3072] = rw[irys*128+64];
                         }
-                        double *_gx = gx + n * 768;
+                        double *_gx = gx + n * 1536;
                         double xjxi = rjri[n];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n*32];
+                        double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
-                        _gx[32] = s1;
+                        _gx[64] = s1;
                         s2 = c0x * s1 + 1 * b10 * s0;
-                        _gx[64] = s2;
+                        _gx[128] = s2;
                         s0 = s1;
                         s1 = s2;
                         s2 = c0x * s1 + 2 * b10 * s0;
-                        _gx[96] = s2;
+                        _gx[192] = s2;
                         s0 = s1;
                         s1 = s2;
                         s2 = c0x * s1 + 3 * b10 * s0;
-                        _gx[128] = s2;
-                        double xlxk = rlrk[n*32];
+                        _gx[256] = s2;
+                        double xlxk = rlrk[n*64];
                         double Rqc = xlxk * al_akl;
-                        double cpx = Rqc + rt_akl * Rpq[n*32];
+                        double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
-                        _gx[256] = s1;
+                        _gx[512] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        _gx[512] = s2;
-                        s0 = _gx[32];
+                        _gx[1024] = s2;
+                        s0 = _gx[64];
                         s1 = cpx * s0;
                         s1 += 1 * b00 * _gx[0];
-                        _gx[288] = s1;
+                        _gx[576] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 1 * b00 * _gx[256];
-                        _gx[544] = s2;
-                        s0 = _gx[64];
-                        s1 = cpx * s0;
-                        s1 += 2 * b00 * _gx[32];
-                        _gx[320] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 2 * b00 * _gx[288];
-                        _gx[576] = s2;
-                        s0 = _gx[96];
-                        s1 = cpx * s0;
-                        s1 += 3 * b00 * _gx[64];
-                        _gx[352] = s1;
-                        s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 3 * b00 * _gx[320];
-                        _gx[608] = s2;
+                        s2 += 1 * b00 * _gx[512];
+                        _gx[1088] = s2;
                         s0 = _gx[128];
                         s1 = cpx * s0;
-                        s1 += 4 * b00 * _gx[96];
-                        _gx[384] = s1;
+                        s1 += 2 * b00 * _gx[64];
+                        _gx[640] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 4 * b00 * _gx[352];
-                        _gx[640] = s2;
-                        s1 = _gx[128];
-                        s0 = _gx[96];
-                        _gx[224] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[64];
-                        _gx[192] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[32];
-                        _gx[160] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[0];
-                        _gx[128] = s1 - xjxi * s0;
-                        s1 = _gx[384];
-                        s0 = _gx[352];
-                        _gx[480] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[320];
+                        s2 += 2 * b00 * _gx[576];
+                        _gx[1152] = s2;
+                        s0 = _gx[192];
+                        s1 = cpx * s0;
+                        s1 += 3 * b00 * _gx[128];
+                        _gx[704] = s1;
+                        s2 = cpx*s1 + 1 * b01 *s0;
+                        s2 += 3 * b00 * _gx[640];
+                        _gx[1216] = s2;
+                        s0 = _gx[256];
+                        s1 = cpx * s0;
+                        s1 += 4 * b00 * _gx[192];
+                        _gx[768] = s1;
+                        s2 = cpx*s1 + 1 * b01 *s0;
+                        s2 += 4 * b00 * _gx[704];
+                        _gx[1280] = s2;
+                        s1 = _gx[256];
+                        s0 = _gx[192];
                         _gx[448] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[288];
-                        _gx[416] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[256];
+                        s0 = _gx[128];
                         _gx[384] = s1 - xjxi * s0;
-                        s1 = _gx[640];
-                        s0 = _gx[608];
-                        _gx[736] = s1 - xjxi * s0;
+                        s1 = s0;
+                        s0 = _gx[64];
+                        _gx[320] = s1 - xjxi * s0;
+                        s1 = s0;
+                        s0 = _gx[0];
+                        _gx[256] = s1 - xjxi * s0;
+                        s1 = _gx[768];
+                        s0 = _gx[704];
+                        _gx[960] = s1 - xjxi * s0;
+                        s1 = s0;
+                        s0 = _gx[640];
+                        _gx[896] = s1 - xjxi * s0;
                         s1 = s0;
                         s0 = _gx[576];
-                        _gx[704] = s1 - xjxi * s0;
-                        s1 = s0;
-                        s0 = _gx[544];
-                        _gx[672] = s1 - xjxi * s0;
+                        _gx[832] = s1 - xjxi * s0;
                         s1 = s0;
                         s0 = _gx[512];
-                        _gx[640] = s1 - xjxi * s0;
+                        _gx[768] = s1 - xjxi * s0;
+                        s1 = _gx[1280];
+                        s0 = _gx[1216];
+                        _gx[1472] = s1 - xjxi * s0;
+                        s1 = s0;
+                        s0 = _gx[1152];
+                        _gx[1408] = s1 - xjxi * s0;
+                        s1 = s0;
+                        s0 = _gx[1088];
+                        _gx[1344] = s1 - xjxi * s0;
+                        s1 = s0;
+                        s0 = _gx[1024];
+                        _gx[1280] = s1 - xjxi * s0;
                     }
                     __syncthreads();
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
                     double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
+                    double ylyk = rlrk[64];
+                    double zlzk = rlrk[128];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
-                        Ix = gx[448];
-                        Iy = gx[768];
-                        Iz = gx[1536];
+                        Ix = gx[896];
+                        Iy = gx[1536];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[480] - 2 * gx[416]) * prod_yz;
-                        v_kx += (ak2 * gx[704] - 1 * gx[192]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += (aj2 * (gx[480] - xjxi * Ix) - 1 * gx[320]) * prod_yz;
-                        v_lx += al2 * (gx[704] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[960] - 2 * gx[832]) * prod_yz;
+                        v_kx += (ak2 * gx[1408] - 1 * gx[384]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += (aj2 * (gx[960] - xjxi * Ix) - 1 * gx[640]) * prod_yz;
+                        v_lx += al2 * (gx[1408] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[256];
-                        Ix = gx[288];
-                        Iy = gx[896];
-                        Iz = gx[1568];
+                        Ix = gx[768];
+                        Iy = gx[1600];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[320] - 1 * gx[256]) * prod_yz;
-                        v_kx += (ak2 * gx[544] - 1 * gx[32]) * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += ak2 * gx[1152] * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1824] * prod_xy;
-                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[544] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[928] - yjyi * Iy) - 1 * gx[768]) * prod_xz;
-                        v_ly += al2 * (gx[1152] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += (ak2 * gx[1280] - 1 * gx[256]) * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[2112] * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3648] * prod_xy;
+                        v_jx += (aj2 * (gx[832] - xjxi * Ix) - 1 * gx[512]) * prod_yz;
+                        v_lx += al2 * (gx[1280] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[512];
-                        Ix = gx[256];
-                        Iy = gx[800];
-                        Iz = gx[1696];
+                        Ix = gx[576];
+                        Iy = gx[1792];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[288] * prod_yz;
-                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[1056] * prod_xz;
-                        v_iz += (ai2 * gx[1728] - 1 * gx[1664]) * prod_xy;
-                        v_kz += ak2 * gx[1952] * prod_xy;
-                        v_jx += aj2 * (gx[288] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1728] - zjzi * Iz) - 1 * gx[1568]) * prod_xy;
-                        v_lz += al2 * (gx[1952] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[640] - 1 * gx[512]) * prod_yz;
+                        v_kx += (ak2 * gx[1088] - 1 * gx[64]) * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += ak2 * gx[2304] * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3648] * prod_xy;
+                        v_jx += aj2 * (gx[640] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1088] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1856] - yjyi * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_ly += al2 * (gx[2304] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[768];
-                        Ix = gx[64];
-                        Iy = gx[1152];
-                        Iz = gx[1536];
+                        Ix = gx[640];
+                        Iy = gx[1536];
+                        Iz = gx[3328];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[96] - 2 * gx[32]) * prod_yz;
-                        v_kx += ak2 * gx[320] * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += (ak2 * gx[1408] - 1 * gx[896]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += aj2 * (gx[96] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[1184] - yjyi * Iy) - 1 * gx[1024]) * prod_xz;
-                        v_ly += al2 * (gx[1408] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[704] - 2 * gx[576]) * prod_yz;
+                        v_kx += (ak2 * gx[1152] - 1 * gx[128]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += ak2 * gx[3840] * prod_xy;
+                        v_jx += aj2 * (gx[704] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1152] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3392] - zjzi * Iz) - 1 * gx[3072]) * prod_xy;
+                        v_lz += al2 * (gx[3840] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1024];
-                        Ix = gx[32];
-                        Iy = gx[1024];
-                        Iz = gx[1696];
+                        Ix = gx[512];
+                        Iy = gx[1600];
+                        Iz = gx[3392];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[288] * prod_yz;
-                        v_iy += ai2 * gx[1056] * prod_xz;
-                        v_ky += (ak2 * gx[1280] - 1 * gx[768]) * prod_xz;
-                        v_iz += (ai2 * gx[1728] - 1 * gx[1664]) * prod_xy;
-                        v_kz += ak2 * gx[1952] * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1056] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1280] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1728] - zjzi * Iz) - 1 * gx[1568]) * prod_xy;
-                        v_lz += al2 * (gx[1952] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[576] * prod_yz;
+                        v_kx += (ak2 * gx[1024] - 1 * gx[0]) * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[2112] * prod_xz;
+                        v_iz += (ai2 * gx[3456] - 1 * gx[3328]) * prod_xy;
+                        v_kz += ak2 * gx[3904] * prod_xy;
+                        v_jx += aj2 * (gx[576] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1024] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3456] - zjzi * Iz) - 1 * gx[3136]) * prod_xy;
+                        v_lz += al2 * (gx[3904] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1280];
-                        Ix = gx[128];
-                        Iy = gx[800];
-                        Iz = gx[1824];
+                        Ix = gx[320];
+                        Iy = gx[2048];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += ak2 * gx[384] * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[1056] * prod_xz;
-                        v_iz += (ai2 * gx[1856] - 1 * gx[1792]) * prod_xy;
-                        v_kz += (ak2 * gx[2080] - 1 * gx[1568]) * prod_xy;
-                        v_jx += (aj2 * (gx[160] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
-                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1856] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2080] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[384] - 1 * gx[256]) * prod_yz;
+                        v_kx += ak2 * gx[832] * prod_yz;
+                        v_iy += ai2 * gx[2112] * prod_xz;
+                        v_ky += (ak2 * gx[2560] - 1 * gx[1536]) * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3648] * prod_xy;
+                        v_jx += (aj2 * (gx[384] - xjxi * Ix) - 1 * gx[64]) * prod_yz;
+                        v_lx += al2 * (gx[832] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2112] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2560] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1536];
-                        Ix = gx[64];
-                        Iy = gx[768];
-                        Iz = gx[1920];
+                        Ix = gx[128];
+                        Iy = gx[2304];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[96] - 2 * gx[32]) * prod_yz;
-                        v_kx += ak2 * gx[320] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += (ak2 * gx[2176] - 1 * gx[1664]) * prod_xy;
-                        v_jx += aj2 * (gx[96] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1952] - zjzi * Iz) - 1 * gx[1792]) * prod_xy;
-                        v_lz += al2 * (gx[2176] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[192] - 2 * gx[64]) * prod_yz;
+                        v_kx += ak2 * gx[640] * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += (ak2 * gx[2816] - 1 * gx[1792]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[2368] - yjyi * Iy) - 1 * gx[2048]) * prod_xz;
+                        v_ly += al2 * (gx[2816] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1792];
+                        Ix = gx[0];
+                        Iy = gx[2368];
+                        Iz = gx[3136];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += (ai2 * gx[2432] - 1 * gx[2304]) * prod_xz;
+                        v_ky += (ak2 * gx[2880] - 1 * gx[1856]) * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3648] * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[2432] - yjyi * Iy) - 1 * gx[2112]) * prod_xz;
+                        v_ly += al2 * (gx[2880] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2048];
+                        Ix = gx[64];
+                        Iy = gx[2048];
+                        Iz = gx[3392];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[576] * prod_yz;
+                        v_iy += ai2 * gx[2112] * prod_xz;
+                        v_ky += (ak2 * gx[2560] - 1 * gx[1536]) * prod_xz;
+                        v_iz += (ai2 * gx[3456] - 1 * gx[3328]) * prod_xy;
+                        v_kz += ak2 * gx[3904] * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2112] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2560] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3456] - zjzi * Iz) - 1 * gx[3136]) * prod_xy;
+                        v_lz += al2 * (gx[3904] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2304];
+                        Ix = gx[384];
+                        Iy = gx[1536];
+                        Iz = gx[3584];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[448] - 2 * gx[320]) * prod_yz;
+                        v_kx += ak2 * gx[896] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += ai2 * gx[3648] * prod_xy;
+                        v_kz += (ak2 * gx[4096] - 1 * gx[3072]) * prod_xy;
+                        v_jx += (aj2 * (gx[448] - xjxi * Ix) - 1 * gx[128]) * prod_yz;
+                        v_lx += al2 * (gx[896] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3648] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4096] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2560];
+                        Ix = gx[256];
+                        Iy = gx[1600];
+                        Iz = gx[3648];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += ak2 * gx[768] * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[2112] * prod_xz;
+                        v_iz += (ai2 * gx[3712] - 1 * gx[3584]) * prod_xy;
+                        v_kz += (ak2 * gx[4160] - 1 * gx[3136]) * prod_xy;
+                        v_jx += (aj2 * (gx[320] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
+                        v_lx += al2 * (gx[768] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3712] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4160] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2816];
+                        Ix = gx[64];
+                        Iy = gx[1792];
+                        Iz = gx[3648];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[576] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += ak2 * gx[2304] * prod_xz;
+                        v_iz += (ai2 * gx[3712] - 1 * gx[3584]) * prod_xy;
+                        v_kz += (ak2 * gx[4160] - 1 * gx[3136]) * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1856] - yjyi * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_ly += al2 * (gx[2304] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3712] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4160] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[3072];
+                        Ix = gx[128];
+                        Iy = gx[1536];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[192] - 2 * gx[64]) * prod_yz;
+                        v_kx += ak2 * gx[640] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += (ak2 * gx[4352] - 1 * gx[3328]) * prod_xy;
+                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3904] - zjzi * Iz) - 1 * gx[3584]) * prod_xy;
+                        v_lz += al2 * (gx[4352] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[3328];
+                        Ix = gx[0];
+                        Iy = gx[1600];
+                        Iz = gx[3904];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[2112] * prod_xz;
+                        v_iz += (ai2 * gx[3968] - 1 * gx[3840]) * prod_xy;
+                        v_kz += (ak2 * gx[4416] - 1 * gx[3392]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3968] - zjzi * Iz) - 1 * gx[3648]) * prod_xy;
+                        v_lz += al2 * (gx[4416] - zlzk * Iz) * prod_xy;
                         break;
                     case 1:
-                        dd = dd_cache[32];
-                        Ix = gx[416];
-                        Iy = gx[800];
-                        Iz = gx[1536];
+                        dd = dd_cache[64];
+                        Ix = gx[832];
+                        Iy = gx[1600];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[448] - 1 * gx[384]) * prod_yz;
-                        v_kx += (ak2 * gx[672] - 1 * gx[160]) * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[1056] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += (aj2 * (gx[448] - xjxi * Ix) - 1 * gx[288]) * prod_yz;
-                        v_lx += al2 * (gx[672] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[288];
+                        v_ix += (ai2 * gx[896] - 1 * gx[768]) * prod_yz;
+                        v_kx += (ak2 * gx[1344] - 1 * gx[320]) * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[2112] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += (aj2 * (gx[896] - xjxi * Ix) - 1 * gx[576]) * prod_yz;
+                        v_lx += al2 * (gx[1344] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[320];
+                        Ix = gx[768];
+                        Iy = gx[1536];
+                        Iz = gx[3200];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += (ak2 * gx[1280] - 1 * gx[256]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += (ai2 * gx[3264] - 2 * gx[3136]) * prod_xy;
+                        v_kz += ak2 * gx[3712] * prod_xy;
+                        v_jx += (aj2 * (gx[832] - xjxi * Ix) - 1 * gx[512]) * prod_yz;
+                        v_lx += al2 * (gx[1280] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3264] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3712] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[576];
+                        Ix = gx[512];
+                        Iy = gx[1920];
+                        Iz = gx[3072];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[576] * prod_yz;
+                        v_kx += (ak2 * gx[1024] - 1 * gx[0]) * prod_yz;
+                        v_iy += (ai2 * gx[1984] - 2 * gx[1856]) * prod_xz;
+                        v_ky += ak2 * gx[2432] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += aj2 * (gx[576] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1024] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1984] - yjyi * Iy) - 1 * gx[1664]) * prod_xz;
+                        v_ly += al2 * (gx[2432] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[832];
+                        Ix = gx[576];
+                        Iy = gx[1600];
+                        Iz = gx[3328];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[640] - 1 * gx[512]) * prod_yz;
+                        v_kx += (ak2 * gx[1088] - 1 * gx[64]) * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[2112] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += ak2 * gx[3840] * prod_xy;
+                        v_jx += aj2 * (gx[640] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1088] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3392] - zjzi * Iz) - 1 * gx[3072]) * prod_xy;
+                        v_lz += al2 * (gx[3840] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1088];
+                        Ix = gx[512];
+                        Iy = gx[1536];
+                        Iz = gx[3456];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[576] * prod_yz;
+                        v_kx += (ak2 * gx[1024] - 1 * gx[0]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += (ai2 * gx[3520] - 2 * gx[3392]) * prod_xy;
+                        v_kz += ak2 * gx[3968] * prod_xy;
+                        v_jx += aj2 * (gx[576] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1024] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3520] - zjzi * Iz) - 1 * gx[3200]) * prod_xy;
+                        v_lz += al2 * (gx[3968] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1344];
                         Ix = gx[256];
-                        Iy = gx[960];
-                        Iz = gx[1536];
+                        Iy = gx[2176];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[288] * prod_yz;
-                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
-                        v_iy += (ai2 * gx[992] - 2 * gx[928]) * prod_xz;
-                        v_ky += ak2 * gx[1216] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += aj2 * (gx[288] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[992] - yjyi * Iy) - 1 * gx[832]) * prod_xz;
-                        v_ly += al2 * (gx[1216] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[544];
-                        Ix = gx[256];
-                        Iy = gx[768];
-                        Iz = gx[1728];
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += ak2 * gx[768] * prod_yz;
+                        v_iy += (ai2 * gx[2240] - 2 * gx[2112]) * prod_xz;
+                        v_ky += (ak2 * gx[2688] - 1 * gx[1664]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += (aj2 * (gx[320] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
+                        v_lx += al2 * (gx[768] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2240] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2688] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1600];
+                        Ix = gx[64];
+                        Iy = gx[2368];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[288] * prod_yz;
-                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += (ai2 * gx[1760] - 2 * gx[1696]) * prod_xy;
-                        v_kz += ak2 * gx[1984] * prod_xy;
-                        v_jx += aj2 * (gx[288] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1760] - zjzi * Iz) - 1 * gx[1600]) * prod_xy;
-                        v_lz += al2 * (gx[1984] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[800];
-                        Ix = gx[32];
-                        Iy = gx[1184];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[288] * prod_yz;
-                        v_iy += (ai2 * gx[1216] - 1 * gx[1152]) * prod_xz;
-                        v_ky += (ak2 * gx[1440] - 1 * gx[928]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[1216] - yjyi * Iy) - 1 * gx[1056]) * prod_xz;
-                        v_ly += al2 * (gx[1440] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1056];
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[576] * prod_yz;
+                        v_iy += (ai2 * gx[2432] - 1 * gx[2304]) * prod_xz;
+                        v_ky += (ak2 * gx[2880] - 1 * gx[1856]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[2432] - yjyi * Iy) - 1 * gx[2112]) * prod_xz;
+                        v_ly += al2 * (gx[2880] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1856];
                         Ix = gx[0];
-                        Iy = gx[1088];
-                        Iz = gx[1664];
+                        Iy = gx[2304];
+                        Iz = gx[3200];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += (ai2 * gx[1120] - 2 * gx[1056]) * prod_xz;
-                        v_ky += (ak2 * gx[1344] - 1 * gx[832]) * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += ak2 * gx[1920] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1120] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1344] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1696] - zjzi * Iz) - 1 * gx[1536]) * prod_xy;
-                        v_lz += al2 * (gx[1920] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1312];
-                        Ix = gx[128];
-                        Iy = gx[768];
-                        Iz = gx[1856];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += ak2 * gx[384] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += (ai2 * gx[1888] - 2 * gx[1824]) * prod_xy;
-                        v_kz += (ak2 * gx[2112] - 1 * gx[1600]) * prod_xy;
-                        v_jx += (aj2 * (gx[160] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
-                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1888] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2112] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1568];
-                        Ix = gx[32];
-                        Iy = gx[800];
-                        Iz = gx[1920];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[288] * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[1056] * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += (ak2 * gx[2176] - 1 * gx[1664]) * prod_xy;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += (ak2 * gx[2816] - 1 * gx[1792]) * prod_xz;
+                        v_iz += (ai2 * gx[3264] - 2 * gx[3136]) * prod_xy;
+                        v_kz += ak2 * gx[3712] * prod_xy;
                         v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1952] - zjzi * Iz) - 1 * gx[1792]) * prod_xy;
-                        v_lz += al2 * (gx[2176] - zlzk * Iz) * prod_xy;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[2368] - yjyi * Iy) - 1 * gx[2048]) * prod_xz;
+                        v_ly += al2 * (gx[2816] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3264] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3712] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2112];
+                        Ix = gx[0];
+                        Iy = gx[2176];
+                        Iz = gx[3328];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += (ai2 * gx[2240] - 2 * gx[2112]) * prod_xz;
+                        v_ky += (ak2 * gx[2688] - 1 * gx[1664]) * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += ak2 * gx[3840] * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2240] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2688] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3392] - zjzi * Iz) - 1 * gx[3072]) * prod_xy;
+                        v_lz += al2 * (gx[3840] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2368];
+                        Ix = gx[320];
+                        Iy = gx[1600];
+                        Iz = gx[3584];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[384] - 1 * gx[256]) * prod_yz;
+                        v_kx += ak2 * gx[832] * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[2112] * prod_xz;
+                        v_iz += ai2 * gx[3648] * prod_xy;
+                        v_kz += (ak2 * gx[4096] - 1 * gx[3072]) * prod_xy;
+                        v_jx += (aj2 * (gx[384] - xjxi * Ix) - 1 * gx[64]) * prod_yz;
+                        v_lx += al2 * (gx[832] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3648] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4096] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2624];
+                        Ix = gx[256];
+                        Iy = gx[1536];
+                        Iz = gx[3712];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += ak2 * gx[768] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += (ai2 * gx[3776] - 2 * gx[3648]) * prod_xy;
+                        v_kz += (ak2 * gx[4224] - 1 * gx[3200]) * prod_xy;
+                        v_jx += (aj2 * (gx[320] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
+                        v_lx += al2 * (gx[768] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3776] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4224] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2880];
+                        Ix = gx[0];
+                        Iy = gx[1920];
+                        Iz = gx[3584];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += (ai2 * gx[1984] - 2 * gx[1856]) * prod_xz;
+                        v_ky += ak2 * gx[2432] * prod_xz;
+                        v_iz += ai2 * gx[3648] * prod_xy;
+                        v_kz += (ak2 * gx[4096] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1984] - yjyi * Iy) - 1 * gx[1664]) * prod_xz;
+                        v_ly += al2 * (gx[2432] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3648] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4096] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[3136];
+                        Ix = gx[64];
+                        Iy = gx[1600];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[576] * prod_yz;
+                        v_iy += (ai2 * gx[1664] - 1 * gx[1536]) * prod_xz;
+                        v_ky += ak2 * gx[2112] * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += (ak2 * gx[4352] - 1 * gx[3328]) * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1664] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2112] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3904] - zjzi * Iz) - 1 * gx[3584]) * prod_xy;
+                        v_lz += al2 * (gx[4352] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[3392];
+                        Ix = gx[0];
+                        Iy = gx[1536];
+                        Iz = gx[3968];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += (ai2 * gx[4032] - 2 * gx[3904]) * prod_xy;
+                        v_kz += (ak2 * gx[4480] - 1 * gx[3456]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[4032] - zjzi * Iz) - 1 * gx[3712]) * prod_xy;
+                        v_lz += al2 * (gx[4480] - zlzk * Iz) * prod_xy;
                         break;
                     case 2:
-                        dd = dd_cache[64];
-                        Ix = gx[416];
-                        Iy = gx[768];
-                        Iz = gx[1568];
+                        dd = dd_cache[128];
+                        Ix = gx[832];
+                        Iy = gx[1536];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[448] - 1 * gx[384]) * prod_yz;
-                        v_kx += (ak2 * gx[672] - 1 * gx[160]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1824] * prod_xy;
-                        v_jx += (aj2 * (gx[448] - xjxi * Ix) - 1 * gx[288]) * prod_yz;
-                        v_lx += al2 * (gx[672] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[320];
+                        v_ix += (ai2 * gx[896] - 1 * gx[768]) * prod_yz;
+                        v_kx += (ak2 * gx[1344] - 1 * gx[320]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3648] * prod_xy;
+                        v_jx += (aj2 * (gx[896] - xjxi * Ix) - 1 * gx[576]) * prod_yz;
+                        v_lx += al2 * (gx[1344] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[384];
+                        Ix = gx[640];
+                        Iy = gx[1792];
+                        Iz = gx[3072];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[704] - 2 * gx[576]) * prod_yz;
+                        v_kx += (ak2 * gx[1152] - 1 * gx[128]) * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += ak2 * gx[2304] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += aj2 * (gx[704] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1152] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1856] - yjyi * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_ly += al2 * (gx[2304] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[640];
+                        Ix = gx[512];
+                        Iy = gx[1856];
+                        Iz = gx[3136];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[576] * prod_yz;
+                        v_kx += (ak2 * gx[1024] - 1 * gx[0]) * prod_yz;
+                        v_iy += (ai2 * gx[1920] - 1 * gx[1792]) * prod_xz;
+                        v_ky += ak2 * gx[2368] * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3648] * prod_xy;
+                        v_jx += aj2 * (gx[576] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1024] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1920] - yjyi * Iy) - 1 * gx[1600]) * prod_xz;
+                        v_ly += al2 * (gx[2368] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[896];
+                        Ix = gx[576];
+                        Iy = gx[1536];
+                        Iz = gx[3392];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[640] - 1 * gx[512]) * prod_yz;
+                        v_kx += (ak2 * gx[1088] - 1 * gx[64]) * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += (ai2 * gx[3456] - 1 * gx[3328]) * prod_xy;
+                        v_kz += ak2 * gx[3904] * prod_xy;
+                        v_jx += aj2 * (gx[640] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1088] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3456] - zjzi * Iz) - 1 * gx[3136]) * prod_xy;
+                        v_lz += al2 * (gx[3904] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1152];
+                        Ix = gx[384];
+                        Iy = gx[2048];
+                        Iz = gx[3072];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[448] - 2 * gx[320]) * prod_yz;
+                        v_kx += ak2 * gx[896] * prod_yz;
+                        v_iy += ai2 * gx[2112] * prod_xz;
+                        v_ky += (ak2 * gx[2560] - 1 * gx[1536]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += (aj2 * (gx[448] - xjxi * Ix) - 1 * gx[128]) * prod_yz;
+                        v_lx += al2 * (gx[896] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2112] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2560] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1408];
                         Ix = gx[256];
-                        Iy = gx[928];
-                        Iz = gx[1568];
+                        Iy = gx[2112];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[288] * prod_yz;
-                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
-                        v_iy += (ai2 * gx[960] - 1 * gx[896]) * prod_xz;
-                        v_ky += ak2 * gx[1184] * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1824] * prod_xy;
-                        v_jx += aj2 * (gx[288] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[960] - yjyi * Iy) - 1 * gx[800]) * prod_xz;
-                        v_ly += al2 * (gx[1184] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[576];
-                        Ix = gx[192];
-                        Iy = gx[1024];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[224] - 2 * gx[160]) * prod_yz;
-                        v_kx += ak2 * gx[448] * prod_yz;
-                        v_iy += ai2 * gx[1056] * prod_xz;
-                        v_ky += (ak2 * gx[1280] - 1 * gx[768]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += (aj2 * (gx[224] - xjxi * Ix) - 1 * gx[64]) * prod_yz;
-                        v_lx += al2 * (gx[448] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1056] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1280] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[832];
-                        Ix = gx[32];
-                        Iy = gx[1152];
-                        Iz = gx[1568];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[288] * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += (ak2 * gx[1408] - 1 * gx[896]) * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1824] * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[1184] - yjyi * Iy) - 1 * gx[1024]) * prod_xz;
-                        v_ly += al2 * (gx[1408] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1088];
-                        Ix = gx[0];
-                        Iy = gx[1056];
-                        Iz = gx[1696];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += (ai2 * gx[1088] - 1 * gx[1024]) * prod_xz;
-                        v_ky += (ak2 * gx[1312] - 1 * gx[800]) * prod_xz;
-                        v_iz += (ai2 * gx[1728] - 1 * gx[1664]) * prod_xy;
-                        v_kz += ak2 * gx[1952] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1088] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1312] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1728] - zjzi * Iz) - 1 * gx[1568]) * prod_xy;
-                        v_lz += al2 * (gx[1952] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1344];
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += ak2 * gx[768] * prod_yz;
+                        v_iy += (ai2 * gx[2176] - 1 * gx[2048]) * prod_xz;
+                        v_ky += (ak2 * gx[2624] - 1 * gx[1600]) * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3648] * prod_xy;
+                        v_jx += (aj2 * (gx[320] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
+                        v_lx += al2 * (gx[768] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2176] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2624] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1664];
                         Ix = gx[64];
-                        Iy = gx[896];
-                        Iz = gx[1792];
+                        Iy = gx[2304];
+                        Iz = gx[3136];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[96] - 2 * gx[32]) * prod_yz;
-                        v_kx += ak2 * gx[320] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += ak2 * gx[1152] * prod_xz;
-                        v_iz += ai2 * gx[1824] * prod_xy;
-                        v_kz += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xy;
-                        v_jx += aj2 * (gx[96] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[928] - yjyi * Iy) - 1 * gx[768]) * prod_xz;
-                        v_ly += al2 * (gx[1152] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1824] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2048] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1600];
-                        Ix = gx[32];
-                        Iy = gx[768];
-                        Iz = gx[1952];
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[576] * prod_yz;
+                        v_iy += ai2 * gx[2368] * prod_xz;
+                        v_ky += (ak2 * gx[2816] - 1 * gx[1792]) * prod_xz;
+                        v_iz += (ai2 * gx[3200] - 1 * gx[3072]) * prod_xy;
+                        v_kz += ak2 * gx[3648] * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[2368] - yjyi * Iy) - 1 * gx[2048]) * prod_xz;
+                        v_ly += al2 * (gx[2816] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3200] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3648] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1920];
+                        Ix = gx[128];
+                        Iy = gx[2048];
+                        Iz = gx[3328];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[288] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += (ai2 * gx[1984] - 1 * gx[1920]) * prod_xy;
-                        v_kz += (ak2 * gx[2208] - 1 * gx[1696]) * prod_xy;
+                        v_ix += (ai2 * gx[192] - 2 * gx[64]) * prod_yz;
+                        v_kx += ak2 * gx[640] * prod_yz;
+                        v_iy += ai2 * gx[2112] * prod_xz;
+                        v_ky += (ak2 * gx[2560] - 1 * gx[1536]) * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += ak2 * gx[3840] * prod_xy;
+                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2112] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2560] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3392] - zjzi * Iz) - 1 * gx[3072]) * prod_xy;
+                        v_lz += al2 * (gx[3840] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2176];
+                        Ix = gx[0];
+                        Iy = gx[2112];
+                        Iz = gx[3392];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += (ai2 * gx[2176] - 1 * gx[2048]) * prod_xz;
+                        v_ky += (ak2 * gx[2624] - 1 * gx[1600]) * prod_xz;
+                        v_iz += (ai2 * gx[3456] - 1 * gx[3328]) * prod_xy;
+                        v_kz += ak2 * gx[3904] * prod_xy;
                         v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1984] - zjzi * Iz) - 1 * gx[1824]) * prod_xy;
-                        v_lz += al2 * (gx[2208] - zlzk * Iz) * prod_xy;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2176] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2624] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3456] - zjzi * Iz) - 1 * gx[3136]) * prod_xy;
+                        v_lz += al2 * (gx[3904] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2432];
+                        Ix = gx[320];
+                        Iy = gx[1536];
+                        Iz = gx[3648];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[384] - 1 * gx[256]) * prod_yz;
+                        v_kx += ak2 * gx[832] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += (ai2 * gx[3712] - 1 * gx[3584]) * prod_xy;
+                        v_kz += (ak2 * gx[4160] - 1 * gx[3136]) * prod_xy;
+                        v_jx += (aj2 * (gx[384] - xjxi * Ix) - 1 * gx[64]) * prod_yz;
+                        v_lx += al2 * (gx[832] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3712] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4160] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2688];
+                        Ix = gx[128];
+                        Iy = gx[1792];
+                        Iz = gx[3584];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[192] - 2 * gx[64]) * prod_yz;
+                        v_kx += ak2 * gx[640] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += ak2 * gx[2304] * prod_xz;
+                        v_iz += ai2 * gx[3648] * prod_xy;
+                        v_kz += (ak2 * gx[4096] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[192] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1856] - yjyi * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_ly += al2 * (gx[2304] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3648] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4096] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2944];
+                        Ix = gx[0];
+                        Iy = gx[1856];
+                        Iz = gx[3648];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += (ai2 * gx[1920] - 1 * gx[1792]) * prod_xz;
+                        v_ky += ak2 * gx[2368] * prod_xz;
+                        v_iz += (ai2 * gx[3712] - 1 * gx[3584]) * prod_xy;
+                        v_kz += (ak2 * gx[4160] - 1 * gx[3136]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1920] - yjyi * Iy) - 1 * gx[1600]) * prod_xz;
+                        v_ly += al2 * (gx[2368] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3712] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4160] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[3200];
+                        Ix = gx[64];
+                        Iy = gx[1536];
+                        Iz = gx[3904];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[576] * prod_yz;
+                        v_iy += ai2 * gx[1600] * prod_xz;
+                        v_ky += ak2 * gx[2048] * prod_xz;
+                        v_iz += (ai2 * gx[3968] - 1 * gx[3840]) * prod_xy;
+                        v_kz += (ak2 * gx[4416] - 1 * gx[3392]) * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1600] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2048] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3968] - zjzi * Iz) - 1 * gx[3648]) * prod_xy;
+                        v_lz += al2 * (gx[4416] - zlzk * Iz) * prod_xy;
                         break;
                     case 3:
-                        dd = dd_cache[96];
-                        Ix = gx[384];
-                        Iy = gx[832];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += (ak2 * gx[640] - 1 * gx[128]) * prod_yz;
-                        v_iy += (ai2 * gx[864] - 2 * gx[800]) * prod_xz;
-                        v_ky += ak2 * gx[1088] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += (aj2 * (gx[416] - xjxi * Ix) - 1 * gx[256]) * prod_yz;
-                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[864] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1088] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[352];
-                        Ix = gx[256];
-                        Iy = gx[896];
-                        Iz = gx[1600];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[288] * prod_yz;
-                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += ak2 * gx[1152] * prod_xz;
-                        v_iz += (ai2 * gx[1632] - 2 * gx[1568]) * prod_xy;
-                        v_kz += ak2 * gx[1856] * prod_xy;
-                        v_jx += aj2 * (gx[288] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[928] - yjyi * Iy) - 1 * gx[768]) * prod_xz;
-                        v_ly += al2 * (gx[1152] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1632] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1856] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[608];
-                        Ix = gx[160];
-                        Iy = gx[1056];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[192] - 1 * gx[128]) * prod_yz;
-                        v_kx += ak2 * gx[416] * prod_yz;
-                        v_iy += (ai2 * gx[1088] - 1 * gx[1024]) * prod_xz;
-                        v_ky += (ak2 * gx[1312] - 1 * gx[800]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += (aj2 * (gx[192] - xjxi * Ix) - 1 * gx[32]) * prod_yz;
-                        v_lx += al2 * (gx[416] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1088] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1312] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[864];
-                        Ix = gx[0];
-                        Iy = gx[1216];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += (ai2 * gx[1248] - 2 * gx[1184]) * prod_xz;
-                        v_ky += (ak2 * gx[1472] - 1 * gx[960]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[1248] - yjyi * Iy) - 1 * gx[1088]) * prod_xz;
-                        v_ly += al2 * (gx[1472] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1120];
-                        Ix = gx[0];
-                        Iy = gx[1024];
-                        Iz = gx[1728];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += ai2 * gx[1056] * prod_xz;
-                        v_ky += (ak2 * gx[1280] - 1 * gx[768]) * prod_xz;
-                        v_iz += (ai2 * gx[1760] - 2 * gx[1696]) * prod_xy;
-                        v_kz += ak2 * gx[1984] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1056] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1280] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1760] - zjzi * Iz) - 1 * gx[1600]) * prod_xy;
-                        v_lz += al2 * (gx[1984] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1376];
-                        Ix = gx[32];
-                        Iy = gx[928];
-                        Iz = gx[1792];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[288] * prod_yz;
-                        v_iy += (ai2 * gx[960] - 1 * gx[896]) * prod_xz;
-                        v_ky += ak2 * gx[1184] * prod_xz;
-                        v_iz += ai2 * gx[1824] * prod_xy;
-                        v_kz += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[960] - yjyi * Iy) - 1 * gx[800]) * prod_xz;
-                        v_ly += al2 * (gx[1184] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1824] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2048] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1632];
-                        Ix = gx[0];
-                        Iy = gx[832];
-                        Iz = gx[1920];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += (ai2 * gx[864] - 2 * gx[800]) * prod_xz;
-                        v_ky += ak2 * gx[1088] * prod_xz;
-                        v_iz += ai2 * gx[1952] * prod_xy;
-                        v_kz += (ak2 * gx[2176] - 1 * gx[1664]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[864] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1088] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1952] - zjzi * Iz) - 1 * gx[1792]) * prod_xy;
-                        v_lz += al2 * (gx[2176] - zlzk * Iz) * prod_xy;
-                        break;
-                    case 4:
-                        dd = dd_cache[128];
-                        Ix = gx[384];
-                        Iy = gx[800];
-                        Iz = gx[1568];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += (ak2 * gx[640] - 1 * gx[128]) * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[1056] * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1824] * prod_xy;
-                        v_jx += (aj2 * (gx[416] - xjxi * Ix) - 1 * gx[256]) * prod_yz;
-                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[384];
-                        Ix = gx[320];
-                        Iy = gx[768];
-                        Iz = gx[1664];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[352] - 2 * gx[288]) * prod_yz;
-                        v_kx += (ak2 * gx[576] - 1 * gx[64]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += ak2 * gx[1920] * prod_xy;
-                        v_jx += aj2 * (gx[352] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1696] - zjzi * Iz) - 1 * gx[1536]) * prod_xy;
-                        v_lz += al2 * (gx[1920] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[640];
-                        Ix = gx[160];
-                        Iy = gx[1024];
-                        Iz = gx[1568];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[192] - 1 * gx[128]) * prod_yz;
-                        v_kx += ak2 * gx[416] * prod_yz;
-                        v_iy += ai2 * gx[1056] * prod_xz;
-                        v_ky += (ak2 * gx[1280] - 1 * gx[768]) * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1824] * prod_xy;
-                        v_jx += (aj2 * (gx[192] - xjxi * Ix) - 1 * gx[32]) * prod_yz;
-                        v_lx += al2 * (gx[416] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1056] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1280] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[896];
-                        Ix = gx[0];
-                        Iy = gx[1184];
-                        Iz = gx[1568];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += (ai2 * gx[1216] - 1 * gx[1152]) * prod_xz;
-                        v_ky += (ak2 * gx[1440] - 1 * gx[928]) * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1824] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[1216] - yjyi * Iy) - 1 * gx[1056]) * prod_xz;
-                        v_ly += al2 * (gx[1440] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1152];
-                        Ix = gx[192];
-                        Iy = gx[768];
-                        Iz = gx[1792];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[224] - 2 * gx[160]) * prod_yz;
-                        v_kx += ak2 * gx[448] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += ai2 * gx[1824] * prod_xy;
-                        v_kz += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xy;
-                        v_jx += (aj2 * (gx[224] - xjxi * Ix) - 1 * gx[64]) * prod_yz;
-                        v_lx += al2 * (gx[448] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1824] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2048] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1408];
-                        Ix = gx[32];
-                        Iy = gx[896];
-                        Iz = gx[1824];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[288] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += ak2 * gx[1152] * prod_xz;
-                        v_iz += (ai2 * gx[1856] - 1 * gx[1792]) * prod_xy;
-                        v_kz += (ak2 * gx[2080] - 1 * gx[1568]) * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[928] - yjyi * Iy) - 1 * gx[768]) * prod_xz;
-                        v_ly += al2 * (gx[1152] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1856] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2080] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1664];
-                        Ix = gx[0];
-                        Iy = gx[800];
-                        Iz = gx[1952];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[1056] * prod_xz;
-                        v_iz += (ai2 * gx[1984] - 1 * gx[1920]) * prod_xy;
-                        v_kz += (ak2 * gx[2208] - 1 * gx[1696]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1984] - zjzi * Iz) - 1 * gx[1824]) * prod_xy;
-                        v_lz += al2 * (gx[2208] - zlzk * Iz) * prod_xy;
-                        break;
-                    case 5:
-                        dd = dd_cache[160];
-                        Ix = gx[384];
-                        Iy = gx[768];
-                        Iz = gx[1600];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[416] * prod_yz;
-                        v_kx += (ak2 * gx[640] - 1 * gx[128]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += (ai2 * gx[1632] - 2 * gx[1568]) * prod_xy;
-                        v_kz += ak2 * gx[1856] * prod_xy;
-                        v_jx += (aj2 * (gx[416] - xjxi * Ix) - 1 * gx[256]) * prod_yz;
-                        v_lx += al2 * (gx[640] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1632] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1856] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[416];
-                        Ix = gx[288];
-                        Iy = gx[800];
-                        Iz = gx[1664];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[320] - 1 * gx[256]) * prod_yz;
-                        v_kx += (ak2 * gx[544] - 1 * gx[32]) * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[1056] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += ak2 * gx[1920] * prod_xy;
-                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[544] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1696] - zjzi * Iz) - 1 * gx[1536]) * prod_xy;
-                        v_lz += al2 * (gx[1920] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[672];
-                        Ix = gx[128];
-                        Iy = gx[1088];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += ak2 * gx[384] * prod_yz;
-                        v_iy += (ai2 * gx[1120] - 2 * gx[1056]) * prod_xz;
-                        v_ky += (ak2 * gx[1344] - 1 * gx[832]) * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += (aj2 * (gx[160] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
-                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1120] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1344] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[928];
-                        Ix = gx[0];
-                        Iy = gx[1152];
-                        Iz = gx[1600];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += ai2 * gx[1184] * prod_xz;
-                        v_ky += (ak2 * gx[1408] - 1 * gx[896]) * prod_xz;
-                        v_iz += (ai2 * gx[1632] - 2 * gx[1568]) * prod_xy;
-                        v_kz += ak2 * gx[1856] * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[1184] - yjyi * Iy) - 1 * gx[1024]) * prod_xz;
-                        v_ly += al2 * (gx[1408] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1632] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1856] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1184];
-                        Ix = gx[160];
-                        Iy = gx[800];
-                        Iz = gx[1792];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[192] - 1 * gx[128]) * prod_yz;
-                        v_kx += ak2 * gx[416] * prod_yz;
-                        v_iy += (ai2 * gx[832] - 1 * gx[768]) * prod_xz;
-                        v_ky += ak2 * gx[1056] * prod_xz;
-                        v_iz += ai2 * gx[1824] * prod_xy;
-                        v_kz += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xy;
-                        v_jx += (aj2 * (gx[192] - xjxi * Ix) - 1 * gx[32]) * prod_yz;
-                        v_lx += al2 * (gx[416] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[832] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1056] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1824] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2048] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1440];
-                        Ix = gx[0];
-                        Iy = gx[960];
-                        Iz = gx[1792];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += (ai2 * gx[992] - 2 * gx[928]) * prod_xz;
-                        v_ky += ak2 * gx[1216] * prod_xz;
-                        v_iz += ai2 * gx[1824] * prod_xy;
-                        v_kz += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[992] - yjyi * Iy) - 1 * gx[832]) * prod_xz;
-                        v_ly += al2 * (gx[1216] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1824] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2048] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1696];
-                        Ix = gx[0];
-                        Iy = gx[768];
-                        Iz = gx[1984];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += (ai2 * gx[2016] - 2 * gx[1952]) * prod_xy;
-                        v_kz += (ak2 * gx[2240] - 1 * gx[1728]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[2016] - zjzi * Iz) - 1 * gx[1856]) * prod_xy;
-                        v_lz += al2 * (gx[2240] - zlzk * Iz) * prod_xy;
-                        break;
-                    case 6:
                         dd = dd_cache[192];
-                        Ix = gx[320];
-                        Iy = gx[896];
-                        Iz = gx[1536];
+                        Ix = gx[768];
+                        Iy = gx[1664];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[352] - 2 * gx[288]) * prod_yz;
-                        v_kx += (ak2 * gx[576] - 1 * gx[64]) * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += ak2 * gx[1152] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += aj2 * (gx[352] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[928] - yjyi * Iy) - 1 * gx[768]) * prod_xz;
-                        v_ly += al2 * (gx[1152] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[832] * prod_yz;
+                        v_kx += (ak2 * gx[1280] - 1 * gx[256]) * prod_yz;
+                        v_iy += (ai2 * gx[1728] - 2 * gx[1600]) * prod_xz;
+                        v_ky += ak2 * gx[2176] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += (aj2 * (gx[832] - xjxi * Ix) - 1 * gx[512]) * prod_yz;
+                        v_lx += al2 * (gx[1280] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1728] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2176] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[448];
-                        Ix = gx[288];
-                        Iy = gx[768];
-                        Iz = gx[1696];
+                        Ix = gx[576];
+                        Iy = gx[1856];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[320] - 1 * gx[256]) * prod_yz;
-                        v_kx += (ak2 * gx[544] - 1 * gx[32]) * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += (ai2 * gx[1728] - 1 * gx[1664]) * prod_xy;
-                        v_kz += ak2 * gx[1952] * prod_xy;
-                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[544] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1728] - zjzi * Iz) - 1 * gx[1568]) * prod_xy;
-                        v_lz += al2 * (gx[1952] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[640] - 1 * gx[512]) * prod_yz;
+                        v_kx += (ak2 * gx[1088] - 1 * gx[64]) * prod_yz;
+                        v_iy += (ai2 * gx[1920] - 1 * gx[1792]) * prod_xz;
+                        v_ky += ak2 * gx[2368] * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += aj2 * (gx[640] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1088] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1920] - yjyi * Iy) - 1 * gx[1600]) * prod_xz;
+                        v_ly += al2 * (gx[2368] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[704];
-                        Ix = gx[128];
-                        Iy = gx[1056];
-                        Iz = gx[1568];
+                        Ix = gx[512];
+                        Iy = gx[1792];
+                        Iz = gx[3200];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += ak2 * gx[384] * prod_yz;
-                        v_iy += (ai2 * gx[1088] - 1 * gx[1024]) * prod_xz;
-                        v_ky += (ak2 * gx[1312] - 1 * gx[800]) * prod_xz;
-                        v_iz += (ai2 * gx[1600] - 1 * gx[1536]) * prod_xy;
-                        v_kz += ak2 * gx[1824] * prod_xy;
-                        v_jx += (aj2 * (gx[160] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
-                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1088] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1312] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1600] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1824] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[576] * prod_yz;
+                        v_kx += (ak2 * gx[1024] - 1 * gx[0]) * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += ak2 * gx[2304] * prod_xz;
+                        v_iz += (ai2 * gx[3264] - 2 * gx[3136]) * prod_xy;
+                        v_kz += ak2 * gx[3712] * prod_xy;
+                        v_jx += aj2 * (gx[576] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1024] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1856] - yjyi * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_ly += al2 * (gx[2304] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3264] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3712] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[960];
-                        Ix = gx[64];
-                        Iy = gx[1024];
-                        Iz = gx[1664];
+                        Ix = gx[512];
+                        Iy = gx[1664];
+                        Iz = gx[3328];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[96] - 2 * gx[32]) * prod_yz;
-                        v_kx += ak2 * gx[320] * prod_yz;
-                        v_iy += ai2 * gx[1056] * prod_xz;
-                        v_ky += (ak2 * gx[1280] - 1 * gx[768]) * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += ak2 * gx[1920] * prod_xy;
-                        v_jx += aj2 * (gx[96] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[320] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1056] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1280] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1696] - zjzi * Iz) - 1 * gx[1536]) * prod_xy;
-                        v_lz += al2 * (gx[1920] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[576] * prod_yz;
+                        v_kx += (ak2 * gx[1024] - 1 * gx[0]) * prod_yz;
+                        v_iy += (ai2 * gx[1728] - 2 * gx[1600]) * prod_xz;
+                        v_ky += ak2 * gx[2176] * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += ak2 * gx[3840] * prod_xy;
+                        v_jx += aj2 * (gx[576] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[1024] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1728] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2176] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3392] - zjzi * Iz) - 1 * gx[3072]) * prod_xy;
+                        v_lz += al2 * (gx[3840] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1216];
-                        Ix = gx[160];
-                        Iy = gx[768];
-                        Iz = gx[1824];
+                        Ix = gx[320];
+                        Iy = gx[2112];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[192] - 1 * gx[128]) * prod_yz;
-                        v_kx += ak2 * gx[416] * prod_yz;
-                        v_iy += ai2 * gx[800] * prod_xz;
-                        v_ky += ak2 * gx[1024] * prod_xz;
-                        v_iz += (ai2 * gx[1856] - 1 * gx[1792]) * prod_xy;
-                        v_kz += (ak2 * gx[2080] - 1 * gx[1568]) * prod_xy;
-                        v_jx += (aj2 * (gx[192] - xjxi * Ix) - 1 * gx[32]) * prod_yz;
-                        v_lx += al2 * (gx[416] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[800] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1024] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1856] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2080] - zlzk * Iz) * prod_xy;
+                        v_ix += (ai2 * gx[384] - 1 * gx[256]) * prod_yz;
+                        v_kx += ak2 * gx[832] * prod_yz;
+                        v_iy += (ai2 * gx[2176] - 1 * gx[2048]) * prod_xz;
+                        v_ky += (ak2 * gx[2624] - 1 * gx[1600]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += (aj2 * (gx[384] - xjxi * Ix) - 1 * gx[64]) * prod_yz;
+                        v_lx += al2 * (gx[832] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2176] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2624] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
                         dd = dd_cache[1472];
-                        Ix = gx[0];
-                        Iy = gx[928];
-                        Iz = gx[1824];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += (ai2 * gx[960] - 1 * gx[896]) * prod_xz;
-                        v_ky += ak2 * gx[1184] * prod_xz;
-                        v_iz += (ai2 * gx[1856] - 1 * gx[1792]) * prod_xy;
-                        v_kz += (ak2 * gx[2080] - 1 * gx[1568]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[960] - yjyi * Iy) - 1 * gx[800]) * prod_xz;
-                        v_ly += al2 * (gx[1184] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1856] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2080] - zlzk * Iz) * prod_xy;
-                        break;
-                    case 7:
-                        dd = dd_cache[224];
-                        Ix = gx[288];
-                        Iy = gx[928];
-                        Iz = gx[1536];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[320] - 1 * gx[256]) * prod_yz;
-                        v_kx += (ak2 * gx[544] - 1 * gx[32]) * prod_yz;
-                        v_iy += (ai2 * gx[960] - 1 * gx[896]) * prod_xz;
-                        v_ky += ak2 * gx[1184] * prod_xz;
-                        v_iz += ai2 * gx[1568] * prod_xy;
-                        v_kz += ak2 * gx[1792] * prod_xy;
-                        v_jx += aj2 * (gx[320] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[544] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[960] - yjyi * Iy) - 1 * gx[800]) * prod_xz;
-                        v_ly += al2 * (gx[1184] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1568] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1792] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[480];
                         Ix = gx[256];
-                        Iy = gx[832];
-                        Iz = gx[1664];
+                        Iy = gx[2048];
+                        Iz = gx[3200];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[288] * prod_yz;
-                        v_kx += (ak2 * gx[512] - 1 * gx[0]) * prod_yz;
-                        v_iy += (ai2 * gx[864] - 2 * gx[800]) * prod_xz;
-                        v_ky += ak2 * gx[1088] * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += ak2 * gx[1920] * prod_xy;
-                        v_jx += aj2 * (gx[288] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[864] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1088] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1696] - zjzi * Iz) - 1 * gx[1536]) * prod_xy;
-                        v_lz += al2 * (gx[1920] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[736];
-                        Ix = gx[128];
-                        Iy = gx[1024];
-                        Iz = gx[1600];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += ak2 * gx[384] * prod_yz;
-                        v_iy += ai2 * gx[1056] * prod_xz;
-                        v_ky += (ak2 * gx[1280] - 1 * gx[768]) * prod_xz;
-                        v_iz += (ai2 * gx[1632] - 2 * gx[1568]) * prod_xy;
-                        v_kz += ak2 * gx[1856] * prod_xy;
-                        v_jx += (aj2 * (gx[160] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
-                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1056] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1280] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1632] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[1856] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[992];
-                        Ix = gx[32];
-                        Iy = gx[1056];
-                        Iz = gx[1664];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += (ai2 * gx[64] - 1 * gx[0]) * prod_yz;
-                        v_kx += ak2 * gx[288] * prod_yz;
-                        v_iy += (ai2 * gx[1088] - 1 * gx[1024]) * prod_xz;
-                        v_ky += (ak2 * gx[1312] - 1 * gx[800]) * prod_xz;
-                        v_iz += ai2 * gx[1696] * prod_xy;
-                        v_kz += ak2 * gx[1920] * prod_xy;
-                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[288] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[1088] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1312] - ylyk * Iy) * prod_xz;
-                        v_jz += (aj2 * (gx[1696] - zjzi * Iz) - 1 * gx[1536]) * prod_xy;
-                        v_lz += al2 * (gx[1920] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1248];
-                        Ix = gx[128];
-                        Iy = gx[832];
-                        Iz = gx[1792];
-                        prod_xy = Ix * Iy * dd;
-                        prod_xz = Ix * Iz * dd;
-                        prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[160] * prod_yz;
-                        v_kx += ak2 * gx[384] * prod_yz;
-                        v_iy += (ai2 * gx[864] - 2 * gx[800]) * prod_xz;
-                        v_ky += ak2 * gx[1088] * prod_xz;
-                        v_iz += ai2 * gx[1824] * prod_xy;
-                        v_kz += (ak2 * gx[2048] - 1 * gx[1536]) * prod_xy;
-                        v_jx += (aj2 * (gx[160] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
-                        v_lx += al2 * (gx[384] - xlxk * Ix) * prod_yz;
-                        v_jy += aj2 * (gx[864] - yjyi * Iy) * prod_xz;
-                        v_ly += al2 * (gx[1088] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1824] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2048] - zlzk * Iz) * prod_xy;
-                        dd = dd_cache[1504];
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += ak2 * gx[768] * prod_yz;
+                        v_iy += ai2 * gx[2112] * prod_xz;
+                        v_ky += (ak2 * gx[2560] - 1 * gx[1536]) * prod_xz;
+                        v_iz += (ai2 * gx[3264] - 2 * gx[3136]) * prod_xy;
+                        v_kz += ak2 * gx[3712] * prod_xy;
+                        v_jx += (aj2 * (gx[320] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
+                        v_lx += al2 * (gx[768] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2112] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2560] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3264] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3712] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1728];
                         Ix = gx[0];
-                        Iy = gx[896];
-                        Iz = gx[1856];
+                        Iy = gx[2432];
+                        Iz = gx[3072];
                         prod_xy = Ix * Iy * dd;
                         prod_xz = Ix * Iz * dd;
                         prod_yz = Iy * Iz * dd;
-                        v_ix += ai2 * gx[32] * prod_yz;
-                        v_kx += ak2 * gx[256] * prod_yz;
-                        v_iy += ai2 * gx[928] * prod_xz;
-                        v_ky += ak2 * gx[1152] * prod_xz;
-                        v_iz += (ai2 * gx[1888] - 2 * gx[1824]) * prod_xy;
-                        v_kz += (ak2 * gx[2112] - 1 * gx[1600]) * prod_xy;
-                        v_jx += aj2 * (gx[32] - xjxi * Ix) * prod_yz;
-                        v_lx += al2 * (gx[256] - xlxk * Ix) * prod_yz;
-                        v_jy += (aj2 * (gx[928] - yjyi * Iy) - 1 * gx[768]) * prod_xz;
-                        v_ly += al2 * (gx[1152] - ylyk * Iy) * prod_xz;
-                        v_jz += aj2 * (gx[1888] - zjzi * Iz) * prod_xy;
-                        v_lz += al2 * (gx[2112] - zlzk * Iz) * prod_xy;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += (ai2 * gx[2496] - 2 * gx[2368]) * prod_xz;
+                        v_ky += (ak2 * gx[2944] - 1 * gx[1920]) * prod_xz;
+                        v_iz += ai2 * gx[3136] * prod_xy;
+                        v_kz += ak2 * gx[3584] * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[2496] - yjyi * Iy) - 1 * gx[2176]) * prod_xz;
+                        v_ly += al2 * (gx[2944] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3136] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[3584] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[1984];
+                        Ix = gx[64];
+                        Iy = gx[2112];
+                        Iz = gx[3328];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[576] * prod_yz;
+                        v_iy += (ai2 * gx[2176] - 1 * gx[2048]) * prod_xz;
+                        v_ky += (ak2 * gx[2624] - 1 * gx[1600]) * prod_xz;
+                        v_iz += ai2 * gx[3392] * prod_xy;
+                        v_kz += ak2 * gx[3840] * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2176] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2624] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3392] - zjzi * Iz) - 1 * gx[3072]) * prod_xy;
+                        v_lz += al2 * (gx[3840] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2240];
+                        Ix = gx[0];
+                        Iy = gx[2048];
+                        Iz = gx[3456];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += ai2 * gx[2112] * prod_xz;
+                        v_ky += (ak2 * gx[2560] - 1 * gx[1536]) * prod_xz;
+                        v_iz += (ai2 * gx[3520] - 2 * gx[3392]) * prod_xy;
+                        v_kz += ak2 * gx[3968] * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[2112] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2560] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3520] - zjzi * Iz) - 1 * gx[3200]) * prod_xy;
+                        v_lz += al2 * (gx[3968] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2496];
+                        Ix = gx[256];
+                        Iy = gx[1664];
+                        Iz = gx[3584];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[320] * prod_yz;
+                        v_kx += ak2 * gx[768] * prod_yz;
+                        v_iy += (ai2 * gx[1728] - 2 * gx[1600]) * prod_xz;
+                        v_ky += ak2 * gx[2176] * prod_xz;
+                        v_iz += ai2 * gx[3648] * prod_xy;
+                        v_kz += (ak2 * gx[4096] - 1 * gx[3072]) * prod_xy;
+                        v_jx += (aj2 * (gx[320] - xjxi * Ix) - 1 * gx[0]) * prod_yz;
+                        v_lx += al2 * (gx[768] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1728] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2176] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3648] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4096] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[2752];
+                        Ix = gx[64];
+                        Iy = gx[1856];
+                        Iz = gx[3584];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += (ai2 * gx[128] - 1 * gx[0]) * prod_yz;
+                        v_kx += ak2 * gx[576] * prod_yz;
+                        v_iy += (ai2 * gx[1920] - 1 * gx[1792]) * prod_xz;
+                        v_ky += ak2 * gx[2368] * prod_xz;
+                        v_iz += ai2 * gx[3648] * prod_xy;
+                        v_kz += (ak2 * gx[4096] - 1 * gx[3072]) * prod_xy;
+                        v_jx += aj2 * (gx[128] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[576] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1920] - yjyi * Iy) - 1 * gx[1600]) * prod_xz;
+                        v_ly += al2 * (gx[2368] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3648] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4096] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[3008];
+                        Ix = gx[0];
+                        Iy = gx[1792];
+                        Iz = gx[3712];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += ai2 * gx[1856] * prod_xz;
+                        v_ky += ak2 * gx[2304] * prod_xz;
+                        v_iz += (ai2 * gx[3776] - 2 * gx[3648]) * prod_xy;
+                        v_kz += (ak2 * gx[4224] - 1 * gx[3200]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += (aj2 * (gx[1856] - yjyi * Iy) - 1 * gx[1536]) * prod_xz;
+                        v_ly += al2 * (gx[2304] - ylyk * Iy) * prod_xz;
+                        v_jz += aj2 * (gx[3776] - zjzi * Iz) * prod_xy;
+                        v_lz += al2 * (gx[4224] - zlzk * Iz) * prod_xy;
+                        dd = dd_cache[3264];
+                        Ix = gx[0];
+                        Iy = gx[1664];
+                        Iz = gx[3840];
+                        prod_xy = Ix * Iy * dd;
+                        prod_xz = Ix * Iz * dd;
+                        prod_yz = Iy * Iz * dd;
+                        v_ix += ai2 * gx[64] * prod_yz;
+                        v_kx += ak2 * gx[512] * prod_yz;
+                        v_iy += (ai2 * gx[1728] - 2 * gx[1600]) * prod_xz;
+                        v_ky += ak2 * gx[2176] * prod_xz;
+                        v_iz += ai2 * gx[3904] * prod_xy;
+                        v_kz += (ak2 * gx[4352] - 1 * gx[3328]) * prod_xy;
+                        v_jx += aj2 * (gx[64] - xjxi * Ix) * prod_yz;
+                        v_lx += al2 * (gx[512] - xlxk * Ix) * prod_yz;
+                        v_jy += aj2 * (gx[1728] - yjyi * Iy) * prod_xz;
+                        v_ly += al2 * (gx[2176] - ylyk * Iy) * prod_xz;
+                        v_jz += (aj2 * (gx[3904] - zjzi * Iz) - 1 * gx[3584]) * prod_xy;
+                        v_lz += al2 * (gx[4352] - zlzk * Iz) * prod_xy;
                         break;
                     }
                 }
@@ -16308,39 +16282,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * 5184 + sq_id;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -16349,6 +16299,7 @@ while (1) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+    int gout_id = threadIdx.y;
     extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -16356,40 +16307,68 @@ while (1) {
     double *rw = shared_memory + nsq_per_block * 150 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (150+nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 5184 + sq_id;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -16400,10 +16379,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -16418,17 +16395,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
             rlrk[0] = xlxk;
             rlrk[32] = ylyk;
@@ -16504,12 +16479,11 @@ while (1) {
                 dd_cache[n*32] = fac_sym * dd;
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
@@ -16521,24 +16495,24 @@ while (1) {
                 double ylyk = rlrk[32];
                 double zlzk = rlrk[64];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
-                double xkl = rk[0] + rlrk[0] * al_akl;
-                double ykl = rk[1] + rlrk[32] * al_akl;
-                double zkl = rk[2] + rlrk[64] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
+                double xkl = env[rk+0] + rlrk[0] * al_akl;
+                double ykl = env[rk+1] + rlrk[32] * al_akl;
+                double zkl = env[rk+2] + rlrk[64] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -19899,39 +19873,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -19940,6 +19890,7 @@ while (1) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+    int gout_id = threadIdx.y;
     extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -19947,40 +19898,68 @@ while (1) {
     double *rw = shared_memory + nsq_per_block * 102 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (102+nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -19991,10 +19970,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -20009,17 +19986,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
             rlrk[0] = xlxk;
             rlrk[32] = ylyk;
@@ -20095,12 +20070,11 @@ while (1) {
                 dd_cache[n*32] = fac_sym * dd;
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
@@ -20112,24 +20086,24 @@ while (1) {
                 double ylyk = rlrk[32];
                 double zlzk = rlrk[64];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
-                double xkl = rk[0] + rlrk[0] * al_akl;
-                double ykl = rk[1] + rlrk[32] * al_akl;
-                double zkl = rk[2] + rlrk[64] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
+                double xkl = env[rk+0] + rlrk[0] * al_akl;
+                double ykl = env[rk+1] + rlrk[32] * al_akl;
+                double zkl = env[rk+2] + rlrk[64] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -22392,38 +22366,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -22436,40 +22387,67 @@ while (1) {
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -22480,10 +22458,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -22498,17 +22474,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
@@ -22720,24 +22694,23 @@ while (1) {
                 dd_cache35 += fac * (dm[(l0+0)*nao+(k0+0)]+dmb[(l0+0)*nao+(k0+0)]) * (dm[(j0+5)*nao+(i0+5)]+dmb[(j0+5)*nao+(i0+5)]);
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
             double al_akl = al / akl;
             double theta_kl = ak * al_akl;
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = ck[kp] * cl[lp] * Kcd;
+            double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -22753,9 +22726,9 @@ while (1) {
                 double xqc = xlxk * al_akl;
                 double yqc = ylyk * al_akl;
                 double zqc = zlzk * al_akl;
-                double xkl = rk[0] + xqc;
-                double ykl = rk[1] + yqc;
-                double zkl = rk[2] + zqc;
+                double xkl = env[rk+0] + xqc;
+                double ykl = env[rk+1] + yqc;
+                double zkl = env[rk+2] + zqc;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -24157,39 +24130,15 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool, int *head)
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int t_id = threadIdx.y * nsq_per_block + threadIdx.x;
     int threads = nsq_per_block * gout_stride;
-    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
-    __shared__ int ntasks, pair_ij;
-while (1) {
-    if (thread_id == 0) {
-        pair_ij = atomicAdd(head, 1);
-    }
-    __syncthreads();
-    if (pair_ij >= bounds.npairs_ij) {
-        return;
-    }
-    int bas_ij = bounds.pair_ij_mapping[pair_ij];
-    if (thread_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
-    if (jk.lr_factor != 0) {
-        _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    } else {
-        _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
-    }
-    if (ntasks == 0) {
-        continue;
-    }
-
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -24198,6 +24147,7 @@ while (1) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+    int gout_id = threadIdx.y;
     extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -24205,40 +24155,68 @@ while (1) {
     double *rw = shared_memory + nsq_per_block * 114 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (114+nroots*2);
 
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    if (thread_id == 0) {
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
+    __shared__ int ntasks, pair_ij, pair_kl0;
+while (1) {
+    __syncthreads();
+    __shared__ int ish, jsh;
+    if (t_id == 0) {
+        int task_id = atomicAdd(head, 1);
+        int batch_kl = task_id / bounds.npairs_ij;
+        pair_ij = task_id - bounds.npairs_ij * batch_kl;
+        pair_kl0 = batch_kl * (QUEUE_DEPTH - 512);
+        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
     }
     __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    if (thread_id < 3) {
-        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[thread_id] = env[ri_ptr+thread_id];
-        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    if (pair_kl0 >= bounds.npairs_kl) {
+        break;
+    }
+    if (jk.lr_factor != 0) {
+        _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                        q_cond_ij, q_cond_kl, jk, envs, bounds);
+    } else {
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           q_cond_ij, q_cond_kl,
+                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
+    }
+    if (ntasks == 0) {
+        continue;
+    }
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi, expj;
+    if (t_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
     __syncthreads();
+    if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[t_id] = env[ri_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
+    __syncthreads();
 
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[nbas];
@@ -24249,10 +24227,8 @@ while (1) {
     double v_jx = 0;
     double v_jy = 0;
     double v_jz = 0;
-
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
-        __syncthreads();
-        int bas_kl = bas_kl_idx[task_id];
+        uint32_t bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -24267,17 +24243,15 @@ while (1) {
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xlxk = rl[0] - rk[0];
-        double ylyk = rl[1] - rk[1];
-        double zlzk = rl[2] - rk[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xlxk = env[rl+0] - env[rk+0];
+        double ylyk = env[rl+1] - env[rk+1];
+        double zlzk = env[rl+2] - env[rk+2];
         if (gout_id == 0) {
             rlrk[0] = xlxk;
             rlrk[32] = ylyk;
@@ -24353,12 +24327,11 @@ while (1) {
                 dd_cache[n*32] = fac_sym * dd;
             }
         }
-
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double ak2 = ak * 2;
             double al2 = al * 2;
             double akl = ak + al;
@@ -24370,24 +24343,24 @@ while (1) {
                 double ylyk = rlrk[32];
                 double zlzk = rlrk[64];
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
-                double xkl = rk[0] + rlrk[0] * al_akl;
-                double ykl = rk[1] + rlrk[32] * al_akl;
-                double zkl = rk[2] + rlrk[64] * al_akl;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
+                double xkl = env[rk+0] + rlrk[0] * al_akl;
+                double ykl = env[rk+1] + rlrk[32] * al_akl;
+                double zkl = env[rk+2] + rlrk[64] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -26669,7 +26642,9 @@ while (1) {
 }
 
 int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                        int *pool, double *dd_pool)
+                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                        uint32_t *pool, double *dd_pool, int *head, int workers)
 {
     int li = bounds->li;
     int lj = bounds->lj;
@@ -26681,90 +26656,133 @@ int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
     int gout_stride = 1;
 
     switch (ijkl) {
-    case 156:
+    case 0: // (0, 0, 0, 0)
+        adjust_threads(rys_ejk_ip1_0000, nsq_per_block);
+        break;
+    case 125: // (1, 0, 0, 0)
+        adjust_threads(rys_ejk_ip1_1000, nsq_per_block);
+        break;
+    case 130: // (1, 0, 1, 0)
+        adjust_threads(rys_ejk_ip1_1010, nsq_per_block);
+        break;
+    case 131: // (1, 0, 1, 1)
+        adjust_threads(rys_ejk_ip1_1011, nsq_per_block);
+        break;
+    case 150: // (1, 1, 0, 0)
+        adjust_threads(rys_ejk_ip1_1100, nsq_per_block);
+        break;
+    case 155: // (1, 1, 1, 0)
+        adjust_threads(rys_ejk_ip1_1110, nsq_per_block);
+        break;
+    case 156: // (1, 1, 1, 1)
         nsq_per_block = 32;
         gout_stride = 8;
         break;
-    case 256:
+    case 250: // (2, 0, 0, 0)
+        adjust_threads(rys_ejk_ip1_2000, nsq_per_block);
+        break;
+    case 255: // (2, 0, 1, 0)
+        adjust_threads(rys_ejk_ip1_2010, nsq_per_block);
+        break;
+    case 256: // (2, 0, 1, 1)
+        nsq_per_block = 64;
+        gout_stride = 4;
+        break;
+    case 260: // (2, 0, 2, 0)
+        break;
+    case 261: // (2, 0, 2, 1)
         nsq_per_block = 32;
         gout_stride = 8;
         break;
-    case 261:
+    case 275: // (2, 1, 0, 0)
+        adjust_threads(rys_ejk_ip1_2100, nsq_per_block);
+        break;
+    case 280: // (2, 1, 1, 0)
+        nsq_per_block = 64;
+        gout_stride = 4;
+        break;
+    case 281: // (2, 1, 1, 1)
         nsq_per_block = 32;
         gout_stride = 8;
         break;
-    case 280:
+    case 285: // (2, 1, 2, 0)
         nsq_per_block = 32;
         gout_stride = 8;
         break;
-    case 281:
-        nsq_per_block = 32;
-        gout_stride = 8;
+    case 300: // (2, 2, 0, 0)
         break;
-    case 285:
-        nsq_per_block = 32;
-        gout_stride = 8;
-        break;
-    case 305:
+    case 305: // (2, 2, 1, 0)
         nsq_per_block = 32;
         gout_stride = 8;
         break;
     }
-
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int workers = prop.multiProcessorCount;
-    int *head = pool + workers * QUEUE_DEPTH;
-    cudaMemset(head, 0, sizeof(int));
 
     dim3 threads(nsq_per_block, gout_stride);
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
-    case 0:
-        rys_ejk_ip1_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 125:
-        rys_ejk_ip1_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 130:
-        rys_ejk_ip1_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 131:
-        rys_ejk_ip1_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 150:
-        rys_ejk_ip1_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 155:
-        rys_ejk_ip1_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 156:
-        buflen += 3648;
-        rys_ejk_ip1_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 250:
-        rys_ejk_ip1_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 255:
-        rys_ejk_ip1_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 256:
-        buflen += 2496;
-        rys_ejk_ip1_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 260:
-        rys_ejk_ip1_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 261:
-        buflen += 3264;
-        rys_ejk_ip1_2021<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 275:
-        rys_ejk_ip1_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 280:
-        buflen += 2496;
-        rys_ejk_ip1_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 281:
-        buflen += 4800;
-        rys_ejk_ip1_2111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 285:
-        buflen += 3264;
-        rys_ejk_ip1_2120<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 300:
-        rys_ejk_ip1_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
-    case 305:
-        buflen += 3648;
-        rys_ejk_ip1_2210<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
+    case 0: // (0, 0, 0, 0)
+        rys_ejk_ip1_0000<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 125: // (1, 0, 0, 0)
+        rys_ejk_ip1_1000<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 130: // (1, 0, 1, 0)
+        rys_ejk_ip1_1010<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 131: // (1, 0, 1, 1)
+        rys_ejk_ip1_1011<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 150: // (1, 1, 0, 0)
+        rys_ejk_ip1_1100<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 155: // (1, 1, 1, 0)
+        rys_ejk_ip1_1110<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 156: // (1, 1, 1, 1)
+        buflen = 4032 + iprim * jprim;
+        rys_ejk_ip1_1111<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 250: // (2, 0, 0, 0)
+        rys_ejk_ip1_2000<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 255: // (2, 0, 1, 0)
+        rys_ejk_ip1_2010<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 256: // (2, 0, 1, 1)
+        buflen = 5760 + iprim * jprim;
+        rys_ejk_ip1_2011<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 260: // (2, 0, 2, 0)
+        rys_ejk_ip1_2020<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 261: // (2, 0, 2, 1)
+        buflen = 3776 + iprim * jprim;
+        rys_ejk_ip1_2021<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 275: // (2, 1, 0, 0)
+        rys_ejk_ip1_2100<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 280: // (2, 1, 1, 0)
+        buflen = 5760 + iprim * jprim;
+        rys_ejk_ip1_2110<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 281: // (2, 1, 1, 1)
+        buflen = 5312 + iprim * jprim;
+        rys_ejk_ip1_2111<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 285: // (2, 1, 2, 0)
+        buflen = 3776 + iprim * jprim;
+        rys_ejk_ip1_2120<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 300: // (2, 2, 0, 0)
+        rys_ejk_ip1_2200<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
+    case 305: // (2, 2, 1, 0)
+        buflen = 4160 + iprim * jprim;
+        rys_ejk_ip1_2210<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head); break;
     default: return 0;
     }
     return 1;

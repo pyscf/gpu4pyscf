@@ -70,7 +70,8 @@ def energy_ee(ks_grad, dm, kpts):
 
     if j_factor != 0 or k_sr != 0 or k_lr != 0:
         exc += kuhf_grad.jk_energy_per_atom(
-            mf, dm, kpts, j_factor, k_sr, k_lr, omega, mf.exxdiv)
+            mf, dm, kpts, j_factor, lr_factor=k_lr, sr_factor=k_sr, omega=omega,
+            exxdiv=mf.exxdiv)
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
@@ -86,7 +87,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
             rho_a = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
             wv = weight * vxc[:,0]
             aowa = cp.einsum('xpi,p->xpi', ao_ks[:,0], wv[0])
             aowb = cp.einsum('xpi,p->xpi', ao_ks[:,0], wv[1])
@@ -101,7 +102,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
             wv = weight * vxc
             wv[:,0] *= .5
             for kn in range(nkpts):
@@ -115,7 +116,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
             wv = weight * vxc
             wv[:,0] *= .5
             wv[:,4] *= .5  # for the factor 1/2 in tau

@@ -189,6 +189,14 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-10
 
+    def test_default_grids(self):
+        grids = Grids_gpu(mol)
+        grids.atom_grid = {'default': (6, 50), 'S': (99, 590)}
+        grids.prune = None
+        grids.build()
+        # grids.size != 900 due to alignment
+        assert 900 <= grids.size <= 1024
+
 if __name__ == "__main__":
     print("Full Tests for grids")
     unittest.main()
