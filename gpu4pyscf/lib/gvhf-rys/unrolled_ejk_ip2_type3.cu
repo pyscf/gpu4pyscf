@@ -1,36 +1,16 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "vhf.cuh"
-#include "rys_roots_for_k.cu"
-#include "create_tasks.cu"
-
-#define KERNEL_ARGS \
-    RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds, \
-    float *q_cond_ij, float *q_cond_kl, float dm_penalty, \
-    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
-    uint32_t *pool, double *dd_pool, int *head
-
-#define KERNEL_SETUP() \
-    int sq_id = threadIdx.x; \
-    int gout_id = threadIdx.y; \
-    int worker_id = blockIdx.x; \
-    extern __shared__ double shared_memory[]; \
-    __shared__ int ntasks, pair_ij, pair_kl0; \
-    __shared__ int ish, jsh; \
-    __shared__ double ri[3]; \
-    __shared__ double rjri[3]; \
-    __shared__ int expi, expj;
-
-#define LAUNCH_KERNEL(KERNEL) \
-    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
-    *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head)
+#include "gvhf-rys/vhf.cuh"
+#include "gvhf-rys/rys_roots_for_k.cu"
+#include "gvhf-rys/create_tasks.cu"
+#include "gvhf-rys/unrolled_kernels.cuh"
 
 
 __global__ static
-void rys_ejk_ip2_type3_0000(KERNEL_ARGS)
+void rys_ejk_ip2_type3_0000(JKENERGY_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKENERGY_KERNEL_SETUP();
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
     int t_id = gout_id * nsq_per_block + sq_id;
@@ -433,9 +413,9 @@ while (1) {
 }
 
 __global__ static
-void rys_ejk_ip2_type3_1000(KERNEL_ARGS)
+void rys_ejk_ip2_type3_1000(JKENERGY_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKENERGY_KERNEL_SETUP();
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
     int t_id = gout_id * nsq_per_block + sq_id;
@@ -1067,9 +1047,9 @@ while (1) {
 }
 
 __global__ static
-void rys_ejk_ip2_type3_1010(KERNEL_ARGS)
+void rys_ejk_ip2_type3_1010(JKENERGY_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKENERGY_KERNEL_SETUP();
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
     int t_id = gout_id * nsq_per_block + sq_id;
@@ -2528,9 +2508,9 @@ while (1) {
 }
 
 __global__ static
-void rys_ejk_ip2_type3_1011(KERNEL_ARGS)
+void rys_ejk_ip2_type3_1011(JKENERGY_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKENERGY_KERNEL_SETUP();
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     int t_id = gout_id * nsq_per_block + sq_id;
@@ -5003,9 +4983,9 @@ while (1) {
 }
 
 __global__ static
-void rys_ejk_ip2_type3_1100(KERNEL_ARGS)
+void rys_ejk_ip2_type3_1100(JKENERGY_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKENERGY_KERNEL_SETUP();
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
     int t_id = gout_id * nsq_per_block + sq_id;
@@ -6468,9 +6448,9 @@ while (1) {
 }
 
 __global__ static
-void rys_ejk_ip2_type3_1110(KERNEL_ARGS)
+void rys_ejk_ip2_type3_1110(JKENERGY_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKENERGY_KERNEL_SETUP();
     constexpr int nsq_per_block = 64;
     constexpr int gout_stride = 4;
     int t_id = gout_id * nsq_per_block + sq_id;
@@ -8940,9 +8920,9 @@ while (1) {
 }
 
 __global__ static
-void rys_ejk_ip2_type3_1111(KERNEL_ARGS)
+void rys_ejk_ip2_type3_1111(JKENERGY_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKENERGY_KERNEL_SETUP();
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
     int t_id = gout_id * nsq_per_block + sq_id;
@@ -15652,22 +15632,22 @@ int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bo
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
-        LAUNCH_KERNEL(rys_ejk_ip2_type3_0000); break;
+        LAUNCH_JKENERGY_KERNEL(rys_ejk_ip2_type3_0000); break;
     case 125: // (1, 0, 0, 0)
-        LAUNCH_KERNEL(rys_ejk_ip2_type3_1000); break;
+        LAUNCH_JKENERGY_KERNEL(rys_ejk_ip2_type3_1000); break;
     case 130: // (1, 0, 1, 0)
-        LAUNCH_KERNEL(rys_ejk_ip2_type3_1010); break;
+        LAUNCH_JKENERGY_KERNEL(rys_ejk_ip2_type3_1010); break;
     case 131: // (1, 0, 1, 1)
         buflen = 4608 + iprim * jprim;
-        LAUNCH_KERNEL(rys_ejk_ip2_type3_1011); break;
+        LAUNCH_JKENERGY_KERNEL(rys_ejk_ip2_type3_1011); break;
     case 150: // (1, 1, 0, 0)
-        LAUNCH_KERNEL(rys_ejk_ip2_type3_1100); break;
+        LAUNCH_JKENERGY_KERNEL(rys_ejk_ip2_type3_1100); break;
     case 155: // (1, 1, 1, 0)
         buflen = 4608 + iprim * jprim;
-        LAUNCH_KERNEL(rys_ejk_ip2_type3_1110); break;
+        LAUNCH_JKENERGY_KERNEL(rys_ejk_ip2_type3_1110); break;
     case 156: // (1, 1, 1, 1)
         buflen = 4160 + iprim * jprim;
-        LAUNCH_KERNEL(rys_ejk_ip2_type3_1111); break;
+        LAUNCH_JKENERGY_KERNEL(rys_ejk_ip2_type3_1111); break;
     default: return 0;
     }
     return 1;

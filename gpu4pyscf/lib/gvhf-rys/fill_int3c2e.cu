@@ -22,12 +22,11 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+#include "unrolled_int3c2e.cu"
 
 #define THREADS         256
 #define GOUT_WIDTH      54
 #define POOL_SIZE       25600
-
-#include "unrolled_int3c2e.cu"
 
 __global__ static
 void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
@@ -105,7 +104,7 @@ while (1) {
                          iprim, jprim, kprim, li, lj, lk, bas_ij_idx,
                          ao_pair_loc, ao_pair_offset, aux_start, naux,
                          reorder_aux, to_sph, thread_id, worker_id, shared_memory)) {
-        return;
+        continue;
     }
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;

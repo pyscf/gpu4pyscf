@@ -7,7 +7,9 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+#define THREADS         256
 #define POOL_SIZE       25600
+
 
 #define KERNEL_ARGS \
     double *out, RysIntEnvVars& envs, double *pool, \
@@ -39,8 +41,8 @@ void int3c2e_000(KERNEL_ARGS)
     if (omega < 0) {
         nroots *= 2;
     }
-    double *rw = shared_memory + st_id;
-    double *rjri = shared_memory + nst_per_block * nroots*2 + st_id;
+    double *rjri = shared_memory + st_id;
+    double *rw = shared_memory + nst_per_block * 4 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -131,8 +133,8 @@ void int3c2e_100(KERNEL_ARGS)
     if (omega < 0) {
         nroots *= 2;
     }
-    double *rw = shared_memory + st_id;
-    double *rjri = shared_memory + nst_per_block * nroots*2 + st_id;
+    double *rjri = shared_memory + st_id;
+    double *rw = shared_memory + nst_per_block * 4 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -234,8 +236,8 @@ void int3c2e_110(KERNEL_ARGS)
     if (omega < 0) {
         nroots *= 2;
     }
-    double *rw = shared_memory + st_id;
-    double *rjri = shared_memory + nst_per_block * nroots*2 + st_id;
+    double *rjri = shared_memory + st_id;
+    double *rw = shared_memory + nst_per_block * 4 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -353,8 +355,8 @@ void int3c2e_200(KERNEL_ARGS)
     if (omega < 0) {
         nroots *= 2;
     }
-    double *rw = shared_memory + st_id;
-    double *rjri = shared_memory + nst_per_block * nroots*2 + st_id;
+    double *rjri = shared_memory + st_id;
+    double *rw = shared_memory + nst_per_block * 4 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -481,10 +483,10 @@ void int3c2e_210(KERNEL_ARGS)
         nroots *= 2;
     }
     __syncthreads();
-    double *rw = shared_memory + st_id;
-    double *gx = rw + nroots * 256;
-    double *Rpq = gx + 2304;
-    double *rjri = gx + 2688;
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + 512 + st_id;
+    double *gx = shared_memory + 896 + st_id;
+    double *rw = shared_memory + 3200 + st_id;
     if (gout_id == 0) {
         gx[0] = 1.;
     }
@@ -721,10 +723,10 @@ void int3c2e_220(KERNEL_ARGS)
         nroots *= 2;
     }
     __syncthreads();
-    double *rw = shared_memory + st_id;
-    double *gx = rw + nroots * 256;
-    double *Rpq = gx + 3456;
-    double *rjri = gx + 3840;
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + 512 + st_id;
+    double *gx = shared_memory + 896 + st_id;
+    double *rw = shared_memory + 4352 + st_id;
     if (gout_id == 0) {
         gx[0] = 1.;
     }
@@ -1021,8 +1023,8 @@ void int3c2e_001(KERNEL_ARGS)
     if (omega < 0) {
         nroots *= 2;
     }
-    double *rw = shared_memory + st_id;
-    double *rjri = shared_memory + nst_per_block * nroots*2 + st_id;
+    double *rjri = shared_memory + st_id;
+    double *rw = shared_memory + nst_per_block * 4 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -1124,8 +1126,8 @@ void int3c2e_101(KERNEL_ARGS)
     if (omega < 0) {
         nroots *= 2;
     }
-    double *rw = shared_memory + st_id;
-    double *rjri = shared_memory + nst_per_block * nroots*2 + st_id;
+    double *rjri = shared_memory + st_id;
+    double *rw = shared_memory + nst_per_block * 4 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -1246,10 +1248,10 @@ void int3c2e_111(KERNEL_ARGS)
         nroots *= 2;
     }
     __syncthreads();
-    double *rw = shared_memory + st_id;
-    double *gx = rw + nroots * 256;
-    double *Rpq = gx + 3072;
-    double *rjri = gx + 3456;
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + 512 + st_id;
+    double *gx = shared_memory + 896 + st_id;
+    double *rw = shared_memory + 3968 + st_id;
     if (gout_id == 0) {
         gx[0] = 1.;
     }
@@ -1425,40 +1427,6 @@ void int3c2e_111(KERNEL_ARGS)
                 out_local[ij*i_stride + k*aux_stride] = gout[n];
             }
         }
-        __syncthreads();
-        if (ijk_idx < nst && to_sph) {
-            constexpr int i_stride = 384;
-            constexpr int j_stride = i_stride * 3;
-            double *inp_local = out_local;
-            int aux_stride = 1;
-            if (reorder_aux) {
-                aux_stride = nksh;
-            }
-            double *inp, *sph_out;
-            double s;
-            for (int k = gout_id; k < 3; k += 2) {
-                inp = inp_local + k * 128;
-                sph_out = j3c + k * aux_stride;
-                s = inp[i_stride*0+j_stride*0];
-                sph_out[0*naux] += s;
-                s = inp[i_stride*0+j_stride*1];
-                sph_out[3*naux] += s;
-                s = inp[i_stride*0+j_stride*2];
-                sph_out[6*naux] += s;
-                s = inp[i_stride*1+j_stride*0];
-                sph_out[1*naux] += s;
-                s = inp[i_stride*1+j_stride*1];
-                sph_out[4*naux] += s;
-                s = inp[i_stride*1+j_stride*2];
-                sph_out[7*naux] += s;
-                s = inp[i_stride*2+j_stride*0];
-                sph_out[2*naux] += s;
-                s = inp[i_stride*2+j_stride*1];
-                sph_out[5*naux] += s;
-                s = inp[i_stride*2+j_stride*2];
-                sph_out[8*naux] += s;
-            }
-        }
     }
 }
 
@@ -1479,10 +1447,10 @@ void int3c2e_201(KERNEL_ARGS)
         nroots *= 2;
     }
     __syncthreads();
-    double *rw = shared_memory + st_id;
-    double *gx = rw + nroots * 256;
-    double *Rpq = gx + 2304;
-    double *rjri = gx + 2688;
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + 512 + st_id;
+    double *gx = shared_memory + 896 + st_id;
+    double *rw = shared_memory + 3200 + st_id;
     if (gout_id == 0) {
         gx[0] = 1.;
     }
@@ -1692,10 +1660,10 @@ void int3c2e_211(KERNEL_ARGS)
         nroots *= 2;
     }
     __syncthreads();
-    double *rw = shared_memory + st_id;
-    double *gx = rw + nroots * 128;
-    double *Rpq = gx + 2304;
-    double *rjri = gx + 2496;
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + 256 + st_id;
+    double *gx = shared_memory + 448 + st_id;
+    double *rw = shared_memory + 2752 + st_id;
     if (gout_id == 0) {
         gx[0] = 1.;
     }
@@ -1997,8 +1965,8 @@ void int3c2e_002(KERNEL_ARGS)
     if (omega < 0) {
         nroots *= 2;
     }
-    double *rw = shared_memory + st_id;
-    double *rjri = shared_memory + nst_per_block * nroots*2 + st_id;
+    double *rjri = shared_memory + st_id;
+    double *rw = shared_memory + nst_per_block * 4 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -2109,10 +2077,10 @@ void int3c2e_102(KERNEL_ARGS)
         nroots *= 2;
     }
     __syncthreads();
-    double *rw = shared_memory + st_id;
-    double *gx = rw + nroots * 256;
-    double *Rpq = gx + 2304;
-    double *rjri = gx + 2688;
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + 512 + st_id;
+    double *gx = shared_memory + 896 + st_id;
+    double *rw = shared_memory + 3200 + st_id;
     if (gout_id == 0) {
         gx[0] = 1.;
     }
@@ -2266,28 +2234,6 @@ void int3c2e_102(KERNEL_ARGS)
                 out_local[ij*i_stride + k*aux_stride] = gout[n];
             }
         }
-        __syncthreads();
-        if (ijk_idx < nst && to_sph) {
-            constexpr int i_stride = 768;
-            constexpr int j_stride = i_stride * 3;
-            double *inp_local = out_local;
-            int aux_stride = 1;
-            if (reorder_aux) {
-                aux_stride = nksh;
-            }
-            double *inp, *sph_out;
-            double s;
-            for (int k = gout_id; k < 6; k += 2) {
-                inp = inp_local + k * 128;
-                sph_out = j3c + k * aux_stride;
-                s = inp[i_stride*0+j_stride*0];
-                sph_out[0*naux] += s;
-                s = inp[i_stride*1+j_stride*0];
-                sph_out[1*naux] += s;
-                s = inp[i_stride*2+j_stride*0];
-                sph_out[2*naux] += s;
-            }
-        }
     }
 }
 
@@ -2308,10 +2254,10 @@ void int3c2e_112(KERNEL_ARGS)
         nroots *= 2;
     }
     __syncthreads();
-    double *rw = shared_memory + st_id;
-    double *gx = rw + nroots * 128;
-    double *Rpq = gx + 2304;
-    double *rjri = gx + 2496;
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + 256 + st_id;
+    double *gx = shared_memory + 448 + st_id;
+    double *rw = shared_memory + 2752 + st_id;
     if (gout_id == 0) {
         gx[0] = 1.;
     }
@@ -2533,40 +2479,6 @@ void int3c2e_112(KERNEL_ARGS)
                 out_local[ij*i_stride + k*aux_stride] = gout[n];
             }
         }
-        __syncthreads();
-        if (ijk_idx < nst && to_sph) {
-            constexpr int i_stride = 384;
-            constexpr int j_stride = i_stride * 3;
-            double *inp_local = out_local;
-            int aux_stride = 1;
-            if (reorder_aux) {
-                aux_stride = nksh;
-            }
-            double *inp, *sph_out;
-            double s;
-            for (int k = gout_id; k < 6; k += 4) {
-                inp = inp_local + k * 64;
-                sph_out = j3c + k * aux_stride;
-                s = inp[i_stride*0+j_stride*0];
-                sph_out[0*naux] += s;
-                s = inp[i_stride*0+j_stride*1];
-                sph_out[3*naux] += s;
-                s = inp[i_stride*0+j_stride*2];
-                sph_out[6*naux] += s;
-                s = inp[i_stride*1+j_stride*0];
-                sph_out[1*naux] += s;
-                s = inp[i_stride*1+j_stride*1];
-                sph_out[4*naux] += s;
-                s = inp[i_stride*1+j_stride*2];
-                sph_out[7*naux] += s;
-                s = inp[i_stride*2+j_stride*0];
-                sph_out[2*naux] += s;
-                s = inp[i_stride*2+j_stride*1];
-                sph_out[5*naux] += s;
-                s = inp[i_stride*2+j_stride*2];
-                sph_out[8*naux] += s;
-            }
-        }
     }
 }
 
@@ -2587,10 +2499,10 @@ void int3c2e_202(KERNEL_ARGS)
         nroots *= 2;
     }
     __syncthreads();
-    double *rw = shared_memory + st_id;
-    double *gx = rw + nroots * 256;
-    double *Rpq = gx + 3456;
-    double *rjri = gx + 3840;
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + 512 + st_id;
+    double *gx = shared_memory + 896 + st_id;
+    double *rw = shared_memory + 4352 + st_id;
     if (gout_id == 0) {
         gx[0] = 1.;
     }

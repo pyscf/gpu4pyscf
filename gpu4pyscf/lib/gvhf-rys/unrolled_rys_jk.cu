@@ -1,39 +1,16 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "vhf.cuh"
-#include "rys_roots.cu"
-#include "create_tasks.cu"
-
-
-#define KERNEL_ARGS \
-    RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, \
-    float *q_cond_ij, float *q_cond_kl, float dm_penalty, \
-    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
-    uint32_t *pool, int *head
-
-#define KERNEL_SETUP() \
-    int sq_id = threadIdx.x; \
-    int gout_id = threadIdx.y; \
-    int _nsq_per_block = blockDim.x; \
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH; \
-    extern __shared__ double shared_memory[]; \
-    __shared__ int ntasks, pair_ij, pair_kl0; \
-    __shared__ int ish, jsh; \
-    __shared__ double ri[3]; \
-    __shared__ double rjri[3]; \
-    __shared__ int expi; \
-    __shared__ int expj;
-
-#define LAUNCH_KERNEL(KERNEL) \
-    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
-    *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head)
+#include "gvhf-rys/vhf.cuh"
+#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/create_tasks.cu"
+#include "gvhf-rys/unrolled_kernels.cuh"
 
 
 __global__ static
-void rys_k_0000(KERNEL_ARGS)
+void rys_k_0000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -214,9 +191,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1000(KERNEL_ARGS)
+void rys_k_1000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -438,9 +415,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1010(KERNEL_ARGS)
+void rys_k_1010(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -709,9 +686,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1011(KERNEL_ARGS)
+void rys_k_1011(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -1131,9 +1108,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1100(KERNEL_ARGS)
+void rys_k_1100(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -1401,9 +1378,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1110(KERNEL_ARGS)
+void rys_k_1110(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -1823,9 +1800,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1111(KERNEL_ARGS)
+void rys_k_1111(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -2312,9 +2289,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2000(KERNEL_ARGS)
+void rys_k_2000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -2579,9 +2556,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2010(KERNEL_ARGS)
+void rys_k_2010(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -2956,9 +2933,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2011(KERNEL_ARGS)
+void rys_k_2011(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -3565,9 +3542,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2020(KERNEL_ARGS)
+void rys_k_2020(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -4024,9 +4001,9 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2021(KERNEL_ARGS)
+void rys_jk_2021(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -5397,9 +5374,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2100(KERNEL_ARGS)
+void rys_k_2100(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -5772,9 +5749,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2110(KERNEL_ARGS)
+void rys_k_2110(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -6377,9 +6354,9 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2111(KERNEL_ARGS)
+void rys_jk_2111(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int t_id = 32 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -8751,9 +8728,9 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2120(KERNEL_ARGS)
+void rys_jk_2120(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -10229,9 +10206,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2200(KERNEL_ARGS)
+void rys_k_2200(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -10691,9 +10668,9 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2210(KERNEL_ARGS)
+void rys_jk_2210(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -12072,9 +12049,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3000(KERNEL_ARGS)
+void rys_k_3000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -12394,9 +12371,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3010(KERNEL_ARGS)
+void rys_k_3010(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -12885,9 +12862,9 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_3011(KERNEL_ARGS)
+void rys_jk_3011(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -14180,9 +14157,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3020(KERNEL_ARGS)
+void rys_k_3020(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -14912,9 +14889,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3100(KERNEL_ARGS)
+void rys_k_3100(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -15401,9 +15378,9 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_3110(KERNEL_ARGS)
+void rys_jk_3110(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int t_id = 64 * gout_id + sq_id;
     constexpr int threads = 256;
@@ -16692,9 +16669,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3200(KERNEL_ARGS)
+void rys_k_3200(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
 
     int nsq_per_block = _nsq_per_block;
     int nbas = envs.nbas;
@@ -17521,61 +17498,61 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
-        LAUNCH_KERNEL(rys_k_0000); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_0000); break;
     case 125: // (1, 0, 0, 0)
-        LAUNCH_KERNEL(rys_k_1000); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1000); break;
     case 130: // (1, 0, 1, 0)
-        LAUNCH_KERNEL(rys_k_1010); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1010); break;
     case 131: // (1, 0, 1, 1)
-        LAUNCH_KERNEL(rys_k_1011); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1011); break;
     case 150: // (1, 1, 0, 0)
-        LAUNCH_KERNEL(rys_k_1100); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1100); break;
     case 155: // (1, 1, 1, 0)
-        LAUNCH_KERNEL(rys_k_1110); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1110); break;
     case 156: // (1, 1, 1, 1)
-        LAUNCH_KERNEL(rys_k_1111); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1111); break;
     case 250: // (2, 0, 0, 0)
-        LAUNCH_KERNEL(rys_k_2000); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2000); break;
     case 255: // (2, 0, 1, 0)
-        LAUNCH_KERNEL(rys_k_2010); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2010); break;
     case 256: // (2, 0, 1, 1)
-        LAUNCH_KERNEL(rys_k_2011); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2011); break;
     case 260: // (2, 0, 2, 0)
-        LAUNCH_KERNEL(rys_k_2020); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2020); break;
     case 261: // (2, 0, 2, 1)
         buflen = 4736 + iprim * jprim;
-        LAUNCH_KERNEL(rys_jk_2021); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_jk_2021); break;
     case 275: // (2, 1, 0, 0)
-        LAUNCH_KERNEL(rys_k_2100); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2100); break;
     case 280: // (2, 1, 1, 0)
-        LAUNCH_KERNEL(rys_k_2110); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2110); break;
     case 281: // (2, 1, 1, 1)
         buflen = 2944 + iprim * jprim;
-        LAUNCH_KERNEL(rys_jk_2111); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_jk_2111); break;
     case 285: // (2, 1, 2, 0)
         buflen = 4736 + iprim * jprim;
-        LAUNCH_KERNEL(rys_jk_2120); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_jk_2120); break;
     case 300: // (2, 2, 0, 0)
-        LAUNCH_KERNEL(rys_k_2200); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2200); break;
     case 305: // (2, 2, 1, 0)
         buflen = 4736 + iprim * jprim;
-        LAUNCH_KERNEL(rys_jk_2210); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_jk_2210); break;
     case 375: // (3, 0, 0, 0)
-        LAUNCH_KERNEL(rys_k_3000); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_3000); break;
     case 380: // (3, 0, 1, 0)
-        LAUNCH_KERNEL(rys_k_3010); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_3010); break;
     case 381: // (3, 0, 1, 1)
         buflen = 4352 + iprim * jprim;
-        LAUNCH_KERNEL(rys_jk_3011); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_jk_3011); break;
     case 385: // (3, 0, 2, 0)
-        LAUNCH_KERNEL(rys_k_3020); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_3020); break;
     case 400: // (3, 1, 0, 0)
-        LAUNCH_KERNEL(rys_k_3100); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_3100); break;
     case 405: // (3, 1, 1, 0)
         buflen = 4352 + iprim * jprim;
-        LAUNCH_KERNEL(rys_jk_3110); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_jk_3110); break;
     case 425: // (3, 2, 0, 0)
-        LAUNCH_KERNEL(rys_k_3200); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_3200); break;
     default: return 0;
     }
     return 1;

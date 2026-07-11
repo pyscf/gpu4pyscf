@@ -4,43 +4,14 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "create_tasks.cu"
-
-#define KERNEL_ARGS \
-    RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, \
-    int64_t *pair_ij_mapping, int64_t *pair_kl_mapping, \
-    int *supcell_shl, int *Ts_ij_lookup, \
-    int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao, \
-    float *q_cond_ij, float *q_cond_kl, \
-    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
-    float dm_penalty, int64_t *pool, int *head
-
-#define KERNEL_SETUP() \
-    int sq_id = threadIdx.x; \
-    int gout_id = threadIdx.y; \
-    int _nsq_per_block = blockDim.x; \
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH; \
-    extern __shared__ double shared_memory[]; \
-    __shared__ int ntasks, pair_ij, pair_kl0; \
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0; \
-    __shared__ double ri[3]; \
-    __shared__ double rjri[3]; \
-    __shared__ double aij_cache[2]; \
-    __shared__ int expi; \
-    __shared__ int expj;
-
-#define LAUNCH_KERNEL(KERNEL) \
-    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
-    *envs, *kmat, *bounds, \
-    pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
-    nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
-    s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head)
+#include "pbc/create_tasks.cu"
+#include "pbc/unrolled_kernels.cuh"
 
 
 __global__ static
-void rys_k_0000(KERNEL_ARGS)
+void rys_k_0000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -158,11 +129,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -228,9 +194,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1000(KERNEL_ARGS)
+void rys_k_1000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -348,11 +314,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -377,8 +338,6 @@ while (1) {
                 for (int irys = 0; irys < 2; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double xjxi = rjri[0];
                     double rt_aij = rt_aa * akl;
@@ -452,9 +411,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1010(KERNEL_ARGS)
+void rys_k_1010(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -572,11 +531,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -601,8 +555,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double rt_akl = rt_aa * aij;
@@ -720,9 +672,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1011(KERNEL_ARGS)
+void rys_k_1011(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -840,11 +792,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -869,8 +816,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double rt_akl = rt_aa * aij;
@@ -1094,9 +1039,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1100(KERNEL_ARGS)
+void rys_k_1100(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -1214,11 +1159,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -1243,8 +1183,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double xjxi = rjri[0];
                     double rt_aij = rt_aa * akl;
@@ -1340,9 +1278,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1110(KERNEL_ARGS)
+void rys_k_1110(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -1460,11 +1398,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -1489,8 +1422,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double rt_akl = rt_aa * aij;
@@ -1714,9 +1645,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2000(KERNEL_ARGS)
+void rys_k_2000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -1834,11 +1765,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -1863,8 +1789,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double xjxi = rjri[0];
                     double rt_aij = rt_aa * akl;
@@ -1969,9 +1893,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2010(KERNEL_ARGS)
+void rys_k_2010(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -2089,11 +2013,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -2118,8 +2037,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double rt_akl = rt_aa * aij;
@@ -2316,9 +2233,9 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2100(KERNEL_ARGS)
+void rys_k_2100(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
+    JKMATRIX_KERNEL_SETUP();
     int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
     int threads = nsq_per_block;
@@ -2436,11 +2353,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -2465,8 +2377,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double xjxi = rjri[0];
                     double rt_aij = rt_aa * akl;
@@ -2683,23 +2593,23 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
-        LAUNCH_KERNEL(rys_k_0000); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_0000); break;
     case 125: // (1, 0, 0, 0)
-        LAUNCH_KERNEL(rys_k_1000); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1000); break;
     case 130: // (1, 0, 1, 0)
-        LAUNCH_KERNEL(rys_k_1010); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1010); break;
     case 131: // (1, 0, 1, 1)
-        LAUNCH_KERNEL(rys_k_1011); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1011); break;
     case 150: // (1, 1, 0, 0)
-        LAUNCH_KERNEL(rys_k_1100); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1100); break;
     case 155: // (1, 1, 1, 0)
-        LAUNCH_KERNEL(rys_k_1110); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1110); break;
     case 250: // (2, 0, 0, 0)
-        LAUNCH_KERNEL(rys_k_2000); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2000); break;
     case 255: // (2, 0, 1, 0)
-        LAUNCH_KERNEL(rys_k_2010); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2010); break;
     case 275: // (2, 1, 0, 0)
-        LAUNCH_KERNEL(rys_k_2100); break;
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2100); break;
     default: return 0;
     }
     return 1;
