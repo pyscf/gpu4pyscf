@@ -1258,7 +1258,7 @@ class PBCJKMatrixOpt:
                     else:
                         dm_vG *= wcoulG[p0:p1]
                     dm_vG = cp.asarray(dm_vG, order='C')
-                    GvT = cp.asarray((Gv[p0:p1]+kpt).T.ravel())
+                    GvT = (Gv[p0:p1].T + cp.asarray(kpt[:,None])).ravel()
                     err = kern(
                         ctypes.cast(ek.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
@@ -1683,7 +1683,7 @@ class PBCJKMatrixOpt:
             sigma1 = cp.zeros((3, 3))
             for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
                 kpt = kpts[kp]
-                Gvk = Gv + kpt
+                Gvk = Gv + cp.asarray(kpt)
                 remove_G0 = is_zero(kpt)
                 wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, 0)
                 if remove_G0 and exxdiv == 'ewald':

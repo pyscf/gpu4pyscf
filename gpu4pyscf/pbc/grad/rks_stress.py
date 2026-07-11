@@ -94,7 +94,7 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
 
 def _get_coulG_strain_derivatives(cell, Gv, omega=None):
     '''derivatives of 4pi/G^2'''
-    remove_G0 = is_zero(Gv[0])
+    remove_G0 = is_zero(cp.asnumpy(Gv[0]))
     Gv = asarray(Gv)
     G2 = cp.einsum('gx,gx->g', Gv, Gv)
     if remove_G0:
