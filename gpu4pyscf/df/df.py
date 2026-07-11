@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,36 +13,47 @@
 # limitations under the License.
 
 
-import copy
+import ctypes
+import contextlib
 import cupy
-from concurrent.futures import ThreadPoolExecutor
 import numpy as np
+import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
-from pyscf.df import df, addons, incore
+from pyscf.df import addons, incore
 from gpu4pyscf.lib.cupy_helper import (
-    cholesky, tag_array, get_avail_mem, cart2sph, p2p_transfer, copy_array,
-    asarray, empty_mapped)
-from gpu4pyscf.df import int3c2e, df_jk
-from gpu4pyscf.df import int3c2e_bdiv
+    cholesky, tag_array, get_avail_mem, cart2sph, copy_array,
+    asarray, empty_mapped, ndarray)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
+from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.df import int3c2e_bdiv
+from gpu4pyscf.df import df_jk
+from gpu4pyscf.gto.mole import SortedMole
 from gpu4pyscf import __config__
-from gpu4pyscf.__config__ import num_devices
 
-MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
+libvhf_rys = int3c2e_bdiv.libvhf_rys
+num_devices = multi_gpu.num_devices
+
+MIN_BLK_SIZE = 256
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
-GB = 1024*1024*1024
-INT3C2E_V2 = False
 
 LINEAR_DEP_THR = incore.LINEAR_DEP_THR
-GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
 
-    use_gpu_memory = True
+    # Automatically determine whether to use GPU memory to hold the cderi tensor.
+    # When gpu memory is sufficient, cderi is cached in GPU memory. Otherwise,
+    # transfer to the host memory
+    use_gpu_memory = None
 
     _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_gpu_memory'}
+
+    # These attributes are not available in PySCF. When accessing them from an
+    # object created by to_gpu(), they may not be available.
+    intopt = None
+    nao = None
+    naux = None
 
     def __init__(self, mol, auxbasis=None):
         self.mol = mol
@@ -52,16 +63,12 @@ class DF(lib.StreamObject):
         self._auxbasis = auxbasis
 
         self.auxmol = None
-        self.intopt = None
-        self.nao = None
-        self.naux = None
-        self.cd_low = None
         self._cderi = None
-        self._vjopt = None
+        self._cderi_idx = None
         self._rsh_df = {}
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
-        excludes=('cd_low', 'intopt', '_cderi', '_vjopt'))
+        excludes=('intopt', '_cderi'))
 
     @property
     def auxbasis(self):
@@ -79,89 +86,60 @@ class DF(lib.StreamObject):
         from pyscf.df.df import DF
         return utils.to_cpu(self, out=DF(self.mol, auxbasis=self.auxbasis))
 
-    def build(self, direct_scf_tol=1e-14, omega=None):
+    def build(self, direct_scf_tol=None, omega=None, build_cderi=True):
         mol = self.mol
         auxmol = self.auxmol
-        self.nao = mol.nao
         log = logger.new_logger(mol, mol.verbose)
         t0 = log.init_timer()
         if auxmol is None:
             self.auxmol = auxmol = addons.make_auxmol(mol, self.auxbasis)
+        self.nao = mol.nao
+        self.naux = auxmol.nao
 
-        if INT3C2E_V2:
-            self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
-            self._cderi = {}
-            self._cderi[0] = _cholesky_eri_bdiv(intopt, omega=omega)
-            pair_addrs, diags = intopt.pair_and_diag_indices()
-            rows, cols, diags = divmod(pair_addrs, self.nao)
-            intopt.cderi_row = rows
-            intopt.cderi_col = cols
-            intopt.cderi_diag = diags
+        self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
+        intopt.mol = SortedMole.from_mol(mol, decontract=True)
+        intopt.build()
+        if build_cderi:
+            self._cderi, self._cderi_idx = _cholesky_eri(
+                intopt, omega=omega, use_gpu_memory=self.use_gpu_memory)
             log.timer_debug1('cholesky_eri', *t0)
-            return self
-
-        if omega and omega > 1e-10:
-            with auxmol.with_range_coulomb(omega):
-                j2c_cpu = auxmol.intor('int2c2e', hermi=1)
-        else:
-            j2c_cpu = auxmol.intor('int2c2e', hermi=1)
-        j2c = asarray(j2c_cpu)
-        t0 = log.timer_debug1('2c2e', *t0)
-        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True,
-                     group_size=GROUP_SIZE, group_size_aux=GROUP_SIZE)
-        log.timer_debug1('prepare intopt', *t0)
-        self.j2c = j2c.copy()
-
-        j2c = intopt.sort_orbitals(j2c, aux_axis=[0,1])
-        try:
-            self.cd_low = cholesky(j2c)
-            self.cd_low = tag_array(self.cd_low, tag='cd')
-        except Exception:
-            w, v = cupy.linalg.eigh(j2c)
-            idx = w > LINEAR_DEP_THR
-            self.cd_low = (v[:,idx] / cupy.sqrt(w[idx]))
-            self.cd_low = tag_array(self.cd_low, tag='eig')
-
-        v = w = None
-        naux = self.naux = self.cd_low.shape[1]
-        log.debug('size of aux basis %d', naux)
-
-        self._cderi = cholesky_eri_gpu(intopt, mol, auxmol, self.cd_low,
-                                       omega=omega, use_gpu_memory=self.use_gpu_memory)
-        log.timer_debug1('cholesky_eri', *t0)
-        self.intopt = intopt
         return self
 
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
-               direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),
-               omega=None):
-        if omega is None:
-            return df_jk.get_jk(self, dm, hermi, with_j, with_k, direct_scf_tol)
-        assert omega >= 0.0
+               direct_scf_tol=None, omega=None):
+        with self.range_coulomb(omega) as dfobj:
+            return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k, omega=omega)
 
-        # A temporary treatment for RSH-DF integrals
-        # TODO: use the range_coulomb context from pyscf
-        key = '%.6f' % omega
-        if key in self._rsh_df:
-            rsh_df = self._rsh_df[key]
-        else:
-            rsh_df = self._rsh_df[key] = self.copy().reset()
-            logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
-
-        return df_jk.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol, omega=omega)
-
-    def get_blksize(self, extra=0, nao=None):
+    def get_blksize(self, extra=0, nao=None, mem_fraction=0.3):
         '''
         extra for pre-calculated space for other variables
         '''
         if nao is None: nao = self.nao
+        device_id = cp.cuda.Device().id
+        cderi_sparse = self._cderi[device_id]
+        naux_slice = cderi_sparse.shape[0]
+        if naux_slice == 0:
+            # On multiple GPUs, cderi_sparse might be a zero-sized array.
+            # return a non-zero blksize to avoid potential issues in workspace
+            # size estimation and offsets computation.
+            return 1
+
+        on_gpu = isinstance(cderi_sparse, cp.ndarray)
+        if not on_gpu:
+            # When cderi is stored on host memory, additional memory is required
+            # to load data into GPU memory. The available memory for unpacked
+            # 3-index cderi is smaller.
+            mem_fraction *= .5
+
         mem_avail = get_avail_mem()
-        blksize = int(mem_avail*0.2/8/(nao*nao + extra) / ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
-        log = logger.new_logger(self.mol, self.mol.verbose)
-        device_id = cupy.cuda.Device().id
-        log.debug(f"{mem_avail/1e9:.3f} GB memory available on Device {device_id}, block size = {blksize}")
+        word_avail = int(mem_avail * mem_fraction / 8)
+
+        blksize = word_avail // (nao*nao + extra)
+        if blksize > ALIGNED:
+            blksize = blksize // ALIGNED * ALIGNED
+        blksize = min(blksize, MIN_BLK_SIZE, naux_slice)
+        logger.debug1(self.mol, f"{mem_avail/1e9:.3f} GB memory available on"
+                      f"Device {device_id}, block size = {blksize}")
         assert blksize > 0
         return blksize
 
@@ -169,53 +147,118 @@ class DF(lib.StreamObject):
         ''' loop over cderi for the current device
             and unpack the CDERI in (Lij) format
         '''
-        device_id = cupy.cuda.Device().id
+        if self._cderi is None:
+            self.build()
+
+        device_id = cp.cuda.Device().id
         cderi_sparse = self._cderi[device_id]
-        if blksize is None:
-            blksize = self.get_blksize()
         nao = self.nao
         naux_slice = cderi_sparse.shape[0]
-        rows = self.intopt.cderi_row
-        cols = self.intopt.cderi_col
-        buf_prefetch = None
-        buf_cderi = cupy.zeros([blksize,nao,nao])
-        for p0, p1 in lib.prange(0, naux_slice, blksize):
-            p2 = min(naux_slice, p1+blksize)
-            if isinstance(cderi_sparse, cupy.ndarray):
-                buf = cderi_sparse[p0:p1,:]
-            if isinstance(cderi_sparse, np.ndarray):
-                # first block
-                if buf_prefetch is None:
-                    buf = asarray(cderi_sparse[p0:p1,:])
-                buf_prefetch = cupy.empty([p2-p1,cderi_sparse.shape[1]])
-            if isinstance(cderi_sparse, np.ndarray) and p1 < p2:
-                buf_prefetch.set(cderi_sparse[p1:p2,:])
-            if unpack:
-                buf_cderi[:p1-p0,rows,cols] = buf
-                buf_cderi[:p1-p0,cols,rows] = buf
-                buf2 = buf_cderi[:p1-p0]
-            else:
-                buf2 = None
-            yield buf2, buf.T
-            if isinstance(cderi_sparse, np.ndarray):
-                cupy.cuda.Device().synchronize()
+        if blksize is None:
+            blksize = self.get_blksize()
+        blksize = min(blksize, naux_slice)
+        if blksize == 0:
+            # On multiple GPUs, cderi_sparse might be a zero-sized array
+            return
 
-            if buf_prefetch is not None:
-                buf = buf_prefetch
+        on_gpu = isinstance(cderi_sparse, cp.ndarray)
+
+        if unpack:
+            work = cp.zeros((nao, nao, blksize))
+
+        pair_idx = cp.asarray(self._cderi_idx[0], dtype=np.int32)
+        npairs = len(pair_idx)
+        if on_gpu:
+            for p0, p1 in lib.prange(0, naux_slice, blksize):
+                cderi_blk = cderi_sparse[p0:p1]
+                if not unpack:
+                    yield None, cderi_blk
+                else:
+                    out = _fill_symmetric(work[:,:,:p1-p0], pair_idx,
+                                          cderi_sparse.T, p0, p1)
+                    yield out.transpose(2,0,1), cderi_blk
+
+        else:
+            buf = cp.empty((blksize, npairs))
+            buf_prefetch = cp.empty_like(buf)
+
+            comput_stream = cp.cuda.get_current_stream()
+            compute_event = cp.cuda.Event()
+            io_stream = cp.cuda.stream.Stream(non_blocking=True)
+            io_event = cp.cuda.Event()
+
+            buf_prefetch.set(cderi_sparse[:blksize], stream=io_stream)
+            io_event.record(io_stream)
+
+            for p0, p1 in lib.prange(0, naux_slice, blksize):
+                compute_event.record(comput_stream)
+                buf, buf_prefetch = buf_prefetch, buf
+                cderi_blk = buf[:p1-p0]
+                comput_stream.wait_event(io_event)
+
+                # prefetch the next block
+                p2 = min(naux_slice, p1 + blksize)
+                if p1 < p2:
+                    io_stream.wait_event(compute_event)
+                    buf_prefetch[:p2-p1].set(cderi_sparse[p1:p2], stream=io_stream)
+                    io_event.record(io_stream)
+
+                if not unpack:
+                    yield None, cderi_blk
+                else:
+                    out = _fill_symmetric(work[:,:,:p1-p0], pair_idx,
+                                          cderi_blk.T, 0, p1-p0)
+                    yield out.transpose(2,0,1), cderi_blk
 
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
         if mol is not None:
             self.mol = mol
             self.auxmol = None
+            self.intopt = None
         self._cderi = None
-        self._vjopt = None
+        self._cderi_idx = None
         self._rsh_df = {}
-        self.intopt = None
-        self.nao = None
-        self.naux = None
-        self.cd_low = None
         return self
+
+    @contextlib.contextmanager
+    def range_coulomb(self, omega):
+        if omega is None:
+            omega = 0
+
+        if omega == 0:
+            yield self
+            return
+
+        key = '%.6f' % omega
+        if key in self._rsh_df:
+            rsh_df = self._rsh_df[key]
+        else:
+            rsh_df = self._rsh_df[key] = self.copy().reset()
+            if hasattr(self, '_dataname'):
+                rsh_df._dataname = f'{self._dataname}-lr/{key}'
+            logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
+
+        mol = self.mol
+        auxmol = self.auxmol
+
+        mol_omega = mol.omega
+        mol.omega = omega
+        auxmol_omega = None
+        if auxmol is not None:
+            auxmol_omega = auxmol.omega
+            auxmol.omega = omega
+
+        assert rsh_df.mol.omega == omega
+        if rsh_df.auxmol is not None:
+            assert rsh_df.auxmol.omega == omega
+
+        try:
+            yield rsh_df
+        finally:
+            mol.omega = mol_omega
+            if auxmol_omega is not None:
+                auxmol.omega = auxmol_omega
 
     get_ao_eri = get_eri = NotImplemented
     get_mo_eri = ao2mo = NotImplemented
@@ -226,6 +269,14 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     Returns:
         2D array of (naux,nao*(nao+1)/2) in C-contiguous
     '''
+    import warnings
+    from concurrent.futures import ThreadPoolExecutor
+    warnings.warn(
+        'cholesky_eri_gpu is deprecated',
+        DeprecationWarning, stacklevel=2)
+
+    GB = 1024*1024*1024
+
     naux = cd_low.shape[1]
     npairs = len(intopt.cderi_row)
     log = logger.new_logger(mol, mol.verbose)
@@ -286,10 +337,11 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
 
     return _cderi
 
-def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize, 
+def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                 omega=None, sr_only=False, device_id=0):
     ''' Execute CDERI tasks on one device
     '''
+    from gpu4pyscf.df import int3c2e
     nq = len(intopt.log_qs)
     mol = intopt.mol
     naux = cd_low.shape[1]
@@ -381,20 +433,216 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                         _cderi[dev_id][:,ij0:ij1] = tmp
             else:
                 _cderi[0][:,ij0:ij1] = cderi_block
-            t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)    
+            t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
     return
 
-# Generate CDERI using the new int3c2e_bdiv algorithm
-def _cholesky_eri_bdiv(intopt, omega=None):
+def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
-    assert omega is None
-    eval_j3c, aux_sorting = intopt.int3c2e_evaluator(reorder_aux=True)[:2]
-    j3c = eval_j3c()
-    aux_coef = intopt.auxmol.ctr_coeff
-    aux_coef, tmp = cupy.empty_like(aux_coef), aux_coef
-    aux_coef[aux_sorting] = tmp
-    j2c = int3c2e_bdiv.int2c2e(intopt.auxmol)
-    cd_low = cholesky(j2c)
-    cd_low = solve_triangular(cd_low, aux_coef.T, lower=True, overwrite_b=True)
-    cderi = cd_low.dot(j3c.T)
-    return cderi
+    if intopt._int3c2e_envs is None:
+        intopt.build()
+    sorted_mol = intopt.mol
+    mol = sorted_mol.mol
+    log = logger.new_logger(mol)
+    auxmol = intopt.auxmol
+    naux_sorted = auxmol.nao
+    num_devices = multi_gpu.num_devices
+
+    # When the basis set does not contain general contractions, sorted_mol are
+    # simply an reordering of the original mol bases.
+    recontract_bas = cp.asnumpy(sorted_mol.recontract_bas)
+    needs_recontraction = any(recontract_bas[:,int3c2e_bdiv.NCTR_OF] != 1)
+
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    word_avail = mem_avail // 8
+    batch_size = int(word_avail * .2) // naux_sorted
+
+    current_device = cp.cuda.device.get_device_id()
+    eval_j3c, aux_sorting, ao_pair_offsets, _, clone_context = intopt.int3c2e_evaluator(
+        ao_pair_batch_size=batch_size, reorder_aux=True,
+        pair_batch_by_l=needs_recontraction, return_clone_context=True,
+        omega=omega)
+    cderi_batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
+    batch_size = cderi_batch_size
+    # * When the get_avail_mem() returns a small amount of memory, the actual
+    #   size (cderi_batch_size) can be larger than the input batch_size.
+    #   This cderi_batch_size should not be used to initialize eval_j3c for
+    #   other devices. It may produce a different batches patterns.
+    # * When multi-gpu is enabled, clone_context is used to clone eval_j3c on
+    #   different GPUs, to ensure the same offsets, and same pair_addresses are
+    #   created across devices.
+    num_batches = len(ao_pair_offsets) - 1
+
+    if needs_recontraction:
+        recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses = \
+                int3c2e_bdiv._create_pair_recontraction(sorted_mol, clone_context)
+        cderi_offsets = np.append(0, np.cumsum(contracted_ao_pair_counts))
+        cderi_batch_size = int(max(contracted_ao_pair_counts))
+        cderi_npairs = len(pair_addresses)
+        pair_addresses = asarray(pair_addresses)
+        rows, cols = divmod(pair_addresses, mol.nao)
+        diag_addrs = cp.where(rows == cols)[0]
+        cderi_idx = (pair_addresses, diag_addrs)
+    else:
+        cderi_offsets = ao_pair_offsets
+        pair_addresses, diag_addrs = intopt.pair_and_diag_indices()
+        cderi_npairs = len(pair_addresses)
+        pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
+        cderi_idx = (pair_addresses, diag_addrs)
+
+    aux_coef, tag = _decompose_j2c(auxmol, aux_sorting, omega)
+    if num_devices > 1:
+        # cupy cannot copy non-contiguous array aux_coef[:,aux0:aux1] between
+        # devices. This slicing is a contiguous array in the F-order storage.
+        aux_coef = cp.asarray(aux_coef, order='F')
+
+    naux = aux_coef.shape[1]
+    naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
+
+    cp.get_default_memory_pool().free_all_blocks()
+    word_avail -= batch_size * naux
+    if needs_recontraction:
+        word_avail -= cderi_batch_size * naux_per_device
+
+    # Put cderi on GPU whenever possible
+    on_gpu = True
+    if use_gpu_memory is False:
+        on_gpu = False
+    elif cderi_npairs * naux > word_avail * 0.95 * num_devices:
+        if use_gpu_memory:
+            cderi_size = cderi_npairs * naux / num_devices * 8e-9
+            raise MemoryError(f'Not enough GPU memory. cderi size = {cderi_size:.2f} GB')
+        on_gpu = False
+    log.debug1('mem_avail=%.3f MB on_gpu=%s, nao_pairs=%d, naux_per_device=%d, batch_size=%d, num_batches=%d',
+               mem_avail, on_gpu, cderi_npairs, naux_per_device, batch_size, num_batches)
+
+    if not on_gpu:
+        cderi_cpu = empty_mapped((naux, cderi_npairs))
+
+        def proc(batch_iter):
+            device_id = cp.cuda.device.get_device_id()
+            c = cp.asarray(aux_coef)
+            _eval_j3c = eval_j3c
+            if device_id != current_device:
+                _eval_j3c = intopt.int3c2e_evaluator(
+                    reorder_aux=True, clone_context=clone_context, omega=omega)[0]
+
+            work = cp.empty(naux_sorted * batch_size)
+            if needs_recontraction:
+                work1 = cp.empty(naux_sorted * cderi_batch_size)
+            work2 = cp.empty(naux * cderi_batch_size)
+
+            for batch_id in batch_iter:
+                log.debug1('processing cderi batch %d', batch_id)
+                j3c = _eval_j3c(shl_pair_batch_id=batch_id, out=work)
+                if needs_recontraction:
+                    tmp = ndarray((j3c.shape[0], naux_sorted), buffer=work1)
+                    j3c = recontract(batch_id, j3c, out=tmp)
+                cderi_gpu = ndarray((j3c.shape[0], naux), buffer=work2)
+                cderi_gpu = j3c.dot(c, out=cderi_gpu)
+                p0, p1 = cderi_offsets[batch_id:batch_id+2]
+                # TODO: async-write to host memory in another stream
+                err = libvhf_rys.transpose_write(
+                    cderi_cpu.ctypes,
+                    ctypes.cast(cderi_gpu.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(naux), ctypes.c_int(cderi_npairs),
+                    ctypes.c_int(p0), ctypes.c_int(p1))
+                if err != 0:
+                    raise RuntimeError('transpose_write cderi_cpu failed')
+
+        batch_iter = iter(range(num_batches))
+        multi_gpu.run(proc, args=(batch_iter,), non_blocking=True)
+
+        # Ensure data are fully written to host memory.
+        multi_gpu.synchronize()
+        cderi = [cderi_cpu[i*naux_per_device:(i+1)*naux_per_device]
+                 for i in range(num_devices)]
+
+    else:
+        def proc():
+            device_id = cp.cuda.device.get_device_id()
+            aux0 = naux_per_device * device_id
+            aux1 = min(int(aux_coef.shape[1]), aux0 + naux_per_device)
+            c = cp.asarray(aux_coef[:,aux0:aux1])
+
+            _eval_j3c = eval_j3c
+            if device_id != current_device:
+                _eval_j3c = intopt.int3c2e_evaluator(
+                    reorder_aux=True, clone_context=clone_context, omega=omega)[0]
+
+            out = cp.empty((cderi_npairs, aux1-aux0))
+            work = cp.empty(naux_sorted * batch_size)
+            if needs_recontraction:
+                work1 = cp.empty(naux_per_device * batch_size)
+
+            for batch_id in range(num_batches):
+                j3c = _eval_j3c(batch_id, out=work)
+                p0, p1 = cderi_offsets[batch_id:batch_id+2]
+                if needs_recontraction:
+                    tmp = ndarray((j3c.shape[0], aux1-aux0), buffer=work1)
+                    tmp = j3c.dot(c, out=tmp)
+                    recontract(batch_id, tmp, out=out[p0:p1])
+                else:
+                    j3c.dot(c, out=out[p0:p1])
+            return out.T
+
+        cderi = multi_gpu.run(proc, non_blocking=True)
+    return cderi, cderi_idx
+
+def _decompose_j2c(auxmol, aux_sorting=None, omega=None):
+    j2c = int3c2e_bdiv.int2c2e(auxmol, omega=omega)
+
+    try:
+        cd_low = cholesky(j2c)
+        aux_coef = auxmol.ctr_coeff
+        aux_coef = solve_triangular(
+            cd_low, aux_coef.T, lower=True, overwrite_b=True).T
+        tag = 'cd'
+    except RuntimeError:
+        w, v = cp.linalg.eigh(j2c)
+        idx = cp.where(w > LINEAR_DEP_THR)[0]
+        logger.debug1(auxmol, 'discard %d small eigenvectors for auxiliary dimension',
+                      w.size - len(idx))
+        v = v[:,idx] / cp.sqrt(w[idx])
+        aux_coef = auxmol.apply_C_dot(v, axis=0)
+        tag = 'ed'
+
+    if aux_sorting is not None:
+        aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
+        aux_coef[aux_sorting] = tmp
+    return aux_coef, tag
+
+def _fill_symmetric(out, pair_addresses, a, aux0, aux1):
+    '''
+    i, j = divmod(pair_addresses, nao)
+    out[j,i] = out[i,j] = a[:,aux0:aux1]
+    '''
+    assert out.ndim == 3 and a.ndim == 2
+    assert pair_addresses.dtype == np.int32
+    nao = out.shape[0]
+    out_stride = out.strides[-2] // out.itemsize
+    if a.strides[-1] == 8: # a is in row major
+        a_stride = a.strides[-2] // a.itemsize
+        err = libvhf_rys.decompress_and_fill(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(out_stride),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(pair_addresses)),
+            ctypes.c_int(nao),
+            ctypes.c_int(a_stride),
+            ctypes.c_int(aux0), ctypes.c_int(aux1))
+    else: # a is in column major
+        naux = len(a)
+        err = libvhf_rys.decompress_and_transpose(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(out_stride),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(pair_addresses)),
+            ctypes.c_int(nao),
+            ctypes.c_int(naux),
+            ctypes.c_int(aux0), ctypes.c_int(aux1),
+            ctypes.c_int(1), ctypes.c_int(0))
+    if err != 0:
+        raise RuntimeError('decompress cderi failed')
+    return out

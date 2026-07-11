@@ -73,14 +73,10 @@ def get_avail_mem(exclude_memory_pool=False):
 
     mempool = cupy.get_default_memory_pool()
     used_mem = mempool.used_bytes()
-    mem_limit = mempool.get_limit()
-    if(mem_limit != 0):
-        return mem_limit - used_mem
-    else:
-        total_mem = mempool.total_bytes()
-        # get memGetInfo() is slow
-        mem_avail = cupy.cuda.runtime.memGetInfo()[0]
-        return mem_avail + total_mem - used_mem
+    total_mem = mempool.total_bytes()
+    # get memGetInfo() is slow
+    mem_avail = cupy.cuda.runtime.memGetInfo()[0]
+    return mem_avail + total_mem - used_mem
 
 def concatenate(array_list):
     ''' Concatenate axis=0 only
@@ -1173,7 +1169,7 @@ def sandwich_dot(a, c, out=None):
         out = out[0]
     return out
 
-MEMPOOL_THRESHOLD = 100000000
+MEMPOOL_THRESHOLD = 100*1024*1024
 
 def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     '''
@@ -1190,7 +1186,7 @@ def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     cuda_malloc = cupy.cuda.memory._malloc
     default_mempool_malloc = cupy.get_default_memory_pool().malloc
     def malloc(size):
-        if size >= n_bytes_threshold:
+        if size > n_bytes_threshold:
             return cuda_malloc(size)
         return default_mempool_malloc(size)
     cupy.cuda.set_allocator(malloc)

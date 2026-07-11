@@ -34,7 +34,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             double *dm, double *density_auxvec, int n_dm,
                             RysIntEnvVars envs, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int npairs, int naux)
+                            int *ao_pair_loc, int aux_offset, int naux)
 {
     // For better load balance, consume blocks in the reversed order
     int thread_id = threadIdx.x;
@@ -900,7 +900,7 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     sum_ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
             ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-            ao_pair_loc, aux_offset, npairs, naux);
+            ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));

@@ -60,7 +60,7 @@ def dfmp2_kernel_one_gpu(
     idx_device = cupy.cuda.get_device_id()
 
     if j3c_backend == 'bdiv':
-        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux).build()
     else:
         intopt = get_int3c2e_opt(mol, aux, device_list=[idx_device], log=log)
 
@@ -128,7 +128,7 @@ def dfump2_kernel_one_gpu(
     idx_device = cupy.cuda.get_device_id()
 
     if j3c_backend == 'bdiv':
-        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux).build()
     else:
         intopt = get_int3c2e_opt(mol, aux, device_list=[idx_device], log=log)
 
@@ -239,7 +239,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
     t1 = log.init_timer()
     # intopt
     if j3c_backend == 'bdiv':
-        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux).build()
     else:
         intopt = get_int3c2e_opt(mol, aux, device_list=device_list, log=log)
     t1 = log.timer('in dfmp2_kernel_multi_gpu_cderi_cpu, build intopt', *t1)
@@ -267,7 +267,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
     def exec_device_cderi(idx_device):
         # intopt of bdiv kernel is device-dependent, need to be regenerated on target device.
         if j3c_backend == 'bdiv':
-            intopt_device = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+            intopt_device = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux).build()
         else:
             intopt_device = intopt
 
