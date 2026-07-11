@@ -220,13 +220,15 @@ class KnownValues(unittest.TestCase):
             dm = dm + dm.transpose(0,2,1)
             kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
             vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-            assert abs(vk.get() - kref).max() < 3e-9
+            # difference is smaller for pyscf-2.13 or newer
+            assert abs(vk.get() - kref).max() < 1e-8
 
             dm = np.einsum('npi,nqi->npq', mo, mo.conj())
             kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
             dm = tag_array(cp.array(dm), mo_coeff=cp.array(mo), mo_occ=cp.array(mo_occ))
             vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-            assert abs(vk.get() - kref).max() < 3e-9
+            # difference is smaller for pyscf-2.13 or newer
+            assert abs(vk.get() - kref).max() < 1e-8
         finally:
             aft_jk.get_avail_mem = bak
 
