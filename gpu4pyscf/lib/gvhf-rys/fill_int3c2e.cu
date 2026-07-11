@@ -22,11 +22,12 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "unrolled_int3c2e.cu"
 
 #define THREADS         256
 #define GOUT_WIDTH      54
 #define POOL_SIZE       25600
+
+#include "unrolled_int3c2e.cu"
 
 __global__ static
 void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
@@ -52,11 +53,12 @@ while (1) {
     __syncthreads();
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
-        sp_block_id = batch_id / nbatches_ksh;
-        ksh_block_id = batch_id % nbatches_ksh;
+        // For better load balance, process sp_blocks in the reversed order
+        sp_block_id = nbatches_shl_pair - 1 - batch_id / nbatches_ksh;
+        ksh_block_id = nbatches_ksh - 1 - batch_id % nbatches_ksh;
     }
     __syncthreads();
-    if (sp_block_id >= nbatches_shl_pair) {
+    if (sp_block_id < 0) {
         break;
     }
 
@@ -102,7 +104,7 @@ while (1) {
                          shl_pair0, shl_pair1, ksh0, ksh1,
                          iprim, jprim, kprim, li, lj, lk, bas_ij_idx,
                          ao_pair_loc, ao_pair_offset, aux_start, naux,
-                         reorder_aux, to_sph, worker_id, shared_memory)) {
+                         reorder_aux, to_sph, thread_id, worker_id, shared_memory)) {
         return;
     }
     int gout_id = thread_id / nst_per_block;

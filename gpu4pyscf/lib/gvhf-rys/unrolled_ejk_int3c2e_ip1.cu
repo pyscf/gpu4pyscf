@@ -7,7 +7,6 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#define THREADS         256
 #define BLOCK_SIZE      16
 
 
@@ -16,20 +15,20 @@
     RysIntEnvVars& envs, int shl_pair0, int shl_pair1, \
     int ksh0, int ksh1, int iprim, int jprim, int kprim, \
     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc, \
-    int aux_offset, int naux, int nao, double *shared_memory
+    int aux_offset, int naux, int nao, \
+    int thread_id, double *shared_memory
 
 #define LAUNCH_KERNEL(KERNEL) \
     KERNEL(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim, \
-    omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, shared_memory)
+    omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, thread_id, shared_memory)
 
 
 __device__ inline
 void int3c2e_ip1_000(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
-    int nst_per_block = blockDim.x;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -238,10 +237,9 @@ void int3c2e_ip1_000(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_100(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
-    int nst_per_block = blockDim.x;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -512,10 +510,9 @@ void int3c2e_ip1_100(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_110(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
-    int nst_per_block = blockDim.x;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -966,10 +963,9 @@ void int3c2e_ip1_110(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_200(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
-    int nst_per_block = blockDim.x;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1327,10 +1323,9 @@ void int3c2e_ip1_200(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_001(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
-    int nst_per_block = blockDim.x;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1601,10 +1596,9 @@ void int3c2e_ip1_001(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_101(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
-    int nst_per_block = blockDim.x;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2050,10 +2044,9 @@ void int3c2e_ip1_101(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_002(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
-    int nst_per_block = blockDim.x;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2413,7 +2406,7 @@ int int3c2e_ip1_unrolled(double *ejk, double *ejk_aux, double *dm, double *densi
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double *shared_memory)
+                    int aux_offset, int naux, int nao, int thread_id, double *shared_memory)
 {
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {

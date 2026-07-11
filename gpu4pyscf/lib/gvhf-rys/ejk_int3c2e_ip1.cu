@@ -22,12 +22,13 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "unrolled_ejk_int3c2e_ip1.cu"
 
 #define THREADS         256
 #define BLOCK_SIZE      16
 #define DM_BLOCK        7
 #define GOUT_WIDTH      54
+
+#include "unrolled_ejk_int3c2e_ip1.cu"
 
 __global__ static
 void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
@@ -92,7 +93,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         int3c2e_ip1_unrolled(ejk, ejk_aux, dm, density_auxvec, envs,
             shl_pair0, shl_pair1, ksh0, ksh1,
             iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx, ao_pair_loc,
-            aux_offset, naux, nao, shared_memory)) {
+            aux_offset, naux, nao, thread_id, shared_memory)) {
         return;
     }
     register int gout_id = thread_id / nst_per_block;

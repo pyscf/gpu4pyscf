@@ -254,7 +254,7 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
         }
         __syncthreads();
         if (thread_id == 0) {
-            num_ijk_tasks += swap[threads - 1];
+            num_sub_tasks += swap[threads - 1];
         }
     }
     __syncthreads();

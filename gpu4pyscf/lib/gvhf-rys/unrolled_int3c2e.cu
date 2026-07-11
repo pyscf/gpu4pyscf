@@ -9,24 +9,26 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #define POOL_SIZE       25600
 
+#define KERNEL_ARGS \
+    double *out, RysIntEnvVars& envs, double *pool, \
+    double omega, double lr_factor, double sr_factor, \
+    int shl_pair0, int shl_pair1, \
+    int ksh0, int ksh1, int iprim, int jprim, int kprim, \
+    uint32_t *bas_ij_idx, int *ao_pair_loc, \
+    int ao_pair_offset, int aux_start, int naux, \
+    int reorder_aux, int to_sph, \
+    int thread_id, int worker_id, double *shared_memory
 
 #define LAUNCH_KERNEL(KERNEL) \
     KERNEL(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim, \
-            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph, worker_id, shared_memory)
+    bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph, thread_id, worker_id, shared_memory)
 
 
 __device__ inline
-void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_000(KERNEL_ARGS)
 {
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
+    int st_id = thread_id;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -115,17 +117,10 @@ void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_100(KERNEL_ARGS)
 {
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
+    int st_id = thread_id;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -225,17 +220,10 @@ void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_110(KERNEL_ARGS)
 {
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
+    int st_id = thread_id;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -351,17 +339,10 @@ void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_200(KERNEL_ARGS)
 {
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
+    int st_id = thread_id;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -484,16 +465,8 @@ void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_210(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     constexpr int nst_per_block = 128;
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
@@ -732,16 +705,8 @@ void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_220(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     constexpr int nst_per_block = 128;
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
@@ -1042,17 +1007,10 @@ void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_001(KERNEL_ARGS)
 {
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
+    int st_id = thread_id;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1152,17 +1110,10 @@ void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_101(KERNEL_ARGS)
 {
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
+    int st_id = thread_id;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1279,16 +1230,8 @@ void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_111(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     constexpr int nst_per_block = 128;
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
@@ -1520,16 +1463,8 @@ void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_201(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     constexpr int nst_per_block = 128;
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
@@ -1741,16 +1676,8 @@ void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_211(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     constexpr int nst_per_block = 64;
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
@@ -2056,17 +1983,10 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_002(KERNEL_ARGS)
 {
-    int st_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
+    int st_id = thread_id;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2173,16 +2093,8 @@ void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_102(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     constexpr int nst_per_block = 128;
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
@@ -2380,16 +2292,8 @@ void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_112(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     constexpr int nst_per_block = 64;
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
@@ -2667,16 +2571,8 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
 }
 
 __device__ inline
-void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
-                    double omega, double lr_factor, double sr_factor,
-                    int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int ao_pair_offset, int aux_start, int naux,
-                    int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+void int3c2e_202(KERNEL_ARGS)
 {
-    int thread_id = threadIdx.x;
     constexpr int nst_per_block = 128;
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
@@ -2922,7 +2818,7 @@ int int3c2e_unrolled(double *out, RysIntEnvVars& envs, double *pool,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph,
-                    int worker_id, double *shared_memory)
+                    int thread_id, int worker_id, double *shared_memory)
 {
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
