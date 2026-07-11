@@ -880,9 +880,10 @@ def decompose_rdm1_svd(dm, hermi=0):
     u, s, vh = cp.linalg.svd(dm)
     mask = s > 1e-8
     if dm.ndim == 2:
+        mask = cp.where(mask)[0]
         return u[:,mask], contract('i,ip->pi', s[mask], vh[mask])
     else:
-        mask = mask.any(axis=0)
+        mask = cp.where(mask.any(axis=0))[0]
         return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
 
 def _make_factorized_dm(factor_l, factor_r, symmetrize=1):

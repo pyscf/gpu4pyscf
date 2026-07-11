@@ -424,3 +424,15 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
             else:  # KUHF dms
                 assert v_kpts.shape[1] == len(kpts_band)
         return v_kpts
+
+def _factorize_dm(dm_kpts, kpts=None):
+    from gpu4pyscf.df.df_jk import factorize_dm
+    if kpts is None or kpts.ndim == 1:
+        nkpts = 1
+    else:
+        nkpts = len(kpts)
+    orbl, orbr = factorize_dm(dm_kpts)
+    orbl = cp.asarray(orbl.reshape((-1, nkpts) + orbl.shape[-2:]))
+    if orbr is not None:
+        orbr = cp.asarray(orbr.reshape(orbl.shape))
+    return orbl, orbr
