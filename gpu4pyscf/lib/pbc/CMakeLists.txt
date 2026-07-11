@@ -13,7 +13,7 @@ add_library(pbc SHARED
   unrolled_rys_k.cu
   nr_eval_gto.cu
   sorting.c
-  decompress.cu fill_triu.cu
+  fill_triu.cu
 )
 
 set_target_properties(pbc PROPERTIES

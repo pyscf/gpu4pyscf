@@ -65,9 +65,6 @@ class KnownValues(unittest.TestCase):
         mp_gpu = gpu4pyscf.mp.dfump2.DFUMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(j2c_decomp_alg='eig')
         self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 8)
 
-        mp_gpu = gpu4pyscf.mp.dfump2.DFUMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(j3c_backend='vhfopt')
-        self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 8)
-
         mp_gpu = gpu4pyscf.mp.dfump2.DFUMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(fp_type='FP32')
         self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 5)
 

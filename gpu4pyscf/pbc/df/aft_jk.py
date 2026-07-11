@@ -30,13 +30,15 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero, group_by_conj_pairs, kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
-from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
+from gpu4pyscf.pbc.df.fft_jk import (
+    _format_dms, _format_jks, _ewald_exxdiv_for_G0, _factorize_dm)
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray, ndarray
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     if kpts_band is not None:
@@ -112,7 +114,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
-    is_single_kpt = kpts is not None and kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1,3))
     else:
@@ -123,18 +124,18 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     cell = SortedCell.from_cell(mydf.cell)
     mesh = mydf.mesh
     ngrids = np.prod(mesh)
-    mo_coeff = getattr(dm_kpts, 'mo_coeff', None)
-    mo_occ = getattr(dm_kpts, 'mo_occ', None)
-    dm_kpts = cp.asarray(dm_kpts)
 
     bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
-    nao1 = cell.nao
+    orbl, orbr = _factorize_dm(dm_kpts, kpts)
+    n_dm, nkpts, nao, nocc = orbl.shape
+    if orbr is None or nocc * 2 >= nao:
+        orbl = None
     dms = _format_dms(dm_kpts, kpts)
-    n_dm, nkpts, nao = dms.shape[:3]
-    vk_kpts = cp.zeros((n_dm,nkpts,nao1,nao1), dtype=np.complex128)
+
+    vk_kpts = cp.zeros((n_dm,nkpts,nao,nao), dtype=np.complex128)
     weight = 1. / nkpts
     if (exxdiv == 'ewald' and
         (cell.dimension < 2 or  # 0D and 1D are computed with inf_vacuum
@@ -165,47 +166,24 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     else:
         k_to_compute = np.ones(nkpts, dtype=np.int8)
 
-    Gpq_unit = nao1**2*bvk_ncells
-    if mo_coeff is None:
-        dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
-        dms = dms.reshape(n_dm, nkpts, nao1, nao1)
+    nao1 = cell.nao
+    if orbl is None:
         if dms.dtype != vk_kpts.dtype:
             dms = dms.astype(vk_kpts.dtype)
         update_vk = _update_vk_
 
-        unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
-                Gpq_unit + # Gpq_conj[kj_idx]
-                n_dm*nkpts*nao1**2) # contract('ngij,snjk->sngik', Gpq, dms)
+        Gpq_unit = nao**2*bvk_ncells
+        unit = (nao1**2*bvk_ncells + # Gpq
+                max(nao1**2*bvk_ncells,
+                    (Gpq_unit + # Gpq_conj
+                     Gpq_unit + # Gpq_conj[kj_idx]
+                     n_dm*nkpts*nao1**2))) # contract('ngij,snjk->sngik', Gpq, dms)
     else:
-        # dm ~= dm_factor * dm_factor.T
-        # mo_coeff, mo_occ may not be a list of aligned array if
-        # remove_lin_dep was applied to scf object.
-        # We assume they are of the same length in this version.
-        mo_coeff = cp.asarray(mo_coeff)
-        mo_occ = cp.asarray(mo_occ)
-        if is_single_kpt:
-            if mo_coeff.ndim == 3:
-                mo_coeff = mo_coeff[:,None]
-                mo_occ = mo_occ[:,None]
-            else:
-                mo_coeff = mo_coeff[None]
-                mo_occ = mo_occ[None]
-        nocc = int((mo_occ > 0).sum(axis=-1).max().get())
-        if mo_coeff.ndim == 4:  # KUHF
-            occs = cp.array(mo_occ[:,:,:nocc], dtype=np.float64)
-            dm_factor = cell.apply_C_dot(mo_coeff[:,:,:,:nocc].reshape(-1,nao,nocc), axis=1)
-            dm_factor = cp.asarray(dm_factor.reshape(n_dm,nkpts,nao1,nocc),
-                                   dtype=np.complex128, order='C')
-        else:  # KRHF
-            occs = cp.asarray(mo_occ[None,:,:nocc], dtype=np.float64)
-            dm_factor = cell.apply_C_dot(mo_coeff[:,:,:nocc].reshape(-1,nao,nocc), axis=1)
-            dm_factor = cp.asarray(dm_factor.reshape(1,nkpts,nao1,nocc),
-                                   dtype=np.complex128, order='C')
-        dm_factor *= cp.sqrt(occs)[:,:,None,:]
-        dms, dm_factor = dm_factor, None
-
-        unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
-                n_dm*nkpts*nao1*nocc*2) # contract('ngij,snjk->sngik', Gpq, dms)
+        dms = orbl, orbr
+        unit = (nao1**2*bvk_ncells + # Gpq
+                max(nao1**2*bvk_ncells,
+                    (nao**2*bvk_ncells + # Gpq_conj
+                     n_dm*nkpts*nao1*nocc*2))) # contract('ngij,snjk->sngik', Gpq, dms)
 
         log.debug2('time_reversal_symmetry = %s bvk_ncells = %d '
                    'cell0_nao = %d nocc = %d n_dm = %d',
@@ -219,15 +197,17 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     ft_opt.permutation_symmetry = bvk_ncells == nkpts
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
-    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
     avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .9)
     avail_mem -= n_dm*nkpts*nao1**2 * 16 # intermediates for vk or dms
-    Gblksize = max(16, int(avail_mem/(16*unit))//8*8)
+    Gblksize = int(avail_mem/(16*unit))//8*8
+    if Gblksize < 8:
+        raise MemoryError('Insufficient memory for evaluating ft_aopair')
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 
     Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
-    buf = Gpq_buf[Gpq_unit*Gblksize:]
+    buf = Gpq_buf[nao1**2*bvk_ncells*Gblksize:]
     for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
         vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, omega, kpts,
                                       lr_factor=lr_factor, sr_factor=sr_factor)
@@ -235,6 +215,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
+            Gpq = _bas_recontract_ft_pair(cell, Gpq, Gpq_buf, buf)
             update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1], ki_idx, kj_idx,
                       not self_conj, k_to_compute, t_rev_pairs, buf)
             Gpq = None
@@ -247,7 +228,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
         for k, k_conj in t_rev_pairs:
             if k != k_conj:
                 vk_kpts[:,k_conj] = vk_kpts[:,k].conj()
-    vk_kpts = cell.apply_CT_mat_C(vk_kpts.reshape(-1,nao1,nao1))
     log.timer_debug1('get_k_kpts', *cpu0)
     return vk_kpts.reshape(dm_kpts.shape)
 
@@ -299,7 +279,7 @@ def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
         #:vk[:,ki] += contract('sngik,nglk->snil', tmp, Gpq_conj[kj])
         cp.take(Gpq, kj, axis=0, out=tmp2)
         cp.take(dms, kj, axis=1, out=tmp1)
-        contract('ngij,snjk->sngik', tmp2, tmp1, out=tmp)
+        contract('snjk,ngij->sngik', tmp1, tmp2, out=tmp)
         cp.take(Gpq_conj, kj, axis=0, out=tmp2)
         vk[:,ki] += contract('sngik,nglk->snil', tmp, tmp2, out=tmp1)
 
@@ -314,53 +294,71 @@ def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
             tmp, buf1 = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf)
             tmp1, _ = _allocate((n_dm,nkj,nao,nao), Gpq.dtype, buf1)
             cp.take(dms, idx, axis=1, out=tmp1)
-            contract('ngij,snli->snglj', Gpq, tmp1, out=tmp)
-            contract('nglk,snglj->snkj', Gpq_conj, tmp, beta=1, out=vk)
+            contract('snli,ngij->snglj', tmp1, Gpq, out=tmp)
+            contract('snglj,nglk->snkj', tmp, Gpq_conj, beta=1, out=vk)
         else:
             tmp, buf1 = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf)
             tmp1, buf1 = _allocate((n_dm,nkj,nao,nao), Gpq.dtype, buf1)
             tmp2, _ = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf1)
             cp.take(Gpq, kj, axis=0, out=tmp2)
             cp.take(dms, ki, axis=1, out=tmp1)
-            contract('ngij,snli->snglj', tmp2, tmp1, out=tmp)
+            contract('snli,ngij->snglj', tmp1, tmp2, out=tmp)
             cp.take(Gpq_conj, kj, axis=0, out=tmp2)
-            vk[:,kj] += contract('nglk,snglj->snkj', tmp2, tmp, out=tmp1)
+            vk[:,kj] += contract('snglj,nglk->snkj', tmp, tmp2, out=tmp1)
     return vk
 
 def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
                    k_to_compute, t_rev_pairs, buf):
     '''
-    dmf is the factorized dm, dm = dmf * dmf.conj().T
+    dmf = orbl*orbr.conj().T is the factorized dm.
     Computing exchange matrices with dmf:
+        kGpq,kGsr.conj(),kqi,kir->k'ps
+    and
+        kGpq,kGsr.conj(),ksi,kip->k'rq
     '''
-    n_dm, _, nao, nocc = dmf.shape[:4]
+    if isinstance(dmf, cp.ndarray):
+        orbl, orbr = dmf, None
+    else:
+        orbl, orbr = dmf
+
+    n_dm, _, nao, nocc = orbl.shape[:4]
     ngrids = Gpq.shape[1]
     k_mask = k_to_compute[kpti_idx] == 1
     ki = kpti_idx[k_mask]
     kj = kptj_idx[k_mask]
     nkj = len(kj)
     Gpi, buf1 = _allocate((n_dm,nkj,ngrids,nocc,nao), Gpq.dtype, buf)
+    Gpi_conj, buf2 = _allocate_like(Gpi, buf1)
     if len(ki) == len(Gpq):
         idx = np.empty_like(ki)
         idx[kj] = ki
         ki = idx
-        contract('ngij,snjp->sngpi', Gpq, dmf, out=Gpi)
+        contract('ngij,snjp->sngpi', Gpq, orbl, out=Gpi)
+        if orbr is None:
+            cp.conjugate(Gpi, out=Gpi_conj)
+        else:
+            tmp, _ = _allocate((n_dm,nkj,nao,nocc), orbr.dtype, buf2)
+            if orbr.dtype == cp.complex128:
+                tmp = cp.conjugate(orbr, out=tmp)
+            else:
+                tmp = orbr
+            contract('ngij,snjp->sngpi', Gpq, tmp, out=Gpi_conj)
+            cp.conjugate(Gpi_conj, out=Gpi_conj)
     else:
-        tmp, buf2 = _allocate((n_dm,nkj,nao,nocc), Gpq.dtype, buf1)
-        tmp1, _ = _allocate((nkj,ngrids,nao,nao), dmf.dtype, buf2)
+        tmp1, buf3 = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf2)
+        tmp, _ = _allocate((n_dm,nkj,nao,nocc), orbl.dtype, buf3)
         cp.take(Gpq, kj, axis=0, out=tmp1)
-        cp.take(dmf, kj, axis=1, out=tmp)
-        contract('ngij,snjp->sngpi', tmp1, tmp, out=Gpi)
-    Gpi_conj, buf1 = _allocate(Gpi.shape, Gpq.dtype, buf1)
-    tmp, _ = _allocate((n_dm,nkj,nao,nao), vk.dtype, buf1)
-    if Gpi.dtype == np.float64:
-        assert dmf.dtype == vk.dtype == np.float64
-        #:Gpi_conj = Gpi * wcoulG[:,None,None]
-        cp.multiply(Gpi, wcoulG[:,None,None], out=Gpi_conj)
-    else:
-        #:Gpi_conj = Gpi.conj()
-        cp.conjugate(Gpi, out=Gpi_conj)
-        Gpi_conj *= wcoulG[:,None,None]
+        contract('ngij,snjp->sngpi', tmp1, cp.take(orbl, kj, axis=1, out=tmp), out=Gpi)
+        if orbr is None:
+            cp.conjugate(Gpi, out=Gpi_conj)
+        else:
+            cp.take(orbr, kj, axis=1, out=tmp)
+            if orbr.dtype == cp.complex128:
+                tmp.imag *= -1 # conj(orbr)
+            contract('ngij,snjp->sngpi', tmp1, tmp, out=Gpi_conj)
+            cp.conjugate(Gpi_conj, out=Gpi_conj)
+    Gpi_conj *= wcoulG[:,None,None]
+    tmp, _ = _allocate((n_dm,nkj,nao,nao), vk.dtype, buf2)
     vk[:,ki] += contract('sngpi,sngpj->snij', Gpi, Gpi_conj, out=tmp)
 
     if swap_2e:
@@ -369,30 +367,35 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
         kj = kptj_idx[k_mask]
         nkj = len(kj)
         Gpi, buf1 = _allocate((n_dm,nkj,ngrids,nocc,nao), Gpq.dtype, buf)
+        Gpi_conj, buf2 = _allocate_like(Gpi, buf1)
         if len(ki) == len(Gpq):
             idx = np.empty_like(ki)
             idx[kj] = ki
-            dmf_ki, _ = _allocate((n_dm,nkj,nao,nocc), dmf.dtype, buf1)
-            cp.take(dmf, idx, axis=1, out=dmf_ki)
-            dmf_ki.imag *= -1 # conj(dmf_ki)
-            contract('ngij,snip->sngpj', Gpq, dmf_ki, out=Gpi)
-            #:Gpi_conj = Gpi.conj()
-            Gpi_conj, _ = _allocate_like(Gpi, buf1)
+            dmf_ki, _ = _allocate((n_dm,nkj,nao,nocc), orbl.dtype, buf2)
+            orbl = cp.take(orbl, idx, axis=1, out=dmf_ki)
+            if orbl.dtype == cp.complex128:
+                orbl.imag *= -1 # conj(orbl)
+            contract('ngij,snip->sngpj', Gpq, orbl, out=Gpi)
             cp.conjugate(Gpi, out=Gpi_conj)
             Gpi_conj *= wcoulG[:,None,None]
+            if orbr is not None:
+                orbr = cp.take(orbr, idx, axis=1, out=dmf_ki)
+                contract('ngij,snip->sngpj', Gpq, orbr, out=Gpi)
             contract('sngpi,sngpj->snij', Gpi_conj, Gpi, beta=1, out=vk)
         else:
-            dmf_ki, buf2 = _allocate((n_dm,nkj,nao,nocc), dmf.dtype, buf1)
-            tmp1, _ = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf2)
-            cp.take(Gpq, kj, axis=0, out=tmp1)
-            cp.take(dmf, ki, axis=1, out=dmf_ki)
-            dmf_ki.imag *= -1 # conj(dmf_ki)
-            contract('ngij,snip->sngpj', tmp1, dmf_ki, out=Gpi)
-            #:Gpi_conj = Gpi.conj()
-            tmp, buf2 = _allocate((n_dm,nkj,nao,nao), vk.dtype, buf1)
-            Gpi_conj, _ = _allocate_like(Gpi, buf2)
+            tmp1, buf3 = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf2)
+            dmf_ki, _ = _allocate((n_dm,nkj,nao,nocc), orbl.dtype, buf3)
+            Gpq = cp.take(Gpq, kj, axis=0, out=tmp1)
+            orbl = cp.take(orbl, ki, axis=1, out=dmf_ki)
+            if orbl.dtype == cp.complex128:
+                orbl.imag *= -1 # conj(orbl)
+            contract('ngij,snip->sngpj', Gpq, orbl, out=Gpi)
             cp.conjugate(Gpi, out=Gpi_conj)
             Gpi_conj *= wcoulG[:,None,None]
+            if orbr is not None:
+                orbr = cp.take(orbr, ki, axis=1, out=dmf_ki)
+                contract('ngij,snip->sngpj', Gpq, orbr, out=Gpi)
+            tmp, _ = _allocate((n_dm,nkj,nao,nao), vk.dtype, buf2)
             vk[:,kj] += contract('sngpi,sngpj->snij', Gpi_conj, Gpi, out=tmp)
     return vk
 
@@ -974,7 +977,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
     ft_opt = FTOpt(cell, bvk_kmesh)
     ft_kern = ft_opt.gen_ft_kernel(verbose=log)
 
-    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
     ngrids = len(Gv)
     avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     Gblksize = max(16, int(avail_mem/(16*nao**2*2)//8*8))
@@ -1007,3 +1010,10 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
             vk = vk.real
         vk = vk.reshape(dm.shape)
     return vj, vk
+
+def _bas_recontract_ft_pair(cell, Gpq, out=None, buf=None):
+    pqG = Gpq.transpose(0,2,3,1)
+    assert pqG.flags.c_contiguous
+    tmp = cell.apply_CT_dot(pqG, axis=1, out=buf)
+    out = cell.apply_CT_dot(tmp, axis=2, out=out)
+    return out.transpose(0,3,1,2)

@@ -92,12 +92,12 @@ class KnownValues(unittest.TestCase):
         nao = mol.nao
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
-        mf = gpu_scf.RHF(mol).density_fit()
-        mf.kernel()
-        vj0, _ = mf.get_jk(dm=dm, with_j=True, with_k=False, hermi=1)
+        mf = gpu_scf.RHF(mol)
+        mf = mf.density_fit()
         vj = df_jk.get_j(mf.with_df, dm)
-        assert cupy.linalg.norm(vj - vj0) < 1e-4
-    
+        ref, _ = mf.get_jk(dm=dm, with_j=True, with_k=False, hermi=1)
+        assert abs(vj - ref).max() < 2e-9
+
     def test_jk_hermi0(self):
         dfobj = DF(mol, 'sto3g').build()
         np.random.seed(3)
@@ -144,6 +144,29 @@ class KnownValues(unittest.TestCase):
         vk = vk.get()
         assert abs(vj - refj).max() < 1e-9
         assert abs(vk - refk).max() < 1e-9
+
+    def test_limited_mem(self):
+        from gpu4pyscf.df import df
+        mol = pyscf.M(atom='''
+O       0.873    5.017    1.816
+H       1.128    5.038    2.848
+H       0.173    4.317    1.960
+O       3.665    1.316    1.319
+H       3.904    2.233    1.002
+H       4.224    0.640    0.837
+''', basis='def2-tzvp')
+        mf = mol.RHF().to_gpu()
+        mf = mf.density_fit()
+        mf.with_df.use_gpu_memory = False
+        mf.run()
+        assert isinstance(mf.with_df._cderi[0], np.ndarray)
+        assert abs(mf.e_tot - -152.09455538734778) < 1e-8
+
+        with lib.temporary_env(df, get_avail_mem=lambda *args, **kw: 3000000):
+            mf = mol.RHF().to_gpu()
+            mf = mf.density_fit().run()
+            assert isinstance(mf.with_df._cderi[0], np.ndarray)
+            assert abs(mf.e_tot - -152.09455538734778) < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for DF JK")

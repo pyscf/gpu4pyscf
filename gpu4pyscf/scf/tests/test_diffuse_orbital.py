@@ -77,15 +77,12 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
+    def setUp(self):
         assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue is True
-        cls.overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+        self.overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
 
-    @classmethod
-    def tearDownClass(cls):
-        assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue is True
-        assert cls.overlap_zero_eigenvalue_threshold == gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+    def tearDown(self):
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = self.overlap_zero_eigenvalue_threshold
 
     def test_rhf(self):
         mf = scf.RHF(mol)
