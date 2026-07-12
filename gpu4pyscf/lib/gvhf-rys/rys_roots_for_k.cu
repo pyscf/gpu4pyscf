@@ -25,7 +25,7 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
     if (omega == 0) {
         rys_roots(nroots, theta_rr, rw, block_size, rt_id, stride);
         if (lr_factor != 1) {
-            __syncthreads();
+            if (stride != 1) __syncthreads();
             for (int irys = rt_id; irys < nroots; irys+=stride) {
                 rw[(irys*2+1)*block_size] *= lr_factor;
             }
@@ -33,7 +33,7 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
     } else if (sr_factor == 0) {
         double theta_fac = omega * omega / (omega * omega + theta);
         rys_roots(nroots, theta_fac*theta_rr, rw, block_size, rt_id, stride);
-        __syncthreads();
+        if (stride != 1) __syncthreads();
         double sqrt_theta_fac = sqrt(theta_fac) * lr_factor;
         for (int irys = rt_id; irys < nroots; irys+=stride) {
             rw[ irys*2   *block_size] *= theta_fac;
@@ -45,7 +45,7 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
         double theta_fac = omega * omega / (omega * omega + theta);
         double *rw1 = rw + nroots*block_size;
         rys_roots(_nroots, theta_fac*theta_rr, rw1, block_size, rt_id, stride);
-        __syncthreads();
+        if (stride != 1) __syncthreads();
         double full_factor = sr_factor;
         double sqrt_theta_fac = sqrt(theta_fac) * (lr_factor - sr_factor);
         for (int irys = rt_id; irys < _nroots; irys+=stride) {
