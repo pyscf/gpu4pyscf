@@ -42,20 +42,18 @@ int blockDim_y = item.get_local_range(0);
 
 #endif // USE_SYCL
 
-// Parallel prefix-sum (Blelloch scan) over the x-row only.
+// Parallel prefix-sum (inclusive scan) over the x-row only.
 //
 // Parameters:
 //   keep         - this thread's contribution (0 or 1)
-//   row_storage  - pointer to THIS thread's y-row slice of shared swap[]:i.e.
-//                  swap + threadIdx_y * blockDim_x.  Size must be >= blockDim_x.
-//   n            - blockDim_x (number of threads in the x dimension)
-//   lane         - threadIdx_x (this thread's position within its row)
+//   row_storage  - pointer to blockDim_x ints in shared memory for this scan
+//   n            - blockDim_x
+//   lane         - threadIdx_x
 //
-// Returns the exclusive prefix sum for this lane within its y-row.
+// Returns the exclusive prefix sum for this lane.
 //
-// All threads in the workgroup (all y-rows) must call this function
-// simultaneously so that every __syncthreads() is convergent on both
-// CUDA and SYCL backends.
+// All threads in the workgroup MUST call this function simultaneously so
+// that every __syncthreads() is convergent on both CUDA and SYCL backends.
 __device__ inline
 int mask_to_index(int keep, int *row_storage, int n, int lane)
 {
@@ -71,12 +69,25 @@ int mask_to_index(int keep, int *row_storage, int n, int lane)
 }
 
 // ---------------------------------------------------------------------------
-// Shared helper: advance pair_kl0 by blockDim_x (x-row width) per iteration.
-// Only threadIdx_y == 0 computes keep and reads kl-pair data; all other y-rows
-// hold keep=0 and pass through the scan transparently.  This guarantees:
-//   (a) every __syncthreads() is reached by ALL threads unconditionally, and
-//   (b) ntasks counts each accepted kl-pair exactly once.
-// swap[] must have room for blockDim_x ints (not blockDim_x * blockDim_y).
+// Design invariants shared by ALL _fill_*_tasks helpers:
+//
+//  1. Early-exit guard: the q_cond screening test before the while loop is
+//     a UNIFORM branch (all threads see the same condition because pair_kl0
+//     and kl_cutoff are read-only at that point).  A __syncthreads() is
+//     placed immediately before every `return` so that no work-item escapes
+//     a barrier that its peers are still waiting on — the primary cause of
+//     PVC hangs.
+//
+//  2. Non-uniform writes to loop-condition variables are forbidden.  The
+//     "skip-to-end" optimisation (formerly `pair_kl0 = pair_kl1` inside
+//     `if (threadIdx_y == 0 && pair_kl < pair_kl1)`) is communicated
+//     through a shared flag `do_skip` and applied uniformly inside the
+//     `if (t_id == 0)` block at the bottom of each iteration.
+//
+//  3. mask_to_index() is called unconditionally by all threads so that
+//     every __syncthreads() inside it is always convergent.
+//
+//  4. swap[] only needs blockDim_x entries (not blockDim_x * blockDim_y).
 // ---------------------------------------------------------------------------
 
 __device__ static
@@ -96,6 +107,9 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        // FIX: barrier before return so no peer is left waiting on a barrier
+        // that this thread already skipped (root cause of SYCL hang on PVC).
+        __syncthreads();
         return;
     }
 
@@ -105,21 +119,26 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float *dm_cond = bounds.dm_cond;
     uint32_t bas_ij = ish * nbas + jsh;
 
-    // swap only needs blockDim_x entries; row_storage == swap (threadIdx_y==0 row)
     int *swap = (int *)shared_memory;
+    // swap[blockDim_x] reused as a single-int shared flag for the skip signal.
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
+        __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        // Only y-row 0 evaluates the screening condition.
-        // All other rows hold keep=0 and contribute nothing to ntasks.
         if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
+            // FIX: signal skip uniformly via shared flag instead of writing
+            // pair_kl0 non-uniformly inside a divergent branch.
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -132,7 +151,6 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         dm_cond[jsh*nbas+lsh] > d_cutoff);
             }
         }
-        // mask_to_index scans blockDim_x threads; all y-rows reach __syncthreads.
         int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
@@ -140,11 +158,14 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
-    // pad data to avoid overflow
     if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
@@ -168,6 +189,7 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -179,9 +201,14 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float d_ij = dm_cond[bas_ij];
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -189,7 +216,7 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -211,7 +238,11 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
@@ -238,6 +269,7 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -249,9 +281,14 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float d_ij = dm_cond[bas_ij];
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -259,7 +296,7 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -275,7 +312,11 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
@@ -303,6 +344,7 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -341,9 +383,14 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     uint32_t bas_ij = ish * nbas + jsh;
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -351,7 +398,7 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -402,7 +449,11 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
@@ -430,6 +481,7 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -469,9 +521,14 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float theta_ij = omega2 * aij / (aij + omega2);
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -479,7 +536,7 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -532,7 +589,11 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
@@ -560,12 +621,13 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
     int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
-    uint32_t nbas = envs.nbas;
+    // FIX: removed duplicate `uint32_t nbas = envs.nbas;` (was a compile error)
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
@@ -600,9 +662,14 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float theta_ij = omega2 * aij / (aij + omega2);
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -610,7 +677,7 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -658,7 +725,11 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
@@ -685,6 +756,7 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -695,9 +767,14 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float d_ij = dm_cond[ish * nbas + jsh];
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -705,7 +782,7 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff;
             if (keep) {
@@ -727,7 +804,11 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
@@ -755,6 +836,7 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -799,9 +881,14 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float theta_ij = omega2 * aij / (aij + omega2);
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -809,7 +896,7 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff;
             if (keep) {
@@ -864,7 +951,11 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
@@ -891,6 +982,7 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -904,9 +996,14 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     int do_k = jk.k_factor != 0;
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -914,7 +1011,7 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -933,7 +1030,11 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
@@ -961,6 +1062,7 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -1002,9 +1104,14 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     int do_k = jk.k_factor != 0;
 
     int *swap = (int *)shared_memory;
+    int *do_skip_flag = swap + blockDim_x;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + threadIdx_x;
+        __syncthreads();
+        if (t_id == 0) {
+            do_skip_flag[0] = 0;
+        }
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
@@ -1012,7 +1119,7 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = pair_kl1;
+                do_skip_flag[0] = 1;
             }
             keep = q_kl >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -1065,7 +1172,11 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
         if (t_id == 0) {
             ntasks += swap[blockDim_x - 1];
-            pair_kl0 += blockDim_x;
+            if (do_skip_flag[0]) {
+                pair_kl0 = pair_kl1;
+            } else {
+                pair_kl0 += blockDim_x;
+            }
         }
         __syncthreads();
     }
