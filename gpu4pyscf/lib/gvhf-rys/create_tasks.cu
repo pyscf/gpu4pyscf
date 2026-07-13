@@ -42,27 +42,42 @@ int blockDim_y = item.get_local_range(0);
 
 #endif // USE_SYCL
 
-// np.where(threads_mask)[0]
+// Parallel prefix-sum (Blelloch scan) over the x-row only.
+//
+// Parameters:
+//   keep         - this thread's contribution (0 or 1)
+//   row_storage  - pointer to THIS thread's y-row slice of shared swap[]:i.e.
+//                  swap + threadIdx_y * blockDim_x.  Size must be >= blockDim_x.
+//   n            - blockDim_x (number of threads in the x dimension)
+//   lane         - threadIdx_x (this thread's position within its row)
+//
+// Returns the exclusive prefix sum for this lane within its y-row.
+//
+// All threads in the workgroup (all y-rows) must call this function
+// simultaneously so that every __syncthreads() is convergent on both
+// CUDA and SYCL backends.
 __device__ inline
-int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
+int mask_to_index(int keep, int *row_storage, int n, int lane)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    #endif
-    tmp_storage[t_id] = keep;
+    row_storage[lane] = keep;
     __syncthreads();
-    for (int offset = 1; offset < threads; offset <<= 1) {
-        int val = 0;
-        if (t_id >= offset) {
-            val = tmp_storage[t_id - offset];
-        }
+    for (int offset = 1; offset < n; offset <<= 1) {
+        int val = (lane >= offset) ? row_storage[lane - offset] : 0;
         __syncthreads();
-        tmp_storage[t_id] += val;
+        row_storage[lane] += val;
         __syncthreads();
     }
-    int offset = tmp_storage[t_id] - keep;
-    return offset;
+    return row_storage[lane] - keep;
 }
+
+// ---------------------------------------------------------------------------
+// Shared helper: advance pair_kl0 by blockDim_x (x-row width) per iteration.
+// Only threadIdx_y == 0 computes keep and reads kl-pair data; all other y-rows
+// hold keep=0 and pass through the scan transparently.  This guarantees:
+//   (a) every __syncthreads() is reached by ALL threads unconditionally, and
+//   (b) ntasks counts each accepted kl-pair exactly once.
+// swap[] must have room for blockDim_x ints (not blockDim_x * blockDim_y).
+// ---------------------------------------------------------------------------
 
 __device__ static
 void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
@@ -72,7 +87,6 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -91,14 +105,17 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float *dm_cond = bounds.dm_cond;
     uint32_t bas_ij = ish * nbas + jsh;
 
+    // swap only needs blockDim_x entries; row_storage == swap (threadIdx_y==0 row)
     int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        // Only y-row 0 evaluates the screening condition.
+        // All other rows hold keep=0 and contribute nothing to ntasks.
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
@@ -115,20 +132,21 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         dm_cond[jsh*nbas+lsh] > d_cutoff);
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        // mask_to_index scans blockDim_x threads; all y-rows reach __syncthreads.
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
     // pad data to avoid overflow
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -141,7 +159,6 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -163,16 +180,12 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int *swap = (int *)shared_memory;
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-        if (threadIdx_y == active_y) {
-    #endif
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
@@ -191,25 +204,19 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         dm_cond[jsh*nbas+lsh] > d_cutoff);
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -222,7 +229,6 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -244,16 +250,12 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int *swap = (int *)shared_memory;
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-        if (threadIdx_y == active_y) {
-    #endif
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
@@ -266,24 +268,19 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         dm_cond[bas_kl] > d_cutoff);
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -297,7 +294,6 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -346,16 +342,12 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int *swap = (int *)shared_memory;
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-        if (threadIdx_y == active_y) {
-    #endif
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
@@ -403,24 +395,19 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                 }
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -434,7 +421,6 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -482,18 +468,14 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-      if (threadIdx_y == active_y) {
-    #endif
     int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
@@ -543,25 +525,19 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                 }
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -575,7 +551,6 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -590,6 +565,7 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
+    uint32_t nbas = envs.nbas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
@@ -625,16 +601,12 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int *swap = (int *)shared_memory;
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-        if (threadIdx_y == active_y) {
-    #endif
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
@@ -679,25 +651,19 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                 }
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -710,7 +676,6 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -731,16 +696,12 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int *swap = (int *)shared_memory;
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-        if (threadIdx_y == active_y) {
-    #endif
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
@@ -759,25 +720,19 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         dm_cond[jsh*nbas+lsh] > d_cutoff);
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -791,7 +746,6 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -846,16 +800,12 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int *swap = (int *)shared_memory;
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-        if (threadIdx_y == active_y) {
-    #endif
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
@@ -907,24 +857,19 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                 }
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -937,7 +882,6 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -961,16 +905,12 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int *swap = (int *)shared_memory;
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-      if (threadIdx_y == active_y) {
-    #endif
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + Q_COND_MARGIN < kl_cutoff) {
@@ -986,25 +926,19 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         (do_j && d_ij+dm_cond[bas_kl] > d_cutoff));
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
@@ -1018,7 +952,6 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -1070,16 +1003,12 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
     int *swap = (int *)shared_memory;
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-        if (threadIdx_y == active_y) {
-    #endif
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
-        int pair_kl = pair_kl0 + t_id;
+        int pair_kl = pair_kl0 + threadIdx_x;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < pair_kl1) {
+        if (threadIdx_y == 0 && pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + Q_COND_MARGIN < kl_cutoff) {
@@ -1129,25 +1058,19 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                 }
             }
         }
-        int offset = mask_to_index(keep, swap, threads, t_id);
+        int offset = mask_to_index(keep, swap, blockDim_x, threadIdx_x);
         if (keep) {
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
         if (t_id == 0) {
-            ntasks += swap[threads - 1];
-            pair_kl0 += threads;
+            ntasks += swap[blockDim_x - 1];
+            pair_kl0 += blockDim_x;
         }
         __syncthreads();
     }
-    #ifdef USE_SYCL
-        } // for: if threadIdx_y
-        __syncthreads();
-    } // for: active_y
-    #endif
-
-    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
-        bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
+    if (threadIdx_y == 0 && ntasks + threadIdx_x < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks + threadIdx_x] = bas_kl_idx[ntasks - 1];
     }
     __syncthreads();
 }
