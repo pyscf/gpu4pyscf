@@ -757,27 +757,68 @@ class TDBase(tdhf_gpu.TDBase):
 
     def _contract_multipole(tdobj, ints, hermi=True, xy=None):
         if xy is None: xy = tdobj.xy
-        mo_coeff = tdobj._scf.mo_coeff
-        mo_occ = tdobj._scf.mo_occ
-        orbo_a = mo_coeff[0][:,mo_occ[0]==1]
-        orbv_a = mo_coeff[0][:,mo_occ[0]==0]
-        orbo_b = mo_coeff[1][:,mo_occ[1]==1]
-        orbv_b = mo_coeff[1][:,mo_occ[1]==0]
-        ints = asarray(ints)
+        nstates = len(xy)
+        pol_shape = ints.shape[:-2]
+        npol = np.prod(pol_shape, dtype=int)
+        nao = ints.shape[-1]
 
-        ints_a = cp.einsum('...pq,pi,qj->...ij', ints, orbo_a.conj(), orbv_a)
-        ints_b = cp.einsum('...pq,pi,qj->...ij', ints, orbo_b.conj(), orbv_b)
-        pol = [(cp.einsum('...ij,ij->...', ints_a, x[0]).get() +
-                cp.einsum('...ij,ij->...', ints_b, x[1]).get()) for x,y in xy]
+        ints = asarray(ints).reshape(npol, nao, nao)
+        mo_coeff_a = asarray(tdobj._scf.mo_coeff[0])
+        mo_coeff_b = asarray(tdobj._scf.mo_coeff[1])
+        mo_occ_a = asarray(tdobj._scf.mo_occ[0])
+        mo_occ_b = asarray(tdobj._scf.mo_occ[1])
+        orbo_a = mo_coeff_a[:,mo_occ_a==1]
+        orbv_a = mo_coeff_a[:,mo_occ_a==0]
+        orbo_b = mo_coeff_b[:,mo_occ_b==1]
+        orbv_b = mo_coeff_b[:,mo_occ_b==0]
+        nocca = orbo_a.shape[1]
+        nvira = orbv_a.shape[1]
+        noccb = orbo_b.shape[1]
+        nvirb = orbv_b.shape[1]
+
+        mo_ints_a = cp.empty((npol, nocca, nvira), dtype=ints.dtype)
+        mo_ints_b = cp.empty((npol, noccb, nvirb), dtype=ints.dtype)
+        for k in range(npol):
+            buf = ints[k] @ orbv_a
+            mo_ints_a[k] = orbo_a.conj().T @ buf
+            del buf
+            buf = ints[k] @ orbv_b
+            mo_ints_b[k] = orbo_b.conj().T @ buf
+            del buf
+
+        pol = []
+        for x, y in xy:
+            x_a, x_b = x[0], x[1]
+            if not isinstance(x_a, cp.ndarray):
+                x_a = asarray(x_a)
+            if not isinstance(x_b, cp.ndarray):
+                x_b = asarray(x_b)
+            pa = cp.einsum('xij,ij->x', mo_ints_a, x_a)
+            pb = cp.einsum('xij,ij->x', mo_ints_b, x_b)
+            pol.append((pa + pb).get() * 2)
         pol = np.array(pol)
-        y = xy[0][1]
-        if isinstance(y[0], cp.ndarray):
-            pol_y = [(cp.einsum('...ij,ij->...', ints_a, y[0]).get() +
-                      cp.einsum('...ij,ij->...', ints_b, y[1]).get()) for x,y in xy]
+
+        y0 = xy[0][1]
+        if hasattr(y0, '__len__') and len(y0) == 2 and isinstance(y0[0], (np.ndarray, cp.ndarray)):
+            pol_y = []
+            for x, y in xy:
+                y_a, y_b = y[0], y[1]
+                if not isinstance(y_a, cp.ndarray):
+                    y_a = asarray(y_a)
+                if not isinstance(y_b, cp.ndarray):
+                    y_b = asarray(y_b)
+                pa = cp.einsum('xij,ij->x', mo_ints_a, y_a)
+                pb = cp.einsum('xij,ij->x', mo_ints_b, y_b)
+                pol_y.append((pa + pb).get() * 2)
+            pol_y = np.array(pol_y)
             if hermi:
                 pol += pol_y
-            else:  # anti-Hermitian
+            else:
                 pol -= pol_y
+
+        del mo_ints_a, mo_ints_b
+        cp.get_default_memory_pool().free_all_blocks()
+        pol = pol.reshape((nstates,) + pol_shape)
         return pol
 
 

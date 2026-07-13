@@ -520,28 +520,39 @@ class TDBase(lib.StreamObject):
         if xy is None: xy = tdobj.xy
         nstates = len(xy)
         pol_shape = ints.shape[:-2]
+        npol = np.prod(pol_shape, dtype=int)
         nao = ints.shape[-1]
 
         if not tdobj.singlet:
             return np.zeros((nstates,) + pol_shape)
 
-        ints = asarray(ints)
-        mo_coeff = tdobj._scf.mo_coeff
-        mo_occ = tdobj._scf.mo_occ
+        ints = asarray(ints).reshape(npol, nao, nao)
+        mo_coeff = asarray(tdobj._scf.mo_coeff)
+        mo_occ = asarray(tdobj._scf.mo_occ)
         orbo = mo_coeff[:,mo_occ==2]
         orbv = mo_coeff[:,mo_occ==0]
 
-        #Incompatible to old np version
-        #ints = np.einsum('...pq,pi,qj->...ij', ints, orbo.conj(), orbv)
-        ints = cp.einsum('xpq,pi,qj->xij', ints.reshape(-1,nao,nao), orbo.conj(), orbv)
-        xs = cp.asarray([x for x,y in xy])
-        pol = cp.einsum('xij,nij->nx', ints, xs).get() * 2
-        if isinstance(xy[0][1], (np.ndarray, cp.ndarray)):
-            ys = cp.asarray([y for x,y in xy])
-            if hermi:
-                pol += cp.einsum('xij,nij->nx', ints, ys).get() * 2
-            else:  # anti-Hermitian
-                pol -= cp.einsum('xij,nij->nx', ints, ys).get() * 2
+        pol = cp.zeros((nstates, npol), dtype=ints.dtype)
+        for k in range(npol):
+            buf = ints[k] @ orbv
+            mo_ints_k = orbo.conj().T @ buf
+            del buf
+            for i in range(nstates):
+                x, y = xy[i]
+                if not isinstance(x, cp.ndarray):
+                    x = asarray(x)
+                pol[i, k] = cp.sum(mo_ints_k * x) * 2
+                if isinstance(y, (np.ndarray, cp.ndarray)):
+                    if not isinstance(y, cp.ndarray):
+                        y = asarray(y)
+                    val = cp.sum(mo_ints_k * y) * 2
+                    if hermi:
+                        pol[i, k] += val
+                    else:
+                        pol[i, k] -= val
+            del mo_ints_k
+        pol = pol.get()
+        cp.get_default_memory_pool().free_all_blocks()
         pol = pol.reshape((nstates,)+pol_shape)
         return pol
 
