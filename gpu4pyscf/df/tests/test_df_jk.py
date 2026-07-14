@@ -91,10 +91,25 @@ class KnownValues(unittest.TestCase):
     def test_j_outcore(self):
         cupy.random.seed(np.asarray(1, dtype=np.uint64))
         nao = mol.nao
+        mf = gpu_scf.RHF(mol)
+        mf = mf.density_fit(auxbasis='sto3g')
+        mf.with_df.build()
+
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
-        mf = gpu_scf.RHF(mol)
-        mf = mf.density_fit()
+        vj = df_jk.get_j(mf.with_df, dm)
+        ref, _ = mf.get_jk(dm=dm, hermi=1)
+        assert abs(vj - ref).max() < 1e-12
+
+        dm = cupy.random.rand(2, nao, nao)
+        vj = df_jk.get_j(mf.with_df, dm, hermi=0)
+        ref, _ = mf.get_jk(dm=dm, hermi=0)
+        assert abs(vj - ref).max() < 1e-12
+
+        dm = cupy.random.rand(42, nao, nao)
+        vj = df_jk.get_j(mf.with_df, dm, hermi=0)
+        ref, _ = mf.get_jk(dm=dm, hermi=0)
+        assert abs(vj - ref).max() < 1e-12
 
     def test_jk_hermi0(self):
         dfobj = DF(mol, 'sto3g').build()

@@ -203,7 +203,7 @@ class _DFHF:
         vj = vk = None
         if self.only_dfj:
             if with_j:
-                vj = self.with_df.get_j(mol, dm, hermi, omega)
+                vj = self.with_df.get_jk(mol, dm, hermi, with_k=False)[0]
             if with_k:
                 vk = hf.SCF.get_k(self, mol, dm, hermi, omega=omega)
         else:
