@@ -1,3 +1,10 @@
+v1.7.6 (2026-07-14)
+-------------------
+* Fixes
+  - Excessive memory usage in TDDFT caused by cupy.einsum
+  - Fix the bad atomic radii assigned to ghost atom, which causes a bad Becke partition and a negative BSSE (#814)
+
+
 v1.7.5 (2026-07-10)
 -------------------
 * Improvements
