@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 import cupy
 import numpy
 import cupy as cp
+from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
@@ -33,7 +34,7 @@ from gpu4pyscf.lib.cupy_helper import asarray, ndarray, get_avail_mem
 from gpu4pyscf.lib import multi_gpu
 num_devices = multi_gpu.num_devices
 
-def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
+def density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
     '''For the given SCF object, update the J, K matrix constructor with
     corresponding density fitting integrals.
     Args:
@@ -92,13 +93,11 @@ class _DFHF:
     to_gpu = utils.to_gpu
     device = utils.device
     __name_mixin__ = 'DF'
-    _keys = {'rhoj', 'rhok', 'disp', 'screen_tol', 'with_df', 'only_dfj'}
+    _keys = {'disp', 'screen_tol', 'with_df', 'only_dfj'}
 
     def __init__(self, mf, dfobj, only_dfj):
         self.__dict__.update(mf.__dict__)
         self._eri = None
-        self.rhoj = None
-        self.rhok = None
         self.direct_scf = False
         self.with_df = dfobj
         self.only_dfj = only_dfj
@@ -106,7 +105,7 @@ class _DFHF:
     def undo_df(self):
         '''Remove the DFHF Mixin'''
         obj = lib.view(self, lib.drop_class(self.__class__, _DFHF))
-        del obj.rhoj, obj.rhok, obj.with_df, obj.only_dfj
+        del obj.with_df, obj.only_dfj
         return obj
 
     def reset(self, mol=None):
@@ -119,59 +118,97 @@ class _DFHF:
     def get_k(self, mol=None, dm=None, hermi=1, omega=None,
               lr_factor=None, sr_factor=None):
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
-        vk = self.with_df.get_jk(dm, hermi, False, True)[1]
+        vk = self.get_jk(mol, dm, hermi, False, True, omega=omega)[1]
         vk *= sr_factor
         if omega == 0:
             return vk
 
-        vklr = self.with_df.get_jk(dm, hermi, False, True, omega=omega)[1]
+        vklr = self.get_jk(mol, dm, hermi, False, True, omega=omega)[1]
         vklr *= lr_factor - sr_factor
         vk += vklr
         return vk
 
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                omega=None):
+        if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        
-        if self.with_df and self.only_dfj:
-            vj = vk = None
-            # 1. Calculate DF J (Density Fitting J)
-            if with_j:
-                if isinstance(self, ghf.GHF):
-                    # GHF: Define local strategy and call GHF adapter for J only
-                    def jkbuild(mol_obj, dm_obj, hermi, omega=None):
-                        nao = mol_obj.nao
-                        dm_obj = dm_obj.reshape(-1, nao, nao)
-                        return self.with_df.get_jk(dm_obj, hermi, omega=omega)
-                    # Pass with_k=False to get only DF J
-                    vj, _ = ghf.get_jk(mol, dm, hermi, True, False,
-                                       jkbuild=jkbuild, omega=omega)
+
+        if isinstance(self, ghf.GHF):
+            nao = mol.nao
+            if with_k and not self.only_dfj:
+                factor_l, factor_r = factorize_dm(dm, hermi)
+                if factor_r is None:
+                    factor_r = factor_l
+                n2c, nocc = factor_l.shape[-2:]
+                nao = n2c // 2
+                factor_l = factor_l.reshape(-1, n2c, nocc)
+                factor_r = factor_r.reshape(-1, n2c, nocc)
+                la = factor_l[:,:nao]
+                lb = factor_l[:,nao:]
+                ra = factor_r[:,:nao]
+                rb = factor_r[:,nao:]
+                is_real = dm.dtype == cp.float64
+                if dm.ndim == 2:
+                    n_dm = 1
                 else:
-                    # Standard RHF/UHF: Use Master's get_j logic
-                    vj = self.get_j(mol, dm, hermi, omega)
-            
-            # 2. Calculate Exact K (because only_dfj is True, we don't use DF for K)
+                    n_dm = len(dm)
+
+            def get_jk_spin_free(mf, mol, dm, hermi, with_j=True, with_k=True,
+                                 omega=None, lr_factor=None, sr_factor=None):
+                vj = vk = None
+                if with_j:
+                    vj = mf.with_df.get_jk(dm, hermi, with_k=False)[0]
+
+                if not with_k:
+                    return vj, vk
+
+                if self.only_dfj:
+                    vk = hf.SCF.get_k(self, mol, dm, hermi, omega=omega)
+                    return vj, vk
+
+                if is_real:
+                    # leading dimension of dm corresponds to aa,bb,ab,ba
+                    factor_l = cp.vstack([la, lb, la, lb])
+                    factor_r = cp.vstack([ra, rb, rb, ra])
+                else:
+                    # leading dimension of dm corresponds to
+                    # aaR,bbR,abR,baR,aaI,bbI,abI,baI
+                    factor_l = cp.stack([
+                        la.real, la.imag, # laR*raR - laI*raI
+                        lb.real, lb.imag, # lbR*rbR - lbI*rbI
+                        la.real, la.imag, # laR*rbR - laI*rbI
+                        lb.real, lb.imag, # lbR*raR - lbI*raI
+                        la.real, la.imag, # laR*raI + laI*raR
+                        lb.real, lb.imag, # lbR*rbI + lbI*rbR
+                        la.real, la.imag, # laR*rbI + laI*rbR
+                        lb.real, lb.imag, # lbR*raI + lbI*raR
+                    ]).reshape(8,2, n_dm,nao,nocc).transpose(0,2,3,1,4).reshape(8*n_dm, nao, 2*nocc)
+                    factor_r = cp.stack([
+                        ra.real, -ra.imag,
+                        rb.real, -rb.imag,
+                        rb.real, -rb.imag,
+                        ra.real, -ra.imag,
+                        ra.imag, ra.real,
+                        rb.imag, rb.real,
+                        rb.imag, rb.real,
+                        ra.imag, ra.real,
+                    ]).reshape(8,2, n_dm,nao,nocc).transpose(0,2,3,1,4).reshape(8*n_dm, nao, 2*nocc)
+                dm = tag_array(dm, factor_l=factor_l, factor_r=factor_r)
+                vk = self.with_df.get_jk(dm, hermi=0, with_j=False, omega=omega)[1]
+                return vj, vk
+
+            return ghf._get_jk(self, mol, dm, hermi, with_j, with_k,
+                               jkbuild=get_jk_spin_free, omega=omega)
+
+        vj = vk = None
+        if self.only_dfj:
+            if with_j:
+                vj = self.with_df.get_j(mol, dm, hermi, omega)
             if with_k:
-                vk = super().get_jk(mol, dm, hermi, False, True, omega)[1]
-
-        elif self.with_df:
-            # Full DF mode (DF J + DF K)
-            if isinstance(self, ghf.GHF):
-                # GHF: Define local strategy and call GHF adapter
-                def jkbuild(mol_obj, dm_obj, hermi, omega=None):
-                    nao = mol_obj.nao
-                    dm_obj = dm_obj.reshape(-1, nao, nao)
-                    return self.with_df.get_jk(dm_obj, hermi, omega=omega)
-                vj, vk = ghf.get_jk(mol, dm, hermi, with_j, with_k,
-                                    jkbuild=jkbuild, omega=omega)
-            else:
-                # Standard RHF/UHF: Use Master's direct call
-                vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k, omega=omega)
-
+                vk = hf.SCF.get_k(self, mol, dm, hermi, omega=omega)
         else:
-            # Error handling from Master
-            raise ValueError(f"with_df field not found in a df object (type = {type(self)}) during a get_jk() call.")
-            
+            # Full DF mode (DF J + DF K)
+            vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k, omega=omega)
         return vj, vk
 
     def Gradients(self):
@@ -435,6 +472,16 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
         # dms equals to 0. vj and vk must be all zeros.
         return dms, dms
 
+    if with_j:
+        pair_addresses, diags = dfobj._cderi_idx
+        rows, cols = divmod(cp.asarray(pair_addresses), nao)
+        dm_sparse = dms_3d[:,rows,cols]
+        if hermi == 0:
+            dm_sparse += dms_3d[:,cols,rows]
+        else:
+            dm_sparse *= 2
+        dm_sparse[:,diags] *= .5
+
     def proc():
         factor_l = cp.asarray(dm_factor_l).reshape(-1,nao,nocc)
         factor_r = dm_factor_r
@@ -443,15 +490,8 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
 
         vj = vk = None
         if with_j:
-            pair_addresses, diags = dfobj._cderi_idx
-            rows, cols = divmod(cp.asarray(pair_addresses), nao)
-            dm_sparse = cp.asarray(dms_3d)[:,rows,cols]
-            if hermi == 0:
-                dm_sparse += cp.asarray(dms_3d)[:,cols,rows]
-            else:
-                dm_sparse *= 2
-            dm_sparse[:,cp.asarray(diags)] *= .5
-            vj_sparse = cp.zeros_like(dm_sparse)
+            _dm_sparse = cp.asarray(dm_sparse)
+            vj = cp.zeros_like(dm_sparse)
 
         blksize = dfobj.get_blksize(mem_fraction=0.4)
         if with_k:
@@ -474,7 +514,8 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
 
         for cderi, cderi_tril in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
-                vj_sparse += dm_sparse.dot(cderi_tril.T).dot(cderi_tril)
+                auxvec = contract('Lp,np->nL', cderi_tril, _dm_sparse)
+                contract('Lp,nL->np', cderi_tril, auxvec, beta=1, out=vj)
 
             if with_k:
                 nL = len(cderi)
@@ -504,17 +545,15 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
                         contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
                         contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
                 rhok1 = rhok = None
-        if with_j:
-            vj = cp.zeros(dms_3d.shape)
-            vj[:,cols,rows] = vj_sparse
-            vj[:,rows,cols] = vj_sparse
         return vj, vk
 
     results = multi_gpu.run(proc, non_blocking=True)
 
     vj = vk = None
     if with_j:
-        vj = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+        vj_sparse = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+        vj = cp.zeros_like(dms_3d)
+        vj[:,cols,rows] = vj[:,rows,cols] = vj_sparse
         vj = vj.reshape(dms.shape)
         if not out_cupy: vj = vj.get()
 
@@ -528,38 +567,36 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
     return vj, vk
 
 def get_j(dfobj, dm, hermi=1):
-    from cupyx.scipy.linalg import solve_triangular
-    from gpu4pyscf.df.int3c2e_bdiv import int2c2e
-
-    if dfobj._cderi is not None:
-        return dfobj.get_jk(dm, hermi, with_k=False)
-
     if dfobj.intopt is None:
         dfobj.build(build_cderi=False)
+
+    if dfobj._cd_j2c is None:
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
         j2c = int2c2e(dfobj.auxmol)
         try:
-            dfobj.cd_j2c = cholesky(j2c)
-            dfobj.cd_tag = 'cd'
+            dfobj._cd_j2c = cholesky(j2c), 'cd'
         except RuntimeError:
-            dfobj.cd_j2c = j2c
-            dfobj.cd_tag = 'ed'
+            dfobj._cd_j2c = j2c, None
 
+    dm_shape = dm.shape
     intopt = dfobj.intopt
     mol = intopt.mol
     auxmol = intopt.auxmol
     dm = mol.apply_C_mat_CT(dm)
     rhoj = intopt.contract_dm(dm, hermi=hermi)
-    if dfobj.cd_tag == 'ed':
-        rhoj = cp.linalg.solve(dfobj.cd_j2c, rhoj.T)[0]
+    rhoj = auxmol.apply_CT_dot(rhoj, axis=-1)
+
+    j2c, tag = dfobj._cd_j2c
+    if tag == 'cd':
+        rhoj = solve_triangular(j2c, rhoj.T, lower=True)
+        rhoj = solve_triangular(j2c.T, rhoj, lower=False)
     else:
-        rhoj = solve_triangular(dfobj.cd_j2c, rhoj.T, lower=True)
-        rhoj = solve_triangular(dfobj.cd_j2c.T, rhoj, lower=False)
+        rhoj = cp.linalg.solve(j2c, rhoj.T)
 
-    auxvec = auxmol.C_dot_mat(rhoj.T)
+    auxvec = auxmol.apply_C_dot(rhoj, axis=0).T
     vj = intopt.contract_auxvec(auxvec)
-    return vj
-
-density_fit = _density_fit
+    vj = intopt.mol.apply_CT_mat_C(vj)
+    return vj.reshape(dm_shape)
 
 def factorize_dm(dm, hermi=0):
     '''

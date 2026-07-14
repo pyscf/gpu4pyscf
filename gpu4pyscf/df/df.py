@@ -65,6 +65,7 @@ class DF(lib.StreamObject):
         self.auxmol = None
         self._cderi = None
         self._cderi_idx = None
+        self._cd_j2c = None
         self._rsh_df = {}
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
@@ -107,6 +108,9 @@ class DF(lib.StreamObject):
 
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
                direct_scf_tol=None, omega=None):
+        if not with_k and self._cderi is None:
+            return df_jk.get_j(self, dm, hermi), None
+
         with self.range_coulomb(omega) as dfobj:
             return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k, omega=omega)
 
@@ -218,6 +222,7 @@ class DF(lib.StreamObject):
             self.intopt = None
         self._cderi = None
         self._cderi_idx = None
+        self._cd_j2c = None
         self._rsh_df = {}
         return self
 

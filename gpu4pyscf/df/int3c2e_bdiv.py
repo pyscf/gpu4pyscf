@@ -326,8 +326,9 @@ class Int3c2eOpt:
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
         mol = self.mol
+        nao = mol.nao
         auxmol = self.auxmol
-        assert dm.shape[-1] == mol.nao
+        assert dm.shape[-1] == nao
         assert dm.dtype == np.float64
         assert dm.flags.c_contiguous
         nbas_aux = auxmol.nbas
@@ -338,6 +339,7 @@ class Int3c2eOpt:
         if dm_ndim == 2:
             dm = dm[None]
         n_dm = len(dm)
+        dm = cp.asarray(dm.reshape(n_dm,nao,nao), order='C')
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
             short_range=mol.omega<0, cache_cart_idx=True)
@@ -377,8 +379,12 @@ class Int3c2eOpt:
         t0 = log.init_timer()
         mol = self.mol
         auxmol = self.auxmol
-        assert auxvec.ndim == 1
-        auxvec = cp.asarray(auxvec)
+        naux = auxmol.nao
+        assert auxvec.shape[-1] == naux
+
+        auxvec_ndim = auxvec.ndim
+        auxvec = cp.asarray(auxvec.reshape(-1,naux), order='C')
+        n_dm = len(auxvec)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
             short_range=mol.omega<0, gout_width=30, cache_cart_idx=True)
@@ -396,21 +402,24 @@ class Int3c2eOpt:
 
         int3c2e_envs = self.int3c2e_envs
         nao = mol.nao
-        vj = cp.zeros((nao, nao))
-        err = libvhf_rys.contract_int3c2e_auxvec(
-            ctypes.cast(vj.data.ptr, ctypes.c_void_p),
-            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
-            ctypes.c_int(len(shl_pair_offsets) - 1),
-            ctypes.c_int(len(ksh_offsets) - 1),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
-        if err != 0:
-            raise RuntimeError('contract_int3c2e_auxvec kernel failed')
-        log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
+        vj = cp.zeros((n_dm, nao, nao))
+        for i in range(n_dm):
+            err = libvhf_rys.contract_int3c2e_auxvec(
+                ctypes.cast(vj[i].data.ptr, ctypes.c_void_p),
+                ctypes.cast(auxvec[i].data.ptr, ctypes.c_void_p),
+                ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
+                ctypes.c_int(len(shl_pair_offsets) - 1),
+                ctypes.c_int(len(ksh_offsets) - 1),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+            if err != 0:
+                raise RuntimeError('contract_int3c2e_auxvec kernel failed')
+            log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
         vj = hermi_triu(vj, inplace=True)
+        if auxvec_ndim == 1:
+            vj = vj[0]
         return vj
 
     def orbital_pair_cart2sph(self, compressed_eri3c):
