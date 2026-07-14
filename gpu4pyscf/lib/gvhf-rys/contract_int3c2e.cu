@@ -70,6 +70,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
     int *ao_loc = envs.ao_loc;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
@@ -77,6 +78,8 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
     __shared__ uint32_t nao;
     __shared__ int gout_stride, nsp_per_block;
     __shared__ int dm_id0;
+    __shared__ double xk, yk, zk;
+    __shared__ int expk, ck;
     if (thread_id == 0) {
         int sp_block_id = gridDim.y - blockIdx.y - 1;
         shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -113,7 +116,6 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 4 + sp_id;
     double *gx = shared_memory + nsp_per_block * 7 + sp_id;
@@ -132,8 +134,6 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nsp_per_block;
     }
 
-    __shared__ double xk, yk, zk;
-    __shared__ int expk, ck;
     if (thread_id == 0) {
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         xk = rk[0];
@@ -385,12 +385,14 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1;
     __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
     __shared__ int nfij;
     __shared__ int gout_stride;
+    __shared__ double vj_aux[NF_AUX_MAX];
     double omega = env[PTR_RANGE_OMEGA];
     if (thread_id == 0) {
         int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -430,7 +432,6 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 4 + sp_id;
     double *gx = shared_memory + nsp_per_block * 7 + sp_id;
@@ -448,7 +449,6 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     if (thread_id < nfk * 3) {
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nsp_per_block;
     }
-    __shared__ double vj_aux[NF_AUX_MAX];
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         __syncthreads();

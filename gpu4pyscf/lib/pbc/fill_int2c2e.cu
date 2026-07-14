@@ -38,13 +38,15 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs,
 {
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double *img_coords = envs.img_coords;
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int nbas;
     __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
+
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *img_coords = envs.img_coords;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -73,7 +75,6 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs,
     int stride_j = li + 1;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
