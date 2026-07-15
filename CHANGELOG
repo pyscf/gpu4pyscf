@@ -32,9 +32,15 @@ v1.8.0 (2026-07-20)
   - OOM issue caused by low ke_cutoff. (#804)
   - Setting per-device shared memory attributes on each GPU, fixing shared memory configuration for kernels running on multiple GPUs.
   - Fix a bug when ghost atom has no grid with significant density, vv10 grid response gradient/hessian fails
-  - Fix bad atomic radii assigned to ghost atom, which causes a bad Becke partition and a negative BSSE (#814)
 * API Updates
   - Function numint.eval_xc_eff now returns exc as a vector with shape (N,) instead of an array with shape (N, 1).
+
+
+v1.7.6 (2026-07-14)
+-------------------
+* Fixes
+  - Excessive memory usage in TDDFT caused by cupy.einsum
+  - Fix the bad atomic radii assigned to ghost atom, which causes a bad Becke partition and a negative BSSE (#814)
 
 
 v1.7.5 (2026-07-10)
