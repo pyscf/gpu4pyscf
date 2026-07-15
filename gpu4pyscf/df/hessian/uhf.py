@@ -28,7 +28,7 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem)
+    contract, asarray, ndarray, transpose_sum, get_avail_mem, fill_symmetric)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, libvhf_rys, int2c2e_ip1,
     _check_rsh_factors)
