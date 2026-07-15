@@ -26,6 +26,8 @@
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 
+#define GVHF_FILE_TAG gint_int3c2e_pass1
+#include "launch.cuh"
 #include "contract_jk.cu"
 #include "gint/rys_roots.cu"
 #include "gint/g2e.cu"
@@ -46,61 +48,41 @@ static int GINTrun_tasks_int3c2e_pass1_j(JKMatrix *jk, BasisProdOffsets *offsets
     sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
     auto dev_envs = *envs;
     auto dev_jk = *jk;
-    auto dev_offsets = *offsets;    
-    switch (envs->nrys_roots) {
-        case 1:
-            type_ijkl = (envs->i_l << 3) | (envs->j_l << 2) | (envs->k_l << 1) | envs->l_l;
-            switch (type_ijkl) {
-                case 0b0000: stream.parallel_for<class GINTint3c2e_pass1_j_kernel0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel0000(dev_envs, dev_jk, dev_offsets); }); break;
-                case 0b0010: stream.parallel_for<class GINTint3c2e_pass1_j_kernel0010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel0010(dev_envs, dev_jk, dev_offsets); }); break;
-                case 0b1000: stream.parallel_for<class GINTint3c2e_pass1_j_kernel1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel1000(dev_envs, dev_jk, dev_offsets); }); break;
-                default: fprintf(stderr, "rys roots 1 type_ijkl %d\n", type_ijkl);
-                return 1;
-                }
-            break;
-        case 2: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<2, GSIZE2_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
-        case 3: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<3, GSIZE3_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
-        case 4: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<4, GSIZE4_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
-        case 5: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<5, GSIZE5_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
-        case 6: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<6, GSIZE6_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
-        case 7: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<7, GSIZE7_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
-        case 8: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_8_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<8, GSIZE8_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
-        case 9: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_9_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<9, GSIZE9_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
-        default: fprintf(stderr, "rys roots %d\n", nrys_roots);
-        return 1;
-    }
-#else // USE_SYCL
+    auto dev_offsets = *offsets;
+#else
     dim3 threads(THREADSX, THREADSY);
     dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
+#endif
     switch (envs->nrys_roots) {
         case 1:
             type_ijkl = (envs->i_l << 3) | (envs->j_l << 2) | (envs->k_l << 1) | envs->l_l;
             switch (type_ijkl) {
-                case 0b0000: GINTint3c2e_pass1_j_kernel0000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-                case 0b0010: GINTint3c2e_pass1_j_kernel0010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-                case 0b1000: GINTint3c2e_pass1_j_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+                case 0b0000: GVHF_LAUNCH(GINTint3c2e_pass1_j_kernel0000); break;
+                case 0b0010: GVHF_LAUNCH(GINTint3c2e_pass1_j_kernel0010); break;
+                case 0b1000: GVHF_LAUNCH(GINTint3c2e_pass1_j_kernel1000); break;
                 default: fprintf(stderr, "rys roots 1 type_ijkl %d\n", type_ijkl);
                 return 1;
                 }
             break;
-        case 2: GINTint3c2e_pass1_j_kernel<2, GSIZE2_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 3: GINTint3c2e_pass1_j_kernel<3, GSIZE3_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 4: GINTint3c2e_pass1_j_kernel<4, GSIZE4_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 5: GINTint3c2e_pass1_j_kernel<5, GSIZE5_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 6: GINTint3c2e_pass1_j_kernel<6, GSIZE6_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 7: GINTint3c2e_pass1_j_kernel<7, GSIZE7_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 8: GINTint3c2e_pass1_j_kernel<8, GSIZE8_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case 9: GINTint3c2e_pass1_j_kernel<9, GSIZE9_INT3C> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 2: GVHF_LAUNCH_T(GINTint3c2e_pass1_j_kernel, 2, GSIZE2_INT3C); break;
+        case 3: GVHF_LAUNCH_T(GINTint3c2e_pass1_j_kernel, 3, GSIZE3_INT3C); break;
+        case 4: GVHF_LAUNCH_T(GINTint3c2e_pass1_j_kernel, 4, GSIZE4_INT3C); break;
+        case 5: GVHF_LAUNCH_T(GINTint3c2e_pass1_j_kernel, 5, GSIZE5_INT3C); break;
+        case 6: GVHF_LAUNCH_T(GINTint3c2e_pass1_j_kernel, 6, GSIZE6_INT3C); break;
+        case 7: GVHF_LAUNCH_T(GINTint3c2e_pass1_j_kernel, 7, GSIZE7_INT3C); break;
+        case 8: GVHF_LAUNCH_T(GINTint3c2e_pass1_j_kernel, 8, GSIZE8_INT3C); break;
+        case 9: GVHF_LAUNCH_T(GINTint3c2e_pass1_j_kernel, 9, GSIZE9_INT3C); break;
         default: fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }
 
+#ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GINTint2e_jk_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-#endif // USE_SYCL
+#endif
     return 0;
 }
 

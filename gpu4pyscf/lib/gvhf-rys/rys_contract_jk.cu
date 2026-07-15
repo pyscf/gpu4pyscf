@@ -653,9 +653,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
               });
             });
             #else
-            dim3 threads;
-            threads.x = tdims[0];
-            threads.y = tdims[1];
+            dim3 threads(tdims[0], tdims[1]);
             rys_jk_kernel<OFFSET><<<workers, threads, buflen>>>(
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,

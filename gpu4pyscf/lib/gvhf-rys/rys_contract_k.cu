@@ -753,7 +753,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
             rys_k_kernel<OFFSET><<<workers, threads, buflen>>>(
                 *envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
-                head + OFFSET/256, p_gxyz_offset,
+                head, p_gxyz_offset,
                 gout_pattern, reserved_shm_size);
             #endif
         };

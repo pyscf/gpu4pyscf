@@ -53,7 +53,7 @@
 // trailing __VA_ARGS__ so its commas survive macro expansion. SYCL kernel name
 // is generated inline per source line (unique within this translation unit).
 #define LAUNCH_KERNEL(ARGS, ...) \
-    stream.parallel_for<class GINT_CAT(gint_kernel_L, __LINE__)>( \
+    stream.parallel_for<class GINT_CAT(gint_int3c1e_kernel_L, __LINE__)>( \
         sycl::nd_range<2>(blocks * threads, threads), \
         [=](auto item) [[intel::kernel_args_restrict]] { __VA_ARGS__ ARGS; });
 #else
