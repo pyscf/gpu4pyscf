@@ -520,7 +520,7 @@ int PBCsr_ejk_int3c2e_ip1(double *ejk, double*ejk_aux, double *dm, double *densi
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class ejk_int3c2e_ip1_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
+      cgh.parallel_for<class ejk_int3c2e_ip1_pbc_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
         ejk_int3c2e_ip1_kernel(
             ejk, ejk_aux, dm, density_auxvec, dev_envs, pool, task_pool,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,
