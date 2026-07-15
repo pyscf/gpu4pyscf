@@ -835,7 +835,7 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, PBCIntEnvVars *envs,
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class contract_int3c2e_dm_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
+      cgh.parallel_for<class contract_int3c2e_dm_pbc_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
         contract_int3c2e_dm_kernel(
             out, dm, dev_envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
@@ -875,7 +875,7 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, PBCIntEnvVars *envs,
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class contract_int3c2e_auxvec_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
+      cgh.parallel_for<class contract_int3c2e_auxvec_pbc_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
         contract_int3c2e_auxvec_kernel(out, auxvec, dev_envs, pool, task_pool, bas_ij_idx, ksh_offsets,
                                        img_idx, img_offsets, gout_stride_lookup, nauxbas,
                                        diffuse_exps, diffuse_coefs, log_cutoff,

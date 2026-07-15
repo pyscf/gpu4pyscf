@@ -1302,7 +1302,7 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         auto dev_envs = *envs;
         stream.submit([&](sycl::handler &cgh) {
           sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
-          cgh.parallel_for<class rys_ejk_ip1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+          cgh.parallel_for<class rys_ejk_ip1_pbc_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
             rys_ejk_ip1_kernel(dev_envs, jk, bounds, pair_ij_mapping, pair_kl_mapping,
                                bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
