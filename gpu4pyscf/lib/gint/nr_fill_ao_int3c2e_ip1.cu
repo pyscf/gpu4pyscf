@@ -57,7 +57,7 @@
 // for lambda capture.
 #define LAUNCH_KERNEL(...) { \
     auto dev_envs = *envs; auto dev_eri = *eri; auto dev_offsets = *offsets; \
-    stream.parallel_for<class GINT_CAT(gint_kernel_L, __LINE__)>( \
+    stream.parallel_for<class GINT_CAT(gint_int3c2e_ip1_kernel_L, __LINE__)>( \
         sycl::nd_range<2>(blocks * threads, threads), \
         [=](auto item) [[intel::kernel_args_restrict]] { \
             __VA_ARGS__(dev_envs, dev_eri, dev_offsets); }); }

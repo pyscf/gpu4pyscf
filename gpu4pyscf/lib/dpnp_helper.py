@@ -15,6 +15,7 @@
 import os
 import sys
 import functools
+import inspect
 import ctypes
 import numpy as np
 import scipy.linalg
@@ -260,7 +261,11 @@ class _GPUMethodProxy:
 
     def __getattr__(self, name):
         attr = getattr(object.__getattribute__(self, '_mf'), name)
-        if callable(attr):
+        # Only wrap genuine bound methods / functions. Callable *objects*
+        # (e.g. gto.Mole, which defines __call__) must be returned as-is,
+        # otherwise `self.mol` becomes a wrapper function and attribute
+        # access like `mol.inertia_moment()` fails.
+        if inspect.isroutine(attr):
             @functools.wraps(attr)
             def wrapper(*args, **kwargs):
                 # Convert numpy arrays back to dpnp before calling GPU method
