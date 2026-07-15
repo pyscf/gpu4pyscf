@@ -22,8 +22,7 @@ from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.df import addons, incore
 from gpu4pyscf.lib.cupy_helper import (
-    cholesky, tag_array, get_avail_mem, cart2sph, copy_array,
-    asarray, empty_mapped, ndarray)
+    cholesky, get_avail_mem, fill_symmetric, asarray, empty_mapped, ndarray)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import multi_gpu
@@ -178,8 +177,8 @@ class DF(lib.StreamObject):
                 if not unpack:
                     yield None, cderi_blk
                 else:
-                    out = _fill_symmetric(work[:,:,:p1-p0], pair_idx,
-                                          cderi_sparse.T, p0, p1)
+                    out = fill_symmetric(cderi_sparse.T, pair_idx, nao, p0, p1,
+                                         out=work[:,:,:p1-p0])
                     yield out.transpose(2,0,1), cderi_blk
 
         else:
@@ -210,8 +209,8 @@ class DF(lib.StreamObject):
                 if not unpack:
                     yield None, cderi_blk
                 else:
-                    out = _fill_symmetric(work[:,:,:p1-p0], pair_idx,
-                                          cderi_blk.T, 0, p1-p0)
+                    out = fill_symmetric(cderi_blk.T, pair_idx, nao, 0, p1-p0,
+                                         out=work[:,:,:p1-p0])
                     yield out.transpose(2,0,1), cderi_blk
 
     def reset(self, mol=None):
@@ -276,6 +275,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     '''
     import warnings
     from concurrent.futures import ThreadPoolExecutor
+    from gpu4pyscf.lib.cupy_helper import tag_array
     warnings.warn(
         'cholesky_eri_gpu is deprecated',
         DeprecationWarning, stacklevel=2)
@@ -346,6 +346,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                 omega=None, sr_only=False, device_id=0):
     ''' Execute CDERI tasks on one device
     '''
+    from gpu4pyscf.lib.cupy_helper import cart2sph, copy_array
     from gpu4pyscf.df import int3c2e
     nq = len(intopt.log_qs)
     mol = intopt.mol
@@ -615,39 +616,3 @@ def _decompose_j2c(auxmol, aux_sorting=None, omega=None):
         aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
         aux_coef[aux_sorting] = tmp
     return aux_coef, tag
-
-def _fill_symmetric(out, pair_addresses, a, aux0, aux1):
-    '''
-    i, j = divmod(pair_addresses, nao)
-    out[j,i] = out[i,j] = a[:,aux0:aux1]
-    '''
-    assert out.ndim == 3 and a.ndim == 2
-    assert pair_addresses.dtype == np.int32
-    nao = out.shape[0]
-    out_stride = out.strides[-2] // out.itemsize
-    if a.strides[-1] == 8: # a is in row major
-        a_stride = a.strides[-2] // a.itemsize
-        err = libvhf_rys.decompress_and_fill(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(out_stride),
-            ctypes.cast(a.data.ptr, ctypes.c_void_p),
-            ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(len(pair_addresses)),
-            ctypes.c_int(nao),
-            ctypes.c_int(a_stride),
-            ctypes.c_int(aux0), ctypes.c_int(aux1))
-    else: # a is in column major
-        naux = len(a)
-        err = libvhf_rys.decompress_and_transpose(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(out_stride),
-            ctypes.cast(a.data.ptr, ctypes.c_void_p),
-            ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(len(pair_addresses)),
-            ctypes.c_int(nao),
-            ctypes.c_int(naux),
-            ctypes.c_int(aux0), ctypes.c_int(aux1),
-            ctypes.c_int(1), ctypes.c_int(0))
-    if err != 0:
-        raise RuntimeError('decompress cderi failed')
-    return out

@@ -514,8 +514,8 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
 
         for cderi, cderi_tril in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_j:
-                auxvec = contract('Lp,np->nL', cderi_tril, _dm_sparse)
-                contract('Lp,nL->np', cderi_tril, auxvec, beta=1, out=vj)
+                auxvec = contract('np,Lp->nL', _dm_sparse, cderi_tril)
+                contract('nL,Lp->np', auxvec, cderi_tril, beta=1, out=vj)
 
             if with_k:
                 nL = len(cderi)

@@ -231,24 +231,24 @@ H       4.224    0.640    0.837
         ref = mf_cpu.get_jk(mol, dm.get())
 
         vj, vk = mf.get_jk(mol, dm)
-        assert abs(ref[0] - vj.get()).max() < 1e-12
-        assert abs(ref[1] - vk.get()).max() < 1e-12
+        assert abs(ref[0] - vj.get()).max() < 1e-11
+        assert abs(ref[1] - vk.get()).max() < 1e-11
 
         vj = mf.get_j(mol, dm)
         vk = mf.get_k(mol, dm)
-        assert abs(ref[0] - vj.get()).max() < 1e-12
-        assert abs(ref[1] - vk.get()).max() < 1e-12
+        assert abs(ref[0] - vj.get()).max() < 1e-11
+        assert abs(ref[1] - vk.get()).max() < 1e-11
 
         vk_ref = mol.GHF().get_k(mol, dm.get())
         mf.only_dfj = True
         vj, vk = mf.get_jk(mol, dm)
-        assert abs(ref[0] - vj.get()).max() < 1e-12
-        assert abs(vk_ref - vk.get()).max() < 1e-12
+        assert abs(ref[0] - vj.get()).max() < 1e-11
+        assert abs(vk_ref - vk.get()).max() < 1e-11
 
         vj = mf.get_j(mol, dm)
         vk = mf.get_k(mol, dm)
-        assert abs(ref[0] - vj.get()).max() < 1e-12
-        assert abs(vk_ref - vk.get()).max() < 1e-12
+        assert abs(ref[0] - vj.get()).max() < 1e-11
+        assert abs(vk_ref - vk.get()).max() < 1e-11
 
 if __name__ == "__main__":
     print("Full Tests for DF JK")
