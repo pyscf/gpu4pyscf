@@ -106,7 +106,7 @@ class KnownValues(unittest.TestCase):
         ref, _ = mf.get_jk(dm=dm, hermi=0)
         assert abs(vj - ref).max() < 1e-12
 
-        dm = cupy.random.rand(42, nao, nao)
+        dm = cupy.random.rand(15, nao, nao)
         vj = df_jk.get_j(mf.with_df, dm, hermi=0)
         ref, _ = mf.get_jk(dm=dm, hermi=0)
         assert abs(vj - ref).max() < 1e-12

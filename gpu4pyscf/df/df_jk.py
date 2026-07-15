@@ -567,11 +567,12 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
     return vj, vk
 
 def get_j(dfobj, dm, hermi=1):
+    from gpu4pyscf.df.int3c2e_bdiv import (
+        int2c2e, contract_int3c2e_dm, contract_int3c2e_auxvec)
     if dfobj.intopt is None:
         dfobj.build(build_cderi=False)
 
     if dfobj._cd_j2c is None:
-        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
         j2c = int2c2e(dfobj.auxmol)
         try:
             dfobj._cd_j2c = cholesky(j2c), 'cd'
@@ -582,9 +583,7 @@ def get_j(dfobj, dm, hermi=1):
     intopt = dfobj.intopt
     mol = intopt.mol
     auxmol = intopt.auxmol
-    dm = mol.apply_C_mat_CT(dm)
-    rhoj = intopt.contract_dm(dm, hermi=hermi)
-    rhoj = auxmol.apply_CT_dot(rhoj, axis=-1)
+    rhoj = contract_int3c2e_dm(mol, auxmol, dm, hermi, int3c2e_opt=intopt)
 
     j2c, tag = dfobj._cd_j2c
     if tag == 'cd':
@@ -593,9 +592,7 @@ def get_j(dfobj, dm, hermi=1):
     else:
         rhoj = cp.linalg.solve(j2c, rhoj.T)
 
-    auxvec = auxmol.apply_C_dot(rhoj, axis=0).T
-    vj = intopt.contract_auxvec(auxvec)
-    vj = intopt.mol.apply_CT_mat_C(vj)
+    vj = contract_int3c2e_auxvec(mol, auxmol, rhoj.T, int3c2e_opt=intopt)
     return vj.reshape(dm_shape)
 
 def factorize_dm(dm, hermi=0):

@@ -94,15 +94,18 @@ def compressed_aux_e2(mol, auxmol):
     rows, cols = divmod(pair_address, mol.nao)
     return j3c, rows, cols
 
-def contract_int3c2e_dm(mol, auxmol, dm):
-    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+def contract_int3c2e_dm(mol, auxmol, dm, hermi=0, int3c2e_opt=None):
+    if int3c2e_opt is None:
+        int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     dm = int3c2e_opt.mol.apply_C_mat_CT(dm)
-    auxvec = int3c2e_opt.contract_dm(dm)
+    auxvec = int3c2e_opt.contract_dm(dm, hermi)
     return int3c2e_opt.auxmol.apply_CT_dot(auxvec, axis=-1)
 
-def contract_int3c2e_auxvec(mol, auxmol, auxvec, sort_output=True):
-    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    auxvec = int3c2e_opt.auxmol.C_dot_mat(auxvec)
+def contract_int3c2e_auxvec(mol, auxmol, auxvec, sort_output=True,
+                            int3c2e_opt=None):
+    if int3c2e_opt is None:
+        int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    auxvec = int3c2e_opt.auxmol.apply_C_dot(auxvec, axis=-1)
     vj = int3c2e_opt.contract_auxvec(auxvec)
     if sort_output:
         vj = int3c2e_opt.mol.apply_CT_mat_C(vj)
@@ -328,12 +331,12 @@ class Int3c2eOpt:
         mol = self.mol
         nao = mol.nao
         auxmol = self.auxmol
-        assert dm.shape[-1] == nao
+        assert dm.shape[-1] == nao, 'Requires transforming dm: mol.apply_C_mat_CT(dm)'
         assert dm.dtype == np.float64
         assert dm.flags.c_contiguous
         nbas_aux = auxmol.nbas
         if hermi != 1:
-            dm = transpose_sum(dm, inplace=False)
+            dm = transpose_sum(dm)
 
         dm_ndim = dm.ndim
         if dm_ndim == 2:

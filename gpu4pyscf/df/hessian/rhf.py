@@ -1440,8 +1440,8 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                         rhoj1 = cp.einsum('sniiL->nL', rhok1_oo)
                         contract('spiL,nL->nspi', rhok, rhoj1, beta=1, out=vj[i0:i1])
             elif with_j:
-                auxvec = contract('Lp,np->nL', cderi_tril, _dm_sparse)
-                contract('Lp,Ln->np', cderi_tril, auxvec, beta=1, out=vj)
+                auxvec = contract('np,Lp->nL', _dm_sparse, cderi_tril)
+                contract('nL,Lp->np', auxvec, cderi_tril, beta=1, out=vj)
         return vj, vk
 
     results = multi_gpu.run(proc, non_blocking=True)

@@ -24,26 +24,30 @@ from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff, _nearest_power2, SHM_SIZE
 from gpu4pyscf.df.int3c2e_bdiv import _conc_locs, LMAX, L_AUX_MAX, THREADS
 from gpu4pyscf.scf.j_engine import libvhf_md, _cache_q_cond_and_non0pairs
 
-def contract_int3c2e_dm(mol, auxmol, dm):
-    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    return int3c2e_opt.contract_dm(dm)
+def contract_int3c2e_dm(mol, auxmol, dm, hermi=0, int3c2e_opt=None):
+    if int3c2e_opt is None:
+        int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    dm = int3c2e_opt.mol.apply_C_mat_CT(dm)
+    auxvec = int3c2e_opt.contract_dm(dm, hermi)
+    return int3c2e_opt.auxmol.apply_CT_dot(auxvec, axis=-1)
 
-def contract_int3c2e_auxvec(mol, auxmol, auxvec):
-    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    return int3c2e_opt.contract_auxvec(auxvec)
+def contract_int3c2e_auxvec(mol, auxmol, auxvec, int3c2e_opt=None):
+    if int3c2e_opt is None:
+        int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    auxvec = int3c2e_opt.auxmol.apply_C_dot(auxvec, axis=-1)
+    vj = int3c2e_opt.contract_auxvec(auxvec)
+    return int3c2e_opt.mol.apply_CT_mat_C(vj)
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
         self.mol = mol
         self.auxmol = auxmol
-        self.sorted_mol = None
-        self.sorted_auxmol = None
+        self.int3c2e_envs = None
 
     def build(self, cutoff=1e-12):
-        mol = self.mol
         log = logger.new_logger(mol)
         cput0 = log.init_timer()
-        mol = self.sorted_mol = SortedGTO.from_mol(
+        mol = self.mol = SortedGTO.from_mol(
             self.mol, decontract=True, diffuse_cutoff=1e200)
         # very high angular momentum basis are processed on CPU
         lmax = mol.uniq_l_ctr[:,0].max()
@@ -57,7 +61,7 @@ class Int3c2eOpt:
         self.bas_pair_cache = _cache_q_cond_and_non0pairs(mol, rys_envs, cutoff)
         log.timer('Initialize q_cond', *cput0)
 
-        auxmol = self.sorted_auxmol = SortedGTO.from_mol(
+        auxmol = self.auxmol = SortedGTO.from_mol(
             self.auxmol, decontract=True, diffuse_cutoff=1e200)
 
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
@@ -90,15 +94,19 @@ class Int3c2eOpt:
         self.pair_loc = np.cumsum(np.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
         return self
 
-    def contract_dm(self, dm):
-        if self.sorted_mol is None:
+    def contract_dm(self, dm, hermi=0):
+        if self.int3c2e_envs is None:
             self.build()
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
-        mol = self.sorted_mol
-        auxmol = self.sorted_auxmol
+        mol = self.mol
+        auxmol = self.auxmol
         ao_loc = mol.ao_loc
+        nao = ao_loc[-1]
         naux = auxmol.nao_nr(cart=True)
+        assert dm.shape[-1] == nao, 'Requires transforming dm: mol.apply_C_mat_CT(dm)'
+        if hermi != 1:
+            dm = transpose_sum(dm)
 
         lmax = mol.uniq_l_ctr[:,0].max()
         lmax_aux = auxmol._bas[:,ANG_OF].max()
@@ -123,9 +131,8 @@ class Int3c2eOpt:
         log.debug1('sp_blocks = %d, shm_size = %d B', sp_blocks, shm_size)
 
         dm = cp.asarray(dm)
-        assert dm.ndim == 2
+        assert dm.ndim == 2 or len(dm) == 1
         n_dm = 1
-        dm = mol.apply_C_mat_CT(dm)
         dm = transpose_sum(dm)
         dm_cpu = dm.get()
         dm = None
@@ -159,20 +166,17 @@ class Int3c2eOpt:
             raise RuntimeError('contract_int3c2e_dm kernel failed')
         if log.verbose >= logger.DEBUG1:
             log.timer_debug1('processing contract_int3c2e_dm', *t0)
-
-        vj_aux = auxmol.apply_CT_dot(vj_aux)
         return vj_aux
 
     def contract_auxvec(self, auxvec):
-        if self.sorted_mol is None:
+        if self.int3c2e_envs is None:
             self.build()
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
-        mol = self.sorted_mol
-        auxmol = self.sorted_auxmol
-        assert auxvec.ndim == 1
+        mol = self.mol
+        auxmol = self.auxmol
+        assert auxvec.ndim == 1 or len(auxvec) == 1
         n_dm = 1
-        auxvec = auxmol.apply_C_dot(cp.asarray(auxvec))
         aux_loc = auxmol.ao_loc
         naux = aux_loc[-1]
 
@@ -262,5 +266,4 @@ class Int3c2eOpt:
             shl_pair_idx_cpu.ctypes, ctypes.c_int(len(shl_pair_idx_cpu)),
             ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
         vj = transpose_sum(asarray(vj))
-        vj = mol.apply_CT_mat_C(vj)
         return vj

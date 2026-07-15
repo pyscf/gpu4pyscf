@@ -533,13 +533,13 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, int n_dm, int n
         }
 
         int nfij = c_nf[li] * c_nf[lj];
-        // only supports dm_batch_size = 1,2,4
         int dm_batch_size = min(DM_BATCH_SIZE, IJ_WIDTH*gout_stride / nfij);
-        if (dm_batch_size == 3) {
-            dm_batch_size = 2;
-        }
         for (int dm_id0 = 0; dm_id0 < n_dm; dm_id0 += dm_batch_size) {
             dm_batch_size = min(dm_batch_size, n_dm - dm_id0);
+            if (dm_batch_size == 3) {
+                // only supports dm_batch_size = 1,2,4
+                dm_batch_size = 2;
+            }
 
             double vj_cache[IJ_WIDTH];
 #pragma unroll

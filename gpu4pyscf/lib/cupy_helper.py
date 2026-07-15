@@ -270,7 +270,8 @@ def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
 
 def fill_symmetric(a, pair_addresses, nao, p0=0, p1=None, out=None, stream=None):
     '''
-    Performs
+    Performs:
+
         i, j = divmod(pair_addresses, nao)
         out[j,i,:] = out[i,j,:] = a[:,p0:p1]
     '''
@@ -279,10 +280,9 @@ def fill_symmetric(a, pair_addresses, nao, p0=0, p1=None, out=None, stream=None)
         p1 = a.shape[1]
 
     if out is None:
-        out = cupy.zeros([nao,nao,p1-p0])
+        out = cupy.zeros([nao,nao,p1-p0], dtype=a.dtype)
     else:
         assert out.ndim == 3
-        assert out.shape[0] == out.shape[1] == nao
 
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -304,16 +304,13 @@ def fill_symmetric(a, pair_addresses, nao, p0=0, p1=None, out=None, stream=None)
         if err != 0:
             raise RuntimeError('decompress_and_fill failed')
     else: # a is in column major
-        naux = len(a)
         err = libcupy_helper.decompress_and_transpose(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(out_stride),
-            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(out_stride), ctypes.cast(a.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(pair_addresses)),
             ctypes.c_int(nao),
-            ctypes.c_int(naux),
             ctypes.c_int(p0), ctypes.c_int(p1),
             ctypes.c_int(1), ctypes.c_int(0))
         if err != 0:

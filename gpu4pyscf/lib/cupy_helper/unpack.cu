@@ -133,7 +133,7 @@ void decompress_kernel(double *out, size_t out_stride,
 __global__ static
 void d_t_kernel(double *out, size_t out_stride,
                 double *cderi, int *pair_idx, int npairs, int nao,
-                int naux, int aux0, int aux1, int fill_triu)
+                int aux0, int aux1, int fill_triu)
 {
     int bx = blockIdx.x;
     int by = blockIdx.y;
@@ -174,7 +174,7 @@ void d_t_kernel(double *out, size_t out_stride,
 __global__ static
 void z_d_t_kernel(double2 *out, size_t out_stride,
                   double2 *cderi, int *pair_idx, int npairs, int nao,
-                  int naux, int aux0, int aux1)
+                  int aux0, int aux1)
 {
     int bx = blockIdx.x;
     int by = blockIdx.y;
@@ -224,6 +224,7 @@ int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
+        fprintf(stderr, "fill_tril error %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -238,6 +239,7 @@ int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
     _pack_tril<<<blocks, threads, 0, stream>>>(a_tril, a, n, counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
+        fprintf(stderr, "pack_tril error %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -276,7 +278,7 @@ int decompress_and_fill(cudaStream_t stream, double *out, int out_stride,
 
 int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
                              double *cderi, int *pair_idx, int npairs, int nao,
-                             int naux, int aux0, int aux1, int fill_triu, int on_host)
+                             int aux0, int aux1, int fill_triu, int on_host)
 {
     double *eri_gpu = cderi;
     if (on_host) {
@@ -289,7 +291,7 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
     dim3 threads(CBLKSIZE * STRIDE);
     dim3 blocks((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
     d_t_kernel<<<blocks, threads, 0, stream>>>(
-            out, out_stride, eri_gpu, pair_idx, npairs, nao, naux, aux0, aux1, fill_triu);
+            out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1, fill_triu);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
@@ -298,9 +300,9 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
     return 0;
 }
 
-int z_decompress_and_transpose(double2 *out, int out_stride,
+int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride,
                                double2 *cderi, int *pair_idx, int npairs, int nao,
-                               int naux, int aux0, int aux1, int fill_triu, int on_host)
+                               int aux0, int aux1, int fill_triu, int on_host)
 {
     double2 *eri_gpu = cderi;
     if (on_host) {
@@ -312,8 +314,8 @@ int z_decompress_and_transpose(double2 *out, int out_stride,
     }
     dim3 threads(CBLKSIZE * STRIDE);
     dim3 blocks((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
-    z_d_t_kernel<<<blocks, threads>>>(
-            out, out_stride, eri_gpu, pair_idx, npairs, nao, naux, aux0, aux1);
+    z_d_t_kernel<<<blocks, threads, 0, stream>>>(
+            out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
