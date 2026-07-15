@@ -27,6 +27,7 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.scf import _response_functions # noqa
+from gpu4pyscf.df.df_jk import _make_factorized_dm
 from pyscf import __config__
 
 REAL_EIG_THRESHOLD = tdhf_cpu.REAL_EIG_THRESHOLD
@@ -316,8 +317,8 @@ def gen_tda_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     def vind(zs):
         zs = cp.asarray(zs).reshape(-1,nocc,nvir)
         mo1 = contract('xov,pv->xpo', zs, orbv)
-        dms = contract('xpo,qo->xpq', mo1, orbo2.conj())
-        dms = tag_array(dms, mo1=mo1, occ_coeff=orbo)
+        #:dms = contract('xpo,qo->xpq', mo1, orbo2.conj())
+        dms = _make_factorized_dm(mo1, orbo2, symmetrize=0)
         v1ao = vresp(dms)
         v1mo = contract('xpq,qo->xpo', v1ao, orbo)
         v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())

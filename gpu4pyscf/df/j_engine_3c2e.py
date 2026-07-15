@@ -45,7 +45,7 @@ class Int3c2eOpt:
         self.int3c2e_envs = None
 
     def build(self, cutoff=1e-12):
-        log = logger.new_logger(mol)
+        log = logger.new_logger(self.mol)
         cput0 = log.init_timer()
         mol = self.mol = SortedGTO.from_mol(
             self.mol, decontract=True, diffuse_cutoff=1e200)

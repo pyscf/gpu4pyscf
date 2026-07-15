@@ -455,6 +455,11 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
     dm_factor_l, dm_factor_r = factorize_dm(dms, hermi)
     symmetrize = getattr(dms, 'symmetrize', 0)
 
+    nspin = 1
+    if dm_factor_l.ndim == 4: # for UHF-TDDFT and UHF-hessian
+        assert dms.ndim == 4
+        nspin = 2
+
     if dm_factor_r is None:
         dm_factor_mode = 0
     elif dm_factor_l.ndim == dm_factor_r.ndim:
@@ -466,7 +471,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
 
     nao, nocc = dm_factor_l.shape[-2:]
     dms_3d = cp.asarray(dms).reshape(-1,nao,nao)
-    n_dm = dms_3d.shape[0]
+    n_dm = dms_3d.shape[0] // nspin
 
     if nocc == 0:
         # dms equals to 0. vj and vk must be all zeros.
@@ -483,10 +488,10 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
         dm_sparse[:,diags] *= .5
 
     def proc():
-        factor_l = cp.asarray(dm_factor_l).reshape(-1,nao,nocc)
+        factor_l = cp.asarray(dm_factor_l).reshape(nspin,-1,nao,nocc)
         factor_r = dm_factor_r
         if factor_r is not None:
-            factor_r = cp.asarray(factor_r).reshape(-1,nao,nocc)
+            factor_r = cp.asarray(factor_r).reshape(nspin,-1,nao,nocc)
 
         vj = vk = None
         if with_j:
@@ -495,7 +500,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
 
         blksize = dfobj.get_blksize(mem_fraction=0.4)
         if with_k:
-            vk = cupy.zeros_like(dms_3d)
+            vk = cupy.zeros((nspin, n_dm, nao, nao))
             mem_avail = get_avail_mem(exclude_memory_pool=True)
             dm_batch_size = int(mem_avail * 0.6 / (blksize*nao*nocc * 8))
             if dm_factor_mode == 1:
@@ -519,31 +524,32 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
 
             if with_k:
                 nL = len(cderi)
-                if dm_factor_mode == 0:
-                    for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                        rhok = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
-                        contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
-                        contract('nikL,njkL->nij', rhok, rhok, beta=1, out=vk[i0:i1])
-                elif dm_factor_mode == 1:
-                    for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                        rhok, rhok1 = ndarray((2,i1-i0,nao,nocc,nL), buffer=buf)
-                        contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
-                        contract('Lij,njk->nikL', cderi, factor_r[i0:i1], out=rhok1)
-                        contract('nikL,njkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
-                elif dm_factor_mode == 2:
-                    rhok = ndarray((nao,nocc,nL), buffer=buf1)
-                    contract('Lij,jk->ikL', cderi, factor_l[0], out=rhok)
-                    for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                        rhok1 = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
-                        contract('Lij,njk->nikL', cderi, factor_r[i0:i1], out=rhok1)
-                        contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
-                else:
-                    rhok1 = ndarray((nao,nocc,nL), buffer=buf1)
-                    contract('Lij,jk->ikL', cderi, factor_r[0], out=rhok1)
-                    for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
-                        rhok = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
-                        contract('Lij,njk->nikL', cderi, factor_l[i0:i1], out=rhok)
-                        contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[i0:i1])
+                for s in range(nspin):
+                    if dm_factor_mode == 0:
+                        for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                            rhok = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
+                            contract('Lij,njk->nikL', cderi, factor_l[s,i0:i1], out=rhok)
+                            contract('nikL,njkL->nij', rhok, rhok, beta=1, out=vk[s,i0:i1])
+                    elif dm_factor_mode == 1:
+                        for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                            rhok, rhok1 = ndarray((2,i1-i0,nao,nocc,nL), buffer=buf)
+                            contract('Lij,njk->nikL', cderi, factor_l[s,i0:i1], out=rhok)
+                            contract('Lij,njk->nikL', cderi, factor_r[s,i0:i1], out=rhok1)
+                            contract('nikL,njkL->nij', rhok, rhok1, beta=1, out=vk[s,i0:i1])
+                    elif dm_factor_mode == 2:
+                        rhok = ndarray((nao,nocc,nL), buffer=buf1)
+                        contract('Lij,jk->ikL', cderi, factor_l[s,0], out=rhok)
+                        for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                            rhok1 = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
+                            contract('Lij,njk->nikL', cderi, factor_r[s,i0:i1], out=rhok1)
+                            contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[s,i0:i1])
+                    else:
+                        rhok1 = ndarray((nao,nocc,nL), buffer=buf1)
+                        contract('Lij,jk->ikL', cderi, factor_r[s,0], out=rhok1)
+                        for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
+                            rhok = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
+                            contract('Lij,njk->nikL', cderi, factor_l[s,i0:i1], out=rhok)
+                            contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[s,i0:i1])
                 rhok1 = rhok = None
         return vj, vk
 
@@ -560,7 +566,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
     if with_k:
         vk = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
         if symmetrize != 0:
-            vk = transpose_sum(vk, hermi=symmetrize)
+            vk = transpose_sum(vk.reshape(-1,nao,nao), hermi=symmetrize)
         vk = vk.reshape(dms.shape)
         if not out_cupy: vk = vk.get()
     t1 = log.timer_debug1('vj and vk', *t1)
@@ -674,7 +680,10 @@ def decompose_rdm1_svd(dm, hermi=0):
         return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
 
 def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
-    dm = cp.matmul(factor_l, factor_r.swapaxes(-1, -2))
+    if factor_l.ndim == 4 and factor_r.ndim == 3:
+        dm = contract('snpi,sqi->snpq', factor_l, factor_r)
+    else:
+        dm = cp.matmul(factor_l, factor_r.swapaxes(-1, -2))
     if symmetrize == 1 or symmetrize == 2:
         nao = dm.shape[-1] # dm1 may have dimensions > 3
         transpose_sum(dm.reshape(-1,nao,nao), inplace=True, hermi=symmetrize)
@@ -703,3 +712,14 @@ def _aggregate_dm_factor_l(dms):
     assert all(x.symmetrize == 0 for x in dms)
     return tag_array(cp.stack(dms), factor_l=factor_l, factor_r=factor_r,
                      symmetrize=0)
+
+def _stack_uhf_occ_oribtals(moa, mob):
+    nocca = moa.shape[-1]
+    noccb = mob.shape[-1]
+    assert nocca >= noccb
+    mo_ab = cp.empty((2,) + moa.shape, dtype=moa.dtype)
+    mo_ab[0] = moa
+    mo_ab[1,...,:noccb] = mob
+    if nocca > noccb:
+        mo_ab[1,...,noccb:] = 0.
+    return mo_ab

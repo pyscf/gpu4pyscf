@@ -17,10 +17,11 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh
 from gpu4pyscf.dft.rks import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, transpose_sum
+from gpu4pyscf.lib.cupy_helper import contract, transpose_sum
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import rhf as tdhf_gpu
 from gpu4pyscf import dft
+from gpu4pyscf.df.df_jk import _make_factorized_dm
 
 __all__ = [
     'TDA', 'TDDFT', 'TDRKS', 'CasidaTDDFT', 'TDDFTNoHybrid',
@@ -90,9 +91,10 @@ class CasidaTDDFT(TDDFT):
             # *2 for double occupancy
             mo1 = contract('xov,pv->xpo', zs*(d_ia*2), orbv)
             dms = contract('xpo,qo->xpq', mo1, orbo)
-            # +cc for A+B and K_{ai,jb} in A == K_{ai,bj} in B
-            dms = transpose_sum(dms)
-            dms = tag_array(dms, mo1=mo1, occ_coeff=orbo)
+            # Setting symmetrize=1 triggers dms+dms.T for A+B, given the
+            # equality between A and B:
+            # K_{ai,jb} in A == K_{ai,bj} in B
+            dms = _make_factorized_dm(mo1, orbo, symmetrize=1)
             v1ao = vresp(dms)
             v1mo = contract('xpq,qo->xpo', v1ao, orbo)
             v1mo = contract('xpo,pv->xov', v1mo, orbv)
