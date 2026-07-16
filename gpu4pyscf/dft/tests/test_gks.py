@@ -15,6 +15,7 @@
 import unittest
 from packaging.version import Version
 import cupy as cp
+import pyscf
 from pyscf import gto
 from pyscf import lib
 from gpu4pyscf.dft import gks
