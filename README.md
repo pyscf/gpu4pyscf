@@ -52,6 +52,10 @@ There shouldn't be cupy or cutensor compilation during pip install process. If y
 ```
 <repo_path>/gpu4pyscf/lib/cutensor.py:<line_number>: UserWarning: using cupy as the tensor contraction engine.
 ```
+The following command may help when using `cupy-cuda12x==14.1.1` and `cutensor-cu12==2.7.0`:
+```sh
+export LD_LIBRARY_PATH="$(python -c 'import cutensor; print(cutensor.__path__._path[0])')/lib:${LD_LIBRARY_PATH}"
+```
 
 Features
 --------
