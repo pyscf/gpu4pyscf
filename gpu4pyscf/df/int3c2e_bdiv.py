@@ -51,14 +51,14 @@ POOL_SIZE = 25600
 libvhf_rys.pair_recontraction_info.restype = ctypes.c_int
 libvhf_rys.recontract_ao_pair.restype = ctypes.c_int
 
-def aux_e2(mol, auxmol):
+def aux_e2(mol, auxmol, omega=None):
     r'''
     3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
-        reorder_aux=True, cart=mol.cart)[:2]
+        reorder_aux=True, cart=mol.cart, omega=omega)[:2]
     aux_coef = int3c2e_opt.aux_coeff
     aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
     aux_coef[aux_sorting] = tmp
@@ -74,7 +74,7 @@ def aux_e2(mol, auxmol):
     out[rows,cols] = j3c
     return out
 
-def compressed_aux_e2(mol, auxmol):
+def compressed_aux_e2(mol, auxmol, omega=None):
     r'''
     Returns compressed_int3c, rows, cols. The compressed_int3c stores the
     3-center integrals (ij|k) compressed on the orbital-pair dimensions.
@@ -84,7 +84,7 @@ def compressed_aux_e2(mol, auxmol):
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
-        reorder_aux=True, cart=mol.cart)[:2]
+        reorder_aux=True, cart=mol.cart, omega=omega)[:2]
     aux_coef = int3c2e_opt.auxmol.ctr_coeff
     aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
     aux_coef[aux_sorting] = tmp

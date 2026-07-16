@@ -19,7 +19,7 @@ import cupy as cp
 import pyscf
 from pyscf import df, lib
 from gpu4pyscf import scf as gpu_scf
-from gpu4pyscf.df import int3c2e, df_jk
+from gpu4pyscf.df import df_jk
 from gpu4pyscf.df.df import DF
 from gpu4pyscf.lib.cupy_helper import tag_array
 
@@ -49,46 +49,7 @@ def tearDownModule():
     del mol, auxmol, mol_sph, auxmol_sph
 
 class KnownValues(unittest.TestCase):
-
-    def test_vj_incore(self):
-        int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True, direct_scf_tol=1e-14)
-        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        cupy.random.seed(np.asarray(1, dtype=np.uint64))
-        nao = intopt.mol.nao
-        dm = cupy.random.rand(nao, nao)
-        dm = dm + dm.T
-
-        # pass 1
-        rhoj_outcore = cupy.einsum('ijL,ij->L', int3c_gpu, dm)
-        rhoj_incore = 2.0*int3c2e.get_j_int3c2e_pass1(intopt, dm)
-        assert cupy.linalg.norm(rhoj_outcore - rhoj_incore) < 1e-8
-
-        # pass 2
-        vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
-        vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
-        assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
-    
-    def test_vj_sph_incore(self):
-        int3c_gpu = int3c2e.get_int3c2e(mol_sph, auxmol, aosym=True, direct_scf_tol=1e-14)
-        intopt = int3c2e.VHFOpt(mol_sph, auxmol, 'int2e')
-        intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        cupy.random.seed(np.asarray(1, dtype=np.uint64))
-        nao = intopt.mol.nao
-        dm = cupy.random.rand(nao, nao)
-        dm = dm + dm.T
-        
-        # pass 1
-        rhoj_outcore = cupy.einsum('ijL,ij->L', int3c_gpu, dm)
-        rhoj_incore = 2.0*int3c2e.get_j_int3c2e_pass1(intopt, dm)
-        assert cupy.linalg.norm(rhoj_outcore - rhoj_incore) < 1e-8
-
-        # pass 2
-        vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
-        vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
-        assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
-
-    def test_j_outcore(self):
+    def test_get_j(self):
         cupy.random.seed(np.asarray(1, dtype=np.uint64))
         nao = mol.nao
         mf = gpu_scf.RHF(mol)

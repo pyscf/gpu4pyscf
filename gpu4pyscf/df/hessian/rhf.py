@@ -37,7 +37,6 @@ from gpu4pyscf.df import df
 from gpu4pyscf.df.df_jk import factorize_dm
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
-from gpu4pyscf.df.hessian import jk
 from gpu4pyscf.lib import multi_gpu
 
 num_devices = multi_gpu.num_devices

@@ -107,6 +107,7 @@ class Int3c2eOpt:
         assert dm.shape[-1] == nao, 'Requires transforming dm: mol.apply_C_mat_CT(dm)'
         if hermi != 1:
             dm = transpose_sum(dm)
+            dm *= .5
 
         lmax = mol.uniq_l_ctr[:,0].max()
         lmax_aux = auxmol._bas[:,ANG_OF].max()

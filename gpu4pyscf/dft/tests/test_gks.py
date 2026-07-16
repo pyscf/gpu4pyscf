@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from packaging.version import Version
 import cupy as cp
 from pyscf import gto
 from pyscf import lib
@@ -200,6 +201,8 @@ class KnownValues(unittest.TestCase):
             self.assertAlmostEqual(e_gpu, e_cpu, 6)
             self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
+                     'NumInt2C.to_gpu method is not available.')
     def test_get_veff_complex(self):
         mf_cpu = mol.GKS(xc='lda,')
         mf_cpu.collinear = 'mcol'
@@ -218,6 +221,8 @@ class KnownValues(unittest.TestCase):
         ref = mf_cpu.get_veff(mol, dm)
         assert abs(veff.get() - ref).max() < 1e-12
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
+                     'NumInt2C.to_gpu method is not available.')
     def test_get_veff_real(self):
         mf_cpu = mol.GKS(xc='lda,')
         mf_cpu.collinear = 'mcol'

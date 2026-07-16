@@ -35,7 +35,6 @@ from gpu4pyscf.df.int3c2e_bdiv import (
 from gpu4pyscf.df import df
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import uhf as uhf_hess
-from gpu4pyscf.df.hessian import jk
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.df.hessian.rhf import (
     int3c2e_scheme_ip2, int3c2e_scheme_ip1, int3c2e_scheme_ipaux,
