@@ -33,19 +33,19 @@
 #define GVHF_LAUNCH(KFN) \
     stream.parallel_for<class GVHF_TAG(KFN)>( \
         sycl::nd_range<2>(blocks * threads, threads), \
-        [=](auto item) { KFN(dev_envs, dev_jk, dev_offsets); })
+        [=](auto item) [[intel::kernel_args_restrict]] { KFN(dev_envs, dev_jk, dev_offsets); })
 
 #define GVHF_LAUNCH_T(KFN, ...) \
     stream.parallel_for<class GVHF_TAG(KFN)>( \
         sycl::nd_range<2>(blocks * threads, threads), \
-        [=](auto item) { KFN<__VA_ARGS__>(dev_envs, dev_jk, dev_offsets); })
+        [=](auto item) [[intel::kernel_args_restrict]] { KFN<__VA_ARGS__>(dev_envs, dev_jk, dev_offsets); })
 
 #define GVHF_LAUNCH_SHM(GSIZE, KFN) \
     stream.submit([&](sycl::handler &cgh) { \
         sycl::local_accessor<double, 1> local_acc(sycl::range<1>(GSIZE), cgh); \
         cgh.parallel_for<class GVHF_TAG(KFN)>( \
             sycl::nd_range<2>(blocks * threads, threads), \
-            [=](auto item) { \
+            [=](auto item) [[intel::kernel_args_restrict]] { \
                 KFN(dev_envs, dev_jk, dev_offsets, item, \
                     GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); })
 

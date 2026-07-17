@@ -54,6 +54,7 @@ import os
 import threading
 import time
 import warnings
+import weakref
 
 import dpctl
 import dpctl.memory as dpmem
@@ -66,6 +67,38 @@ import dpnp
 _DEFERRED_FREE_THRESHOLD = int(
     os.environ.get("GPU4PYSCF_DEFERRED_FREE_THRESHOLD", "256")
 )
+
+# Layer 4: queue-ordered deferred free of dpnp USM buffers.
+#
+# dpctl frees device USM EAGERLY on GC (synchronous sycl::free, not
+# queue-ordered). gpu4pyscf launches raw SYCL kernels (lib/*/*.cu under
+# USE_SYCL) fire-and-forget on the singleton in-order queue that read
+# those buffers; an eager free of a still-in-use buffer -> GPU page
+# fault (use-after-free). To match CUDA's stream-ordered free semantics
+# we intercept dpnp array creation and, when the array is garbage
+# collected, defer the actual release behind a host task gated on a
+# queue barrier event, so the free happens only after all pending
+# kernels complete.
+#
+# Set GPU4PYSCF_DEFER_FREE=0 to disable (falls back to eager free).
+_DEFER_FREE_ENABLED = os.environ.get("GPU4PYSCF_DEFER_FREE", "1") != "0"
+# Only defer allocations at least this many bytes. Tiny scalar buffers
+# are rarely the ones handed to raw kernels and deferring them adds
+# finalizer overhead with little safety benefit. 0 = defer everything.
+_DEFER_FREE_MIN_BYTES = int(
+    os.environ.get("GPU4PYSCF_DEFER_FREE_MIN_BYTES", "4096")
+)
+# Coalesce this many freed buffers into a single keep-alive host task to
+# amortize per-free enqueue/GIL cost. 1 = submit a host task per free.
+_DEFER_FREE_BATCH = max(1, int(
+    os.environ.get("GPU4PYSCF_DEFER_FREE_BATCH", "64")
+))
+# Flush a lingering partial batch at most once per this many allocations,
+# so tail buffers are not pinned indefinitely without flushing a host task
+# on every single allocation.
+_DEFER_FREE_FLUSH_STRIDE = max(1, int(
+    os.environ.get("GPU4PYSCF_DEFER_FREE_FLUSH_STRIDE", "128")
+))
 
 
 # =====================================================================
@@ -90,8 +123,20 @@ if _state is None:
         "bootstrapped":       False,
         "verified":           False,
         "shutting_down":      False,
+        # Layer 4 deferred-free bookkeeping. Holds keys:
+        #   "batch"       -> list[_Memory] pending queue-ordered release
+        #   "alloc_count" -> int, throttles partial-batch flushing
+        "defer_free_lock":    threading.Lock(),
+        "pending_frees":      {},
     }
     setattr(dpnp, _STATE_ATTR, _state)
+
+# Reload-safety: a pre-existing _state (from an earlier load of this
+# module under a different dotted name) may predate the Layer 4 keys.
+if "defer_free_lock" not in _state:
+    _state["defer_free_lock"] = threading.Lock()
+if "pending_frees" not in _state:
+    _state["pending_frees"] = {}
 
 _master_lock       = _state["master_lock"]
 _master_queues     = _state["master_queues"]
@@ -99,6 +144,8 @@ _stream_cache      = _state["stream_cache"]
 _stream_cache_lock = _state["stream_cache_lock"]
 _device_cache      = _state["device_cache"]
 _device_cache_lock = _state["device_cache_lock"]
+_defer_free_lock   = _state["defer_free_lock"]
+_pending_frees     = _state["pending_frees"]
 
 
 # =====================================================================
@@ -373,8 +420,133 @@ _DPNP_CREATION = (
 )
 
 
+# =====================================================================
+# Layer 4 — queue-ordered deferred free of dpnp USM buffers
+# =====================================================================
+#
+# Why this exists
+# ---------------
+# dpctl frees device USM EAGERLY on GC (synchronous sycl::free in
+# _Memory.__dealloc__, NOT queue-ordered). gpu4pyscf launches raw SYCL
+# kernels (lib/*/*.cu under USE_SYCL) fire-and-forget on the singleton
+# in-order queue that read those buffers; the C++ kernel wrappers only
+# receive BORROWED raw pointers and cannot own/keep the buffers alive.
+# So an eager free of a still-in-use buffer -> GPU page fault.
+#
+# How ordering is achieved WITHOUT a synchronization / barrier
+# ------------------------------------------------------------
+# The fix keeps the freed buffer's owning dpctl _Memory alive and hands
+# it to SyclQueue._submit_keep_args_alive(), which enqueues a host task
+# ON THE MASTER QUEUE that DECREFs (hence frees) the buffer. Because the
+# master queue is IN-ORDER, that host task is automatically ordered
+# after every kernel submitted before it -- no explicit barrier / event
+# is needed. ext_oneapi_submit_barrier() is therefore NOT used: it would
+# add an extra enqueued command per free for zero benefit on an in-order
+# queue. There is no host-side wait anywhere in this path (fully async,
+# CUDA/CuPy stream-ordered-free parity).
+#
+# Cost control: batching
+# ----------------------
+# Each host task is itself an enqueued command (and acquires the GIL when
+# it runs), so submitting one per freed array would be expensive under
+# high allocation churn. We instead COALESCE freed _Memory objects and
+# release a whole batch behind a SINGLE host task, amortizing the cost to
+# ~1 host task per _DEFER_FREE_BATCH frees.
+
+
+def _flush_deferred_frees_locked():
+    """Submit one keep-alive host task for the whole pending batch.
+
+    Caller must hold _defer_free_lock. The host task, enqueued on the
+    in-order master queue, runs after all previously submitted kernels;
+    when it runs it drops the last reference to each batched _Memory, so
+    the real sycl::free happens only after those kernels complete.
+
+    Fully asynchronous: _submit_keep_args_alive enqueues the host task and
+    returns immediately. We do NOT retain or poll the returned event --
+    the host task itself owns the batched _Memory references (dpctl's
+    async_dec_ref captures them by value), and ordering is guaranteed by
+    the in-order queue alone. No additional synchronization is introduced.
+    """
+    batch = _pending_frees.get("batch")
+    if not batch:
+        return
+    _pending_frees["batch"] = []
+    try:
+        # Empty depends: on an in-order queue the host task is already
+        # ordered after all prior submissions. Return value discarded.
+        _master_queue()._submit_keep_args_alive(tuple(batch), [])
+    except Exception:
+        # On failure, dropping `batch` here frees eagerly (still correct
+        # if no kernel is mid-flight; worst case reproduces the original
+        # eager-free behavior only for this batch).
+        pass
+
+
+def _deferred_release(mem):
+    """Finalizer body: queue the freed USM `_Memory` for batched,
+    queue-ordered release.
+
+    `mem` is a strong reference to the dpctl _Memory owner; holding it
+    here means the eager sycl::free in _Memory.__dealloc__ has NOT run
+    yet. We append it to the pending batch and flush when the batch is
+    large enough.
+    """
+    # During interpreter shutdown, host tasks acquiring the GIL are unsafe
+    # (dpctl warns). Returning drops `mem` -> eager free, which is fine at
+    # exit since no new kernels are being launched.
+    if _state.get("shutting_down"):
+        return
+    with _defer_free_lock:
+        batch = _pending_frees.setdefault("batch", [])
+        batch.append(mem)
+        if len(batch) >= _DEFER_FREE_BATCH:
+            _flush_deferred_frees_locked()
+
+
+def _register_deferred_free(arr):
+    """Register a finalizer on a freshly created dpnp array so that, when
+    it is garbage collected, its USM allocation is released in a batched,
+    queue-ordered manner instead of eagerly.
+
+    No-op (returns arr unchanged) if deferral is disabled, the object is
+    not a dpnp array, it is too small, or the underlying USM handles are
+    unavailable.
+    """
+    if not _DEFER_FREE_ENABLED:
+        return arr
+    try:
+        get_array = getattr(arr, "get_array", None)
+        if get_array is None:
+            return arr
+        usm = get_array()                 # weak-referenceable usm_ndarray
+        mem = usm.usm_data                # strong ref to _Memory owner
+        nbytes = getattr(mem, "nbytes", 0)
+        if nbytes < _DEFER_FREE_MIN_BYTES:
+            return arr
+        # Flush a lingering partial batch so buffers freed during a burst
+        # of frees followed by pure compute (no more frees to trigger a
+        # batch flush) do not stay pinned indefinitely. This piggybacks on
+        # allocation activity and is throttled by _flush_stride so it does
+        # not submit a host task on every allocation.
+        cnt = _pending_frees.get("alloc_count", 0) + 1
+        _pending_frees["alloc_count"] = cnt
+        if (cnt % _DEFER_FREE_FLUSH_STRIDE) == 0:
+            with _defer_free_lock:
+                _flush_deferred_frees_locked()
+        # weakref.finalize on the usm_ndarray fires when it is collected;
+        # `mem` captured in the finalizer keeps _Memory alive past that,
+        # letting us order the real free behind queue work.
+        weakref.finalize(usm, _deferred_release, mem)
+    except Exception:
+        # Never let lifetime-management bookkeeping break array creation.
+        return arr
+    return arr
+
+
 def _wrap_with_master_queue(mod, names):
-    """Inject sycl_queue=master into every creation call on `mod`.
+    """Inject sycl_queue=master into every creation call on `mod`, and
+    register a queue-ordered deferred-free finalizer on the result.
 
     Idempotent: re-wrapping a wrapped function is a no-op.
     """
@@ -387,7 +559,8 @@ def _wrap_with_master_queue(mod, names):
         def wrapper(*args, _orig=orig, **kwargs):
             if "sycl_queue" not in kwargs and "device" not in kwargs:
                 kwargs["sycl_queue"] = _master_queue()
-            return _orig(*args, **kwargs)
+            res = _orig(*args, **kwargs)
+            return _register_deferred_free(res)
 
         wrapper.__master_q_wrapped__ = True
         wrapper.__wrapped__ = orig
@@ -534,6 +707,11 @@ _verify_single_queue_invariant()
 # =====================================================================
 @atexit.register
 def _mark_shutdown():
+    # No synchronization at shutdown (constraint: introduce no waits beyond
+    # the original code). Outstanding deferred-free host tasks are safe:
+    # dpctl's async_dec_ref host task self-guards with Py_IsFinalizing() and
+    # simply skips the DECREF during interpreter teardown, so any not-yet-run
+    # releases leak harmlessly at exit (the OS reclaims the device memory).
     _state["shutting_down"] = True
 
 def _shutting_down():
