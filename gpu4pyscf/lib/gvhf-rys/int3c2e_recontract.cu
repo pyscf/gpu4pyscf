@@ -90,9 +90,12 @@ int pair_recontraction_info(int *inp_idx, int *out_idx, double *coef, int *idx_s
                 for (int ic = 0; ic < ictr; ++ic) {
                     int i = i0 + ic * di + i_in_shell;
                     for (int jc = 0; jc < ictr; ++jc) {
+                        double cc = ci[ic*iprim+ip] * ci[jc*iprim+jp];
+                        if (cc == 0) {
+                            continue;
+                        }
                         int j = i0 + jc * di + j_in_shell;
                         int ij = i * nao + j;
-                        double cc = ci[ic*iprim+ip] * ci[jc*iprim+jp];
                         if (i >= j) {
                             if (output_lut[ij] == NOT_INITIALIZED) {
                                 orig_ao_pair_id[cderi_npairs] = ij;
@@ -129,6 +132,10 @@ int pair_recontraction_info(int *inp_idx, int *out_idx, double *coef, int *idx_s
                 for (int ic = 0; ic < ictr; ++ic) {
                     int i = i0 + ic * di + i_in_shell;
                     for (int jc = 0; jc < jctr; ++jc) {
+                        double cc = ci[ic*iprim+ip] * cj[jc*jprim+jp];
+                        if (cc == 0) {
+                            continue;
+                        }
                         int j = j0 + jc * dj + j_in_shell;
                         int ij = i * nao + j;
                         // Ensure writing to the tril part of the output matrix.
@@ -155,7 +162,7 @@ int pair_recontraction_info(int *inp_idx, int *out_idx, double *coef, int *idx_s
                         }
                         inp_idx[count] = inp_offset;
                         out_idx[count] = output_lut[ij];
-                        coef[count] = ci[ic*iprim+ip] * cj[jc*jprim+jp];
+                        coef[count] = cc;
                         count++;
                     }
                 }

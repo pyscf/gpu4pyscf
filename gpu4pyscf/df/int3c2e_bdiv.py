@@ -51,14 +51,14 @@ POOL_SIZE = 25600
 libvhf_rys.pair_recontraction_info.restype = ctypes.c_int
 libvhf_rys.recontract_ao_pair.restype = ctypes.c_int
 
-def aux_e2(mol, auxmol):
+def aux_e2(mol, auxmol, omega=None):
     r'''
     3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
-        reorder_aux=True, cart=mol.cart)[:2]
+        reorder_aux=True, cart=mol.cart, omega=omega)[:2]
     aux_coef = int3c2e_opt.aux_coeff
     aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
     aux_coef[aux_sorting] = tmp
@@ -74,7 +74,7 @@ def aux_e2(mol, auxmol):
     out[rows,cols] = j3c
     return out
 
-def compressed_aux_e2(mol, auxmol):
+def compressed_aux_e2(mol, auxmol, omega=None):
     r'''
     Returns compressed_int3c, rows, cols. The compressed_int3c stores the
     3-center integrals (ij|k) compressed on the orbital-pair dimensions.
@@ -84,7 +84,7 @@ def compressed_aux_e2(mol, auxmol):
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
-        reorder_aux=True, cart=mol.cart)[:2]
+        reorder_aux=True, cart=mol.cart, omega=omega)[:2]
     aux_coef = int3c2e_opt.auxmol.ctr_coeff
     aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
     aux_coef[aux_sorting] = tmp
@@ -94,15 +94,18 @@ def compressed_aux_e2(mol, auxmol):
     rows, cols = divmod(pair_address, mol.nao)
     return j3c, rows, cols
 
-def contract_int3c2e_dm(mol, auxmol, dm):
-    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+def contract_int3c2e_dm(mol, auxmol, dm, hermi=0, int3c2e_opt=None):
+    if int3c2e_opt is None:
+        int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     dm = int3c2e_opt.mol.apply_C_mat_CT(dm)
-    auxvec = int3c2e_opt.contract_dm(dm)
+    auxvec = int3c2e_opt.contract_dm(dm, hermi)
     return int3c2e_opt.auxmol.apply_CT_dot(auxvec, axis=-1)
 
-def contract_int3c2e_auxvec(mol, auxmol, auxvec, sort_output=True):
-    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    auxvec = int3c2e_opt.auxmol.C_dot_mat(auxvec)
+def contract_int3c2e_auxvec(mol, auxmol, auxvec, sort_output=True,
+                            int3c2e_opt=None):
+    if int3c2e_opt is None:
+        int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    auxvec = int3c2e_opt.auxmol.apply_C_dot(auxvec, axis=-1)
     vj = int3c2e_opt.contract_auxvec(auxvec)
     if sort_output:
         vj = int3c2e_opt.mol.apply_CT_mat_C(vj)
@@ -326,18 +329,20 @@ class Int3c2eOpt:
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
         mol = self.mol
+        nao = mol.nao
         auxmol = self.auxmol
-        assert dm.shape[-1] == mol.nao
+        assert dm.shape[-1] == nao, 'Requires transforming dm: mol.apply_C_mat_CT(dm)'
         assert dm.dtype == np.float64
         assert dm.flags.c_contiguous
         nbas_aux = auxmol.nbas
         if hermi != 1:
-            dm = transpose_sum(dm, inplace=False)
+            dm = transpose_sum(dm)
 
         dm_ndim = dm.ndim
         if dm_ndim == 2:
             dm = dm[None]
         n_dm = len(dm)
+        dm = cp.asarray(dm.reshape(n_dm,nao,nao), order='C')
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
             short_range=mol.omega<0, cache_cart_idx=True)
@@ -377,14 +382,24 @@ class Int3c2eOpt:
         t0 = log.init_timer()
         mol = self.mol
         auxmol = self.auxmol
-        assert auxvec.ndim == 1
-        auxvec = cp.asarray(auxvec)
+        naux = auxmol.nao
+        assert auxvec.shape[-1] == naux
 
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
-            short_range=mol.omega<0, gout_width=30, cache_cart_idx=True)
+        auxvec_ndim = auxvec.ndim
+        auxvec = cp.asarray(auxvec.reshape(-1,naux), order='C')
+        n_dm = len(auxvec)
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
+
+        dm_batch_size = 4
+        nfk_max = (laux + 1) * (laux + 2) // 2
+        sizeof_float64 = 8
+        shm_size = SHM_SIZE - dm_batch_size*nfk_max * sizeof_float64
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            short_range=mol.omega<0, shm_size=shm_size,
+            gout_width=36, cache_cart_idx=True)
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+        shm_size_max += dm_batch_size*nfk_max * sizeof_float64
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
             self.bas_ij_cache, nsp_per_block[0]*4)
         gout_stride = cp.asarray(gout_stride, dtype=np.int32)
@@ -396,10 +411,11 @@ class Int3c2eOpt:
 
         int3c2e_envs = self.int3c2e_envs
         nao = mol.nao
-        vj = cp.zeros((nao, nao))
+        vj = cp.zeros((n_dm, nao, nao))
         err = libvhf_rys.contract_int3c2e_auxvec(
             ctypes.cast(vj.data.ptr, ctypes.c_void_p),
             ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_dm), ctypes.c_int(naux),
             ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
             ctypes.c_int(len(shl_pair_offsets) - 1),
             ctypes.c_int(len(ksh_offsets) - 1),
@@ -410,7 +426,10 @@ class Int3c2eOpt:
         if err != 0:
             raise RuntimeError('contract_int3c2e_auxvec kernel failed')
         log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
+
         vj = hermi_triu(vj, inplace=True)
+        if auxvec_ndim == 1:
+            vj = vj[0]
         return vj
 
     def orbital_pair_cart2sph(self, compressed_eri3c):

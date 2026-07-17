@@ -174,8 +174,7 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
                     v1 += nr_uks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
             if not hybrid:
                 if with_j:
-                    vj = mf.get_j(mol, dm1, hermi=hermi)
-                    v1 += vj[0] + vj[1]
+                    v1 += mf.get_j(mol, dm1[0]+dm1[1], hermi=hermi)
             else:
                 if with_j:
                     vj, vk = mf.get_jk(mol, dm1, hermi=hermi)

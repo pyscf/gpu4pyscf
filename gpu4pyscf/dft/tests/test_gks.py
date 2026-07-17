@@ -13,6 +13,9 @@
 # limitations under the License.
 
 import unittest
+from packaging.version import Version
+import cupy as cp
+import pyscf
 from pyscf import gto
 from pyscf import lib
 from gpu4pyscf.dft import gks
@@ -198,6 +201,46 @@ class KnownValues(unittest.TestCase):
             e_cpu = mf_cpu.kernel()
             self.assertAlmostEqual(e_gpu, e_cpu, 6)
             self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
+
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
+                     'NumInt2C.to_gpu method is not available.')
+    def test_get_veff_complex(self):
+        mf_cpu = mol.GKS(xc='lda,')
+        mf_cpu.collinear = 'mcol'
+        mf_cpu._numint.spin_samples = 6
+        mf_gpu = mf_cpu.to_gpu()
+        mf_gpu.collinear = 'mcol'
+        mf_gpu._numint.spin_samples = 6
+        dm = mf_cpu.get_init_guess() + mf_cpu.get_ovlp() * .1j
+        veff = mf_gpu.get_veff(mol, cp.array(dm))
+        ref = mf_cpu.get_veff(mol, dm)
+        assert abs(veff.get() - ref).max() < 1e-12
+
+        mf_cpu.xc = 'b3lyp'
+        mf_gpu.xc = 'b3lyp'
+        veff = mf_gpu.get_veff(mol, cp.array(dm))
+        ref = mf_cpu.get_veff(mol, dm)
+        assert abs(veff.get() - ref).max() < 1e-12
+
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
+                     'NumInt2C.to_gpu method is not available.')
+    def test_get_veff_real(self):
+        mf_cpu = mol.GKS(xc='lda,')
+        mf_cpu.collinear = 'mcol'
+        mf_cpu._numint.spin_samples = 6
+        mf_gpu = mf_cpu.to_gpu()
+        mf_gpu.collinear = 'mcol'
+        mf_gpu._numint.spin_samples = 6
+        dm = mf_cpu.get_init_guess() + mf_cpu.get_ovlp() * .1
+        veff = mf_gpu.get_veff(mol, cp.array(dm))
+        ref = mf_cpu.get_veff(mol, dm)
+        assert abs(veff.get() - ref).max() < 1e-12
+
+        mf_cpu.xc = 'camb3lyp'
+        mf_gpu.xc = 'camb3lyp'
+        veff = mf_gpu.get_veff(mol, cp.array(dm))
+        ref = mf_cpu.get_veff(mol, dm)
+        assert abs(veff.get() - ref).max() < 1e-12
 
 
 if __name__ == "__main__":

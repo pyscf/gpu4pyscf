@@ -43,7 +43,6 @@ from gpu4pyscf.scf.jk import (
 from gpu4pyscf.grad import rhf as rhf_grad
 from . import dispersion
 from gpu4pyscf.gto.mole import extract_pgto_params
-from gpu4pyscf.df.df_jk import _make_factorized_dm
 
 libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int
 libvhf_rys.RYS_per_atom_jk_ip2_type3.restype = ctypes.c_int

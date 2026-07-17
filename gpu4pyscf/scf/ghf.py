@@ -33,7 +33,8 @@ def _from_rhf_init_dm(dma, breaksym=True):
     return dm
 
 
-def get_jk(mol, dm, hermi=0, with_j=True, with_k=True, jkbuild=None, omega=None):
+def _get_jk(mf, mol, dm, hermi=0, with_j=True, with_k=True, jkbuild=None,
+            omega=None, lr_factor=None, sr_factor=None):
     '''
     GHF J/K adapter function.
     It takes a GHF DM, splits it into blocks, calls the 'jkbuild' strategy,
@@ -44,6 +45,9 @@ def get_jk(mol, dm, hermi=0, with_j=True, with_k=True, jkbuild=None, omega=None)
     '''
     if jkbuild is None:
         raise ValueError("jkbuild (J/K build strategy) must be provided.")
+
+    if mol is None: mol = mf.mol
+    if dm is None: dm = mf.make_rdm1()
 
     dm = asarray(dm)
     dm_shape = dm.shape
@@ -60,34 +64,23 @@ def get_jk(mol, dm, hermi=0, with_j=True, with_k=True, jkbuild=None, omega=None)
     vj = vk = None # Initialize
 
     if dm.dtype == cp.complex128:
-        # --- Prepare DMs ---
-        # Stack all real components: J-DM, then K-DMs
-        dm_j_real = (dmaa + dmbb).real
-        dm_k_real = cp.vstack((dmaa.real, dmbb.real, dmab.real, dmba.real))
-        dms_real_in = cp.vstack((dm_j_real, dm_k_real))
-        
-        # Stack all imaginary components
-        dm_j_imag = (dmaa + dmbb).imag
-        dm_k_imag = cp.vstack((dmaa.imag, dmbb.imag, dmab.imag, dmba.imag))
-        dms_imag_in = cp.vstack((dm_j_imag, dm_k_imag))
-
-        # --- Call builder (real part) ---
-        jtmp_real, ktmp_real = jkbuild(mol, dms_real_in, hermi=0, omega=omega)
-        
-        # --- Call builder (imaginary part) ---
-        jtmp_imag, ktmp_imag = jkbuild(mol, dms_imag_in, hermi=0, omega=omega)
-        
-        # --- Reassemble ---
         if with_j:
-            jtmp = jtmp_real[0] + 1j * jtmp_imag[0] # J is from the first DM in the stack
+            # --- Prepare DMs ---
+            dm_j = cp.vstack((dmaa.real + dmbb.real,
+                              dmaa.imag + dmbb.imag))
+            jtmp = jkbuild(mf, mol, dm_j, hermi=0, with_k=False)[0]
+            jtmp = jtmp[:n_dm] + 1j * jtmp[n_dm:]
             vj = cp.zeros((n_dm, nso, nso), dtype=dm.dtype)
             vj[:, :nao, :nao] = vj[:, nao:, nao:] = jtmp
             vj = vj.reshape(dm_shape)
-            
+
         if with_k:
-            # K is from the last 4 DMs in the stack
-            ktmp_r = ktmp_real[1:].reshape(4, n_dm, nao, nao) 
-            ktmp_i = ktmp_imag[1:].reshape(4, n_dm, nao, nao)
+            dm_k = cp.stack((
+                dmaa.real, dmbb.real, dmab.real, dmba.real,
+                dmaa.imag, dmbb.imag, dmab.imag, dmba.imag))
+            ktmp = jkbuild(mf, mol, dm_k, hermi=0, with_j=False, omega=omega,
+                           lr_factor=lr_factor, sr_factor=sr_factor)[1]
+            ktmp_r, ktmp_i = ktmp.reshape(2, 4, n_dm, nao, nao)
             vk = cp.zeros((n_dm, nso, nso), dtype=dm.dtype)
             vk[:, :nao, :nao] = ktmp_r[0] + 1j * ktmp_i[0]
             vk[:, nao:, nao:] = ktmp_r[1] + 1j * ktmp_i[1]
@@ -96,30 +89,37 @@ def get_jk(mol, dm, hermi=0, with_j=True, with_k=True, jkbuild=None, omega=None)
             vk = vk.reshape(dm_shape)
 
     else: # Real DM
-        dm_j = (dmaa + dmbb)
-        dm_k = cp.vstack((dmaa, dmbb, dmab, dmba))
-        
-        # Stack all DMs for J and K
-        dms_in = cp.vstack((dm_j, dm_k))
-        
-        # Call builder once
-        jtmp, ktmp = jkbuild(mol, dms_in, hermi=0, omega=omega)
-
-        # --- Reassemble ---
         if with_j:
+            dm_j = (dmaa + dmbb)
+            jtmp = jkbuild(mf, mol, dm_j, hermi, with_k=False)[0]
             vj = cp.zeros((n_dm, nso, nso), dtype=dm.dtype)
-            vj[:, :nao, :nao] = vj[:, nao:, nao:] = jtmp[0] # J from first DM
+            vj[:, :nao, :nao] = vj[:, nao:, nao:] = jtmp
             vj = vj.reshape(dm_shape)
-        
+
         if with_k:
+            dm_k = cp.vstack((dmaa, dmbb, dmab, dmba))
+            ktmp = jkbuild(mf, mol, dm_k, hermi=0, with_j=False, omega=omega,
+                           lr_factor=lr_factor, sr_factor=sr_factor)[1]
             vk = cp.zeros((n_dm, nso, nso), dtype=dm.dtype)
             # K from the last 4 DMs
-            vk[:, :nao, :nao] = ktmp[1]
-            vk[:, nao:, nao:] = ktmp[2]
-            vk[:, :nao, nao:] = ktmp[3]
-            vk[:, nao:, :nao] = ktmp[4]
+            vk[:, :nao, :nao] = ktmp[0]
+            vk[:, nao:, nao:] = ktmp[1]
+            vk[:, :nao, nao:] = ktmp[2]
+            vk[:, nao:, :nao] = ktmp[3]
             vk = vk.reshape(dm_shape)
-            
+
+    return vj, vk
+
+def _get_jk_spin_free(mf, mol, dm, hermi, with_j=True, with_k=True,
+                      omega=None, lr_factor=None, sr_factor=None):
+    # The base class get_jk expects (n_dm, nao, nao)
+    nao = mol.nao
+    dm = dm.reshape(-1, nao, nao)
+    vj = vk = None
+    if with_j:
+        vj = hf.SCF.get_j(mf, mol, dm, hermi)
+    if with_k:
+        vk = hf.SCF.get_k(mf, mol, dm, hermi, omega, lr_factor, sr_factor)
     return vj, vk
 
 
@@ -183,29 +183,19 @@ class GHF(hf.SCF):
         return block_diag(stmp, stmp)
 
     def get_jk(self, mol=None, dm=None, hermi=0, with_j=True, with_k=True,
-               omega=None):
-        if mol is None: mol = self.mol
-        if dm is None: dm = self.make_rdm1()
-        
-        # Define the local "jkbuild" strategy for non-DF calculation
-        # This strategy points to the base class (hf.SCF) implementation
-        def jkbuild(mol_obj, dm_obj, hermi, omega=None):
-            # The base class get_jk expects (n_dm, nao, nao)
-            nao = mol_obj.nao
-            dm_obj = dm_obj.reshape(-1, nao, nao)
-            # Call super() to get the non-DF J/K
-            return super(GHF, self).get_jk(mol_obj, dm_obj, hermi, 
-                                           with_j=True, with_k=True, omega=omega)
-
-        # Call the top-level adapter with the non-DF strategy
-        return get_jk(mol, dm, hermi, with_j, with_k, jkbuild=jkbuild, omega=omega)
+               omega=None, lr_factor=None, sr_factor=None):
+        return _get_jk(self, mol, dm, hermi, with_j, with_k,
+                       jkbuild=_get_jk_spin_free, omega=omega,
+                       lr_factor=lr_factor, sr_factor=sr_factor)
 
     def get_j(self, mol=None, dm=None, hermi=1, omega=None):
         vj, _ = self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega)
         return vj
 
-    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
-        _, vk = self.get_jk(mol, dm, hermi, with_j=False, with_k=True, omega=omega)
+    def get_k(self, mol=None, dm=None, hermi=1,
+              omega=None, lr_factor=None, sr_factor=None):
+        _, vk = self.get_jk(mol, dm, hermi, with_j=False, with_k=True,
+                            omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
         return vk
 
     def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):

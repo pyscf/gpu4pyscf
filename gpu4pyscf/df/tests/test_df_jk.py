@@ -15,10 +15,11 @@
 import unittest
 import numpy as np
 import cupy
+import cupy as cp
 import pyscf
 from pyscf import df, lib
 from gpu4pyscf import scf as gpu_scf
-from gpu4pyscf.df import int3c2e, df_jk
+from gpu4pyscf.df import df_jk
 from gpu4pyscf.df.df import DF
 from gpu4pyscf.lib.cupy_helper import tag_array
 
@@ -48,55 +49,28 @@ def tearDownModule():
     del mol, auxmol, mol_sph, auxmol_sph
 
 class KnownValues(unittest.TestCase):
-
-    def test_vj_incore(self):
-        int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True, direct_scf_tol=1e-14)
-        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        cupy.random.seed(np.asarray(1, dtype=np.uint64))
-        nao = intopt.mol.nao
-        dm = cupy.random.rand(nao, nao)
-        dm = dm + dm.T
-
-        # pass 1
-        rhoj_outcore = cupy.einsum('ijL,ij->L', int3c_gpu, dm)
-        rhoj_incore = 2.0*int3c2e.get_j_int3c2e_pass1(intopt, dm)
-        assert cupy.linalg.norm(rhoj_outcore - rhoj_incore) < 1e-8
-
-        # pass 2
-        vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
-        vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
-        assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
-    
-    def test_vj_sph_incore(self):
-        int3c_gpu = int3c2e.get_int3c2e(mol_sph, auxmol, aosym=True, direct_scf_tol=1e-14)
-        intopt = int3c2e.VHFOpt(mol_sph, auxmol, 'int2e')
-        intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        cupy.random.seed(np.asarray(1, dtype=np.uint64))
-        nao = intopt.mol.nao
-        dm = cupy.random.rand(nao, nao)
-        dm = dm + dm.T
-        
-        # pass 1
-        rhoj_outcore = cupy.einsum('ijL,ij->L', int3c_gpu, dm)
-        rhoj_incore = 2.0*int3c2e.get_j_int3c2e_pass1(intopt, dm)
-        assert cupy.linalg.norm(rhoj_outcore - rhoj_incore) < 1e-8
-
-        # pass 2
-        vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
-        vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
-        assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
-
-    def test_j_outcore(self):
+    def test_get_j(self):
         cupy.random.seed(np.asarray(1, dtype=np.uint64))
         nao = mol.nao
+        mf = gpu_scf.RHF(mol)
+        mf = mf.density_fit(auxbasis='sto3g')
+        mf.with_df.build()
+
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
-        mf = gpu_scf.RHF(mol)
-        mf = mf.density_fit()
         vj = df_jk.get_j(mf.with_df, dm)
-        ref, _ = mf.get_jk(dm=dm, with_j=True, with_k=False, hermi=1)
-        assert abs(vj - ref).max() < 2e-9
+        ref, _ = mf.get_jk(dm=dm, hermi=1)
+        assert abs(vj - ref).max() < 1e-12
+
+        dm = cupy.random.rand(2, nao, nao)
+        vj = df_jk.get_j(mf.with_df, dm, hermi=0)
+        ref, _ = mf.get_jk(dm=dm, hermi=0)
+        assert abs(vj - ref).max() < 1e-12
+
+        dm = cupy.random.rand(15, nao, nao)
+        vj = df_jk.get_j(mf.with_df, dm, hermi=0)
+        ref, _ = mf.get_jk(dm=dm, hermi=0)
+        assert abs(vj - ref).max() < 1e-12
 
     def test_jk_hermi0(self):
         dfobj = DF(mol, 'sto3g').build()
@@ -167,6 +141,75 @@ H       4.224    0.640    0.837
             mf = mf.density_fit().run()
             assert isinstance(mf.with_df._cderi[0], np.ndarray)
             assert abs(mf.e_tot - -152.09455538734778) < 1e-8
+
+    def test_ghf_get_jk_real(self):
+        mol = pyscf.M(
+            atom = '''
+            O    0    0    0
+            H    0.   -0.757   0.587
+            H    0.   0.757    0.587''',
+            basis = 'def2-svp')
+        mf = mol.GHF().to_gpu().density_fit(auxbasis='weigend')
+        dm = mf.get_init_guess(key='hcore')
+
+        mf_cpu = mf.to_cpu()
+        ref = mf_cpu.get_jk(mol, dm.get())
+
+        vj, vk = mf.get_jk(mol, dm)
+        assert abs(ref[0] - vj.get()).max() < 1e-12
+        assert abs(ref[1] - vk.get()).max() < 1e-12
+
+        vj = mf.get_j(mol, dm)
+        vk = mf.get_k(mol, dm)
+        assert abs(ref[0] - vj.get()).max() < 1e-12
+        assert abs(ref[1] - vk.get()).max() < 1e-12
+
+        vk_ref = mol.GHF().get_k(mol, dm.get())
+        mf.only_dfj = True
+        vj, vk = mf.get_jk(mol, dm)
+        assert abs(ref[0] - vj.get()).max() < 1e-12
+        assert abs(vk_ref - vk.get()).max() < 1e-12
+
+        vj = mf.get_j(mol, dm)
+        vk = mf.get_k(mol, dm)
+        assert abs(ref[0] - vj.get()).max() < 1e-12
+        assert abs(vk_ref - vk.get()).max() < 1e-12
+
+    def test_ghf_get_jk_complex(self):
+        mol = pyscf.M(
+            atom = '''
+            O    0    0    0
+            H    0.   -0.757   0.587
+            H    0.   0.757    0.587''',
+            basis = 'def2-svp')
+        mf = mol.GHF().to_gpu().density_fit(auxbasis='weigend')
+        cp.random.seed(1)
+        n2c = mol.nao * 2
+        dm = cp.random.rand(n2c, n2c) + 1j * cp.random.rand(n2c, n2c)
+        dm = dm + dm.conj().T
+
+        mf_cpu = mf.to_cpu()
+        ref = mf_cpu.get_jk(mol, dm.get())
+
+        vj, vk = mf.get_jk(mol, dm)
+        assert abs(ref[0] - vj.get()).max() < 1e-11
+        assert abs(ref[1] - vk.get()).max() < 1e-11
+
+        vj = mf.get_j(mol, dm)
+        vk = mf.get_k(mol, dm)
+        assert abs(ref[0] - vj.get()).max() < 1e-11
+        assert abs(ref[1] - vk.get()).max() < 1e-11
+
+        vk_ref = mol.GHF().get_k(mol, dm.get())
+        mf.only_dfj = True
+        vj, vk = mf.get_jk(mol, dm)
+        assert abs(ref[0] - vj.get()).max() < 1e-11
+        assert abs(vk_ref - vk.get()).max() < 1e-11
+
+        vj = mf.get_j(mol, dm)
+        vk = mf.get_k(mol, dm)
+        assert abs(ref[0] - vj.get()).max() < 1e-11
+        assert abs(vk_ref - vk.get()).max() < 1e-11
 
 if __name__ == "__main__":
     print("Full Tests for DF JK")
