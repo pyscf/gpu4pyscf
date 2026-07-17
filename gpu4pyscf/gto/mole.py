@@ -940,7 +940,7 @@ class SortedGTO:
 
     def get_ao_idx(self, cart=None):
         '''The ao_idx can transform the Cartesian AOs in the sorted mol (self)
-        to the AOs in the original mol'''
+        to the AOs in the original mol: mol.ao == sorted_mol.ao[ao_idx]'''
         if cart is None:
             cart = self.cart
         ao_loc = self.ao_loc_nr(cart)

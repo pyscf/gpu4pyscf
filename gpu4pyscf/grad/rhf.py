@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,17 +23,19 @@ from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad.dispersion import get_dispersion
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
-from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import (
-    tag_array, contract, condense, transpose_sum, ensure_numpy)
+    tag_array, contract, condense, transpose_sum, ensure_numpy, get_avail_mem)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
+from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt,
     _nearest_power2, _TimingCollector)
-from gpu4pyscf.gto.mole import groupby, extract_pgto_params
+from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedMole
+from gpu4pyscf.df.int3c2e_bdiv import (
+    Int3c2eOpt, _int3c2e_ip1_evaluator, int3c2e_scheme_ip1)
 
 __all__ = [
     'SCF_GradScanner',
@@ -203,18 +205,44 @@ def get_hcore(mf, mol, exclude_ecp=False):
     '''
     Nuclear gradients of core Hamiltonian
     '''
-    h = mol.intor('int1e_ipkin', comp=3)
+    from gpu4pyscf.pbc.gto.int1e import int1e_ipkin
     if mol._pseudo:
         NotImplementedError('Nuclear gradients for GTH PP')
 
     if getattr(mf, 'with_x2c', None):
         raise NotImplementedError('X2C gradients')
 
-    h += mol.intor('int1e_ipnuc', comp=3)
-    h = cupy.asarray(h)
+    sorted_mol = SortedMole.from_mol(mol, decontract=True)
+    h = int1e_ipkin(sorted_mol)
+    h += int1e_ipnuc(sorted_mol)
     if not exclude_ecp and len(mol._ecpbas) > 0:
         h += get_ecp_ip(mol).sum(axis=0)
     return -h
+
+def int1e_ipnuc(mol):
+    '''
+    cp.array(mol.intor('int1e_ipnuc'))
+    '''
+    coords = mol.atom_coords()
+    charges = cp.asarray(mol.atom_charges(), dtype=np.float64)
+    fakemol = gto.fakemol_for_charges(coords)
+
+    sorted_mol = SortedMole.from_mol(mol, decontract=True)
+    opt = Int3c2eOpt(sorted_mol, fakemol).build(tril=False)
+    batch_size = 32
+    omega = 0.
+    eval_ip1, _, aux_offsets = _int3c2e_ip1_evaluator(
+        opt, int3c2e_scheme_ip1(omega, 27), batch_size, 'fill_int3c2e_ip1', omega)
+    ipnuc = 0
+    for batch_id, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
+        ipnuc += cp.einsum('xpk,k->xp', eval_ip1(batch_id), -charges[p0:p1])
+
+    pair_addresses = opt.pair_and_diag_indices(cart=True, original_ao_order=False)[0]
+    nao = sorted_mol.nao
+    out = cp.zeros([3, nao*nao])
+    out[:,pair_addresses] = ipnuc
+    out = sorted_mol.apply_CT_mat_C(out.reshape(3, nao, nao))
+    return out
 
 def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
@@ -296,22 +324,30 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
 
     orbo = mo_coeff[:,mo_occ>0]
     nocc = orbo.shape[1]
+    dh1e = cupy.empty([natm,3,nao,nocc])
 
     # derivative w.r.t nuclie position
-    dh1e = cupy.zeros([natm,3,nao,nocc])
     coords = mol.atom_coords()
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
-    intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=True, aosym=False,
-                 group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-    orbo_sorted = intopt.sort_orbitals(orbo, axis=[0])
-    mo_coeff_sorted = intopt.sort_orbitals(mo_coeff, axis=[0])
-    for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
-        dh1e[k0:k1,:,j0:j1,:] += contract('xkji,io->kxjo', int3c_blk, orbo_sorted[i0:i1])
-        dh1e[k0:k1,:,i0:i1,:] += contract('xkji,jo->kxio', int3c_blk, orbo_sorted[j0:j1])
-    dh1e = contract('kxjo,k->kxjo', dh1e, -charges)
-    dh1e = contract('kxjo,jp->kxpo', dh1e, mo_coeff_sorted)
+    sorted_mol = SortedMole.from_mol(mol, decontract=True)
+    mo = sorted_mol.apply_C_dot(mo_coeff, axis=0)
+
+    opt = Int3c2eOpt(sorted_mol, fakemol).build(tril=False)
+    batch_size = min(32, natm)
+    omega = 0.
+    eval_ip1, _, aux_offsets = _int3c2e_ip1_evaluator(
+        opt, int3c2e_scheme_ip1(omega, 27), batch_size, 'fill_int3c2e_ip1', omega)
+    pair_addresses = opt.pair_and_diag_indices(cart=True, original_ao_order=False)[0]
+    nao1 = sorted_mol.nao
+    h1 = cp.zeros([batch_size,3,nao1*nao1])
+    for batch_id, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
+        tmp = eval_ip1(batch_id)
+        tmp *= -charges[p0:p1]
+        h1[:p1-p0,:,pair_addresses] = tmp.transpose(2,0,1)
+        tmp = transpose_sum(h1.reshape((p1-p0)*3, nao1, nao1))
+        tmp = contract('kxpq,qj->kxpj', tmp.reshape(p1-p0,3,nao1,nao1), mo[:,mo_occ>0])
+        contract('kxpj,pi->kxij', tmp, mo, out=dh1e[p0:p1])
 
     # derivative w.r.t. atomic orbitals
     h1 = cupy.asarray(mf_grad.get_hcore(mol))
@@ -404,7 +440,6 @@ class GradientsBase(lib.StreamObject):
 
     reset       = rhf_grad_cpu.GradientsBase.reset
     get_hcore   = get_hcore
-    get_ovlp    = rhf_grad_cpu.GradientsBase.get_ovlp
     get_jk      = NotImplemented
     get_j       = NotImplemented
     get_k       = NotImplemented
@@ -420,6 +455,10 @@ class GradientsBase(lib.StreamObject):
     as_scanner  = as_scanner
 
     get_dispersion = get_dispersion
+
+    def get_ovlp(self, mol):
+        from gpu4pyscf.pbc.gto.int1e import int1e_ipovlp
+        return int1e_ipovlp(mol)
 
     def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         log = logger.new_logger(self)
