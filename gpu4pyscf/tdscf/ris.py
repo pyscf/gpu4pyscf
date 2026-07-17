@@ -18,12 +18,13 @@ import cupyx.scipy.linalg as cpx_linalg
 
 from pyscf import gto, lib
 from gpu4pyscf import scf
-from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, fill_symmetric
 from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig, _krylov_tools
 from gpu4pyscf.tdscf import rhf as td_rhf
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e_bdiv
+from gpu4pyscf.gto.mole import SortedMole
 
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
@@ -187,27 +188,30 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     Returns:
         Tpq: cupy.ndarray (naux, nao, nao)
     """
-    from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
-    nao = mol.nao
-    naux = auxmol.nao
+    #from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
+    sr_factor = lr_factor = None
+    if omega is not None and alpha is not None and beta is not None:
+        sr_factor = alpha
+        lr_factor = alpha + beta
 
-    intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(aosym=True, group_size=group_size, group_size_aux=group_size_aux,verbose=mol.verbose)
+    sorted_mol = SortedMole.from_mol(mol, decontract=True)
+    opt = int3c2e_bdiv.Int3c2eOpt(sorted_mol, auxmol).build(tril=aosym)
+    pair_addresses = opt.pair_and_diag_indices(cart=True, original_ao_order=False)[0]
+    nao_pair = len(pair_addresses)
+    C_p = sorted_mol.apply_C_dot(C_p)
+    C_q = sorted_mol.apply_C_dot(C_q)
 
-    C_p = C_p[intopt._ao_idx,:]
-    C_q = C_q[intopt._ao_idx,:]
-
+    nao = sorted_mol.nao
+    naux = opt.auxmol.nao
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
 
-    upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx, intopt._aux_ao_idx[:,None]]
-    # equivalent to 
-    # upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx,:][:,intopt._aux_ao_idx].T.copy()
+    upper_inv_eri2c = cp.asarray(
+        opt.auxmol.ctr_coeff, dtype=lower_inv_eri2c.dtype).dot(lower_inv_eri2c).T
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
     P_dtype = xp.float32 if single else xp.float64
-    int3c_dtype = cp.float32 if single else cp.float64
 
     if 'J' in calc:
         Pia = xp.empty((naux, siz_p, siz_q), dtype=P_dtype)
@@ -216,49 +220,31 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         Pij = xp.empty((naux, siz_p, siz_p), dtype=P_dtype)
         Pab = xp.empty((naux, siz_q, siz_q), dtype=P_dtype)
 
-    for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-        k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
+    batch_size = 32
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    word_avail = mem_avail // 8
+    batch_size = min(int(word_avail * 0.5) // nao_pair, naux)
+    eval_j3c, x, _, aux_offsets = opt.int3c2e_evaluator(
+        aux_batch_size=batch_size, cart=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
+    blksize = min(int(word_avail * 0.25) // nao**2, batch_size)
+    batch_size = min(blksize, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
 
-        int3c_slice = cp.empty((k1 - k0, nao, nao), dtype=int3c_dtype, order='C')
-        for cp_ij_id, _ in enumerate(intopt.log_qs):
-            cpi = intopt.cp_idx[cp_ij_id]
-            cpj = intopt.cp_jdx[cp_ij_id]
-            li = intopt.angular[cpi]
-            lj = intopt.angular[cpj]
+    buf = cp.empty((batch_size, nao_pair))
+    j3c_full = cp.zeros((nao, nao, blksize))
+    for batch_id, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
+        compressed = eval_j3c(aux_batch_id=batch_id, out=buf)
+        naux_in_batch = compressed.shape[1]
+        for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+            j3c = j3c_full[:,:,:k1-k0]
+            fill_symmetric(compressed, pair_addresses, nao, k0, k1, out=j3c)
+            int3c_slice = j3c.transpose(2, 0, 1)
+            if 'J' in calc:
+                Pia[p0+k0:p0+k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_q, in_ram=in_ram)
 
-            int3c_slice_blk = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=0)
-
-            if not mol.cart:
-                int3c_slice_blk = cart2sph(int3c_slice_blk, axis=1, ang=lj)
-                int3c_slice_blk = cart2sph(int3c_slice_blk, axis=2, ang=li)
-
-
-            if omega and omega != 0:
-                int3c_slice_blk_omega = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=omega)
-
-                if not mol.cart:
-                    int3c_slice_blk_omega = cart2sph(int3c_slice_blk_omega, axis=1, ang=lj)
-                    int3c_slice_blk_omega = cart2sph(int3c_slice_blk_omega, axis=2, ang=li)
-                int3c_slice_blk = alpha * int3c_slice_blk +  beta * int3c_slice_blk_omega
-
-            int3c_slice_blk = cp.asarray(int3c_slice_blk, dtype=int3c_dtype, order='C')
-            i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
-
-            assert int3c_slice[:,j0:j1, i0:i1].shape == int3c_slice_blk.shape
-            int3c_slice[:,j0:j1, i0:i1] = int3c_slice_blk
-
-        if aosym:
-            row, col = cp.tril_indices(nao)
-            int3c_slice[:, row, col] = int3c_slice[:, col, row]
-
-        '''Puv -> Ppq, AO->MO transform '''
-        if 'J' in calc:
-            Pia[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_q, in_ram=in_ram)
-
-        if 'K' in calc:
-            Pij[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_p, in_ram=in_ram)
-            Pab[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_q,C_q, in_ram=in_ram)
+            if 'K' in calc:
+                Pij[p0+k0:p0+k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_p, in_ram=in_ram)
+                Pab[p0+k0:p0+k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_q,C_q, in_ram=in_ram)
 
     if in_ram:
         def einsum2dot(_,a,b):
@@ -295,12 +281,11 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
 def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None):
 
-    eri2c = auxmol.intor('int2c2e')
+    eri2c = int3c2e_bdiv.int2c2e(auxmol)
 
     if omega and omega != 0:
 
-        with auxmol.with_range_coulomb(omega):
-            eri2c_erf = auxmol.intor('int2c2e')
+        eri2c_erf = int3c2e_bdiv.int2c2e(auxmol, omega=omega)
 
         eri2c = alpha * eri2c + beta * eri2c_erf
 
@@ -720,7 +705,7 @@ class TD_Scanner(lib.SinglePointScanner):
         self.lower_inv_eri2c_K = None
         self.RKS = True
         self.UKS = False
-        self.mo_coeff = cp.asarray(self._scf.mo_coeff, dtype=self.dtype)
+        self.mo_coeff = self._scf.mo_coeff
         self.build()
 
         # Reuse the previous step for initial guess.
@@ -814,7 +799,7 @@ class RisBase(lib.StreamObject):
         self.nstates = nstates
         self.max_iter = max_iter
         self.mol = mf.mol
-        self.mo_coeff = cp.asarray(mf.mo_coeff, dtype=self.dtype)
+        self.mo_coeff = mf.mo_coeff
         self.spectra = spectra
         self.out_name = out_name
         self.print_threshold = print_threshold
@@ -1169,8 +1154,8 @@ class TDA(RisBase):
         orbv1 = mo_coeff[:, mo_occ==0]
         orbo2 = mf.mo_coeff[:, mf.mo_occ==2]
         orbv2 = mf.mo_coeff[:, mf.mo_occ==0]
-        S_occ = orbo2.T.dot(S).dot(orbo1)
-        S_vir = orbv2.T.dot(S).dot(orbv1)
+        S_occ = cp.asarray(orbo2.T.dot(S).dot(orbo1), dtype=self.dtype)
+        S_vir = cp.asarray(orbv2.T.dot(S).dot(orbv1), dtype=self.dtype)
         nocc = orbo1.shape[1]
         nvir = orbv1.shape[1]
 
