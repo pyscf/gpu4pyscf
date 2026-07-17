@@ -984,14 +984,7 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     sycl::range<2> threads(1, THREADS);
     sycl::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
     auto dev_envs = *envs;
-    
-    // Print queue pointer for debugging
     sycl::queue* q = sycl_get_queue();
-    fprintf(stderr, "[libgsycl DEBUG] sycl_get_queue() ptr = %p  is_in_order = %s \n",
-            (void*)q,
-            q->is_in_order() ? "true" : "false");
-    fflush(stderr);
- 
     q->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class sum_ejk_int3c2e_ip1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
