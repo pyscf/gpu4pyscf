@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <cub/cub.cuh>
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "int3c2e_create_tasks.cuh"
@@ -38,12 +37,21 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs,
                                 int *head, int sp_blocks)
 {
     int thread_id = threadIdx.x;
-    __shared__ int sp_block_id, ksh_cell0;
     img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
     ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
+    extern __shared__ double shared_memory[];
+    __shared__ int sp_block_id, ksh_cell0;
+    __shared__ int shl_pair0, shl_pair1;
+    __shared__ int li, lj, lk, nroots;
+    __shared__ int iprim, jprim, kprim;
+    __shared__ int nao;
+    __shared__ int gout_stride, nst_per_block;
+    __shared__ int expk, ck;
+    __shared__ int num_ijk_tasks;
+    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
@@ -60,12 +68,6 @@ while (1) {
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int nao;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int expk, ck;
     if (thread_id == 0) {
         int bvk_nbas = envs.nbas * ncells;
         shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -100,7 +102,6 @@ while (1) {
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;
@@ -130,14 +131,12 @@ while (shl_pair0 < shl_pair1) {
                          shl_pair0, shl_pair0+n_pairs, ksh_cell0, ksh_cell0+1,
                          li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
-    __shared__ int num_ijk_tasks;
     if (thread_id == 0) {
         num_ijk_tasks = ncells * n_pairs;
     }
     __syncthreads();
     while (num_ijk_tasks > 0) {
     _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info, envs, img_idx);
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
     if (thread_id == 0) {
         img_tile_size = 8;
         img_not_processed = MAX_IMGS_PER_TASK;
@@ -145,7 +144,7 @@ while (shl_pair0 < shl_pair1) {
     __syncthreads();
     while (img_not_processed > 0) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
-                        rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+                        rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
         if (num_sub_tasks == 0) continue;
         for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
@@ -351,7 +350,7 @@ while (shl_pair0 < shl_pair1) {
             }
         }
     } // while (img_not_processed > 0)
-    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
     } // while (num_ijk_tasks > 0)
     if (thread_id == 0) {
         shl_pair0 += POOL_SIZE / ncells;
@@ -361,17 +360,10 @@ while (shl_pair0 < shl_pair1) {
 
     int bvk_nbas = envs.nbas * ncells;
     double *vj = out + envs.ao_loc[bvk_nbas + ksh_cell0] - envs.ao_loc[bvk_nbas];
-    typedef cub::BlockReduce<double, THREADS> BlockReduce;
-    __shared__ typename BlockReduce::TempStorage temp_storage;
 #pragma unroll
     for (int n = 0; n < NF_AUX_MAX; ++n) {
         if (n >= nfk) break;
-        // Reduce within block
-        double val = vj_xyz[n];
-        double block_sum = BlockReduce(temp_storage).Sum(val);
-        if (thread_id == 0) {
-            atomicAdd(vj + n, block_sum);
-        }
+        atomicAdd(vj + n, vj_xyz[n]);
     }
 }
 }
@@ -386,12 +378,21 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars e
                                     int *head, int npairs_ij, int ksh_blocks)
 {
     int thread_id = threadIdx.x;
-    __shared__ int pair_ij, ksh_block_id;
     img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
     ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
+    extern __shared__ double shared_memory[];
+    __shared__ int pair_ij, ksh_block_id;
+    __shared__ int ksh0_cell0, ksh1_cell0;
+    __shared__ int ish, jsh, li, lj, lk, nroots;
+    __shared__ int iprim, jprim, kprim;
+    __shared__ int gout_stride, nst_per_block;
+    __shared__ int expi, expj, ci, cj;
+    __shared__ double xi, yi, zi, xjxi, yjyi, zjzi;
+    __shared__ int num_ijk_tasks;
+    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
@@ -411,12 +412,6 @@ while (1) {
     double *img_coords = envs.img_coords;
     double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
-    __shared__ int ksh0_cell0, ksh1_cell0;
-    __shared__ int ish, jsh, li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int expi, expj, ci, cj;
-    __shared__ double xi, yi, zi, xjxi, yjyi, zjzi;
     if (thread_id == 0) {
         int bvk_nbas = envs.nbas * ncells;
         ksh0_cell0 = ksh_offsets[ksh_block_id];
@@ -464,7 +459,6 @@ while (1) {
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;
@@ -494,14 +488,12 @@ while (ksh0_cell0 < ksh1_cell0) {
                          pair_ij, pair_ij+1, ksh0_cell0, ksh0_cell0+nksh,
                          li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
-    __shared__ int num_ijk_tasks;
     if (thread_id == 0) {
         num_ijk_tasks = nksh * ncells;
     }
     __syncthreads();
     while (num_ijk_tasks > 0) {
     _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info, envs, img_idx);
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
     if (thread_id == 0) {
         img_tile_size = 8;
         img_not_processed = MAX_IMGS_PER_TASK;
@@ -509,7 +501,7 @@ while (ksh0_cell0 < ksh1_cell0) {
     __syncthreads();
     while (img_not_processed > 0) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
-                        rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+                        rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
         if (num_sub_tasks == 0) continue;
         for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
@@ -694,7 +686,7 @@ while (ksh0_cell0 < ksh1_cell0) {
             }
         }
     } // while (img_not_processed > 0)
-    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
     } // while (num_ijk_tasks > 0)
     if (thread_id == 0) {
         ksh0_cell0 += nksh;

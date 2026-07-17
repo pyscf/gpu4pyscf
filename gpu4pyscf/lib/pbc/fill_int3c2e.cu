@@ -38,24 +38,33 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *img_
                                  int ao_pair_offset, int aux_offset,
                                  int nauxbas, int naux, int to_sph,
                                  float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                                 int *head, int sp_blocks, int ksh_blocks)
+                                 int *head, int nbatches_shl_pair, int nbatches_ksh)
 {
     int thread_id = threadIdx.x;
-    __shared__ int sp_block_id, ksh_block_id;
-    c2s_pool += blockIdx.x * (THREADS*GOUT_WIDTH);
-    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    int worker_id = blockIdx.x;
+    c2s_pool += worker_id * (THREADS*GOUT_WIDTH);
+    img_pool += worker_id * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + worker_id * POOL_SIZE;
+    extern __shared__ double shared_memory[];
+    __shared__ int ksh0_cell0, ksh1_cell0;
+    __shared__ int shl_pair0, shl_pair1;
+    __shared__ int li, lj, lk, nroots, nf;
+    __shared__ int iprim, jprim, kprim;
+    __shared__ int g_size, gout_stride, nst_per_block;
+    __shared__ int num_ijk_tasks;
+    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
+    __shared__ int sp_block_id, ksh_block_id;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
-        sp_block_id = batch_id / ksh_blocks;
-        ksh_block_id = batch_id % ksh_blocks;
+        sp_block_id = nbatches_shl_pair - 1 - batch_id / nbatches_ksh;
+        ksh_block_id = nbatches_ksh - 1 - batch_id % nbatches_ksh;
     }
     __syncthreads();
-    if (sp_block_id >= sp_blocks) {
+    if (sp_block_id < 0) {
         return;
     }
 
@@ -64,11 +73,6 @@ while (1) {
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    __shared__ int ksh0_cell0, ksh1_cell0;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size, gout_stride, nst_per_block;
     if (thread_id == 0) {
         int bvk_nbas = envs.nbas * ncells;
         shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -103,7 +107,6 @@ while (1) {
     int nfi = c_nf[li];
     int nfj = c_nf[lj];
     int nfk = c_nf[lk];
-    extern __shared__ double shared_memory[];
     int *idx_i = (int*)shared_memory + shm_size/4 - (nfi+nfj+nfk)*3;
     int *idx_j = idx_i + nfi * 3;
     int *idx_k = idx_j + nfj * 3;
@@ -121,7 +124,6 @@ while (1) {
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nst_per_block;
     }
 
-    __shared__ int num_ijk_tasks;
     if (thread_id == 0) {
         int nshl_pairs = shl_pair1 - shl_pair0;
         int nksh = ksh1_cell0 - ksh0_cell0;
@@ -135,7 +137,6 @@ while (1) {
     while (num_ijk_tasks > 0) {
     _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
                       envs, img_idx);
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
     if (thread_id == 0) {
         img_tile_size = 8;
         img_not_processed = MAX_IMGS_PER_TASK;
@@ -143,13 +144,13 @@ while (1) {
     __syncthreads();
     while (img_not_processed > 0) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
-                        rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+                        rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
         if (num_sub_tasks == 0) continue;
         if (!int3c2e_unrolled(out, envs, img_pool, sub_task_idx, num_sub_tasks,
                               img_tile_size, ijk_tasks_info, c2s_pool,
                               shm_size, iprim, jprim, kprim, li, lj, lk,
                               bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset,
-                              nauxbas, naux, to_sph)) {
+                              nauxbas, naux, to_sph, thread_id, worker_id, shared_memory)) {
             int gout_id = thread_id / nst_per_block;
             int st_id = thread_id - gout_id * nst_per_block;
             double *rjri = shared_memory + st_id;
@@ -1041,7 +1042,8 @@ while (1) {
             }
         }
     } // while (img_not_processed > 0)
-    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info,
+                      (int *)shared_memory);
     } // while (num_ijk_tasks > 0)
 }
 }

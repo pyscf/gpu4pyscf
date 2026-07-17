@@ -28,14 +28,13 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem)
+    contract, asarray, ndarray, transpose_sum, get_avail_mem, fill_symmetric)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, libvhf_rys, int2c2e_ip1,
     _check_rsh_factors)
 from gpu4pyscf.df import df
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import uhf as uhf_hess
-from gpu4pyscf.df.hessian import jk
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.df.hessian.rhf import (
     int3c2e_scheme_ip2, int3c2e_scheme_ip1, int3c2e_scheme_ipaux,
@@ -102,7 +101,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
             aux0, aux1 = aux1, aux1 + dk
             j3c = j3c_full[:,:,:dk]
             #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
-            df._fill_symmetric(j3c, pair_addresses, compressed, k0, k1)
+            fill_symmetric(compressed, pair_addresses, nao, k0, k1, out=j3c)
             tmp = ndarray((nocc, nao, dk), buffer=buf1)
             contract('pqr,pi->iqr', j3c, dm_factor_r[0], out=tmp)
             contract('iqr,qj->rij', tmp, dm_factor_l[0], out=j3c_oo[aux0:aux1,0])
@@ -220,7 +219,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
             tmp = ndarray((nocc, nao, dk), buffer=buf1)
             for i in range(3):
                 #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[i,:,k0:k1]
-                df._fill_symmetric(j3c, pair_addresses, compressed[i], k0, k1)
+                fill_symmetric(compressed[i], pair_addresses, nao, k0, k1, out=j3c)
                 contract('pqr,pi->iqr', j3c, dm_factor_r[0], out=tmp)
                 contract('iqr,qj->rij', tmp, dm_factor_l[0], alpha=-1,
                          out=j3c_oo1[i,aux0:aux1,0])
@@ -509,7 +508,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
             aux0, aux1 = aux1, aux1 + dk
             j3c = j3c_full[:,:,:dk]
             #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
-            df._fill_symmetric(j3c, pair_addresses, compressed, k0, k1)
+            fill_symmetric(compressed, pair_addresses, nao, k0, k1, out=j3c)
             contract('pqr,npi->rniq', j3c, orbo, out=j3c_00[aux0:aux1])
     j3c_full = j3c = buf = eval_j3c = j3c = compressed = None
     t0 = log.timer_debug1('contract dm', *t0)
@@ -669,7 +668,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
             j3c = j3c_full[:,:,:dk]
             for i in range(3):
                 #:j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed_dk[i,:,k0:k1]
-                df._fill_symmetric(j3c, pair_addresses, compressed_dk[i], k0, k1)
+                fill_symmetric(compressed_dk[i], pair_addresses, nao, k0, k1, out=j3c)
                 # Note d/dX = -d/dr, apply alpha=-1
                 contract('pqr,npi->rniq', j3c, orbo, alpha=-1, out=j3c_aux_tmp[i,k0:k1])
 

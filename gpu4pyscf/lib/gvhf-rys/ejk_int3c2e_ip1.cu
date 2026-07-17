@@ -22,12 +22,13 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "unrolled_ejk_int3c2e_ip1.cu"
 
 #define THREADS         256
 #define BLOCK_SIZE      16
 #define DM_BLOCK        7
 #define GOUT_WIDTH      54
+
+#include "unrolled_ejk_int3c2e_ip1.cu"
 
 __global__ static
 void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
@@ -40,10 +41,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     int thread_id = threadIdx.x;
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
-    int nbas = envs.nbas;
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1, nksh;
     __shared__ int li, lj, lij, lk, nroots, nf;
@@ -51,6 +49,11 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     __shared__ int g_size;
     __shared__ int nao;
     __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
+
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -90,7 +93,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         int3c2e_ip1_unrolled(ejk, ejk_aux, dm, density_auxvec, envs,
             shl_pair0, shl_pair1, ksh0, ksh1,
             iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx, ao_pair_loc,
-            aux_offset, naux, nao)) {
+            aux_offset, naux, nao, thread_id, shared_memory)) {
         return;
     }
     register int gout_id = thread_id / nst_per_block;
@@ -99,7 +102,6 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     register int aux_id = st_id - sp_id * aux_per_block;
 
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory;
     double *Rpq = shared_memory + nsp_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;
@@ -468,9 +470,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     int thread_id = threadIdx.x;
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
-    int nbas = envs.nbas;
-    int *bas = envs.bas;
-    double *env = envs.env;
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1, nksh;
     __shared__ int li, lj, lij, lk, nroots, nf;
@@ -478,6 +478,10 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     __shared__ int g_size;
     __shared__ int nao;
     __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
+
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -520,7 +524,6 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     register int aux_id = st_id - sp_id * aux_per_block;
 
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory;
     double *Rpq = shared_memory + nsp_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;

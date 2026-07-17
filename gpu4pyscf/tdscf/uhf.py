@@ -26,11 +26,12 @@ from gpu4pyscf.tdscf._lr_eig import _eigs_cmplx2real, davidson_nosym1
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, asarray
+from gpu4pyscf.lib.cupy_helper import contract, asarray
 from gpu4pyscf.tdscf._uhf_resp_sf import gen_uhf_response_sf, cache_xc_kernel_sf
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.tdscf import rhf as tdhf_gpu
 from gpu4pyscf.dft import KohnShamDFT
+from gpu4pyscf.df.df_jk import _make_factorized_dm, _stack_uhf_occ_oribtals
 from pyscf import __config__
 
 __all__ = [
@@ -719,6 +720,8 @@ def gen_tda_operation(td, mf, fock_ao=None, wfnsym=None):
     nocca, nvira = e_ia_a.shape
     noccb, nvirb = e_ia_b.shape
 
+    orbo = _stack_uhf_occ_oribtals(orboa, orbob)
+
     vresp = td.gen_response(hermi=0)
 
     def vind(zs):
@@ -726,12 +729,11 @@ def gen_tda_operation(td, mf, fock_ao=None, wfnsym=None):
         zs = cp.asarray(zs)
         za = zs[:,:nocca*nvira].reshape(nz,nocca,nvira)
         zb = zs[:,nocca*nvira:].reshape(nz,noccb,nvirb)
-        mo1a = contract('xov,pv->xpo', za, orbva)
-        dmsa = contract('xpo,qo->xpq', mo1a, orboa.conj())
-        mo1b = contract('xov,pv->xpo', zb, orbvb)
-        dmsb = contract('xpo,qo->xpq', mo1b, orbob.conj())
-        dms = cp.asarray((dmsa, dmsb))
-        dms = tag_array(dms, mo1=[mo1a,mo1b], occ_coeff=[orboa,orbob])
+        #:dms = contract('sxpo,sqo->sxpq', mo1, orbo.conj())
+        mo1 = _stack_uhf_occ_oribtals(
+            contract('xov,pv->xpo', za, orbva),
+            contract('xov,pv->xpo', zb, orbvb))
+        dms = _make_factorized_dm(mo1, orbo.conj(), symmetrize=0)
         v1ao = vresp(dms)
         v1a = contract('xpq,qo->xpo', v1ao[0], orboa)
         v1a = contract('xpo,pv->xov', v1a, orbva.conj())
@@ -989,8 +991,7 @@ class SpinFlipTDA(TDBase):
         def vind(zs):
             zs = cp.asarray(zs).reshape(-1, *e_ia.shape)
             mo1 = contract('xov,pv->xpo', zs, orbv)
-            dms = contract('xpo,qo->xpq', mo1, orbo.conj())
-            dms = tag_array(dms, mo1=mo1, occ_coeff=0.5 * orbo)
+            dms = _make_factorized_dm(mo1, orbo.conj(), symmetrize=0)
             v1ao = vresp(dms)
             v1mo = contract('xpq,qo->xpo', v1ao, orbo)
             v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())

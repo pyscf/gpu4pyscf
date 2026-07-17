@@ -44,7 +44,19 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
+    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
+    __shared__ int i0, j0, nao;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[2];
+    __shared__ int expi;
+    __shared__ int expj;
+
+    int t_id = gout_id * nsq_per_block + sq_id;
+    int threads = nsq_per_block * gout_stride;
     uint32_t nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -56,8 +68,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int stride_k = bounds.stride_k;
     int stride_l = bounds.stride_l;
     int g_size = bounds.g_size;
-
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
@@ -87,12 +97,8 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     if (t_id < ntiles_l * 9) {
         idx_l[t_id] = lex_xyz_address(ll, t_id) * stride_l * nsq_per_block;
     }
-
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
-    __shared__ int ish, jsh;
     if (t_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
@@ -108,22 +114,18 @@ while (1) {
     }
     if (kmat.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                       q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
+                       q_cond_ij, q_cond_kl, dm_penalty,
+                       (int *)shared_memory, envs, bounds);
     } else {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           q_cond_ij, q_cond_kl, dm_penalty,
-                          s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
+                          s_cond_ij, s_cond_kl, diffuse_exps,
+                          (int *)shared_memory, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
     }
 
-    __shared__ int i0, j0, nao;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -146,7 +148,6 @@ while (1) {
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    int threads = nsq_per_block * gout_stride;
     for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;

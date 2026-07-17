@@ -170,8 +170,8 @@ class SpinFreeX2CHelper(x2c.X2CHelperBase):
         s = int1e.int1e_ovlp(xmol, sort_output=sort_ao)
         #:v = xmol.intor_symmetric('int1e_nuc')
         nucmol = gto.mole.fakemol_for_charges(xmol.atom_coords())
-        v = contract_int3c2e_auxvec(xmol, nucmol, -xmol.atom_charges(),
-                                    sort_output=sort_ao)
+        Z = cp.asarray(xmol.atom_charges(), dtype=np.float64)
+        v = contract_int3c2e_auxvec(xmol, nucmol, -Z, sort_output=sort_ao)
         with lib.temporary_env(xmol, cart=mol.cart):
             w = asarray(xmol.intor_symmetric('int1e_pnucp'))
         if not mol.cart:
@@ -214,8 +214,8 @@ class SpinFreeX2CHelper(x2c.X2CHelperBase):
             s = int1e.int1e_ovlp(xmol, sort_output=sort_ao)
             #:v = xmol.intor_symmetric('int1e_nuc')
             nucmol = gto.mole.fakemol_for_charges(xmol.atom_coords())
-            v = contract_int3c2e_auxvec(xmol, nucmol, -xmol.atom_charges(),
-                                        sort_output=sort_ao)
+            Z = cp.asarray(xmol.atom_charges(), dtype=np.float64)
+            v = contract_int3c2e_auxvec(xmol, nucmol, -Z, sort_output=sort_ao)
             with lib.temporary_env(xmol, cart=xmol.mol.cart):
                 w = asarray(xmol.intor_symmetric('int1e_pnucp'))
             if not xmol.mol.cart:

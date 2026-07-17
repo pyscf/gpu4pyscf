@@ -34,7 +34,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess_gpu
 from gpu4pyscf.hessian.rhf import _ao2mo
-from gpu4pyscf.df.df_jk import _make_factorized_dm
+from gpu4pyscf.df.df_jk import _stack_uhf_occ_oribtals
 
 GB = 1024*1024*1024
 ALIGNED = 4
@@ -387,20 +387,15 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     assert nmoa == nmob
     assert nocca >= noccb
     nmo = nmoa
-    nocc = nocca
-    orbo = cp.zeros((2, nao, nocc))
-    orbo[0,:,:nocca] = orboa
-    orbo[1,:,:noccb] = orbob
+    orbo = _stack_uhf_occ_oribtals(orboa, orbob)
 
     def fx(mo1):
-        mo1 = cupy.asarray(mo1)
-        mo1 = mo1.reshape(-1,nmoa*nocca+nmob*noccb)
+        mo1 = cupy.asarray(mo1).reshape(-1,nmoa*nocca+nmob*noccb)
         nset = len(mo1)
-        mo1_aligned = cp.empty((nset, 2, nmo, nocc))
-        mo1_aligned[:,0] = mo1[:,:nmoa*nocca].reshape(nset, nmo, nocca)
-        mo1_aligned[:,1,:,:noccb] = mo1[:,nmoa*nocca:].reshape(nset, nmo, noccb)
-        mo1_aligned[:,1,:,noccb:] = 0.
-        mo1_mo = contract('nsai,spa->snpi', mo1_aligned, mo_coeff)
+        mo1_aligned = _stack_uhf_occ_oribtals(
+            mo1[:,:nmoa*nocca].reshape(nset, nmo, nocca),
+            mo1[:,nmoa*nocca:].reshape(nset, nmo, noccb))
+        mo1_mo = contract('snai,spa->snpi', mo1_aligned, mo_coeff)
         dm1 = contract('snpi,sqi->snpq', mo1_mo, orbo)
         transpose_sum(dm1.reshape(-1,nao,nao), inplace=True, hermi=1)
         dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=orbo, symmetrize=1)
