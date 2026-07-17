@@ -59,38 +59,35 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dm0_sf = dm0[0] + dm0[1]
     dme0_sf = dme0[0] + dme0[1]
 
-    # (\nabla i | hcore | j) - (\nabla i | j)
-    h1 = cupy.asarray(mf_grad.get_hcore(mol, exclude_ecp=True))
-    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
+    # dh = (\nabla i | hcore | j) + (i | \nabla Vnuc | j)
+    dh = rhf_grad._hcore_grad_without_ecp(mol, dm0_sf)
 
-    # (i | \nabla hcore | j)
-    dh1e = int3c2e.get_dh1e(mol, dm0_sf)
+    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
+    ds = rhf_grad.contract_h1e_dm(mol, s1, dme0_sf, hermi=1)
 
     # Calculate ECP contributions in (i | \nabla hcore | j) and
     # (\nabla i | hcore | j) simultaneously
     if len(mol._ecpbas) > 0:
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
-        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
-        h1 -= h1_ecp.sum(axis=0)
+        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms).sum(axis=0)
+        dh -= rhf_grad.contract_h1e_dm(mol, h1_ecp, dm0_sf, hermi=1)
 
-        dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0_sf)
+        dh[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0_sf)
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     t1 = log.timer_debug1('gradients of h1e', *t1)
+
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
     e2_grad = mf_grad.energy_ee(mol, dm0)
+    log.timer_debug1('gradients of 2e part', *t1)
 
     extra_force = np.zeros((len(atmlst),3))
     for k, ia in enumerate(atmlst):
         extra_force[k] += ensure_numpy(mf_grad.extra_force(ia, locals()))
-    log.timer_debug1('gradients of 2e part', *t1)
 
-    dh = rhf_grad.contract_h1e_dm(mol, h1, dm0_sf, hermi=1)
-    ds = rhf_grad.contract_h1e_dm(mol, s1, dme0_sf, hermi=1)
     de = dh - ds + e2_grad
-    de += ensure_numpy(dh1e)
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
     return de

@@ -24,7 +24,7 @@ from gpu4pyscf.grad.dispersion import get_dispersion
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
-    tag_array, contract, condense, transpose_sum, ensure_numpy, get_avail_mem)
+    tag_array, contract, condense, transpose_sum, get_avail_mem)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.df import int3c2e_bdiv
@@ -35,7 +35,7 @@ from gpu4pyscf.scf.jk import (
     _nearest_power2, _TimingCollector)
 from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedMole
 from gpu4pyscf.df.int3c2e_bdiv import (
-    Int3c2eOpt, _int3c2e_ip1_evaluator, int3c2e_scheme_ip1)
+    Int3c2eOpt, _int3c2e_ip1_evaluator, int3c2e_scheme, int3c2e_scheme_ip1)
 
 __all__ = [
     'SCF_GradScanner',
@@ -244,6 +244,59 @@ def int1e_ipnuc(mol):
     out = sorted_mol.apply_CT_mat_C(out.reshape(3, nao, nao))
     return out
 
+def _hcore_grad_without_ecp(mol, dm0):
+    from gpu4pyscf.pbc.gto.int1e import int1e_ipkin
+    coords = mol.atom_coords()
+    charges = cp.asarray(-mol.atom_charges(), dtype=np.float64)
+    fakemol = gto.fakemol_for_charges(coords)
+
+    sorted_mol = SortedMole.from_mol(mol, decontract=True)
+    int3c2e_opt = Int3c2eOpt(sorted_mol, fakemol).build()
+    dm = sorted_mol.apply_C_mat_CT(dm0)
+
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+        short_range=False, gout_width=54, deriv=(1,0,0))
+    lmax = sorted_mol.uniq_l_ctr[:,0].max()
+    shm_size_max = shm_size[0,:lmax+1,:lmax+1].max()
+    bas_ij_idx, shl_pair_offsets = sorted_mol.aggregate_shl_pairs(
+        int3c2e_opt.bas_ij_cache, nsp_per_block[0]*16)
+    auxmol = int3c2e_opt.auxmol
+    ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+    ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+sorted_mol.nbas, dtype=np.int32)
+
+    int3c2e_envs = int3c2e_opt.int3c2e_envs
+    kern = libvhf_rys.sum_ejk_int3c2e_ip1
+    de = cp.zeros((mol.natm, 3))
+    # de_aux * 2 is identical to the results of int3c2e.get_dh1e
+    de_aux = cp.zeros((mol.natm, 3))
+    err = kern(
+        ctypes.cast(de.data.ptr, ctypes.c_void_p),
+        ctypes.cast(de_aux.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charges.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(1),
+        ctypes.byref(int3c2e_envs),
+        ctypes.c_int(shm_size_max),
+        ctypes.c_int(len(shl_pair_offsets) - 1),
+        ctypes.c_int(len(ksh_offsets_gpu) - 1),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+        lib.c_null_ptr(),
+        ctypes.c_int(0),
+        ctypes.c_int(0), ctypes.c_int(0),
+        ctypes.c_int(mol.natm), ctypes.c_int(mol.natm))
+    if err != 0:
+        raise RuntimeError('int3c2e_ejk_ip1 failed')
+    de += de_aux
+    de *= 2
+    de = de.get()
+
+    t = int1e_ipkin(sorted_mol)
+    de -= contract_h1e_dm(mol, t, dm0, hermi=1)
+    return de
+
 def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
     Electronic part of RHF/RKS gradients
@@ -267,43 +320,36 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
-    # (\nabla i | hcore | j) - (\nabla i | j)
-    h1 = cupy.asarray(mf_grad.get_hcore(mol, exclude_ecp=True))
-    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
+    # dh = (\nabla i | hcore | j) + (i | \nabla Vnuc | j)
+    dh = _hcore_grad_without_ecp(mol, dm0)
 
-    # (i | \nabla hcore | j)
-    dh1e = int3c2e.get_dh1e(mol, dm0)
+    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
+    ds = contract_h1e_dm(mol, s1, dme0, hermi=1)
 
     # Calculate ECP contributions in (i | \nabla hcore | j) and
     # (\nabla i | hcore | j) simultaneously
     if len(mol._ecpbas) > 0:
         # TODO: slice ecp_atoms
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
-        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
-        h1 -= h1_ecp.sum(axis=0)
+        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms).sum(axis=0)
+        dh -= contract_h1e_dm(mol, h1_ecp, dm0, hermi=1)
 
-        dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0)
+        dh[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0)
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
-    e2_grad = mf_grad.energy_ee(mol, dm0)
-    log.timer_debug1('gradients of veff', *t3)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
-
-    dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-    extra_force = np.zeros((len(atmlst),3))
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += ensure_numpy(mf_grad.extra_force(ia, locals()))
-
+    e2_grad = mf_grad.energy_ee(mol, dm0)
     log.timer_debug1('gradients of 2e part', *t3)
 
-    dh = contract_h1e_dm(mol, h1, dm0, hermi=1)
-    ds = contract_h1e_dm(mol, s1, dme0, hermi=1)
+    extra_force = np.zeros((len(atmlst),3))
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += cp.asnumpy(mf_grad.extra_force(ia, locals()))
+
     de = dh - ds + e2_grad
-    de += ensure_numpy(dh1e)
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
     return de
@@ -458,7 +504,7 @@ class GradientsBase(lib.StreamObject):
 
     def get_ovlp(self, mol):
         from gpu4pyscf.pbc.gto.int1e import int1e_ipovlp
-        return int1e_ipovlp(mol)
+        return -int1e_ipovlp(mol)
 
     def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         log = logger.new_logger(self)
