@@ -357,6 +357,150 @@ void _dot_Et(double *out, double *Rt, double ai)
     }
 }
 
+template <int L> __device__ inline
+void _dot_aux(double& out, double *Rt, double *auxvec,
+              uint16_t *p1_ij, int nf3ij, int i, int nsp_per_block)
+{
+    if constexpr (L == 0) {
+        out += Rt[p1_ij[0*nf3ij+i]*nsp_per_block] * auxvec[0];
+    } else if constexpr (L == 1) {
+        out += Rt[p1_ij[1*nf3ij+i]*nsp_per_block] * auxvec[1];
+        out += Rt[p1_ij[2*nf3ij+i]*nsp_per_block] * auxvec[2];
+        out += Rt[p1_ij[3*nf3ij+i]*nsp_per_block] * auxvec[3];
+    } else if constexpr (L == 2) {
+        out += Rt[p1_ij[0*nf3ij+i]*nsp_per_block] * auxvec[0];
+        out += Rt[p1_ij[2*nf3ij+i]*nsp_per_block] * auxvec[2];
+        out += Rt[p1_ij[4*nf3ij+i]*nsp_per_block] * auxvec[4];
+        out += Rt[p1_ij[5*nf3ij+i]*nsp_per_block] * auxvec[5];
+        out += Rt[p1_ij[7*nf3ij+i]*nsp_per_block] * auxvec[7];
+        out += Rt[p1_ij[8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[9*nf3ij+i]*nsp_per_block] * auxvec[9];
+    } else if constexpr (L == 3) {
+        out += Rt[p1_ij[ 1*nf3ij+i]*nsp_per_block] * auxvec[1];
+        out += Rt[p1_ij[ 3*nf3ij+i]*nsp_per_block] * auxvec[3];
+        out += Rt[p1_ij[ 4*nf3ij+i]*nsp_per_block] * auxvec[4];
+        out += Rt[p1_ij[ 6*nf3ij+i]*nsp_per_block] * auxvec[6];
+        out += Rt[p1_ij[ 8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[ 9*nf3ij+i]*nsp_per_block] * auxvec[9];
+        out += Rt[p1_ij[10*nf3ij+i]*nsp_per_block] * auxvec[10];
+        out += Rt[p1_ij[12*nf3ij+i]*nsp_per_block] * auxvec[12];
+        out += Rt[p1_ij[14*nf3ij+i]*nsp_per_block] * auxvec[14];
+        out += Rt[p1_ij[15*nf3ij+i]*nsp_per_block] * auxvec[15];
+        out += Rt[p1_ij[17*nf3ij+i]*nsp_per_block] * auxvec[17];
+        out += Rt[p1_ij[18*nf3ij+i]*nsp_per_block] * auxvec[18];
+        out += Rt[p1_ij[19*nf3ij+i]*nsp_per_block] * auxvec[19];
+    } else if constexpr (L == 4) {
+        out += Rt[p1_ij[ 0*nf3ij+i]*nsp_per_block] * auxvec[0];
+        out += Rt[p1_ij[ 2*nf3ij+i]*nsp_per_block] * auxvec[2];
+        out += Rt[p1_ij[ 4*nf3ij+i]*nsp_per_block] * auxvec[4];
+        out += Rt[p1_ij[ 6*nf3ij+i]*nsp_per_block] * auxvec[6];
+        out += Rt[p1_ij[ 8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[ 9*nf3ij+i]*nsp_per_block] * auxvec[9];
+        out += Rt[p1_ij[11*nf3ij+i]*nsp_per_block] * auxvec[11];
+        out += Rt[p1_ij[13*nf3ij+i]*nsp_per_block] * auxvec[13];
+        out += Rt[p1_ij[14*nf3ij+i]*nsp_per_block] * auxvec[14];
+        out += Rt[p1_ij[16*nf3ij+i]*nsp_per_block] * auxvec[16];
+        out += Rt[p1_ij[18*nf3ij+i]*nsp_per_block] * auxvec[18];
+        out += Rt[p1_ij[19*nf3ij+i]*nsp_per_block] * auxvec[19];
+        out += Rt[p1_ij[21*nf3ij+i]*nsp_per_block] * auxvec[21];
+        out += Rt[p1_ij[23*nf3ij+i]*nsp_per_block] * auxvec[23];
+        out += Rt[p1_ij[24*nf3ij+i]*nsp_per_block] * auxvec[24];
+        out += Rt[p1_ij[25*nf3ij+i]*nsp_per_block] * auxvec[25];
+        out += Rt[p1_ij[27*nf3ij+i]*nsp_per_block] * auxvec[27];
+        out += Rt[p1_ij[29*nf3ij+i]*nsp_per_block] * auxvec[29];
+        out += Rt[p1_ij[30*nf3ij+i]*nsp_per_block] * auxvec[30];
+        out += Rt[p1_ij[32*nf3ij+i]*nsp_per_block] * auxvec[32];
+        out += Rt[p1_ij[33*nf3ij+i]*nsp_per_block] * auxvec[33];
+        out += Rt[p1_ij[34*nf3ij+i]*nsp_per_block] * auxvec[34];
+    } else if constexpr (L == 5) {
+        out += Rt[p1_ij[ 1*nf3ij+i]*nsp_per_block] * auxvec[1];
+        out += Rt[p1_ij[ 3*nf3ij+i]*nsp_per_block] * auxvec[3];
+        out += Rt[p1_ij[ 5*nf3ij+i]*nsp_per_block] * auxvec[5];
+        out += Rt[p1_ij[ 6*nf3ij+i]*nsp_per_block] * auxvec[6];
+        out += Rt[p1_ij[ 8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[10*nf3ij+i]*nsp_per_block] * auxvec[10];
+        out += Rt[p1_ij[12*nf3ij+i]*nsp_per_block] * auxvec[12];
+        out += Rt[p1_ij[14*nf3ij+i]*nsp_per_block] * auxvec[14];
+        out += Rt[p1_ij[15*nf3ij+i]*nsp_per_block] * auxvec[15];
+        out += Rt[p1_ij[17*nf3ij+i]*nsp_per_block] * auxvec[17];
+        out += Rt[p1_ij[19*nf3ij+i]*nsp_per_block] * auxvec[19];
+        out += Rt[p1_ij[20*nf3ij+i]*nsp_per_block] * auxvec[20];
+        out += Rt[p1_ij[21*nf3ij+i]*nsp_per_block] * auxvec[21];
+        out += Rt[p1_ij[23*nf3ij+i]*nsp_per_block] * auxvec[23];
+        out += Rt[p1_ij[25*nf3ij+i]*nsp_per_block] * auxvec[25];
+        out += Rt[p1_ij[27*nf3ij+i]*nsp_per_block] * auxvec[27];
+        out += Rt[p1_ij[29*nf3ij+i]*nsp_per_block] * auxvec[29];
+        out += Rt[p1_ij[30*nf3ij+i]*nsp_per_block] * auxvec[30];
+        out += Rt[p1_ij[32*nf3ij+i]*nsp_per_block] * auxvec[32];
+        out += Rt[p1_ij[34*nf3ij+i]*nsp_per_block] * auxvec[34];
+        out += Rt[p1_ij[35*nf3ij+i]*nsp_per_block] * auxvec[35];
+        out += Rt[p1_ij[37*nf3ij+i]*nsp_per_block] * auxvec[37];
+        out += Rt[p1_ij[39*nf3ij+i]*nsp_per_block] * auxvec[39];
+        out += Rt[p1_ij[40*nf3ij+i]*nsp_per_block] * auxvec[40];
+        out += Rt[p1_ij[42*nf3ij+i]*nsp_per_block] * auxvec[42];
+        out += Rt[p1_ij[44*nf3ij+i]*nsp_per_block] * auxvec[44];
+        out += Rt[p1_ij[45*nf3ij+i]*nsp_per_block] * auxvec[45];
+        out += Rt[p1_ij[46*nf3ij+i]*nsp_per_block] * auxvec[46];
+        out += Rt[p1_ij[48*nf3ij+i]*nsp_per_block] * auxvec[48];
+        out += Rt[p1_ij[50*nf3ij+i]*nsp_per_block] * auxvec[50];
+        out += Rt[p1_ij[51*nf3ij+i]*nsp_per_block] * auxvec[51];
+        out += Rt[p1_ij[53*nf3ij+i]*nsp_per_block] * auxvec[53];
+        out += Rt[p1_ij[54*nf3ij+i]*nsp_per_block] * auxvec[54];
+        out += Rt[p1_ij[55*nf3ij+i]*nsp_per_block] * auxvec[55];
+    } else if constexpr (L == 6) {
+        out += Rt[p1_ij[ 0*nf3ij+i]*nsp_per_block] * auxvec[0];
+        out += Rt[p1_ij[ 2*nf3ij+i]*nsp_per_block] * auxvec[2];
+        out += Rt[p1_ij[ 4*nf3ij+i]*nsp_per_block] * auxvec[4];
+        out += Rt[p1_ij[ 6*nf3ij+i]*nsp_per_block] * auxvec[6];
+        out += Rt[p1_ij[ 8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[10*nf3ij+i]*nsp_per_block] * auxvec[10];
+        out += Rt[p1_ij[12*nf3ij+i]*nsp_per_block] * auxvec[12];
+        out += Rt[p1_ij[13*nf3ij+i]*nsp_per_block] * auxvec[13];
+        out += Rt[p1_ij[15*nf3ij+i]*nsp_per_block] * auxvec[15];
+        out += Rt[p1_ij[17*nf3ij+i]*nsp_per_block] * auxvec[17];
+        out += Rt[p1_ij[19*nf3ij+i]*nsp_per_block] * auxvec[19];
+        out += Rt[p1_ij[21*nf3ij+i]*nsp_per_block] * auxvec[21];
+        out += Rt[p1_ij[22*nf3ij+i]*nsp_per_block] * auxvec[22];
+        out += Rt[p1_ij[24*nf3ij+i]*nsp_per_block] * auxvec[24];
+        out += Rt[p1_ij[26*nf3ij+i]*nsp_per_block] * auxvec[26];
+        out += Rt[p1_ij[27*nf3ij+i]*nsp_per_block] * auxvec[27];
+        out += Rt[p1_ij[29*nf3ij+i]*nsp_per_block] * auxvec[29];
+        out += Rt[p1_ij[31*nf3ij+i]*nsp_per_block] * auxvec[31];
+        out += Rt[p1_ij[33*nf3ij+i]*nsp_per_block] * auxvec[33];
+        out += Rt[p1_ij[34*nf3ij+i]*nsp_per_block] * auxvec[34];
+        out += Rt[p1_ij[36*nf3ij+i]*nsp_per_block] * auxvec[36];
+        out += Rt[p1_ij[38*nf3ij+i]*nsp_per_block] * auxvec[38];
+        out += Rt[p1_ij[40*nf3ij+i]*nsp_per_block] * auxvec[40];
+        out += Rt[p1_ij[42*nf3ij+i]*nsp_per_block] * auxvec[42];
+        out += Rt[p1_ij[43*nf3ij+i]*nsp_per_block] * auxvec[43];
+        out += Rt[p1_ij[45*nf3ij+i]*nsp_per_block] * auxvec[45];
+        out += Rt[p1_ij[47*nf3ij+i]*nsp_per_block] * auxvec[47];
+        out += Rt[p1_ij[48*nf3ij+i]*nsp_per_block] * auxvec[48];
+        out += Rt[p1_ij[49*nf3ij+i]*nsp_per_block] * auxvec[49];
+        out += Rt[p1_ij[51*nf3ij+i]*nsp_per_block] * auxvec[51];
+        out += Rt[p1_ij[53*nf3ij+i]*nsp_per_block] * auxvec[53];
+        out += Rt[p1_ij[55*nf3ij+i]*nsp_per_block] * auxvec[55];
+        out += Rt[p1_ij[57*nf3ij+i]*nsp_per_block] * auxvec[57];
+        out += Rt[p1_ij[58*nf3ij+i]*nsp_per_block] * auxvec[58];
+        out += Rt[p1_ij[60*nf3ij+i]*nsp_per_block] * auxvec[60];
+        out += Rt[p1_ij[62*nf3ij+i]*nsp_per_block] * auxvec[62];
+        out += Rt[p1_ij[63*nf3ij+i]*nsp_per_block] * auxvec[63];
+        out += Rt[p1_ij[65*nf3ij+i]*nsp_per_block] * auxvec[65];
+        out += Rt[p1_ij[67*nf3ij+i]*nsp_per_block] * auxvec[67];
+        out += Rt[p1_ij[68*nf3ij+i]*nsp_per_block] * auxvec[68];
+        out += Rt[p1_ij[70*nf3ij+i]*nsp_per_block] * auxvec[70];
+        out += Rt[p1_ij[72*nf3ij+i]*nsp_per_block] * auxvec[72];
+        out += Rt[p1_ij[73*nf3ij+i]*nsp_per_block] * auxvec[73];
+        out += Rt[p1_ij[74*nf3ij+i]*nsp_per_block] * auxvec[74];
+        out += Rt[p1_ij[76*nf3ij+i]*nsp_per_block] * auxvec[76];
+        out += Rt[p1_ij[78*nf3ij+i]*nsp_per_block] * auxvec[78];
+        out += Rt[p1_ij[79*nf3ij+i]*nsp_per_block] * auxvec[79];
+        out += Rt[p1_ij[81*nf3ij+i]*nsp_per_block] * auxvec[81];
+        out += Rt[p1_ij[82*nf3ij+i]*nsp_per_block] * auxvec[82];
+        out += Rt[p1_ij[83*nf3ij+i]*nsp_per_block] * auxvec[83];
+    }
+}
+
 template <int LK> __device__ inline
 void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
                                int *shl_pair_offsets, uint32_t *bas_ij_idx,
@@ -570,8 +714,9 @@ void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
     }
 }
 
-__global__ static
-void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
+//__global__ static
+template <int LK> __device__ inline
+void unroll_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
                             int *shl_pair_offsets, int *ksh_offsets,
                             uint32_t *bas_ij_idx, int *pair_ij_loc,
                             int *aux_loc, int *nsp_lookup)
@@ -595,11 +740,12 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
     int jsh0 = bas_ij0 % envs.nbas;
     int li = bas[ANG_OF + ish0*BAS_SLOTS];
     int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
-    int lk = bas[ksh0*BAS_SLOTS+ANG_OF];
+    //int lk = bas[ksh0*BAS_SLOTS+ANG_OF];
+    constexpr int lk = LK;
     int lij = li + lj;
     int order = lij + lk;
-    int nfk = (lk + 1) * (lk + 2) / 2;
-    int nf3k = nfk * (lk + 3) / 3;
+    constexpr int nfk = (lk + 1) * (lk + 2) / 2;
+    constexpr int nf3k = nfk * (lk + 3) / 3;
     int nf3ij = (lij+1)*(lij+2)*(lij+3) / 6;
     int nf3ijk = (order+1)*(order+2)*(order+3) / 6;
     __shared__ int nsp_per_block, Rt_stride;
@@ -612,11 +758,11 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
     int Rt_id = thread_id / nsp_per_block;
     extern __shared__ double shared_memory[];
     double *gamma_inc = shared_memory + sp_id;
-    double *Rt_buf = shared_memory + (order+1) * nsp_per_block;
+    double *auxvec_cache = shared_memory + (order+1) * nsp_per_block;
+    double *Rt_buf = auxvec_cache + nf3k;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     double *auxvec = jk.dm;
-    double *auxvec_cache = Rt_buf + nf3ijk * nsp_per_block * 2;
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double vj_xyz[IJ_SIZE];
@@ -711,15 +857,11 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
             }
             __syncthreads();
             if (pair_ij < shl_pair1) {
-                for (int k = 0; k < nf3k; ++k) {
-                    double rho = auxvec_cache[k];
-                    int off = k * nf3ij;
 #pragma unroll
-                    for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {
-                        if (i >= nf3ij) break;
-                        double s = Rt[p1_ij[off+i]*nsp_per_block];
-                        vj_xyz[n] += s * rho;
-                    }
+                for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {
+                    if (i >= nf3ij) break;
+                    _dot_aux<LK>(vj_xyz[n], Rt, auxvec_cache, p1_ij, nf3ij, i,
+                                 nsp_per_block);
                 }
             }
         }
@@ -731,6 +873,26 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
                 atomicAdd(jk.vj+ij_loc0+i, vj_xyz[n]);
             }
         }
+    }
+}
+
+__global__ static
+void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
+                            int *shl_pair_offsets, int *ksh_offsets,
+                            uint32_t *bas_ij_idx, int *pair_ij_loc,
+                            int *aux_loc, int *nsp_lookup)
+{
+    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int ksh = ksh_offsets[ksh_block_id];
+    int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
+    switch (lk) {
+    case 0: unroll_contract_auxvec<0>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 1: unroll_contract_auxvec<1>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 2: unroll_contract_auxvec<2>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 3: unroll_contract_auxvec<3>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 4: unroll_contract_auxvec<4>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 5: unroll_contract_auxvec<5>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 6: unroll_contract_auxvec<6>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
     }
 }
 
