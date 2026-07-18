@@ -215,7 +215,7 @@ class Int3c2eOpt:
         nf3k = (lmax_aux+1)*(lmax_aux+2)*(lmax_aux+3)//6
         order = li[:,None] + lk
         nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
-        Rt_swap_size = np.array([35, 35, 35, 35, 30, 30, 21])[:lmax_aux+1]
+        Rt_swap_size = np.array([35, 35, 35, 35, 35, 21, 21])[:lmax_aux+1]
         Rt_stride = (nf3ijkl + Rt_swap_size-1) // Rt_swap_size
         nfij = (li + 1) * (li + 2) * (li + 3) // 6
         IJ_SIZE = np.array([35, 21, 15, 11, 8, 8, 8])[:lmax_aux+1]

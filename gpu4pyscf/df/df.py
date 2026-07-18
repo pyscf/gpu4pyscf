@@ -46,11 +46,13 @@ class DF(lib.StreamObject):
     # transfer to the host memory
     use_gpu_memory = None
 
-    _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_gpu_memory'}
+    _keys = {'intopt', 'j_engine', 'nao', 'naux', 'cd_low', 'mol', 'auxmol',
+             'use_gpu_memory'}
 
     # These attributes are not available in PySCF. When accessing them from an
     # object created by to_gpu(), they may not be available.
     intopt = None
+    j_engine = None
     nao = None
     naux = None
 
@@ -219,6 +221,7 @@ class DF(lib.StreamObject):
             self.mol = mol
             self.auxmol = None
             self.intopt = None
+            self.j_engine = None
         self._cderi = None
         self._cderi_idx = None
         self._cd_j2c = None

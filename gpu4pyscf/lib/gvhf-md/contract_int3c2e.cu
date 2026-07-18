@@ -594,39 +594,67 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
                 }
                 boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, 0, nsp_per_block);
                 Rt[0] = gamma_inc[order*nsp_per_block];
+                if (order >= 1) {
+                    double _Rt_0 = Rt[0];
+                    Rt[1*nsp_per_block] = zpq * _Rt_0;
+                    Rt[2*nsp_per_block] = ypq * _Rt_0;
+                    Rt[3*nsp_per_block] = xpq * _Rt_0;
+                    Rt[0] = gamma_inc[(order-1)*nsp_per_block];
+                }
+                if (order >= 2) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsp_per_block];
+                    double _Rt_2 = Rt[2*nsp_per_block];
+                    double _Rt_3 = Rt[3*nsp_per_block];
+                    Rt[1*nsp_per_block] = zpq * _Rt_0;
+                    Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3*nsp_per_block] = ypq * _Rt_0;
+                    Rt[4*nsp_per_block] = ypq * _Rt_1;
+                    Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
+                    Rt[6*nsp_per_block] = xpq * _Rt_0;
+                    Rt[7*nsp_per_block] = xpq * _Rt_1;
+                    Rt[8*nsp_per_block] = xpq * _Rt_2;
+                    Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
+                    Rt[0] = gamma_inc[(order-2)*nsp_per_block];
+                }
+                if (order >= 3) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsp_per_block];
+                    double _Rt_2 = Rt[2*nsp_per_block];
+                    double _Rt_3 = Rt[3*nsp_per_block];
+                    double _Rt_4 = Rt[4*nsp_per_block];
+                    double _Rt_5 = Rt[5*nsp_per_block];
+                    double _Rt_6 = Rt[6*nsp_per_block];
+                    double _Rt_7 = Rt[7*nsp_per_block];
+                    double _Rt_8 = Rt[8*nsp_per_block];
+                    double _Rt_9 = Rt[9*nsp_per_block];
+                    Rt[1 *nsp_per_block] = zpq * _Rt_0;
+                    Rt[2 *nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3 *nsp_per_block] = zpq * _Rt_2 + _Rt_1 * 2;
+                    Rt[4 *nsp_per_block] = ypq * _Rt_0;
+                    Rt[5 *nsp_per_block] = ypq * _Rt_1;
+                    Rt[6 *nsp_per_block] = ypq * _Rt_2;
+                    Rt[7 *nsp_per_block] = ypq * _Rt_3 + _Rt_0;
+                    Rt[8 *nsp_per_block] = ypq * _Rt_4 + _Rt_1;
+                    Rt[9 *nsp_per_block] = ypq * _Rt_5 + _Rt_3 * 2;
+                    Rt[10*nsp_per_block] = xpq * _Rt_0;
+                    Rt[11*nsp_per_block] = xpq * _Rt_1;
+                    Rt[12*nsp_per_block] = xpq * _Rt_2;
+                    Rt[13*nsp_per_block] = xpq * _Rt_3;
+                    Rt[14*nsp_per_block] = xpq * _Rt_4;
+                    Rt[15*nsp_per_block] = xpq * _Rt_5;
+                    Rt[16*nsp_per_block] = xpq * _Rt_6 + _Rt_0;
+                    Rt[17*nsp_per_block] = xpq * _Rt_7 + _Rt_1;
+                    Rt[18*nsp_per_block] = xpq * _Rt_8 + _Rt_3;
+                    Rt[19*nsp_per_block] = xpq * _Rt_9 + _Rt_6 * 2;
+                    Rt[0] = gamma_inc[(order-3)*nsp_per_block];
+                }
             }
-            for (int n = 1; n <= order; ++n) {
+            for (int n = 4; n <= order; ++n) {
                 __syncthreads();
-                if (n == 1) {
-                    if (Rt_id == 0) {
-                        double _Rt_0 = Rt[0];
-                        Rt[1*nsp_per_block] = zpq * _Rt_0;
-                        Rt[2*nsp_per_block] = ypq * _Rt_0;
-                        Rt[3*nsp_per_block] = xpq * _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
-                } else if (n == 2) {
-                    if (Rt_id == 0) {
-                        double _Rt_0 = Rt[0];
-                        double _Rt_1 = Rt[1*nsp_per_block];
-                        double _Rt_2 = Rt[2*nsp_per_block];
-                        double _Rt_3 = Rt[3*nsp_per_block];
-                        Rt[1*nsp_per_block] = zpq * _Rt_0;
-                        Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
-                        Rt[3*nsp_per_block] = ypq * _Rt_0;
-                        Rt[4*nsp_per_block] = ypq * _Rt_1;
-                        Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
-                        Rt[6*nsp_per_block] = xpq * _Rt_0;
-                        Rt[7*nsp_per_block] = xpq * _Rt_1;
-                        Rt[8*nsp_per_block] = xpq * _Rt_2;
-                        Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
-                } else {
-                    iter_Rt_n<RT_SIZE>(Rt, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
-                    if (Rt_id == 0) {
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
+                iter_Rt_n<RT_SIZE>(Rt, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                if (Rt_id == 0) {
+                    Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                 }
             }
             __syncthreads();
@@ -796,42 +824,71 @@ void unroll_contract_auxvec(RysIntEnvVars& envs, JKMatrix& jk,
                 }
                 boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, 0, nsp_per_block);
                 Rt[0] = gamma_inc[order*nsp_per_block];
+                if (order >= 1) {
+                    double _Rt_0 = Rt[0];
+                    Rt[1*nsp_per_block] = zpq * _Rt_0;
+                    Rt[2*nsp_per_block] = ypq * _Rt_0;
+                    Rt[3*nsp_per_block] = xpq * _Rt_0;
+                    Rt[0] = gamma_inc[(order-1)*nsp_per_block];
+                }
+                if (order >= 2) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsp_per_block];
+                    double _Rt_2 = Rt[2*nsp_per_block];
+                    double _Rt_3 = Rt[3*nsp_per_block];
+                    Rt[1*nsp_per_block] = zpq * _Rt_0;
+                    Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3*nsp_per_block] = ypq * _Rt_0;
+                    Rt[4*nsp_per_block] = ypq * _Rt_1;
+                    Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
+                    Rt[6*nsp_per_block] = xpq * _Rt_0;
+                    Rt[7*nsp_per_block] = xpq * _Rt_1;
+                    Rt[8*nsp_per_block] = xpq * _Rt_2;
+                    Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
+                    Rt[0] = gamma_inc[(order-2)*nsp_per_block];
+                }
+                if (order >= 3) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsp_per_block];
+                    double _Rt_2 = Rt[2*nsp_per_block];
+                    double _Rt_3 = Rt[3*nsp_per_block];
+                    double _Rt_4 = Rt[4*nsp_per_block];
+                    double _Rt_5 = Rt[5*nsp_per_block];
+                    double _Rt_6 = Rt[6*nsp_per_block];
+                    double _Rt_7 = Rt[7*nsp_per_block];
+                    double _Rt_8 = Rt[8*nsp_per_block];
+                    double _Rt_9 = Rt[9*nsp_per_block];
+                    Rt[1 *nsp_per_block] = zpq * _Rt_0;
+                    Rt[2 *nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3 *nsp_per_block] = zpq * _Rt_2 + _Rt_1 * 2;
+                    Rt[4 *nsp_per_block] = ypq * _Rt_0;
+                    Rt[5 *nsp_per_block] = ypq * _Rt_1;
+                    Rt[6 *nsp_per_block] = ypq * _Rt_2;
+                    Rt[7 *nsp_per_block] = ypq * _Rt_3 + _Rt_0;
+                    Rt[8 *nsp_per_block] = ypq * _Rt_4 + _Rt_1;
+                    Rt[9 *nsp_per_block] = ypq * _Rt_5 + _Rt_3 * 2;
+                    Rt[10*nsp_per_block] = xpq * _Rt_0;
+                    Rt[11*nsp_per_block] = xpq * _Rt_1;
+                    Rt[12*nsp_per_block] = xpq * _Rt_2;
+                    Rt[13*nsp_per_block] = xpq * _Rt_3;
+                    Rt[14*nsp_per_block] = xpq * _Rt_4;
+                    Rt[15*nsp_per_block] = xpq * _Rt_5;
+                    Rt[16*nsp_per_block] = xpq * _Rt_6 + _Rt_0;
+                    Rt[17*nsp_per_block] = xpq * _Rt_7 + _Rt_1;
+                    Rt[18*nsp_per_block] = xpq * _Rt_8 + _Rt_3;
+                    Rt[19*nsp_per_block] = xpq * _Rt_9 + _Rt_6 * 2;
+                    Rt[0] = gamma_inc[(order-3)*nsp_per_block];
+                }
             }
-            for (int n = 1; n <= order; ++n) {
+            for (int n = 4; n <= order; ++n) {
                 __syncthreads();
-                if (n == 1) {
-                    if (Rt_id == 0) {
-                        double _Rt_0 = Rt[0];
-                        Rt[1*nsp_per_block] = zpq * _Rt_0;
-                        Rt[2*nsp_per_block] = ypq * _Rt_0;
-                        Rt[3*nsp_per_block] = xpq * _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
-                } else if (n == 2) {
-                    if (Rt_id == 0) {
-                        double _Rt_0 = Rt[0];
-                        double _Rt_1 = Rt[1*nsp_per_block];
-                        double _Rt_2 = Rt[2*nsp_per_block];
-                        double _Rt_3 = Rt[3*nsp_per_block];
-                        Rt[1*nsp_per_block] = zpq * _Rt_0;
-                        Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
-                        Rt[3*nsp_per_block] = ypq * _Rt_0;
-                        Rt[4*nsp_per_block] = ypq * _Rt_1;
-                        Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
-                        Rt[6*nsp_per_block] = xpq * _Rt_0;
-                        Rt[7*nsp_per_block] = xpq * _Rt_1;
-                        Rt[8*nsp_per_block] = xpq * _Rt_2;
-                        Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
-                } else {
-                    iter_Rt_n<RT_SIZE>(Rt, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
-                    if (Rt_id == 0) {
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
+                iter_Rt_n<RT_SIZE>(Rt, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                if (Rt_id == 0) {
+                    Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                 }
             }
             __syncthreads();
+
             if (pair_ij < shl_pair1) {
 #pragma unroll
                 for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {
@@ -867,7 +924,7 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
     case 2: unroll_contract_auxvec<2,15,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
     case 3: unroll_contract_auxvec<3,11,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
     case 4: unroll_contract_auxvec<4, 8,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 5: unroll_contract_auxvec<5, 8,30>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 5: unroll_contract_auxvec<5, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
     case 6: unroll_contract_auxvec<6, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
     }
 }
