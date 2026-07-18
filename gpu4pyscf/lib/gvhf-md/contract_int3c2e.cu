@@ -616,6 +616,7 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     double *auxvec = jk.dm;
+    double *auxvec_cache = Rt_buf + nf3ijk * nsp_per_block * 2;
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double vj_xyz[IJ_SIZE];
@@ -641,13 +642,17 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
         double zij = (ai * ri[2] + aj * rj[2]) / aij;
         for (int ksh = ksh0; ksh < ksh1; ++ksh) {
             __syncthreads();
+            int k_loc0 = aux_loc[ksh - envs.nbas];
+            if (thread_id < nf3k) {
+                auxvec_cache[thread_id] = efg_phase[thread_id] *
+                    auxvec[k_loc0+thread_id];
+            }
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             double xpq = xij - rk[0];
             double ypq = yij - rk[1];
             double zpq = zij - rk[2];
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
-            int k_loc0 = aux_loc[ksh - envs.nbas];
             double ak = env[expk];
             double theta = aij * ak / (aij + ak);
             double *Rt, *buf;
@@ -707,7 +712,7 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
             __syncthreads();
             if (pair_ij < shl_pair1) {
                 for (int k = 0; k < nf3k; ++k) {
-                    double rho = efg_phase[k] * auxvec[k_loc0+k];
+                    double rho = auxvec_cache[k];
                     int off = k * nf3ij;
 #pragma unroll
                     for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {

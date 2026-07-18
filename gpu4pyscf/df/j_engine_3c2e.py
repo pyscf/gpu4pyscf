@@ -197,16 +197,17 @@ class Int3c2eOpt:
         lmax_aux = auxmol._bas[:,ANG_OF].max()
         li = np.arange(lmax*2+1)
         lk = np.arange(lmax_aux+1)
+        nf3k = (lmax_aux+1)*(lmax_aux+2)*(lmax_aux+3)//6
         order = li[:,None] + lk
         nf2 = (order + 1) * (order + 2) // 2
         unit = order+1 + nf2 * (order + 3) // 3 + order * nf2 // 3
         # Due to the limited number of registers (11) to store the ouput, the
         # contract_int3c2e_auxvec kernel does not support large shm size.
-        shm_size = min(SHM_SIZE, 1024 * 47)
+        shm_size = min(SHM_SIZE, 1024 * 47) - nf3k * 8
         nsp_per_block = shm_size //(unit*8)
         nsp_per_block = _nearest_power2(nsp_per_block)
         nsp_per_block[nsp_per_block>THREADS] = THREADS
-        shm_size = (nsp_per_block * unit).max() * 8
+        shm_size = ((nsp_per_block * unit).max() + nf3k) * 8
         nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
         nsp_lookup[:lmax*2+1,:lmax_aux+1] = nsp_per_block
         nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
