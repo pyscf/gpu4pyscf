@@ -575,8 +575,10 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
 def get_j(dfobj, dm, hermi=1):
     from gpu4pyscf.df.int3c2e_bdiv import (
         int2c2e, contract_int3c2e_dm, contract_int3c2e_auxvec)
+    from gpu4pyscf.df import j_engine_3c2e
     if dfobj.intopt is None:
         dfobj.build(build_cderi=False)
+        dfobj._j_engine = j_engine_3c2e.Int3c2eOpt(dfobj.mol, dfobj.auxmol).build()
 
     if dfobj._cd_j2c is None:
         j2c = int2c2e(dfobj.auxmol)
@@ -587,6 +589,8 @@ def get_j(dfobj, dm, hermi=1):
 
     dm_shape = dm.shape
     intopt = dfobj.intopt
+    if dm.ndim == 2 or len(dm) == 1:
+        intopt = dfobj._j_engine
     mol = intopt.mol
     auxmol = intopt.auxmol
     rhoj = contract_int3c2e_dm(mol, auxmol, dm, hermi, int3c2e_opt=intopt)

@@ -24,36 +24,39 @@
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
-#define RT2_MAX 9
-#define IJ_SIZE 11
-#define THREADS 256
-#define L_AUX_MAX 6
+#define RT2_MAX         9
+#define THREADS         256
+#define L_AUX_MAX       6
 
-__device__
-inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
-                      int nst_per_block, int gout_id, int gout_stride)
+template <int RT_SIZE> __device__ inline
+void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
+               int nsq_per_block, int gout_id, int gout_stride)
 {
-    int offsets = l*(l+1)*(l+2)*(l+3)/24;
-    uint16_t *p1 = c_Rt_idx + offsets - l;
-    double *pout = out + nst_per_block;
-    for (int v = gout_id; v < l; v += gout_stride) {
-        pout[v*nst_per_block] = rz * Rt[v*nst_per_block] + v * Rt[p1[v]*nst_per_block];
-    }
-    pout += l * nst_per_block;
-    p1 += l;
+    int nf2 = (l + 1) * (l + 2) / 2;
+    int nf3 = nf2 * (l + 3) / 3;
+    int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
+    uint16_t *p1 = c_Rt_idx + offsets;
     int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
-
-    int n2 = l * (l+1) / 2;
-    for (int i = gout_id; i < n2; i += gout_stride) {
-        pout[i*nst_per_block] = ry * Rt[i*nst_per_block] + tuv_fac[i] * Rt[p1[i]*nst_per_block];
+    double Rt_tmp[RT_SIZE];
+    nf2 -= 1; // Drop the first element in Rt. It is assigned outside
+    nf3 -= 1;
+    for (int n = 0; n < RT_SIZE; ++n) {
+        int i = n * gout_stride + gout_id;
+        if (i >= nf3) break;
+        Rt_tmp[n] = tuv_fac[i] * Rt[p1[i]*nsq_per_block];
+        if (i < l) {
+            Rt_tmp[n] += rz * Rt[i*nsq_per_block];
+        } else if (i < nf2) {
+            Rt_tmp[n] += ry * Rt[(i-l)*nsq_per_block];
+        } else {
+            Rt_tmp[n] += rx * Rt[(i-nf2)*nsq_per_block];
+        }
     }
-    pout += n2 * nst_per_block;
-    p1 += n2;
-    tuv_fac += n2;
-
-    int n3 = n2 * (l+2) / 3;
-    for (int i = gout_id; i < n3; i += gout_stride) {
-        pout[i*nst_per_block] = rx * Rt[i*nst_per_block] + tuv_fac[i] * Rt[p1[i]*nst_per_block];
+    __syncthreads();
+    for (int n = 0; n < RT_SIZE; ++n) {
+        int i = n * gout_stride + gout_id;
+        if (i >= nf3) break;
+        Rt[(i+1)*nsq_per_block] = Rt_tmp[n];
     }
 }
 
@@ -501,8 +504,8 @@ void _dot_aux(double& out, double *Rt, double *auxvec,
     }
 }
 
-template <int LK> __device__ inline
-void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
+template <int LK, int RT_SIZE> __device__ inline
+void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
                                int *shl_pair_offsets, uint32_t *bas_ij_idx,
                                int *pair_ij_loc, int *nsp_lookup)
 {
@@ -526,13 +529,12 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     int li = bas[ANG_OF + ish0*BAS_SLOTS];
     int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
     int lij = li + lj;
-    __shared__ int order, nf3ij, nf3ijk, kprim;
+    __shared__ int order, nf3ij, kprim;
     __shared__ int nsp_per_block, Rt_stride;
     __shared__ double rk[3];
     if (thread_id == 0) {
         order = lij + lk;
         nf3ij = (lij+1)*(lij+2)*(lij+3) / 6;
-        nf3ijk = (order+1)*(order+2)*(order+3) / 6;
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
         int rk_ptr = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         rk[0] = env[rk_ptr+0];
@@ -547,7 +549,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
 
     extern __shared__ double shared_memory[];
     double *gamma_inc = shared_memory + sp_id;
-    double *Rt_buf = shared_memory + (order+1) * nsp_per_block;
+    double *Rt = shared_memory + (order+1) * nsp_per_block + sp_id;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     for (int kp = 0; kp < kprim; ++kp) {
@@ -585,14 +587,6 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
             double zpq = zij - rk[2];
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             double theta = aij * ak / (aij + ak);
-            double *Rt, *buf;
-            if (order % 2 == 0) {
-                Rt = Rt_buf + sp_id;
-                buf = Rt + nf3ijk * nsp_per_block;
-            } else {
-                buf = Rt_buf + sp_id;
-                Rt = buf + nf3ijk * nsp_per_block;
-            }
             if (Rt_id == 0) {
                 double fac = ck/(aij*ak*sqrt(aij+ak));
                 if (pair_ij >= shl_pair1) {
@@ -603,13 +597,9 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
             }
             for (int n = 1; n <= order; ++n) {
                 __syncthreads();
-                // swap input and output
-                double *tmp = buf;
-                buf = Rt;
-                Rt = tmp;
                 if (n == 1) {
                     if (Rt_id == 0) {
-                        double _Rt_0 = buf[0];
+                        double _Rt_0 = Rt[0];
                         Rt[1*nsp_per_block] = zpq * _Rt_0;
                         Rt[2*nsp_per_block] = ypq * _Rt_0;
                         Rt[3*nsp_per_block] = xpq * _Rt_0;
@@ -617,10 +607,10 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
                     }
                 } else if (n == 2) {
                     if (Rt_id == 0) {
-                        double _Rt_0 = buf[0];
-                        double _Rt_1 = buf[1*nsp_per_block];
-                        double _Rt_2 = buf[2*nsp_per_block];
-                        double _Rt_3 = buf[3*nsp_per_block];
+                        double _Rt_0 = Rt[0];
+                        double _Rt_1 = Rt[1*nsp_per_block];
+                        double _Rt_2 = Rt[2*nsp_per_block];
+                        double _Rt_3 = Rt[3*nsp_per_block];
                         Rt[1*nsp_per_block] = zpq * _Rt_0;
                         Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
                         Rt[3*nsp_per_block] = ypq * _Rt_0;
@@ -633,7 +623,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
                         Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                     }
                 } else {
-                    iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                    iter_Rt_n<RT_SIZE>(Rt, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
                     if (Rt_id == 0) {
                         Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                     }
@@ -704,19 +694,18 @@ void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
     int ksh = gridDim.x - blockIdx.x - 1 + envs.nbas;
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unrolled_contract_int3c2e<0>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 1: unrolled_contract_int3c2e<1>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 2: unrolled_contract_int3c2e<2>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 3: unrolled_contract_int3c2e<3>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 4: unrolled_contract_int3c2e<4>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 5: unrolled_contract_int3c2e<5>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 6: unrolled_contract_int3c2e<6>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 0: unrolled_contract_int3c2e<0,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 1: unrolled_contract_int3c2e<1,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 2: unrolled_contract_int3c2e<2,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 3: unrolled_contract_int3c2e<3,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 4: unrolled_contract_int3c2e<4,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 5: unrolled_contract_int3c2e<5,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 6: unrolled_contract_int3c2e<6,30>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
     }
 }
 
-//__global__ static
-template <int LK> __device__ inline
-void unroll_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
+template <int LK, int IJ_SIZE, int RT_SIZE> __device__ inline
+void unroll_contract_auxvec(RysIntEnvVars& envs, JKMatrix& jk,
                             int *shl_pair_offsets, int *ksh_offsets,
                             uint32_t *bas_ij_idx, int *pair_ij_loc,
                             int *aux_loc, int *nsp_lookup)
@@ -747,7 +736,6 @@ void unroll_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
     constexpr int nfk = (lk + 1) * (lk + 2) / 2;
     constexpr int nf3k = nfk * (lk + 3) / 3;
     int nf3ij = (lij+1)*(lij+2)*(lij+3) / 6;
-    int nf3ijk = (order+1)*(order+2)*(order+3) / 6;
     __shared__ int nsp_per_block, Rt_stride;
     if (thread_id == 0) {
         nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
@@ -759,7 +747,7 @@ void unroll_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
     extern __shared__ double shared_memory[];
     double *gamma_inc = shared_memory + sp_id;
     double *auxvec_cache = shared_memory + (order+1) * nsp_per_block;
-    double *Rt_buf = auxvec_cache + nf3k;
+    double *Rt = auxvec_cache + nf3k + sp_id;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     double *auxvec = jk.dm;
@@ -801,14 +789,6 @@ void unroll_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             double ak = env[expk];
             double theta = aij * ak / (aij + ak);
-            double *Rt, *buf;
-            if (order % 2 == 0) {
-                Rt = Rt_buf + sp_id;
-                buf = Rt + nf3ijk * nsp_per_block;
-            } else {
-                buf = Rt_buf + sp_id;
-                Rt = buf + nf3ijk * nsp_per_block;
-            }
             if (Rt_id == 0) {
                 double fac = PI_FAC/(aij*ak*sqrt(aij+ak));
                 if (pair_ij >= shl_pair1) {
@@ -819,13 +799,9 @@ void unroll_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
             }
             for (int n = 1; n <= order; ++n) {
                 __syncthreads();
-                // swap input and output
-                double *tmp = buf;
-                buf = Rt;
-                Rt = tmp;
                 if (n == 1) {
                     if (Rt_id == 0) {
-                        double _Rt_0 = buf[0];
+                        double _Rt_0 = Rt[0];
                         Rt[1*nsp_per_block] = zpq * _Rt_0;
                         Rt[2*nsp_per_block] = ypq * _Rt_0;
                         Rt[3*nsp_per_block] = xpq * _Rt_0;
@@ -833,10 +809,10 @@ void unroll_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
                     }
                 } else if (n == 2) {
                     if (Rt_id == 0) {
-                        double _Rt_0 = buf[0];
-                        double _Rt_1 = buf[1*nsp_per_block];
-                        double _Rt_2 = buf[2*nsp_per_block];
-                        double _Rt_3 = buf[3*nsp_per_block];
+                        double _Rt_0 = Rt[0];
+                        double _Rt_1 = Rt[1*nsp_per_block];
+                        double _Rt_2 = Rt[2*nsp_per_block];
+                        double _Rt_3 = Rt[3*nsp_per_block];
                         Rt[1*nsp_per_block] = zpq * _Rt_0;
                         Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
                         Rt[3*nsp_per_block] = ypq * _Rt_0;
@@ -849,7 +825,7 @@ void unroll_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
                         Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                     }
                 } else {
-                    iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                    iter_Rt_n<RT_SIZE>(Rt, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
                     if (Rt_id == 0) {
                         Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                     }
@@ -886,13 +862,13 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
     int ksh = ksh_offsets[ksh_block_id];
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unroll_contract_auxvec<0>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 1: unroll_contract_auxvec<1>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 2: unroll_contract_auxvec<2>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 3: unroll_contract_auxvec<3>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 4: unroll_contract_auxvec<4>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 5: unroll_contract_auxvec<5>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 6: unroll_contract_auxvec<6>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 0: unroll_contract_auxvec<0,35,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 1: unroll_contract_auxvec<1,21,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 2: unroll_contract_auxvec<2,15,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 3: unroll_contract_auxvec<3,11,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 4: unroll_contract_auxvec<4, 8,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 5: unroll_contract_auxvec<5, 8,30>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 6: unroll_contract_auxvec<6, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
     }
 }
 
@@ -928,6 +904,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
                             int *nsp_lookup, double omega)
 {
     assert(n_dm == 1);
+    cudaFuncSetAttribute(contract_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     JKMatrix jk = {vj, NULL, auxvec, n_dm, 0, omega};
     dim3 threads(THREADS);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
