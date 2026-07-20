@@ -573,8 +573,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
     return vj, vk
 
 def get_j(dfobj, dm, hermi=1):
-    from gpu4pyscf.df.int3c2e_bdiv import (
-        int2c2e, contract_int3c2e_dm, contract_int3c2e_auxvec)
+    from gpu4pyscf.df.int3c2e_bdiv import int2c2e
     from gpu4pyscf.df import j_engine_3c2e
     if dfobj.intopt is None:
         dfobj.build(build_cderi=False)
@@ -595,16 +594,20 @@ def get_j(dfobj, dm, hermi=1):
 
     mol = intopt.mol
     auxmol = intopt.auxmol
-    rhoj = contract_int3c2e_dm(mol, auxmol, dm, hermi, int3c2e_opt=intopt)
+    dm = mol.apply_C_mat_CT(dm)
+    rhoj = intopt.contract_dm(dm, hermi)
+    rhoj = auxmol.apply_CT_dot(rhoj, axis=-1)
 
     j2c, tag = dfobj._cd_j2c
     if tag == 'cd':
         rhoj = solve_triangular(j2c, rhoj.T, lower=True)
-        rhoj = solve_triangular(j2c.T, rhoj, lower=False)
+        rhoj = solve_triangular(j2c.T, rhoj, lower=False).T
     else:
-        rhoj = cp.linalg.solve(j2c, rhoj.T)
+        rhoj = cp.linalg.solve(j2c, rhoj.T).T
 
-    vj = contract_int3c2e_auxvec(mol, auxmol, rhoj.T, int3c2e_opt=intopt)
+    rhoj = auxmol.apply_C_dot(rhoj, axis=-1)
+    vj = intopt.contract_auxvec(rhoj)
+    vj = mol.apply_CT_mat_C(vj)
     return vj.reshape(dm_shape)
 
 def factorize_dm(dm, hermi=0):

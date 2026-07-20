@@ -24,7 +24,8 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, condense, dist_matrix, transpose_sum, hermi_triu, asarray)
+    load_library, condense, dist_matrix, transpose_sum, hermi_triu, asarray,
+    ndarray)
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
@@ -44,6 +45,8 @@ THREADS = 256
 libvhf_md = load_library('libgvhf_md')
 libvhf_md.MD_build_j.restype = ctypes.c_int
 libvhf_md.init_mdj_constant.restype = ctypes.c_int
+libvhf_md.dm_to_Rt.restype = ctypes.c_int
+libvhf_md.Rt_to_dm.restype = ctypes.c_int
 
 def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     '''Compute J matrix
@@ -125,26 +128,19 @@ class _VHFOpt(jk._VHFOpt):
         ll = ls[:,None] + ls
         ll = ll.ravel()[pair_lst] # drops the pairs that do not contribute to integrals
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
-        pair_loc_gpu = cp.cumsum(cp.append(cp.zeros(1, dtype=np.int32), xyz_size.ravel()), dtype=np.int32)
+        pair_loc = cp.cumsum(cp.append(cp.zeros(1, dtype=np.int32), xyz_size.ravel()), dtype=np.int32)
         xyz_size = ls = ll = None
 
-        pair_lst = np.asarray(pair_lst.get(), dtype=np.int32)
-        pair_loc = pair_loc_gpu.get()
-        dm_xyz_size = pair_loc[-1]
+        _env = _scale_sp_ctr_coeff(mol)
+
+        dm_xyz_size = int(pair_loc[-1])
         log.debug1('dm_xyz_size = %s, nao = %s, pair_mapping_size = %s',
                    dm_xyz_size, nao, pair_mapping_size)
-        dms = dms.get()
-        dm_xyz = np.zeros((n_dm, dm_xyz_size))
-        # Must use this modified _env to ensure the consistency with GPU kernel
-        # In this _env, normalization coefficients for s and p funcitons are scaled.
-        _env = _scale_sp_ctr_coeff(mol)
-        libvhf_md.Et_dot_dm(
-            dm_xyz.ctypes, dms.ctypes,
-            ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
-            ao_loc.ctypes, pair_loc.ctypes,
-            pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
-            ctypes.c_int(mol.nbas),
-            mol._bas.ctypes, _env.ctypes)
+
+        if self.h_shls:
+            dm_xyz = _dm_to_Rt(self.sorted_mol, dms, pair_lst, pair_loc)
+        else:
+            dm_xyz = _dm_to_Rt(self.sorted_mol, dms, pair_lst, pair_loc, self.rys_envs)
 
         tasks = []
         for i in range(n_groups):
@@ -164,14 +160,14 @@ class _VHFOpt(jk._VHFOpt):
             err = libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
             if err != 0:
                 raise RuntimeError('MD-J CUDA kernel initialization failed')
-            dm_xyz = asarray(dm_xyz) # transfer to current device
+            dm_xyz = cp.asarray(dm_xyz) # transfer to current device
             vj_xyz = cp.zeros_like(dm_xyz)
 
             _pair_mappings = pair_mappings
             if device_id > 0: # Ensure the precomputation avail on each device
                 _pair_mappings = {k: [cp.asarray(x) for x in v]
                                   for k, v in pair_mappings.items()}
-            _pair_loc_gpu = cp.asarray(pair_loc_gpu)
+            _pair_loc_gpu = cp.asarray(pair_loc)
 
             timing_collection = jk._TimingCollector(log.timer_debug1)
             kern_counts = 0
@@ -232,20 +228,8 @@ class _VHFOpt(jk._VHFOpt):
 
         h_shls = self.h_shls
         if h_shls:
-            vj = np.zeros_like(dms)
-        else:
-            vj, dms = dms, None
-            vj[:] = 0.
-        libvhf_md.jengine_dot_Et(
-            vj.ctypes, vj_xyz.ctypes,
-            ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
-            ao_loc.ctypes, pair_loc.ctypes,
-            pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
-            ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
-        vj = transpose_sum(asarray(vj))
-        vj *= 2.
-
-        if h_shls:
+            vj = _Rt_to_dm(self.sorted_mol, vj_xyz, pair_lst, pair_loc)
+            vj *= 2.
             mol = self.sorted_mol
             log.debug3('Integrals for %s functions on CPU',
                        lib.param.ANGULAR[LMAX+1])
@@ -256,6 +240,9 @@ class _VHFOpt(jk._VHFOpt):
                                      shls_excludes=shls_excludes)
             vj1 = asarray(vs_h)
             vj += hermi_triu(vj1)
+        else:
+            vj = _Rt_to_dm(self.sorted_mol, vj_xyz, pair_lst, pair_loc, self.rys_envs)
+            vj *= 2.
         return vj
 
 def _cache_q_cond_and_non0pairs(mol, rys_envs, precision):
@@ -365,3 +352,95 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
     if cache_Rt2_idx:
         buflen += nf3ij * nf3kl * 2
     return ij, kl, gout_stride, tilex, tiley, buflen
+
+def _dm_to_Rt(mol, dm, shl_pair_idx, pair_loc, envs=None, out=None):
+    ao_loc = mol.ao_loc
+    nao = ao_loc[-1]
+    dm_ndim = dm.ndim
+    dm = dm.reshape(-1,nao,nao)
+    n_dm = len(dm)
+    dm_xyz_size = int(pair_loc[-1])
+    out = ndarray((n_dm, dm_xyz_size), buffer=out)
+
+    if envs is None:
+        # on CPU
+        dm = cp.asnumpy(dm)
+        dm_xyz = np.empty((n_dm, dm_xyz_size))
+        pair_loc = np.asarray(cp.asnumpy(pair_loc), dtype=np.int32)
+        shl_pair_idx = np.asarray(cp.asnumpy(shl_pair_idx), dtype=np.int32)
+        # Must use this modified _env to ensure the consistency with GPU kernel
+        # In this _env, normalization coefficients for s and p funcitons are scaled.
+        _env = _scale_sp_ctr_coeff(mol)
+        libvhf_md.Et_dot_dm(
+            dm_xyz.ctypes, dm.ctypes,
+            ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
+            ao_loc.ctypes, pair_loc.ctypes,
+            shl_pair_idx.ctypes, ctypes.c_int(len(shl_pair_idx)),
+            ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
+        out.set(dm_xyz)
+    else:
+        dm = cp.asarray(dm)
+        pair_loc = cp.asarray(pair_loc, dtype=np.int32)
+        ao_loc = cp.asarray(ao_loc, dtype=np.int32)
+        shl_pair_idx = cp.asarray(shl_pair_idx, dtype=np.int32)
+        for i in range(n_dm):
+            err = libvhf_md.dm_to_Rt(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+                ctypes.byref(envs),
+                ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(shl_pair_idx)),
+                ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p))
+            if err != 0:
+                raise RuntimeError('dm_to_Rt kernel failed')
+
+    if dm_ndim == 2:
+        out = out[0]
+    return out
+
+def _Rt_to_dm(mol, dm_xyz, shl_pair_idx, pair_loc, envs=None, out=None):
+    ao_loc = mol.ao_loc
+    nao = ao_loc[-1]
+    dm_ndim = dm_xyz.ndim
+    dm_xyz_size = int(pair_loc[-1])
+    dm_xyz = dm_xyz.reshape(-1,dm_xyz_size)
+    n_dm = len(dm_xyz)
+    out = ndarray((n_dm, nao, nao), buffer=out)
+    out[:] = 0.
+
+    if envs is None:
+        # on CPU
+        dm = np.zeros((n_dm, nao, nao))
+        dm_xyz = cp.asnumpy(dm_xyz)
+        pair_loc = np.asarray(cp.asnumpy(pair_loc), dtype=np.int32)
+        shl_pair_idx = np.asarray(cp.asnumpy(shl_pair_idx), dtype=np.int32)
+        _env = _scale_sp_ctr_coeff(mol)
+        libvhf_md.jengine_dot_Et(
+            dm.ctypes, dm_xyz.ctypes,
+            ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
+            ao_loc.ctypes, pair_loc.ctypes,
+            shl_pair_idx.ctypes, ctypes.c_int(len(shl_pair_idx)),
+            ctypes.c_int(mol.nbas), mol._bas.ctypes, _env.ctypes)
+        out.set(dm)
+    else:
+        dm_xyz = cp.asarray(dm_xyz)
+        pair_loc = cp.asarray(pair_loc, dtype=np.int32)
+        ao_loc = cp.asarray(ao_loc, dtype=np.int32)
+        shl_pair_idx = cp.asarray(shl_pair_idx, dtype=np.int32)
+        for i in range(n_dm):
+            err = libvhf_md.Rt_to_dm(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
+                ctypes.byref(envs),
+                ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(shl_pair_idx)),
+                ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p))
+            if err != 0:
+                raise RuntimeError('Rt_to_dm kernel failed')
+
+    out = transpose_sum(out)
+    if dm_ndim == 1:
+        out = out[0]
+    return out

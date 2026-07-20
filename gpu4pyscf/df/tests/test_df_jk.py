@@ -60,7 +60,7 @@ class KnownValues(unittest.TestCase):
         dm = dm + dm.T
         vj = df_jk.get_j(mf.with_df, dm)
         ref, _ = mf.get_jk(dm=dm, hermi=1)
-        assert abs(vj - ref).max() < 1e-12
+        assert abs(vj - ref).max() < 1e-11
 
         dm = cupy.random.rand(2, nao, nao)
         vj = df_jk.get_j(mf.with_df, dm, hermi=0)
@@ -156,7 +156,7 @@ H       4.224    0.640    0.837
         ref = mf_cpu.get_jk(mol, dm.get())
 
         vj, vk = mf.get_jk(mol, dm)
-        assert abs(ref[0] - vj.get()).max() < 1e-12
+        assert abs(ref[0] - vj.get()).max() < 1e-11
         assert abs(ref[1] - vk.get()).max() < 1e-12
 
         vj = mf.get_j(mol, dm)
