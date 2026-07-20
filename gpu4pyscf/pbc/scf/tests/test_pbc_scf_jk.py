@@ -329,7 +329,7 @@ def test_vj_hermi1_kpts_vs_fft():
     cell.build(0, 0)
     ref = fft.FFTDF(cell, kpts=kpts).get_jk(
         dm, hermi=1, with_j=False, kpts=kpts, exxdiv='ewald')[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    assert abs(vj - ref).max() < 1e-8
 
 def test_vk_hermi1_kpts_vs_aft():
     cell = pyscf.M(

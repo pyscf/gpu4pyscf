@@ -17,7 +17,7 @@ import cupy as cp
 from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
-from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
+from pyscf.pbc.tools.pbc import get_monkhorst_pack_size, cutoff_to_mesh
 from gpu4pyscf.lib.cupy_helper import asarray, batched_vec_norm2
 from gpu4pyscf.pbc.gto.cell import get_Gv
 
@@ -156,8 +156,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     elif exx and mf is not None:
         exxdiv = mf.exxdiv
     if exxdiv == 'vcut_sph' or exxdiv == 'vcut_ws':
-        return asarray(get_coulG(cell, k, exx, mf, mesh, Gv, wrap_around, omega,
-                                 kmesh=kmesh, **kwargs))
+        return asarray(get_coulG(cell, k, exx, mf, mesh, Gv, wrap_around, omega, **kwargs))
 
     if mesh is None:
         mesh = cell.mesh
@@ -286,14 +285,11 @@ def probe_charge_sr_coulomb(cell, omega, kmesh=None):
     ewovrl = .5 * (erfc(omega * r) / r).sum()
     return 2 * ewovrl * np.prod(kmesh)
 
-def madelung(cell, kpts=None, omega=None, kmesh=None):
-    if kmesh is None:
-        if kpts is None:
-            Nk = np.ones(3)
-        else:
-            Nk = get_monkhorst_pack_size(cell, kpts)
+def madelung(cell, kpts=None, omega=None):
+    if kpts is None:
+        Nk = np.array([1,1,1])
     else:
-        Nk = kmesh
+        Nk = get_monkhorst_pack_size(cell, kpts)
     ecell = cell.copy(deep=False)
     ecell._atm = np.array([[1, cell._env.size, 0, 0, 0, 0]])
     ecell._env = np.append(cell._env, [0., 0., 0.])

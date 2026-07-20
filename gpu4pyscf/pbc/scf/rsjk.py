@@ -42,7 +42,7 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
-from gpu4pyscf.pbc.df.df_jk import factorize_dm
+from gpu4pyscf.pbc.df.df_jk import _factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, double_translation_indices
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
