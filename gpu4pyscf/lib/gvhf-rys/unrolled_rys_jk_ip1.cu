@@ -33729,7 +33729,7 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     dim3 threads(nsq_per_block, gout_stride);
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
-    int buflen = nroots*2 * nsq_per_block + iprim*jprim;
+    int buflen = nroots*2 * nsq_per_block + iprim*jprim + 3;
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
         LAUNCH_JKMATRIX_KERNEL(rys_vjk_ip1_0000); break;
