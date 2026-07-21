@@ -24,7 +24,7 @@ from gpu4pyscf.grad.dispersion import get_dispersion
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
-    tag_array, contract, condense, transpose_sum, get_avail_mem)
+    tag_array, contract, condense, transpose_sum, get_avail_mem, ndarray)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.df import int3c2e_bdiv
@@ -377,7 +377,8 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
     sorted_mol = SortedMole.from_mol(mol, decontract=True)
-    mo = sorted_mol.apply_C_dot(mo_coeff, axis=0)
+    mo_sorted = sorted_mol.apply_C_dot(mo_coeff, axis=0)
+    orbo_sorted = mo_sorted[:,mo_occ>0]
 
     opt = Int3c2eOpt(sorted_mol, fakemol).build(tril=False)
     batch_size = min(32, natm)
@@ -386,14 +387,16 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
         opt, int3c2e_scheme_ip1(omega, 27), batch_size, 'fill_int3c2e_ip1', omega)
     pair_addresses = opt.pair_and_diag_indices(cart=True, original_ao_order=False)[0]
     nao1 = sorted_mol.nao
-    h1 = cp.zeros([batch_size,3,nao1*nao1])
+    work = cp.zeros([batch_size,3,nao1*nao1])
     for batch_id, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         tmp = eval_ip1(batch_id)
         tmp *= -charges[p0:p1]
-        h1[:p1-p0,:,pair_addresses] = tmp.transpose(2,0,1)
-        tmp = transpose_sum(h1.reshape((p1-p0)*3, nao1, nao1))
-        tmp = contract('kxpq,qj->kxpj', tmp.reshape(p1-p0,3,nao1,nao1), mo[:,mo_occ>0])
-        contract('kxpj,pi->kxij', tmp, mo, out=dh1e[p0:p1])
+        h1 = work[:p1-p0]
+        h1[:,:,pair_addresses] = tmp.transpose(2,0,1)
+        h1 = transpose_sum(h1.reshape((p1-p0)*3, nao1, nao1))
+        tmp = contract('kxpq,qj->kxpj', h1.reshape(p1-p0,3,nao1,nao1), orbo_sorted)
+        contract('kxpj,pi->kxij', tmp, mo_sorted, out=dh1e[p0:p1])
+    work = h1 = tmp = None
 
     # derivative w.r.t. atomic orbitals
     h1 = cupy.asarray(mf_grad.get_hcore(mol))
