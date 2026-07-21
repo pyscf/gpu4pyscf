@@ -32,8 +32,8 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, int2c2e,
-    int2c2e_ip1, int3c2e_scheme, _check_rsh_factors,
-    int3c2e_scheme_ip2, int3c2e_scheme_ip1, int3c2e_scheme_ipaux)
+    int2c2e_ip1, int3c2e_scheme, _check_rsh_factors, _int3c2e_ip1_evaluator,
+    int3c2e_scheme_ip1, int3c2e_scheme_ipaux)
 from gpu4pyscf.df import df
 from gpu4pyscf.df.df_jk import factorize_dm
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -1156,8 +1156,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
 
 def int3c2e_scheme_ip2(omega=0, gout_width=None):
     return int3c2e_scheme(
-        short_range=omega<0, gout_width=gout_width, deriv=(1,1,2),
-        angular_inc=2)
+        short_range=omega<0, gout_width=gout_width, deriv=(1,1,0))
 
 def _int2c2e_ip2_per_atom(mol, dm, omega=0):
     '''Second order nuclear derivatives of 2c2e Coulomb integrals.
