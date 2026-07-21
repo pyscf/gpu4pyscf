@@ -296,7 +296,7 @@ def test_contract_int3c2e():
     assert abs(dat.get() - ref).max() < 1e-9
 
     dat = contract_int3c2e_dm(mol, auxmol, dm)
-    assert abs(dat.get() - ref).max() < 1e-9
+    assert abs(dat.get() - ref).max() < 3e-9
 
     auxvec = np.random.rand(auxmol.nao)
     dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)

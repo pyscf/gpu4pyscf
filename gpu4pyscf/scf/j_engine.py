@@ -236,7 +236,7 @@ class _VHFOpt(jk._VHFOpt):
             scripts = 'ji->s2kl'
             shls_excludes = [0, h_shls[0]] * 4
             vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                     dms, 1, mol._atm, mol._bas, mol._env,
+                                     dms.get(), 1, mol._atm, mol._bas, mol._env,
                                      shls_excludes=shls_excludes)
             vj1 = asarray(vs_h)
             vj += hermi_triu(vj1)
@@ -383,17 +383,16 @@ def _dm_to_Rt(mol, dm, shl_pair_idx, pair_loc, envs=None, out=None):
         pair_loc = cp.asarray(pair_loc, dtype=np.int32)
         ao_loc = cp.asarray(ao_loc, dtype=np.int32)
         shl_pair_idx = cp.asarray(shl_pair_idx, dtype=np.int32)
-        for i in range(n_dm):
-            err = libvhf_md.dm_to_Rt(
-                ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-                ctypes.byref(envs),
-                ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(shl_pair_idx)),
-                ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p))
-            if err != 0:
-                raise RuntimeError('dm_to_Rt kernel failed')
+        err = libvhf_md.dm_to_Rt(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_dm), ctypes.byref(envs),
+            ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(shl_pair_idx)),
+            ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p))
+        if err != 0:
+            raise RuntimeError('dm_to_Rt kernel failed')
 
     if dm_ndim == 2:
         out = out[0]
@@ -428,17 +427,16 @@ def _Rt_to_dm(mol, dm_xyz, shl_pair_idx, pair_loc, envs=None, out=None):
         pair_loc = cp.asarray(pair_loc, dtype=np.int32)
         ao_loc = cp.asarray(ao_loc, dtype=np.int32)
         shl_pair_idx = cp.asarray(shl_pair_idx, dtype=np.int32)
-        for i in range(n_dm):
-            err = libvhf_md.Rt_to_dm(
-                ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
-                ctypes.byref(envs),
-                ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(shl_pair_idx)),
-                ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p))
-            if err != 0:
-                raise RuntimeError('Rt_to_dm kernel failed')
+        err = libvhf_md.Rt_to_dm(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_dm), ctypes.byref(envs),
+            ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(shl_pair_idx)),
+            ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p))
+        if err != 0:
+            raise RuntimeError('Rt_to_dm kernel failed')
 
     out = transpose_sum(out)
     if dm_ndim == 1:

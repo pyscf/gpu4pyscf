@@ -22,13 +22,14 @@
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 
-#define THREADS 256
+#define THREADS         256
+#define DM_BLOCK        8
 #define Ex_at(i,j,t)    Ex[(i)*5+(j)+(t)*25]
 #define Ey_at(i,j,t)    Ey[(i)*5+(j)+(t)*25]
 #define Ez_at(i,j,t)    Ez[(i)*5+(j)+(t)*25]
 
 __global__ static
-void dm_to_Rt_kernel(double *out, double *dm, RysIntEnvVars envs,
+void dm_to_Rt_kernel(double *out, double *dm, int n_dm, RysIntEnvVars envs,
                      uint32_t *bas_ij_idx, int *pair_loc, int npairs,
                      int *ao_loc)
 {
@@ -79,6 +80,8 @@ void dm_to_Rt_kernel(double *out, double *dm, RysIntEnvVars envs,
     int j0 = ao_loc[jsh];
     size_t Nao = ao_loc[nbas];
     dm += i0 * Nao + j0;
+    size_t dm_xyz_size = pair_loc[npairs];
+    size_t Nao2 = Nao * Nao;
 
     int lij = li + lj;
     double Ex[5*5*9];
@@ -132,27 +135,43 @@ void dm_to_Rt_kernel(double *out, double *dm, RysIntEnvVars envs,
         }
     }
 
-    int n = 0;
-    // products subject to t+u+v <= li+lj
-    for (int t = 0; t <= lij; t++) {
-    for (int u = 0; u <= lij-t; u++) {
-    for (int v = 0; v <= lij-t-u; v++, n++) {
-        double res = 0;
-        for (int ix = li, i = 0; ix >= 0; ix--) {
-        for (int iy = li-ix; iy >= 0; iy--, i++) {
-            int iz = li - ix - iy;
-            for (int jx = lj, j = 0; jx >= 0; jx--) {
-            for (int jy = lj-jx; jy >= 0; jy--, j++) {
-                int jz = lj - jx - jy;
-                res += Ex_at(ix,jx,t) * Ey_at(iy,jy,u) * Ez_at(iz,jz,v) * dm[i*Nao+j];
+    for (int m0 = 0; m0 < n_dm; m0 += DM_BLOCK) {
+        int n = 0;
+        // products subject to t+u+v <= li+lj
+        for (int t = 0; t <= lij; t++) {
+        for (int u = 0; u <= lij-t; u++) {
+        for (int v = 0; v <= lij-t-u; v++, n++) {
+            double res[DM_BLOCK];
+#pragma unroll
+            for (int m = 0; m < DM_BLOCK; m++) {
+                if (m + m0 >= n_dm) break;
+                res[m] = 0;
+            }
+            for (int ix = li, i = 0; ix >= 0; ix--) {
+            for (int iy = li-ix; iy >= 0; iy--, i++) {
+                int iz = li - ix - iy;
+                for (int jx = lj, j = 0; jx >= 0; jx--) {
+                for (int jy = lj-jx; jy >= 0; jy--, j++) {
+                    int jz = lj - jx - jy;
+                    double Et = Ex_at(ix,jx,t) * Ey_at(iy,jy,u) * Ez_at(iz,jz,v);
+#pragma unroll
+                    for (int m = 0; m < DM_BLOCK; m++) {
+                        if (m0 + m >= n_dm) break;
+                        res[m] += Et * dm[(m0+m)*Nao2+i*Nao+j];
+                    }
+                } }
             } }
-        } }
-        Rt[n] = res;
-    } } }
+#pragma unroll
+            for (int m = 0; m < DM_BLOCK; m++) {
+                if (m0 + m >= n_dm) break;
+                Rt[(m0+m)*dm_xyz_size+n] = res[m];
+            }
+        } } }
+    }
 }
 
 __global__ static
-void Rt_to_dm_kernel(double *dm, double *Rt, RysIntEnvVars envs,
+void Rt_to_dm_kernel(double *dm, double *Rt, int n_dm, RysIntEnvVars envs,
                      uint32_t *bas_ij_idx, int *pair_loc, int npairs,
                      int *ao_loc)
 {
@@ -203,6 +222,8 @@ void Rt_to_dm_kernel(double *dm, double *Rt, RysIntEnvVars envs,
     int j0 = ao_loc[jsh];
     size_t Nao = ao_loc[nbas];
     dm += i0 * Nao + j0;
+    size_t dm_xyz_size = pair_loc[npairs];
+    size_t Nao2 = Nao * Nao;
 
     int lij = li + lj;
     double Ex[5*5*9];
@@ -256,23 +277,39 @@ void Rt_to_dm_kernel(double *dm, double *Rt, RysIntEnvVars envs,
         }
     }
 
-    for (int ix = li, i = 0; ix >= 0; ix--) {
-    for (int iy = li-ix; iy >= 0; iy--, i++) {
-        int iz = li - ix - iy;
-        for (int jx = lj, j = 0; jx >= 0; jx--) {
-        for (int jy = lj-jx; jy >= 0; jy--, j++) {
-            int jz = lj - jx - jy;
-            double res = 0;
-            int n = 0;
-            // products subject to t+u+v <= li+lj
-            for (int t = 0; t <= lij; t++) {
-            for (int u = 0; u <= lij-t; u++) {
-            for (int v = 0; v <= lij-t-u; v++, n++) {
-                res += Ex_at(ix,jx,t) * Ey_at(iy,jy,u) * Ez_at(iz,jz,v) * Rt[n];
-            } } }
-            dm[i*Nao+j] = res;
+    for (int m0 = 0; m0 < n_dm; m0 += DM_BLOCK) {
+        for (int ix = li, i = 0; ix >= 0; ix--) {
+        for (int iy = li-ix; iy >= 0; iy--, i++) {
+            int iz = li - ix - iy;
+            for (int jx = lj, j = 0; jx >= 0; jx--) {
+            for (int jy = lj-jx; jy >= 0; jy--, j++) {
+                int jz = lj - jx - jy;
+                double res[DM_BLOCK];
+#pragma unroll
+                for (int m = 0; m < DM_BLOCK; m++) {
+                    if (m + m0 >= n_dm) break;
+                    res[m] = 0;
+                }
+                int n = 0;
+                // products subject to t+u+v <= li+lj
+                for (int t = 0; t <= lij; t++) {
+                for (int u = 0; u <= lij-t; u++) {
+                for (int v = 0; v <= lij-t-u; v++, n++) {
+                    double Et = Ex_at(ix,jx,t) * Ey_at(iy,jy,u) * Ez_at(iz,jz,v);
+#pragma unroll
+                    for (int m = 0; m < DM_BLOCK; m++) {
+                        if (m0 + m >= n_dm) break;
+                        res[m] += Et * Rt[(m0+m)*dm_xyz_size+n];
+                    }
+                } } }
+#pragma unroll
+                for (int m = 0; m < DM_BLOCK; m++) {
+                    if (m + m0 >= n_dm) break;
+                    dm[(m0+m)*Nao2+i*Nao+j] = res[m];
+                }
+            } }
         } }
-    } }
+    }
 }
 
 __global__ static
@@ -446,11 +483,11 @@ void aux_to_Rt_kernel(double *out, double *aux, RysIntEnvVars envs,
 }
 
 extern "C" {
-int dm_to_Rt(double *out, double *dm, RysIntEnvVars *envs,
+int dm_to_Rt(double *out, double *dm, int n_dm, RysIntEnvVars *envs,
              uint32_t *bas_ij_idx, int *pair_loc, int npairs, int *ao_loc)
 {
     int blocks = (npairs + THREADS - 1) / THREADS;
-    dm_to_Rt_kernel<<<blocks, THREADS>>>(out, dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc);
+    dm_to_Rt_kernel<<<blocks, THREADS>>>(out, dm, n_dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in dm_to_Rt_kernel: %s\n", cudaGetErrorString(err));
@@ -459,11 +496,11 @@ int dm_to_Rt(double *out, double *dm, RysIntEnvVars *envs,
     return 0;
 }
 
-int Rt_to_dm(double *dm, double *Rt, RysIntEnvVars *envs,
+int Rt_to_dm(double *dm, double *Rt, int n_dm, RysIntEnvVars *envs,
              uint32_t *bas_ij_idx, int *pair_loc, int npairs, int *ao_loc)
 {
     int blocks = (npairs + THREADS - 1) / THREADS;
-    Rt_to_dm_kernel<<<blocks, THREADS>>>(dm, Rt, *envs, bas_ij_idx, pair_loc, npairs, ao_loc);
+    Rt_to_dm_kernel<<<blocks, THREADS>>>(dm, Rt, n_dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in Rt_to_dm_kernel: %s\n", cudaGetErrorString(err));
