@@ -133,10 +133,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     ni = mydf._numint
     if kpts is None:
         kpts = np.zeros((1, 3))
-        kmesh = [1] * 3
     else:
         kpts = np.asarray(kpts).reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts)
 
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -181,7 +179,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         for k1, ao1 in enumerate(ao1_kpts):
             ao1T = ao1.T
             kpt1 = kpts_band[k1]
-            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh, kmesh=kmesh)
+            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh=mesh)
             if is_zero(kpt1-kpt2):
                 expmikr = cp.array(1.)
             else:
@@ -370,11 +368,7 @@ def get_k_e1_kpts(mydf, dm_kpts, kpts=None, exxdiv=None):
 def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     from gpu4pyscf.pbc.gto.int1e import int1e_ovlp
     s = int1e_ovlp(cell, kpts=kpts)
-    if kpts is None:
-        kmesh = [1] * 3
-    else:
-        kmesh = kpts_to_kmesh(cell, kpts)
-    m = tools.madelung(cell, kmesh=kmesh)
+    m = tools.madelung(cell)
     if kpts is None:
         for i,dm in enumerate(dms):
             vk[i] += m * s.dot(dm).dot(s)
