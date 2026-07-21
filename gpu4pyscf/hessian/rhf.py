@@ -42,7 +42,7 @@ from gpu4pyscf.scf.jk import (
     _TimingCollector)
 from gpu4pyscf.grad import rhf as rhf_grad
 from . import dispersion
-from gpu4pyscf.gto.mole import extract_pgto_params
+from gpu4pyscf.gto.mole import extract_pgto_params, SortedMole
 
 libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int
 libvhf_rys.RYS_per_atom_jk_ip2_type3.restype = ctypes.c_int
@@ -145,26 +145,105 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     # Energy weighted density matrix
     dme0 = (mocc * mo_energy[mo_occ>0]).dot(mocc.T) * 2
-    de_hcore = _e_hcore_generator(hessobj, dm0)
-    s1aa, s1ab, s1a = get_ovlp(mol)
-
-    aoslices = mol.aoslice_by_atom()
-    e1 = cupy.zeros((mol.natm,mol.natm,3,3))
-    for i0, ia in enumerate(atmlst):
-        p0, p1 = aoslices[ia][2:]
-        e1[i0,i0] -= contract('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1])*2
-
-        for j0, ja in enumerate(atmlst[:i0+1]):
-            q0, q1 = aoslices[ja][2:]
-            # *2 for +c.c.
-            e1[i0,j0] -= contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
-            e1[i0,j0] += de_hcore(ia, ja)
-
-        for j0 in range(i0):
-            e1[j0,i0] = e1[i0,j0].T
-
+    de_hcore = _hcore_energy(hessobj, dm0, dme0)
     log.timer('RHF partial hessian', *time0)
-    return e1, ejk
+    return de_hcore, ejk
+
+def _hcore_energy(hessobj, dm0, dme0):
+    mol = hessobj.mol
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential hessian not supported for molecular system yet")
+
+    de_hcore = _hess_nuc_without_ecp(mol, dm0)
+    with_ecp = len(mol._ecpbas) > 0
+    if with_ecp:
+        de_hcore += hess_nuc_elec_ecp(mol, dm0)
+
+    t_aa = mol.intor('int1e_ipipkin', comp=9)
+    t_ab = cp.asarray(mol.intor('int1e_ipkinip', comp=9))
+    nao = t_ab.shape[1]
+    t_aa = contract('xypq,qp->pxy', t_aa.reshape(3, 3, nao, nao), dm0)
+    t_ab = contract('xypq,qp->pqxy', t_ab.reshape(3, 3, nao, nao), dm0)
+
+    s1aa, s1ab, _ = get_ovlp(mol)
+    s1aa = contract('xypq,qp->pxy', s1aa.reshape(3, 3, nao, nao), dme0)
+    s1ab = contract('xypq,qp->pqxy', s1ab.reshape(3, 3, nao, nao), dme0)
+
+    natm = mol.natm
+    ao_loc = mol.ao_loc
+    atm_labels = np.repeat(mol._bas[:,ATOM_OF], ao_loc[1:]-ao_loc[:-1])
+    de = _aggregate_to_atoms(t_ab-s1ab, natm, atm_labels, axis=(0,1))
+
+    de_diag = cp.zeros((natm, 3, 3))
+    cp.add.at(de_diag, atm_labels, t_aa-s1aa)
+    de[np.diag_indices(natm)] += de_diag
+    de_hcore += de + de.transpose(1,0,3,2)
+    return de_hcore
+
+def _aggregate_to_atoms(a, natm, atom_labels, axis):
+    if axis == 0:
+        shape = list(a.shape)
+        shape[0] = natm
+        indices = atom_labels
+    elif axis == 1:
+        shape = list(a.shape)
+        shape[1] = natm
+        indices = (slice(None), atom_labels)
+    elif axis == (0, 1):
+        shape = [natm if i in axis else n for i, n in enumerate(a.shape)]
+        indices = (atom_labels[:,None], atom_labels)
+    else:
+        raise NotImplementedError
+    out = cp.zeros(shape)
+    cp.add.at(out, indices, a)
+    return out
+
+def _hess_nuc_without_ecp(mol, dm0):
+    from gpu4pyscf.df.int3c2e_bdiv import Int3c2eOpt
+    from gpu4pyscf.df.hessian.rhf import int3c2e_scheme_ip2, get_ao_pair_loc
+    natm = mol.natm
+    coords = mol.atom_coords()
+    charges = cp.asarray(-mol.atom_charges(), dtype=np.float64)
+    fakemol = gto.fakemol_for_charges(coords)
+
+    sorted_mol = SortedMole.from_mol(mol, decontract=True)
+    int3c2e_opt = Int3c2eOpt(sorted_mol, fakemol).build()
+    dm = sorted_mol.apply_C_mat_CT(dm0)
+
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme_ip2()
+    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
+    lmax = sorted_mol.uniq_l_ctr[:,0].max()
+    shm_size_max = shm_size[0,:lmax+1,:lmax+1].max()
+    bas_ij_idx, shl_pair_offsets = sorted_mol.aggregate_shl_pairs(
+        int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
+    ao_pair_loc = get_ao_pair_loc(sorted_mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
+    auxmol = int3c2e_opt.auxmol
+    ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+    ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+sorted_mol.nbas, dtype=np.int32)
+
+    int3c2e_envs = int3c2e_opt.int3c2e_envs
+    de = cp.zeros((natm, natm, 3, 3))
+    err = libvhf_rys.ejk_int3c2e_ip2(
+        ctypes.cast(de.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charges.data.ptr, ctypes.c_void_p),
+        ctypes.byref(int3c2e_envs), ctypes.c_double(0.),
+        ctypes.c_double(1.), ctypes.c_double(1.),
+        ctypes.c_int(shm_size_max),
+        ctypes.c_int(len(shl_pair_offsets) - 1),
+        ctypes.c_int(len(ksh_offsets_gpu) - 1),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(0),
+        ctypes.c_int(natm))
+    if err != 0:
+        raise RuntimeError('ejk_int3c2e_ip2 failed')
+    de = de + de.transpose(1,0,3,2)
+    de *= 2
+    return de
 
 def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=None):
     '''Compute the energy per atom for
@@ -320,7 +399,7 @@ def _ip2_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 2) // 2 + 1
-    unit = nroots*2 + g_size*3 + 8
+    unit = nroots*2 + g_size*3 + 6
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = (shm_size - ij_prims*8) // (unit*8)
@@ -336,7 +415,7 @@ def _ip2_type3_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nps = l_ctr_pattern[:,1]
     ij_prims = nps[0] * nps[1]
     nroots = (order + 2) // 2 + 1
-    unit = nroots*2 + g_size*3 + 8
+    unit = nroots*2 + g_size*3 + 6
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = (shm_size - ij_prims*8) // (unit*8)
@@ -557,25 +636,6 @@ def _make_pair_mappings_for_atoms_slice(mol, bas_pair_cache, atoms_slice):
         out[k] = pair[idx], q_cond[idx], s_cond[idx]
     return out
 
-def get_hcore(mol):
-    '''Part of the second derivatives of core Hamiltonian'''
-    h1aa = mol.intor('int1e_ipipkin', comp=9)
-    h1ab = mol.intor('int1e_ipkinip', comp=9)
-    if mol._pseudo:
-        NotImplementedError('Nuclear hessian for GTH PP')
-    else:
-        h1aa+= mol.intor('int1e_ipipnuc', comp=9)
-        h1ab+= mol.intor('int1e_ipnucip', comp=9)
-    h1aa = cupy.asarray(h1aa)
-    h1ab = cupy.asarray(h1ab)
-    if len(mol._ecpbas) > 0:
-        #h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
-        #h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
-        h1aa += get_ecp_ipip(mol, 'ipipv').sum(axis=0)
-        h1ab += get_ecp_ipip(mol, 'ipvip').sum(axis=0)
-    nao = h1aa.shape[-1]
-    return h1aa.reshape(3,3,nao,nao), h1ab.reshape(3,3,nao,nao)
-
 def get_ovlp(mol):
     from gpu4pyscf.pbc.gto import int1e
     s1a = -int1e.int1e_ipovlp(mol)
@@ -701,46 +761,6 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
     return fx
 
-def hess_nuc_elec(mol, dm):
-    '''
-    H1e hessian nuclear repulsion contribution that originates from differentiating nuclear position
-    (both first derivative d2I_dAdC and second derivative d2I_dC2)
-    w/o ECP
-    '''
-    coords = mol.atom_coords()
-    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
-
-    aoslice = mol.aoslice_by_atom()
-    aoslice = numpy.array(aoslice)
-
-    from gpu4pyscf.gto import int3c1e
-    from gpu4pyscf.gto.int3c1e_ipip import int1e_grids_ip1ip2, int1e_grids_ipip2
-    intopt_derivative = int3c1e.VHFOpt(mol)
-    intopt_derivative.build(cutoff = 1e-14, aosym = False)
-
-    d2e = cupy.zeros([3, 3, mol.natm, mol.natm])
-
-    for j_atom in range(mol.natm):
-        # TODO: It is computing one charge at a time, and it's likely slow
-        g0,g1 = j_atom,j_atom+1
-        d2I_dAdC = int1e_grids_ip1ip2(mol, coords[g0:g1, :], charges = charges[g0:g1], intopt = intopt_derivative)
-
-        for i_atom in range(mol.natm):
-            p0,p1 = aoslice[i_atom, 2:]
-            d2e[:, :, i_atom, j_atom] += contract('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :])
-            d2e[:, :, i_atom, j_atom] += contract('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(0,1,3,2))
-
-            d2e[:, :, j_atom, i_atom] += contract('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,2,3))
-            d2e[:, :, j_atom, i_atom] += contract('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,3,2))
-    d2I_dAdC = None
-
-    d2I_dC2 = int1e_grids_ipip2(mol, coords, dm = dm, intopt = intopt_derivative)
-    for i_atom in range(mol.natm):
-        d2e[:, :, i_atom, i_atom] += d2I_dC2[:, :, i_atom] * charges[i_atom]
-    d2I_dC2 = None
-
-    return -d2e
-
 def hess_nuc_elec_ecp(mol, dm):
     '''
     Calculate hessian contribution due to (nuc, elec) pair with ECP
@@ -805,47 +825,6 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     logger.timer(hessobj, 'SCF hessian', *cput0)
 
     return hessobj.de
-
-def _e_hcore_generator(hessobj, dm):
-    with_x2c = getattr(hessobj.base, 'with_x2c', None)
-    if with_x2c:
-        hcore_deriv = with_x2c.hcore_deriv_generator(deriv=2)
-        dm = dm.get()
-        return lambda i, j: cp.asarray(np.einsum('xypq,pq->xy', hcore_deriv(i, j), dm))
-
-    assert dm.dtype == np.float64
-    mol = hessobj.mol
-    log = logger.new_logger(mol)
-    t1 = log.init_timer()
-    de_nuc_elec = hess_nuc_elec(mol, dm)
-    t1 = log.timer_debug1('hess_nuc_elec', *t1)
-    with_ecp = len(mol._ecpbas) > 0
-    aoslices = mol.aoslice_by_atom()
-    if with_ecp:
-        de_ecp = hess_nuc_elec_ecp(mol, dm)
-
-    if mol._pseudo:
-        raise NotImplementedError("Pseudopotential hessian not supported for molecular system yet")
-
-    # Move data to GPU, get_hcore is slow on CPU
-    h1aa, h1ab = hessobj.get_hcore(mol)
-    h1aa = cupy.asarray(h1aa)
-    h1ab = cupy.asarray(h1ab)
-
-    t1 = log.timer_debug1('get_hcore', *t1)
-    def get_hcore(iatm, jatm):
-        i0, i1 = aoslices[iatm][2:]
-        j0, j1 = aoslices[jatm][2:]
-        if iatm == jatm:
-            de = contract('xypq,pq->xy', h1aa[:,:,i0:i1], dm[i0:i1])
-            de+= contract('xypq,pq->xy', h1ab[:,:,i0:i1,i0:i1], dm[i0:i1,i0:i1])
-        else:
-            de = contract('xypq,pq->xy', h1ab[:,:,i0:i1,j0:j1],dm[i0:i1,j0:j1])
-        if with_ecp:
-            de += de_ecp[:,:,iatm,jatm]
-        # 2.0* due to the symmetry
-        return cp.asarray(2.0*de + de_nuc_elec[:,:,iatm,jatm])
-    return get_hcore
 
 def hcore_generator(hessobj, mol=None):
     raise NotImplementedError
@@ -912,11 +891,8 @@ class HessianBase(lib.StreamObject):
     get_dispersion  = dispersion.get_dispersion
     gen_vind        = NotImplemented
     get_jk          = NotImplemented
+    get_hcore       = NotImplemented
     kernel = hess = kernel
-
-    def get_hcore(self, mol=None):
-        if mol is None: mol = self.mol
-        return get_hcore(mol)
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):

@@ -869,35 +869,6 @@ def _make_j_engine_pair_locs(mol):
     pair_loc = np.append(0, np.cumsum((ll+1)*(ll+2)*(ll+3)//6))
     return np.asarray(pair_loc, dtype=np.int32)
 
-def quartets_scheme(mol, l_ctr_pattern, with_j, with_k, shm_size=SHM_SIZE):
-    raise RuntimeError('deprecated')
-    ls = l_ctr_pattern[:,0]
-    li, lj, lk, ll = ls
-    order = li + lj + lk + ll
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfk = (lk + 1) * (lk + 2) // 2
-    nfl = (ll + 1) * (ll + 2) // 2
-    gout_size = nfi * nfj * nfk * nfl
-    g_size = (li+1)*(lj+1)*(lk+1)*(ll+1)
-    nps = l_ctr_pattern[:,1]
-    ij_prims = nps[0] * nps[1]
-    nroots = order // 2 + 1
-    jk_cache_size = 0
-    if with_j: jk_cache_size += nfi*nfj + nfk*nfl
-    if with_k: jk_cache_size += nfi*nfk + nfi*nfl + nfj*nfk + nfj*nfl
-    root_g_jk_cache_shared = max(nroots*2 + g_size*3, jk_cache_size)
-    unit = root_g_jk_cache_shared + ij_prims + 8
-    if mol.omega < 0: # SR
-        unit += nroots * 2
-    counts = shm_size // (unit*8)
-    n = min(THREADS, _nearest_power2(counts))
-    gout_stride = THREADS // n
-    while gout_stride < 16 and gout_size / (gout_stride*GOUT_WIDTH) > 1:
-        n //= 2
-        gout_stride *= 2
-    return n, gout_stride
-
 def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
