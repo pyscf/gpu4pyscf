@@ -5498,10 +5498,9 @@ void rys_vjk_ip1_0121(JKMATRIX_KERNEL_ARGS)
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 80 + sq_id;
-    double *aij_cache = shared_memory + nsq_per_block * (80+nroots*2);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 78 + sq_id;
+    double *aij_cache = shared_memory + nsq_per_block * (78+nroots*2);
     double *cicj_cache = aij_cache + 3;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -5617,8 +5616,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -5662,7 +5659,6 @@ while (1) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -5683,7 +5679,7 @@ while (1) {
                         s2 = c0x * s1 + 1 * b10 * s0;
                         _gx[128] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
+                        double Rqc = xlxk * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -8884,10 +8880,9 @@ void rys_vjk_ip1_0211(JKMATRIX_KERNEL_ARGS)
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 80 + sq_id;
-    double *aij_cache = shared_memory + nsq_per_block * (80+nroots*2);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 78 + sq_id;
+    double *aij_cache = shared_memory + nsq_per_block * (78+nroots*2);
     double *cicj_cache = aij_cache + 3;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -9003,8 +8998,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -9048,7 +9041,6 @@ while (1) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -9073,7 +9065,7 @@ while (1) {
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
+                        double Rqc = xlxk * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -14319,10 +14311,9 @@ void rys_vjk_ip1_1021(JKMATRIX_KERNEL_ARGS)
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 62 + sq_id;
-    double *aij_cache = shared_memory + nsq_per_block * (62+nroots*2);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 60 + sq_id;
+    double *aij_cache = shared_memory + nsq_per_block * (60+nroots*2);
     double *cicj_cache = aij_cache + 3;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -14438,8 +14429,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -14483,7 +14472,6 @@ while (1) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -14504,7 +14492,7 @@ while (1) {
                         s2 = c0x * s1 + 1 * b10 * s0;
                         _gx[128] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
+                        double Rqc = xlxk * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -17681,10 +17669,9 @@ void rys_vjk_ip1_1111(JKMATRIX_KERNEL_ARGS)
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 80 + sq_id;
-    double *aij_cache = shared_memory + nsq_per_block * (80+nroots*2);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 78 + sq_id;
+    double *aij_cache = shared_memory + nsq_per_block * (78+nroots*2);
     double *cicj_cache = aij_cache + 3;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -17800,8 +17787,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -17845,7 +17830,6 @@ while (1) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -17870,7 +17854,7 @@ while (1) {
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
+                        double Rqc = xlxk * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -20073,10 +20057,9 @@ void rys_vjk_ip1_1120(JKMATRIX_KERNEL_ARGS)
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 62 + sq_id;
-    double *aij_cache = shared_memory + nsq_per_block * (62+nroots*2);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 60 + sq_id;
+    double *aij_cache = shared_memory + nsq_per_block * (60+nroots*2);
     double *cicj_cache = aij_cache + 3;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -20192,8 +20175,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -20237,7 +20218,6 @@ while (1) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -20262,7 +20242,7 @@ while (1) {
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
+                        double Rqc = xlxk * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -23089,10 +23069,9 @@ void rys_vjk_ip1_1210(JKMATRIX_KERNEL_ARGS)
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 62 + sq_id;
-    double *aij_cache = shared_memory + nsq_per_block * (62+nroots*2);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 60 + sq_id;
+    double *aij_cache = shared_memory + nsq_per_block * (60+nroots*2);
     double *cicj_cache = aij_cache + 3;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -23208,8 +23187,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -23253,7 +23230,6 @@ while (1) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -23281,7 +23257,7 @@ while (1) {
                         s2 = c0x * s1 + 3 * b10 * s0;
                         _gx[256] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
+                        double Rqc = xlxk * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -26441,10 +26417,9 @@ void rys_vjk_ip1_2011(JKMATRIX_KERNEL_ARGS)
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 56 + sq_id;
-    double *aij_cache = shared_memory + nsq_per_block * (56+nroots*2);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 54 + sq_id;
+    double *aij_cache = shared_memory + nsq_per_block * (54+nroots*2);
     double *cicj_cache = aij_cache + 3;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -26560,8 +26535,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -26605,7 +26578,6 @@ while (1) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -26630,7 +26602,7 @@ while (1) {
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
+                        double Rqc = xlxk * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -30365,10 +30337,9 @@ void rys_vjk_ip1_2110(JKMATRIX_KERNEL_ARGS)
     constexpr int gout_stride = 4;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * 56 + sq_id;
-    double *aij_cache = shared_memory + nsq_per_block * (56+nroots*2);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 54 + sq_id;
+    double *aij_cache = shared_memory + nsq_per_block * (54+nroots*2);
     double *cicj_cache = aij_cache + 3;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -30484,8 +30455,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -30529,7 +30498,6 @@ while (1) {
                     __syncthreads();
                     double rt = rw[irys*128];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -30557,7 +30525,7 @@ while (1) {
                         s2 = c0x * s1 + 3 * b10 * s0;
                         _gx[256] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * akl_cache[64];
+                        double Rqc = xlxk * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
