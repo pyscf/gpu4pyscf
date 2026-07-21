@@ -531,7 +531,7 @@ def _ip1_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ij_prims = nps[0] * nps[1]
     nroots = (order + 1) // 2 + 1
 
-    unit = nroots*2 + g_size*3 + 8
+    unit = nroots*2 + g_size*3 + 6
     counts = (shm_size - ij_prims * 8) // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n

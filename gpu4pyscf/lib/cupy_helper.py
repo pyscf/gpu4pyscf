@@ -323,7 +323,8 @@ def add_sparse(a, b, indices):
     '''
     assert a.device == b.device
     assert a.flags.c_contiguous
-    assert b.flags.c_contiguous
+    if not b.flags.c_contiguous:
+        b = cupy.ascontiguousarray(b)
     if len(indices) == 0: return a
     indices = cupy.asarray(indices, dtype=np.int32)
     n = a.shape[-1]
