@@ -59,11 +59,11 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dm0_sf = dm0[0] + dm0[1]
     dme0_sf = dme0[0] + dme0[1]
 
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
     # dh = (\nabla i | hcore | j) + (i | \nabla Vnuc | j)
     dh = rhf_grad._hcore_grad_without_ecp(mol, dm0_sf)
-
-    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
-    ds = rhf_grad.contract_h1e_dm(mol, s1, dme0_sf, hermi=1)
 
     # Calculate ECP contributions in (i | \nabla hcore | j) and
     # (\nabla i | hcore | j) simultaneously
@@ -74,8 +74,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
         dh[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0_sf)
 
-    if mol._pseudo:
-        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
+    ds = rhf_grad.contract_h1e_dm(mol, s1, dme0_sf, hermi=1)
 
     t1 = log.timer_debug1('gradients of h1e', *t1)
 
