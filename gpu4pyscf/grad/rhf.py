@@ -244,7 +244,7 @@ def int1e_ipnuc(mol):
     out = sorted_mol.apply_CT_mat_C(out.reshape(3, nao, nao))
     return out
 
-def _hcore_grad_without_ecp(mol, dm0):
+def _grad_nuc_without_ecp(mol, dm0):
     from gpu4pyscf.pbc.gto.int1e import int1e_ipkin
     coords = mol.atom_coords()
     charges = cp.asarray(-mol.atom_charges(), dtype=np.float64)
@@ -320,25 +320,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
-    if mol._pseudo:
-        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
-
-    # dh = (\nabla i | hcore | j) + (i | \nabla Vnuc | j)
-    dh = _hcore_grad_without_ecp(mol, dm0)
-
-    # Calculate ECP contributions in (i | \nabla hcore | j) and
-    # (\nabla i | hcore | j) simultaneously
-    if len(mol._ecpbas) > 0:
-        # TODO: slice ecp_atoms
-        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
-        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms).sum(axis=0)
-        dh -= contract_h1e_dm(mol, h1_ecp, dm0, hermi=1)
-
-        dh[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0)
-
-    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
-    ds = contract_h1e_dm(mol, s1, dme0, hermi=1)
-
+    e1_grad = mf_grad._hcore_energy(dm0, dme0)
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
@@ -349,10 +331,31 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     for k, ia in enumerate(atmlst):
         extra_force[k] += cp.asnumpy(mf_grad.extra_force(ia, locals()))
 
-    de = dh - ds + e2_grad
+    de = e1_grad + e2_grad
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
     return de
+
+def _hcore_energy(mf_grad, dm0, dme0):
+    mol = mf_grad.mol
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
+    # dh = (\nabla i | hcore | j) + (i | \nabla Vnuc | j)
+    dh = _grad_nuc_without_ecp(mol, dm0)
+
+    # Calculate ECP contributions in (i | \nabla hcore | j) and
+    # (\nabla i | hcore | j) simultaneously
+    if len(mol._ecpbas) > 0:
+        # TODO: slice ecp_atoms
+        ecp_atoms = np.unique(mol._ecpbas[:,gto.ATOM_OF])
+        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
+        dh -= contract_h1e_dm(mol, h1_ecp.sum(axis=0), dm0, hermi=1)
+        dh[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0).get()
+
+    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
+    dh -= contract_h1e_dm(mol, s1, dme0, hermi=1)
+    return dh
 
 def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     '''
@@ -411,7 +414,7 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
 
     # Contributions due to ECP
     if len(mol._ecpbas) > 0:
-        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
+        ecp_atoms = np.unique(mol._ecpbas[:,gto.ATOM_OF])
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
         h1_ecp = h1_ecp + h1_ecp.transpose([0,1,3,2])
         h1mo = contract('nxij,jo->nxio', h1_ecp, orbo)
@@ -488,7 +491,6 @@ class GradientsBase(lib.StreamObject):
     dump_flags  = rhf_grad_cpu.GradientsBase.dump_flags
 
     reset       = rhf_grad_cpu.GradientsBase.reset
-    get_hcore   = get_hcore
     get_jk      = NotImplemented
     get_j       = NotImplemented
     get_k       = NotImplemented
@@ -503,7 +505,9 @@ class GradientsBase(lib.StreamObject):
     _write      = rhf_grad_cpu.GradientsBase._write
     as_scanner  = as_scanner
 
+    get_hcore   = get_hcore
     get_dispersion = get_dispersion
+    _hcore_energy = _hcore_energy
 
     def get_ovlp(self, mol):
         from gpu4pyscf.pbc.gto.int1e import int1e_ipovlp

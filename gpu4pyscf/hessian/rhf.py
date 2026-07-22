@@ -157,13 +157,16 @@ def _hcore_energy(hessobj, dm0, dme0):
     de_hcore = _hess_nuc_without_ecp(mol, dm0)
     with_ecp = len(mol._ecpbas) > 0
     if with_ecp:
-        de_hcore += hess_nuc_elec_ecp(mol, dm0)
+        de_hcore += hess_nuc_elec_ecp(mol, dm0).transpose(2,3,0,1) * 2.
 
-    t_aa = mol.intor('int1e_ipipkin', comp=9)
-    t_ab = cp.asarray(mol.intor('int1e_ipkinip', comp=9))
-    nao = t_ab.shape[1]
-    t_aa = contract('xypq,qp->pxy', t_aa.reshape(3, 3, nao, nao), dm0)
-    t_ab = contract('xypq,qp->pqxy', t_ab.reshape(3, 3, nao, nao), dm0)
+    h1aa = cp.asarray(mol.intor('int1e_ipipkin', comp=9))
+    h1ab = cp.asarray(mol.intor('int1e_ipkinip', comp=9))
+    if with_ecp:
+        h1aa += get_ecp_ipip(mol, 'ipipv').sum(axis=0)
+        h1ab += get_ecp_ipip(mol, 'ipvip').sum(axis=0)
+    nao = h1ab.shape[1]
+    h1aa = contract('xypq,qp->pxy', h1aa.reshape(3, 3, nao, nao), dm0)
+    h1ab = contract('xypq,qp->pqxy', h1ab.reshape(3, 3, nao, nao), dm0)
 
     s1aa, s1ab, _ = get_ovlp(mol)
     s1aa = contract('xypq,qp->pxy', s1aa.reshape(3, 3, nao, nao), dme0)
@@ -172,10 +175,10 @@ def _hcore_energy(hessobj, dm0, dme0):
     natm = mol.natm
     ao_loc = mol.ao_loc
     atm_labels = np.repeat(mol._bas[:,ATOM_OF], ao_loc[1:]-ao_loc[:-1])
-    de = _aggregate_to_atoms(t_ab-s1ab, natm, atm_labels, axis=(0,1))
+    de = _aggregate_to_atoms(h1ab-s1ab, natm, atm_labels, axis=(0,1))
 
     de_diag = cp.zeros((natm, 3, 3))
-    cp.add.at(de_diag, atm_labels, t_aa-s1aa)
+    cp.add.at(de_diag, atm_labels, h1aa-s1aa)
     de[np.diag_indices(natm)] += de_diag
     de_hcore += de + de.transpose(1,0,3,2)
     return de_hcore

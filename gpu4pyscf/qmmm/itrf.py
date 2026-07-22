@@ -26,6 +26,7 @@ import gpu4pyscf
 from gpu4pyscf.lib import utils, logger
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
+from gpu4pyscf.grad.rhf import contract_h1e_dm
 
 
 def add_mm_charges(scf_method, atoms_or_coords, charges, radii=None, unit=None):
@@ -184,6 +185,20 @@ class QMMMGrad:
 
         g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts)
         return g_qm
+
+    def _hcore_energy(self, dm0, dme0):
+        e1_grad = super()._hcore_energy(dm0, dme0)
+
+        mm_mol = self.base.mm_mol
+        coords = mm_mol.atom_coords()
+        charges = mm_mol.atom_charges()
+        if mm_mol.charge_model == 'gaussian':
+            expnts = mm_mol.get_zetas()
+        else:
+            expnts = None
+        h1 = int1e_grids_ip1(self.mol, coords, charges = charges, charge_exponents = expnts)
+        e1_grad += contract_h1e_dm(self.mol, h1, dm0, hermi=1)
+        return e1_grad
 
     def grad_hcore_mm(self, dm, mol=None):
         r'''Nuclear gradients of the electronic energy

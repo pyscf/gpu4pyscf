@@ -26,7 +26,7 @@ eps=0.001
 def setUpModule():
     global mol
     mol = pyscf.M(
-        verbose = 0,
+        verbose = 5,
         atom = 'C 0 0 0; O 0.1 1 1.5',
         basis = {'C': 'crenbl', 'O': 'ccpvdz'},
         ecp = {'C': 'crenbl', 'O': 'crenbl'},
