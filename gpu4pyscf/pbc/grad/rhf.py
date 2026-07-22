@@ -43,6 +43,17 @@ class GradientsBase(mol_rhf.GradientsBase):
 
     get_dispersion = NotImplemented
 
+    def __init__(self, method):
+        mol_rhf.GradientsBase.__init__(self, method)
+        self.cell = method.cell
+
+    @property
+    def mol(self):
+        return self.cell
+    @mol.setter
+    def mol(self, x):
+        self.cell = x
+
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell

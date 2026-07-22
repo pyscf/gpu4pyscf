@@ -72,13 +72,14 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
                'H': 'ccpvdz'}
     )
 
-    kpts = cell.make_kpts([3,2,1])
+    kmesh = [3, 2, 1]
+    kpts = cell.make_kpts(kmesh)
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
     vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
     vhfopt.exclude_dd_block = False
     vk = vhfopt.build()._get_k_sr(dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
     s = np.array(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
-    fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA, kpts) / len(kpts)
+    fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA, kmesh) / len(kpts)
     vk += np.einsum('Kij,Kjk,Kkl->Kil', s, dm, s) * fac
 
     cell.precision = 1e-10
@@ -144,7 +145,10 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     vhfopt.exclude_dd_block = False
     vk = vhfopt.build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
 
-    ref = fft.FFTDF(cell, kpts).get_jk(dm, with_j=False, kpts=kpts)[1].get()
+    cell.precision = 1e-10
+    cell.build(0, 0)
+    cell.omega = -rsjk.OMEGA
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, with_j=False, kpts=kpts)[1].get()
     wcoulG_SR_at_G0 = np.pi / cell.omega**2 / cell.vol / len(kpts)
     s = cell.pbc_intor('int1e_ovlp', kpts=kpts)
     ref += lib.einsum('kpq,kqr,krs->kps', s, dm, s) * wcoulG_SR_at_G0
@@ -159,7 +163,7 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     dm = dm + dm.conj().transpose(0,2,1)
     vk = vhfopt._get_k_sr(dm, hermi=1, kpts=kpts).get()
 
-    ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1].get()
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1].get()
     ref += lib.einsum('kpq,kqr,krs->kps', s, dm, s) * wcoulG_SR_at_G0
     assert abs(vk - ref).max() < 1e-8
 
@@ -217,7 +221,7 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     vk = vhfopt.build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
 
     cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     wcoulG_SR_at_G0 = np.pi / cell.omega**2 / cell.vol / nkpts
     s = cell.pbc_intor('int1e_ovlp', kpts=kpts)
     ref += lib.einsum('kpq,kqr,krs->kps', s, dm, s) * wcoulG_SR_at_G0
@@ -228,7 +232,7 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     dm = dm + np.random.rand(nkpts, nao, nao)*.1j
     vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
 
-    ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     ref += lib.einsum('kpq,kqr,krs->kps', s, dm, s) * wcoulG_SR_at_G0
     assert abs(vk - ref).max() < 1e-8
 
@@ -324,8 +328,9 @@ def test_vj_hermi1_kpts_vs_fft():
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_k=False, kpts=kpts)[0].get()
-    assert abs(vj - ref).max() < 1e-7
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(
+        dm, hermi=1, with_k=False, kpts=kpts)[0].get()
+    assert abs(vj - ref).max() < 1e-8
 
 def test_vk_hermi1_kpts_vs_aft():
     cell = pyscf.M(
@@ -397,7 +402,8 @@ def test_vk_hermi0_kpts_vs_fft():
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(
+        dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
 def test_ejk_sr_ip1_per_atom_gamma_point():
@@ -462,7 +468,7 @@ def test_ejk_sr_ip1_per_atom_kpts():
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     cell.omega = -omega
-    vk = fft_cpu.FFTDF(cell, kpts).get_k_e1(dm, kpts=kpts, exxdiv=exxdiv)
+    vk = fft_cpu.FFTDF(cell, kpts=kpts).get_k_e1(dm, kpts=kpts, exxdiv=exxdiv)
     vhf = -.5 * vk
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
@@ -553,7 +559,7 @@ def test_ejk_ip1_per_atom_kpts():
     ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
-    vj, vk = fft_cpu.FFTDF(cell, kpts).get_jk_e1(dm, kpts=kpts, exxdiv=None)
+    vj, vk = fft_cpu.FFTDF(cell, kpts=kpts).get_jk_e1(dm, kpts=kpts, exxdiv=None)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))

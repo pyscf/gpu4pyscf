@@ -1005,7 +1005,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
         if (exxdiv == 'ewald' and
             (cell.dimension < 2 or  # 0D and 1D are computed with inf_vacuum
              (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
-            _ewald_exxdiv_for_G0(cell, kpt, dms, vk)
+            _ewald_exxdiv_for_G0(cell, None, dms, vk)
         if k_real:
             vk = vk.real
         vk = vk.reshape(dm.shape)
