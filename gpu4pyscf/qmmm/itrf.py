@@ -183,6 +183,8 @@ class QMMMGrad:
         assert atom_id is None
         h1 = _mm_charge_integrals(self.base.mm_mol, self.mol, int1e_grids_ip1)
         dm = self.base.make_rdm1()
+        if dm.ndim == 3: #UHF
+            dm = dm[0] + dm[1]
         e1_grad = contract_h1e_dm(self.mol, h1, dm, hermi=1)
         e1_grad += super().extra_force()
         return e1_grad

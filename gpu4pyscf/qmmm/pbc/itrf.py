@@ -1047,6 +1047,8 @@ class QMMMGrad:
         assert atom_id is None
         g_qm = get_hcore_mm(self)
         dm = self.base.make_rdm1()
+        if dm.ndim == 3: #UHF
+            dm = dm[0] + dm[1]
         e1_grad = contract_h1e_dm(self.mol, g_qm, dm, hermi=1)
         e1_grad += super().extra_force()
         return e1_grad

@@ -179,7 +179,9 @@ class EXTFGrad:
 
         dhcore = cp.einsum('Edij,E->dij', dipole_integral_derivative, self.base.electric_field)
         dm = self.base.make_rdm1()
-        e1_grad -= contract_h1e_dm(self.mol, dhcore, dm, hermi=1)
+        if dm.ndim == 3: #UHF
+            dm = dm[0] + dm[1]
+        e1_grad = e1_grad - contract_h1e_dm(self.mol, dhcore, dm, hermi=1)
         return e1_grad
 
     def grad_nuc(self, mol=None, atmlst=None):
