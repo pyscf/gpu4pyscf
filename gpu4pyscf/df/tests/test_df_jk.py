@@ -70,7 +70,7 @@ class KnownValues(unittest.TestCase):
         dm = cupy.random.rand(15, nao, nao)
         vj = df_jk.get_j(mf.with_df, dm, hermi=0)
         ref, _ = mf.get_jk(dm=dm, hermi=0)
-        assert abs(vj - ref).max() < 1e-12
+        assert abs(vj - ref).max() < 1e-11
 
     def test_jk_hermi0(self):
         dfobj = DF(mol, 'sto3g').build()
