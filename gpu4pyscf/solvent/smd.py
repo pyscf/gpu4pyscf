@@ -492,8 +492,10 @@ class SMD(lib.StreamObject):
         if hasattr(out, 'lebedev_order'):
             out.lebedev_order = self.lebedev_order
         out.solvent = self.solvent
-        if self.eps is not None:
-            out.eps = self.eps
-        if self.radii_table is not None:
+        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
+        out.eps = self.eps or solvent_descriptors[5]
+        if self.radii_table is None:
+            out.radii_table = smd_radii(solvent_descriptors[2])
+        else:
             out.radii_table = cupy.asnumpy(self.radii_table)
         return out

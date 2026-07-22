@@ -76,6 +76,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e_gpu, -74.3741809222222, 6)
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -27.63368769213053, 5)
 
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     def test_mcol_gks_gga(self):
 
         mf_gpu = gks.GKS(mol)
@@ -94,6 +95,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e_gpu, -74.869954771937, 6) # pyscf result
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -27.92164954706164, 5) # pyscf result
 
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     def test_mcol_gks_hyb(self):
         mf_gpu = gks.GKS(mol)
         mf_gpu.xc = 'b3lyp'
@@ -111,6 +113,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e_gpu, -74.9528036305753, 6) # pyscf result
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -28.49145406025193, 5) # pyscf result
 
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     def test_mcol_gks_mgga(self):
         mf_gpu = gks.GKS(mol)
         mf_gpu.xc = 'm06l'
@@ -128,7 +131,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e_gpu, -74.9468853267496, 6) # pyscf result
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -28.188215296679516, 5) # pyscf result
 
-    @unittest.skipIf(mcfun is None, "mcfun library not found.")
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     def test_to_cpu(self):
         mf_gpu = gks.GKS(mol1)
         mf_gpu.xc = 'lda,vwn'
@@ -144,7 +147,9 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -27.63368769213053, 5)
 
-    @unittest.skip("NumInt2C in PySCF has no to_gpu method.")
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
+                     'NumInt2C.to_gpu method is not available.')
     def test_to_gpu(self):
         mf_cpu = gks_cpu.GKS(mol1)
         mf_cpu.xc = 'lda,vwn'
@@ -202,6 +207,7 @@ class KnownValues(unittest.TestCase):
             self.assertAlmostEqual(e_gpu, e_cpu, 6)
             self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
 
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'NumInt2C.to_gpu method is not available.')
     def test_get_veff_complex(self):
@@ -222,6 +228,7 @@ class KnownValues(unittest.TestCase):
         ref = mf_cpu.get_veff(mol, dm)
         assert abs(veff.get() - ref).max() < 1e-12
 
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'NumInt2C.to_gpu method is not available.')
     def test_get_veff_real(self):
