@@ -95,6 +95,11 @@ class DF(lib.StreamObject):
         t0 = log.init_timer()
         if auxmol is None:
             self.auxmol = auxmol = addons.make_auxmol(mol, self.auxbasis)
+            # make_auxmol re-parses mol._atom (the input record), which can be
+            # stale when the geometry was updated in place through another Mole
+            # sharing mol._env (e.g. mf.mol after to_gpu()). Sync the auxiliary
+            # basis centers to the runtime coordinates explicitly.
+            auxmol.set_geom_(mol.atom_coords(unit='Bohr'), unit='Bohr')
         self.nao = mol.nao
         self.naux = auxmol.nao
 
@@ -219,9 +224,14 @@ class DF(lib.StreamObject):
         '''Reset mol and clean up relevant attributes for scanner mode'''
         if mol is not None:
             self.mol = mol
-            self.auxmol = None
-            self.intopt = None
-            self.j_engine = None
+        # auxmol, intopt and j_engine depend on the geometry of self.mol, so
+        # they must be discarded even when reset() is called without a new mol
+        # (e.g. after an in-place mol.set_geom_()). Keeping them rebuilds
+        # _cderi against stale auxiliary-basis coordinates and yields silently
+        # wrong SCF energies (issue #827).
+        self.auxmol = None
+        self.intopt = None
+        self.j_engine = None
         self._cderi = None
         self._cderi_idx = None
         self._cd_j2c = None
