@@ -1043,10 +1043,12 @@ class QMMMGrad:
         logger.timer(self, 'get_hcore', *cput0)
         return g_qm_orig + g_qm
 
-    def _hcore_energy(self, dm0, dme0):
-        e1_grad = super()._hcore_energy(dm0, dme0)
+    def extra_force(self, atom_id=None):
+        assert atom_id is None
         g_qm = get_hcore_mm(self)
-        e1_grad += contract_h1e_dm(self.mol, g_qm, dm0, hermi=1)
+        dm = self.base.make_rdm1()
+        e1_grad = contract_h1e_dm(self.mol, g_qm, dm, hermi=1)
+        e1_grad += super().extra_force()
         return e1_grad
 
     def grad_hcore_mm(self, dm, mol=None):

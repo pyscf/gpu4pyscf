@@ -66,12 +66,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     e2_grad = mf_grad.energy_ee(mol, dm0)
     log.timer_debug1('gradients of 2e part', *t1)
 
-    extra_force = np.zeros((len(atmlst),3))
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += ensure_numpy(mf_grad.extra_force(ia, locals()))
-
     de = e1_grad + e2_grad
-    de += extra_force
+    de += cupy.asnumpy(mf_grad.extra_force())
     log.timer_debug1('gradients of electronic part', *t0)
     return de
 

@@ -87,15 +87,7 @@ class QMMMSCF(QMMM):
         if mol is None:
             mol = self.mol
         h1e = super().get_hcore(mol)
-
-        mm_mol = self.mm_mol
-        coords = mm_mol.atom_coords()
-        charges = mm_mol.atom_charges()
-        if mm_mol.charge_model == 'gaussian':
-            expnts = mm_mol.get_zetas()
-        else:
-            expnts = None
-        h1e -= int1e_grids(mol, coords, charges = charges, charge_exponents = expnts)
+        h1e -= _mm_charge_integrals(self.mm_mol, self.mol, int1e_grids)
         return h1e
 
     def energy_nuc(self):
@@ -151,6 +143,16 @@ def qmmm_grad_for_scf(scf_grad):
 
     return scf_grad.view(lib.make_class((QMMMGrad, scf_grad.__class__)))
 
+def _mm_charge_integrals(mm_mol, mol, integral_fn):
+    '''Using the specified integral_fn to compute MM charge integrals for a QM molecule.'''
+    coords = mm_mol.atom_coords()
+    charges = mm_mol.atom_charges()
+    if mm_mol.charge_model == 'gaussian':
+        expnts = mm_mol.get_zetas()
+    else:
+        expnts = None
+    return integral_fn(mol, coords, charges = charges, charge_exponents = expnts)
+
 class QMMMGrad:
     __name_mixin__ = 'QMMM'
 
@@ -174,30 +176,15 @@ class QMMMGrad:
         if mol is None:
             mol = self.mol
         g_qm = super().get_hcore(mol, exclude_ecp)
-
-        mm_mol = self.base.mm_mol
-        coords = mm_mol.atom_coords()
-        charges = mm_mol.atom_charges()
-        if mm_mol.charge_model == 'gaussian':
-            expnts = mm_mol.get_zetas()
-        else:
-            expnts = None
-
-        g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts)
+        g_qm += _mm_charge_integrals(self.base.mm_mol, mol, int1e_grids_ip1)
         return g_qm
 
-    def _hcore_energy(self, dm0, dme0):
-        e1_grad = super()._hcore_energy(dm0, dme0)
-
-        mm_mol = self.base.mm_mol
-        coords = mm_mol.atom_coords()
-        charges = mm_mol.atom_charges()
-        if mm_mol.charge_model == 'gaussian':
-            expnts = mm_mol.get_zetas()
-        else:
-            expnts = None
-        h1 = int1e_grids_ip1(self.mol, coords, charges = charges, charge_exponents = expnts)
-        e1_grad += contract_h1e_dm(self.mol, h1, dm0, hermi=1)
+    def extra_force(self, atom_id=None):
+        assert atom_id is None
+        h1 = _mm_charge_integrals(self.base.mm_mol, self.mol, int1e_grids_ip1)
+        dm = self.base.make_rdm1()
+        e1_grad = contract_h1e_dm(self.mol, h1, dm, hermi=1)
+        e1_grad += super().extra_force()
         return e1_grad
 
     def grad_hcore_mm(self, dm, mol=None):

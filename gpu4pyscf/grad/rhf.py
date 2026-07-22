@@ -327,12 +327,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     e2_grad = mf_grad.energy_ee(mol, dm0)
     log.timer_debug1('gradients of 2e part', *t3)
 
-    extra_force = np.zeros((len(atmlst),3))
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asnumpy(mf_grad.extra_force(ia, locals()))
-
     de = e1_grad + e2_grad
-    de += extra_force
+    de += cupy.asnumpy(mf_grad.extra_force())
     log.timer_debug1('gradients of electronic part', *t0)
     return de
 
@@ -372,8 +368,9 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
         raise NotImplementedError('X2C gradients')
 
     orbo = mo_coeff[:,mo_occ>0]
+    nmo = mo_coeff.shape[1]
     nocc = orbo.shape[1]
-    dh1e = cupy.empty([natm,3,nao,nocc])
+    dh1e = cupy.empty([natm,3,nmo,nocc])
 
     # derivative w.r.t nuclie position
     coords = mol.atom_coords()
@@ -499,7 +496,6 @@ class GradientsBase(lib.StreamObject):
     grad_nuc    = rhf_grad_cpu.GradientsBase.grad_nuc
     grad_elec   = NotImplemented
     optimizer   = rhf_grad_cpu.GradientsBase.optimizer
-    extra_force = rhf_grad_cpu.GradientsBase.extra_force
     grad        = rhf_grad_cpu.GradientsBase.grad
     _finalize   = rhf_grad_cpu.GradientsBase._finalize
     _write      = rhf_grad_cpu.GradientsBase._write
@@ -546,19 +542,13 @@ class GradientsBase(lib.StreamObject):
         '''
         raise NotImplementedError
 
-    @property
-    def grad_disp(self):
-        logger.warn(self, 'Attributes grad_disp and grad_mf are deprecated. '
-                    'They will be removed in the future')
-        g_disp = 0
-        mf = self.base
-        if hasattr(mf, 'disp') and mf.disp is not None:
-            g_disp = self.get_dispersion()
-        return g_disp
+    def extra_force(self, atom_id=None):
+        '''Hook for additional contributions to the analytical gradients.
 
-    @property
-    def grad_mf(self):
-        return self.de - self.grad_disp
+        `atom_id` is the index of the atom for which to compute the force.
+	If not provided, the contribution for all atoms is returned.
+        '''
+        return 0
 
 
 class Gradients(GradientsBase):
