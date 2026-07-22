@@ -32,11 +32,13 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, int2c2e,
-    int2c2e_ip1, int3c2e_scheme, _check_rsh_factors)
+    int2c2e_ip1, int3c2e_scheme, _check_rsh_factors, _int3c2e_ip1_evaluator,
+    int3c2e_scheme_ip1, int3c2e_scheme_ipaux)
 from gpu4pyscf.df import df
 from gpu4pyscf.df.df_jk import factorize_dm
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
+from gpu4pyscf.hessian.rhf import _hcore_energy, _aggregate_to_atoms
 from gpu4pyscf.lib import multi_gpu
 
 num_devices = multi_gpu.num_devices
@@ -720,70 +722,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     ej += ej_ao_aux.transpose(1,0,3,2)
     return ej
 
-def _int3c2e_ip1_evaluator(int3c2e_opt, scheme, batch_size,
-                           kern='fill_int3c2e_ip1', omega=None):
-    mol = int3c2e_opt.mol
-    auxmol = int3c2e_opt.auxmol
-    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
-    nsp_per_block, gout_stride, shm_size = scheme
-    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
-    lmax = mol.uniq_l_ctr[:,0].max()
-    laux = auxmol.uniq_l_ctr[:,0].max()
-    shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-
-    bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-        int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
-    ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
-    nao_pair = int(ao_pair_loc[-1].get())
-
-    l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
-    uniq_l_ctr_aux = auxmol.uniq_l_ctr
-    aux_loc = auxmol.ao_loc
-    l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
-        l_ctr_aux_offsets, uniq_l_ctr_aux, batch_size)
-    aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
-    # assert cp.array_equal(aux_sorting, argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux))
-
-    ksh_offsets_cpu = l_ctr_aux_offsets
-    ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
-    aux_splits = range(len(ksh_offsets_cpu))
-    aux_offsets = aux_loc[ksh_offsets_cpu[aux_splits]]
-    kern = getattr(libvhf_rys, kern)
-    int3c2e_envs = int3c2e_opt.int3c2e_envs
-
-    def evaluate_j3c(batch_id, out=None):
-        aux_split0 = aux_splits[batch_id]
-        aux_split1 = aux_splits[batch_id+1]
-        ksh0 = ksh_offsets_cpu[aux_split0]
-        ksh1 = ksh_offsets_cpu[aux_split1]
-        aux_ao_offset = aux_loc[ksh0]
-        naux = aux_loc[ksh1] - aux_ao_offset
-        out = ndarray((3, nao_pair, naux), buffer=out)
-        if out.size == 0:
-            return out
-
-        err = kern(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int3c2e_envs),
-            ctypes.c_double(omega),
-            ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
-            ctypes.c_int(shm_size_max),
-            ctypes.c_int(len(shl_pair_offsets) - 1),
-            ctypes.c_int(1),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_offsets_gpu[aux_split0:].data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(0),
-            ctypes.c_int(aux_ao_offset),
-            ctypes.c_int(nao_pair),
-            ctypes.c_int(naux))
-        if err != 0:
-            raise RuntimeError(f'{kern} failed')
-        return out
-    return evaluate_j3c, aux_sorting, aux_offsets
-
 def _argsort_aux_by_atom(auxmol, aux_sorting=None):
     # group AO inidices by atom Id
     aux_idx = auxmol.get_ao_idx(cart=True)
@@ -831,24 +769,6 @@ def _bas_atom_labels(mol, aux_sorting=None):
         atm_labels, tmp = np.empty_like(atm_labels), atm_labels
         atm_labels[cp.asnumpy(aux_sorting)] = tmp
     return atm_labels
-
-def _aggregate_to_atoms(a, natm, atom_labels, axis):
-    if axis == 0:
-        shape = list(a.shape)
-        shape[0] = natm
-        indices = atom_labels
-    elif axis == 1:
-        shape = list(a.shape)
-        shape[1] = natm
-        indices = (slice(None), atom_labels)
-    elif axis == (0, 1):
-        shape = [natm if i in axis else n for i, n in enumerate(a.shape)]
-        indices = (atom_labels[:,None], atom_labels)
-    else:
-        raise NotImplementedError
-    out = cp.zeros(shape)
-    cp.add.at(out, indices, a)
-    return out
 
 def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
               verbose=None):
@@ -1219,16 +1139,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
 
 def int3c2e_scheme_ip2(omega=0, gout_width=None):
     return int3c2e_scheme(
-        short_range=omega<0, gout_width=gout_width, deriv=(1,1,2),
-        angular_inc=2)
-
-def int3c2e_scheme_ip1(omega=0, gout_width=None):
-    return int3c2e_scheme(
-        short_range=omega<0, gout_width=gout_width, deriv=(1,0,0))
-
-def int3c2e_scheme_ipaux(omega=0, gout_width=None):
-    return int3c2e_scheme(
-        short_range=omega<0, gout_width=gout_width, deriv=(0,0,1))
+        short_range=omega<0, gout_width=gout_width, deriv=(1,1,0))
 
 def _int2c2e_ip2_per_atom(mol, dm, omega=0):
     '''Second order nuclear derivatives of 2c2e Coulomb integrals.
@@ -1304,30 +1215,6 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     log.timer_debug1('hcore contribution', *t1)
     log.timer('RHF partial hessian', *time0)
     return e1 + ejk
-
-def _hcore_energy(hessobj, dm0, dme0):
-    mol = hessobj.mol
-    de_hcore = rhf_hess._e_hcore_generator(hessobj, dm0)
-    s1aa, s1ab, _ = rhf_hess.get_ovlp(mol)
-    s1aa = cp.asarray(s1aa, order='C')
-    s1ab = cp.asarray(s1ab, order='C')
-    h1aa = 2.0*cp.einsum('xypq,pq->pxy', s1aa, dme0)
-    h1ab = 2.0*cp.einsum('xypq,pq->pqxy', s1ab, dme0)
-    s1aa = s1ab = dme0 = None
-
-    aoslices = mol.aoslice_by_atom()
-    natm = mol.natm
-    e1 = cp.zeros([natm,natm,3,3])
-    for ia in range(natm):
-        p0, p1 = aoslices[ia,2:]
-        e1[ia,ia] -= h1aa[p0:p1].sum(axis=0)
-        for ja in range(ia+1):
-            q0, q1 = aoslices[ja,2:]
-            e1[ia,ja] -= h1ab[p0:p1,q0:q1].sum(axis=[0,1])
-            e1[ia,ja] += de_hcore(ia, ja)
-            if ia != ja:
-                e1[ja,ia] = e1[ia,ja].T
-    return e1
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mf = hessobj.base

@@ -24,6 +24,7 @@ from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.df.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
 from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.gto.mole import SortedMole
 
 def setUpModule():
     global mol1, mol, auxmol
@@ -201,7 +202,8 @@ class KnownValues(unittest.TestCase):
         mo_coeff = cp.array(np.random.rand(nao, nao) - .5) * .2
         mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
-        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
+        pmol = SortedMole.from_mol(mol, decontract=True)
+        opt = int3c2e.Int3c2eOpt(pmol, auxmol).build()
         dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
         dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
@@ -241,7 +243,8 @@ class KnownValues(unittest.TestCase):
         mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
 
-        opt = int3c2e.Int3c2eOpt(mol2, auxmol).build()
+        pmol2 = SortedMole.from_mol(mol2, decontract=True)
+        opt = int3c2e.Int3c2eOpt(pmol2, auxmol).build()
         veff = df_rhf_hess._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
 
         disp = .5e-3

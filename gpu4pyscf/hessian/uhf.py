@@ -142,38 +142,22 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     mocca = mo_coeff[0][:,mo_occ[0]>0]
     moccb = mo_coeff[1][:,mo_occ[1]>0]
-    dm0a = mocca.dot(mocca.T)
-    dm0b = moccb.dot(moccb.T)
-    dm0 = cp.asarray((dm0a, dm0b))
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     vhfopt = mf._opt_gpu.get(None, None)
     ejk = rhf_hess_gpu._partial_ejk_ip2(mol, dm0, vhfopt, j_factor, k_factor,
                                         verbose=log)
     t1 = log.timer_debug1('hessian of 2e part', *t1)
 
+    dm0_sf = dm0[0] + dm0[1]
     # Energy weighted density matrix
     mo_ea = mo_energy[0][mo_occ[0]>0]
     mo_eb = mo_energy[1][mo_occ[1]>0]
     dme0 = (mocca*mo_ea).dot(mocca.T)
     dme0+= (moccb*mo_eb).dot(moccb.T)
-    de_hcore = rhf_hess_gpu._e_hcore_generator(hessobj, dm0a+dm0b)
-    s1aa, s1ab, s1a = rhf_hess_gpu.get_ovlp(mol)
 
-    aoslices = mol.aoslice_by_atom()
-    e1 = cupy.zeros((mol.natm,mol.natm,3,3))
-    for i0, ia in enumerate(atmlst):
-        p0, p1 = aoslices[ia][2:]
-        e1[i0,i0] -= contract('xypq,pq->xy', s1aa[:,:,p0:p1], dme0[p0:p1])*2
-
-        for j0, ja in enumerate(atmlst[:i0+1]):
-            q0, q1 = aoslices[ja][2:]
-            e1[i0,j0] -= contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
-            e1[i0,j0] += de_hcore(ia, ja)
-
-        for j0 in range(i0):
-            e1[j0,i0] = e1[i0,j0].T
-
+    de_hcore = rhf_hess_gpu._hcore_energy(hessobj, dm0_sf, dme0)
     log.timer('UHF partial hessian', *time0)
-    return e1, ejk
+    return de_hcore, ejk
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
@@ -212,31 +196,6 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
                 h1mob[ia,ix] += mo_b.T.dot(vhfb[i,ix].dot(moccb))
         vj = vja = vjb = vka = vkb = vhfa = vhfb = None
     return h1moa, h1mob
-
-def get_hcore(mol):
-    '''Part of the second derivatives of core Hamiltonian'''
-    h1aa = mol.intor('int1e_ipipkin', comp=9)
-    h1ab = mol.intor('int1e_ipkinip', comp=9)
-    if mol._pseudo:
-        NotImplementedError('Nuclear hessian for GTH PP')
-    else:
-        h1aa+= mol.intor('int1e_ipipnuc', comp=9)
-        h1ab+= mol.intor('int1e_ipnucip', comp=9)
-    if len(mol._ecpbas) > 0:
-        h1aa += get_ecp_ip(mol, 'ipipv')
-        h1ab += get_ecp_ip(mol, 'ipvip')
-        #h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
-        #h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
-    nao = h1aa.shape[-1]
-    return h1aa.reshape(3,3,nao,nao), h1ab.reshape(3,3,nao,nao)
-
-def get_ovlp(mol):
-    from gpu4pyscf.pbc.gto import int1e
-    s1a = -int1e.int1e_ipovlp(mol)
-    nao = s1a.shape[-1]
-    s1aa = mol.intor('int1e_ipipovlp', comp=9).reshape(3,3,nao,nao)
-    s1ab = mol.intor('int1e_ipovlpip', comp=9).reshape(3,3,nao,nao)
-    return s1aa, s1ab, s1a
 
 def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
               fx=None, atmlst=None, max_memory=4000, verbose=None,

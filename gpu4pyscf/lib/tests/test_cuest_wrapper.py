@@ -1276,8 +1276,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        for ia in range(mol.natm):
-            ref_dvhf[ia] += gobj.extra_force(ia, {"vhf" : vhf})
+        ref_dvhf += gobj.extra_force()
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1306,8 +1305,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        for ia in range(mol.natm):
-            ref_dvhf[ia] += gobj.extra_force(ia, {"vhf" : vhf})
+        ref_dvhf += gobj.extra_force()
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1336,8 +1334,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        for ia in range(mol.natm):
-            ref_dvhf[ia] += gobj.extra_force(ia, {"vhf" : vhf})
+        ref_dvhf += gobj.extra_force()
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1369,8 +1366,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('sxij,sij->x', vhf[:,:,p0:p1], (dm + dm.transpose(0,2,1))[:,p0:p1])
-        for ia in range(mol.natm):
-            ref_dvhf[ia] += gobj.extra_force(ia, {"vhf" : vhf})
+        ref_dvhf += gobj.extra_force()
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)

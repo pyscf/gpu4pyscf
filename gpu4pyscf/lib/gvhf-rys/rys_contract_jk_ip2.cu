@@ -44,10 +44,9 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
     extern __shared__ double shared_memory[];
     __shared__ int ntasks, pair_ij, pair_kl0;
     __shared__ int ish, jsh;
-    __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[4];
-    __shared__ int expi, expj;
+    __shared__ int ri, expi, expj;
 
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -76,10 +75,9 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
 
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
-    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+8);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+6);
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
@@ -115,12 +113,12 @@ while (1) {
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     }
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[t_id] = env[ri_ptr+t_id];
-        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - env[ri_ptr+t_id];
     }
     __syncthreads();
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -287,10 +285,10 @@ while (1) {
             int lp = klp % lprim;
             double ak = env[expk+kp];
             double al = env[expl+lp];
+            double akl = ak + al;
+            double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double akl = ak + al;
-                double al_akl = al / akl;
                 double xlxk = rlrk[0*nsq_per_block];
                 double ylyk = rlrk[1*nsq_per_block];
                 double zlzk = rlrk[2*nsq_per_block];
@@ -298,8 +296,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
@@ -311,11 +307,9 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double akl = akl_cache[0];
-                double al_akl = akl_cache[nsq_per_block];
-                double xij = ri[0] + rjri[0] * aj_aij;
-                double yij = ri[1] + rjri[1] * aj_aij;
-                double zij = ri[2] + rjri[2] * aj_aij;
+                double xij = env[ri+0] + rjri[0] * aj_aij;
+                double yij = env[ri+1] + rjri[1] * aj_aij;
+                double zij = env[ri+2] + rjri[2] * aj_aij;
                 double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
@@ -346,7 +340,6 @@ while (1) {
                     }
                     double rt = rw[irys*2*nsq_per_block];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double rt_akl = rt_aa * aij;
@@ -378,7 +371,7 @@ while (1) {
                         int i = n / 3; //for i in range(lij+1):
                         int _ix = n % 3;
                         double *_gx = gx + (i + _ix * g_size) * nsq_per_block;
-                        double Rqc = rlrk[_ix*nsq_per_block] * akl_cache[nsq_per_block];
+                        double Rqc = rlrk[_ix*nsq_per_block] * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[_ix*nsq_per_block];
                         //for i in range(lij+1):
                         //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
@@ -750,10 +743,10 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     extern __shared__ double shared_memory[];
     __shared__ int ntasks, pair_ij, pair_kl0;
     __shared__ int ish, jsh;
-    __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[4];
-    __shared__ int expi, expj;
+    __shared__ int ri, expi, expj;
+
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
     uint32_t nbas = envs.nbas;
@@ -781,10 +774,9 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
 
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
-    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+8);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+6);
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
@@ -820,12 +812,12 @@ while (1) {
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     }
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[t_id] = env[ri_ptr+t_id];
-        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - env[ri_ptr+t_id];
     }
     __syncthreads();
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -986,10 +978,10 @@ while (1) {
             int lp = klp % lprim;
             double ak = env[expk+kp];
             double al = env[expl+lp];
+            double akl = ak + al;
+            double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double akl = ak + al;
-                double al_akl = al / akl;
                 double xlxk = rlrk[0*nsq_per_block];
                 double ylyk = rlrk[1*nsq_per_block];
                 double zlzk = rlrk[2*nsq_per_block];
@@ -997,8 +989,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
@@ -1010,11 +1000,9 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double akl = akl_cache[0];
-                double al_akl = akl_cache[nsq_per_block];
-                double xij = ri[0] + rjri[0] * aj_aij;
-                double yij = ri[1] + rjri[1] * aj_aij;
-                double zij = ri[2] + rjri[2] * aj_aij;
+                double xij = env[ri+0] + rjri[0] * aj_aij;
+                double yij = env[ri+1] + rjri[1] * aj_aij;
+                double zij = env[ri+2] + rjri[2] * aj_aij;
                 double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
@@ -1045,7 +1033,6 @@ while (1) {
                     }
                     double rt = rw[irys*2*nsq_per_block];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double rt_akl = rt_aa * aij;
@@ -1077,7 +1064,7 @@ while (1) {
                         int i = n / 3; //for i in range(lij+1):
                         int _ix = n % 3;
                         double *_gx = gx + (i + _ix * g_size) * nsq_per_block;
-                        double Rqc = rlrk[_ix*nsq_per_block] * akl_cache[nsq_per_block];
+                        double Rqc = rlrk[_ix*nsq_per_block] * al_akl;
                         double cpx = Rqc + rt_akl * Rpq[_ix*nsq_per_block];
                         //for i in range(lij+1):
                         //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
