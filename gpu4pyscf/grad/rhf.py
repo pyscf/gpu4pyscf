@@ -360,7 +360,6 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     mf = mf_grad.base
     mol = mf.mol
     natm = mol.natm
-    nao = mol.nao
     if mo_coeff is None: mo_coeff = cupy.asarray(mf.mo_coeff)
     if mo_occ is None: mo_occ = mf.mo_occ
 
@@ -546,7 +545,7 @@ class GradientsBase(lib.StreamObject):
         '''Hook for additional contributions to the analytical gradients.
 
         `atom_id` is the index of the atom for which to compute the force.
-	If not provided, the contribution for all atoms is returned.
+        If not provided, the contribution for all atoms is returned.
         '''
         return 0
 
