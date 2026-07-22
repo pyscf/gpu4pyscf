@@ -102,7 +102,7 @@ class KnownValues(unittest.TestCase):
                      'Require new interface developed in pyscf-2.13')
     def test_to_gpu(self):
         from pyscf.pbc.scf import smearing as cpu_smearing
-        mf = cell.RHF().smearing(sigma=0.1)
+        mf = cell.KRHF().smearing(sigma=0.1)
         gpu_mf = mf.to_gpu()
         assert isinstance(gpu_mf, smearing._SmearingKSCF)
         assert gpu_mf.sigma == 0.1
@@ -110,6 +110,11 @@ class KnownValues(unittest.TestCase):
         mf = gpu_mf.to_cpu()
         assert isinstance(mf, cpu_smearing._SmearingKSCF)
         assert mf.sigma == 0.1
+
+        mf = cell.RHF().smearing(sigma=0.1)
+        gpu_mf = mf.to_gpu()
+        assert isinstance(gpu_mf, smearing.mol_smearing._SmearingSCF)
+        assert gpu_mf.sigma == 0.1
 
 if __name__ == "__main__":
     print("Basic Tests for GPU PBC-SCF Smearing")

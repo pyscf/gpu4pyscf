@@ -179,7 +179,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         for k1, ao1 in enumerate(ao1_kpts):
             ao1T = ao1.T
             kpt1 = kpts_band[k1]
-            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh=mesh)
+            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh=mesh, kpts=kpts)
             if is_zero(kpt1-kpt2):
                 expmikr = cp.array(1.)
             else:
