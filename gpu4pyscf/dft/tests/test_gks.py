@@ -147,6 +147,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -27.63368769213053, 5)
 
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'NumInt2C.to_gpu method is not available.')
     def test_to_gpu(self):
@@ -206,6 +207,7 @@ class KnownValues(unittest.TestCase):
             self.assertAlmostEqual(e_gpu, e_cpu, 6)
             self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
 
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'NumInt2C.to_gpu method is not available.')
     def test_get_veff_complex(self):
@@ -220,13 +222,13 @@ class KnownValues(unittest.TestCase):
         ref = mf_cpu.get_veff(mol, dm)
         assert abs(veff.get() - ref).max() < 1e-12
 
-        if mcfun is not None:
-            mf_cpu.xc = 'b3lyp'
-            mf_gpu.xc = 'b3lyp'
-            veff = mf_gpu.get_veff(mol, cp.array(dm))
-            ref = mf_cpu.get_veff(mol, dm)
-            assert abs(veff.get() - ref).max() < 1e-12
+        mf_cpu.xc = 'b3lyp'
+        mf_gpu.xc = 'b3lyp'
+        veff = mf_gpu.get_veff(mol, cp.array(dm))
+        ref = mf_cpu.get_veff(mol, dm)
+        assert abs(veff.get() - ref).max() < 1e-12
 
+    @unittest.skipIf(mcfun is None, "mcfun library not installed.")
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'NumInt2C.to_gpu method is not available.')
     def test_get_veff_real(self):
@@ -241,12 +243,11 @@ class KnownValues(unittest.TestCase):
         ref = mf_cpu.get_veff(mol, dm)
         assert abs(veff.get() - ref).max() < 1e-12
 
-        if mcfun is not None:
-            mf_cpu.xc = 'camb3lyp'
-            mf_gpu.xc = 'camb3lyp'
-            veff = mf_gpu.get_veff(mol, cp.array(dm))
-            ref = mf_cpu.get_veff(mol, dm)
-            assert abs(veff.get() - ref).max() < 1e-12
+        mf_cpu.xc = 'camb3lyp'
+        mf_gpu.xc = 'camb3lyp'
+        veff = mf_gpu.get_veff(mol, cp.array(dm))
+        ref = mf_cpu.get_veff(mol, dm)
+        assert abs(veff.get() - ref).max() < 1e-12
 
 
 if __name__ == "__main__":

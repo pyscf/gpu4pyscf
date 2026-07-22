@@ -283,16 +283,4 @@ H -0.646 -0.464 -0.804
 
 if __name__ == "__main__":
     print("Full Tests for Gradient of SMD")
-    #unittest.main()
-    setUpModule()
-    if 1:# def test_to_gpu(self):
-        mf = mol.RKS(xc='b3lyp').SMD()
-        if Version(pyscf.__version__) <= Version('2.11.0'):
-            mf.with_solvent.solvent = 'water'
-            mf.with_solvent.sasa_ng = 302
-        mf.conv_tol = 1e-12
-        mf.kernel()
-        gradobj = mf.nuc_grad_method()
-        #print(gradobj.base.with_solvent.solvent)
-        #print(gradobj.base.with_solvent.sasa_ng)
-        g_cpu = gradobj.kernel()
+    unittest.main()
