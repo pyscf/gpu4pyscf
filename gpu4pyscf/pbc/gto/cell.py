@@ -18,7 +18,7 @@ import cupy as cp
 from gpu4pyscf.gto.mole import Cell, SortedCell
 
 __all__ = [
-    'get_Gv_weights', 'get_Gv' 'get_SI',
+    'get_Gv_weights', 'get_Gv', 'get_SI',
 ]
 
 def get_Gv_base(cell, mesh=None):
