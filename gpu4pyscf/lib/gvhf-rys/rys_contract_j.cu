@@ -883,7 +883,15 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             buflen += nf3_ij*nf3_kl * quartets_per_block;
             int reserved_shm_size = buflen;
             buflen += iprim * jprim;
-            rys_j_with_gout_kernel<<<workers, threads, buflen*sizeof(double)>>>(
+            buflen *= sizeof(double);
+            cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                        cudaGetErrorString(err));
+                return 1;
+            }
+            rys_j_with_gout_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
         } else {
@@ -891,7 +899,15 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             int reserved_shm_size = buflen;
             buflen += iprim * jprim;
             buflen += nf3_ij; // dm_ij_cache
-            rys_j_kernel<<<workers, threads, buflen*sizeof(double)>>>(
+            buflen *= sizeof(double);
+            cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                        cudaGetErrorString(err));
+                return 1;
+            }
+            rys_j_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
         }
@@ -909,7 +925,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
     return 0;
 }
 
-int RYS_init_rysj_constant(int shm_size)
+int RYS_init_rysj_constant()
 {
     Fold2Index i_in_fold2idx[165];
     Fold3Index i_in_fold3idx[495];
@@ -931,14 +947,6 @@ int RYS_init_rysj_constant(int shm_size)
     }
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
-    cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
-                cudaGetErrorString(err));
-        return 1;
-    }
     return 0;
 }
 }
