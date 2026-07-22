@@ -72,13 +72,14 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
                'H': 'ccpvdz'}
     )
 
-    kpts = cell.make_kpts([3,2,1])
+    kmesh = [3, 2, 1]
+    kpts = cell.make_kpts(kmesh)
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
     vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
     vhfopt.exclude_dd_block = False
     vk = vhfopt.build()._get_k_sr(dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
     s = np.array(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
-    fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA, kpts) / len(kpts)
+    fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA, kmesh) / len(kpts)
     vk += np.einsum('Kij,Kjk,Kkl->Kil', s, dm, s) * fac
 
     cell.precision = 1e-10

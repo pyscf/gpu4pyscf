@@ -368,7 +368,7 @@ def get_k_e1_kpts(mydf, dm_kpts, kpts=None, exxdiv=None):
 def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     from gpu4pyscf.pbc.gto.int1e import int1e_ovlp
     s = int1e_ovlp(cell, kpts=kpts)
-    m = tools.madelung(cell)
+    m = tools.madelung(cell, kpts)
     if kpts is None:
         for i,dm in enumerate(dms):
             vk[i] += m * s.dot(dm).dot(s)

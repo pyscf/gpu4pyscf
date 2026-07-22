@@ -64,14 +64,14 @@ class KnownValues(unittest.TestCase):
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.13'),
                      'Require new interface developed in pyscf-2.13')
     def test_to_gpu(self):
-        from pyscf.scf import smearing as cpu_smearing
+        from pyscf.scf.smearing import _SmearingSCF as _SmearingSCF_cpu
         mf = mol.RHF().smearing(sigma=0.1)
         gpu_mf = mf.to_gpu()
         assert isinstance(gpu_mf, smearing._SmearingSCF)
         assert gpu_mf.sigma == 0.1
 
         mf = gpu_mf.to_cpu()
-        assert isinstance(mf, cpu_smearing._SmearingSCF)
+        assert isinstance(mf, _SmearingSCF_cpu)
         assert mf.sigma == 0.1
 
 if __name__ == "__main__":

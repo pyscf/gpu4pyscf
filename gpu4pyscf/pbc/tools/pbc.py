@@ -19,7 +19,7 @@ from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.tools.pbc import get_monkhorst_pack_size, cutoff_to_mesh
 from gpu4pyscf.lib.cupy_helper import asarray, batched_vec_norm2
-from gpu4pyscf.pbc.gto.cell import get_Gv
+from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_weights, get_SI
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.
@@ -314,12 +314,11 @@ def madelung(cell, kpts=None, omega=None):
         Ecut = np.log(16*np.pi**2/(2*omega**2*(2*Ecut)**.5) / precision + 1.) * 2*omega**2
         Ecut = np.log(16*np.pi**2/(2*omega**2*(2*Ecut)**.5) / precision + 1.) * 2*omega**2
         mesh = cutoff_to_mesh(a, Ecut)
-        Gv, Gvbase, weights = ecell.get_Gv_weights(mesh)
+        Gv, Gvbase, weights = get_Gv_weights(ecell, mesh)
         wcoulG = get_coulG(ecell, Gv=Gv, omega=abs(omega), exxdiv=None) * weights
-        SI = ecell.get_SI(mesh=mesh)
+        SI = get_SI(ecell, mesh=mesh)
         ZSI = SI[0]
-        e_lr = (2*abs(omega)/np.pi**0.5 -
-                np.einsum('i,i,i->', ZSI.conj(), ZSI, wcoulG).real)
+        e_lr = 2*abs(omega)/np.pi**0.5 - float(ZSI.conj().dot(ZSI * wcoulG).real)
         if omega > 0:
             return e_lr
         else:
