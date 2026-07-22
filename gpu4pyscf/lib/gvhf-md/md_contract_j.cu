@@ -256,39 +256,67 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 boys_fn(gamma_inc, theta, rr, omega, fac/(aij*akl*sqrt(aij+akl)),
                         order, 0, nsq_per_block);
                 Rt[0] = gamma_inc[order*nsq_per_block];
+                if (order >= 1) {
+                    double _Rt_0 = Rt[0];
+                    Rt[1*nsq_per_block] = zpq * _Rt_0;
+                    Rt[2*nsq_per_block] = ypq * _Rt_0;
+                    Rt[3*nsq_per_block] = xpq * _Rt_0;
+                    Rt[0] = gamma_inc[(order-1)*nsq_per_block];
+                }
+                if (order >= 2) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsq_per_block];
+                    double _Rt_2 = Rt[2*nsq_per_block];
+                    double _Rt_3 = Rt[3*nsq_per_block];
+                    Rt[1*nsq_per_block] = zpq * _Rt_0;
+                    Rt[2*nsq_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3*nsq_per_block] = ypq * _Rt_0;
+                    Rt[4*nsq_per_block] = ypq * _Rt_1;
+                    Rt[5*nsq_per_block] = ypq * _Rt_2 + _Rt_0;
+                    Rt[6*nsq_per_block] = xpq * _Rt_0;
+                    Rt[7*nsq_per_block] = xpq * _Rt_1;
+                    Rt[8*nsq_per_block] = xpq * _Rt_2;
+                    Rt[9*nsq_per_block] = xpq * _Rt_3 + _Rt_0;
+                    Rt[0] = gamma_inc[(order-2)*nsq_per_block];
+                }
+                if (order >= 3) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsq_per_block];
+                    double _Rt_2 = Rt[2*nsq_per_block];
+                    double _Rt_3 = Rt[3*nsq_per_block];
+                    double _Rt_4 = Rt[4*nsq_per_block];
+                    double _Rt_5 = Rt[5*nsq_per_block];
+                    double _Rt_6 = Rt[6*nsq_per_block];
+                    double _Rt_7 = Rt[7*nsq_per_block];
+                    double _Rt_8 = Rt[8*nsq_per_block];
+                    double _Rt_9 = Rt[9*nsq_per_block];
+                    Rt[1 *nsq_per_block] = zpq * _Rt_0;
+                    Rt[2 *nsq_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3 *nsq_per_block] = zpq * _Rt_2 + _Rt_1 * 2;
+                    Rt[4 *nsq_per_block] = ypq * _Rt_0;
+                    Rt[5 *nsq_per_block] = ypq * _Rt_1;
+                    Rt[6 *nsq_per_block] = ypq * _Rt_2;
+                    Rt[7 *nsq_per_block] = ypq * _Rt_3 + _Rt_0;
+                    Rt[8 *nsq_per_block] = ypq * _Rt_4 + _Rt_1;
+                    Rt[9 *nsq_per_block] = ypq * _Rt_5 + _Rt_3 * 2;
+                    Rt[10*nsq_per_block] = xpq * _Rt_0;
+                    Rt[11*nsq_per_block] = xpq * _Rt_1;
+                    Rt[12*nsq_per_block] = xpq * _Rt_2;
+                    Rt[13*nsq_per_block] = xpq * _Rt_3;
+                    Rt[14*nsq_per_block] = xpq * _Rt_4;
+                    Rt[15*nsq_per_block] = xpq * _Rt_5;
+                    Rt[16*nsq_per_block] = xpq * _Rt_6 + _Rt_0;
+                    Rt[17*nsq_per_block] = xpq * _Rt_7 + _Rt_1;
+                    Rt[18*nsq_per_block] = xpq * _Rt_8 + _Rt_3;
+                    Rt[19*nsq_per_block] = xpq * _Rt_9 + _Rt_6 * 2;
+                    Rt[0] = gamma_inc[(order-3)*nsq_per_block];
+                }
             }
-            for (int n = 1; n <= order; ++n) {
+            for (int n = 4; n <= order; ++n) {
                 __syncthreads();
-                if (n == 1) {
-                    if (gout_id == 0) {
-                        double _Rt_0 = Rt[0];
-                        Rt[1*nsq_per_block] = zpq * _Rt_0;
-                        Rt[2*nsq_per_block] = ypq * _Rt_0;
-                        Rt[3*nsq_per_block] = xpq * _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsq_per_block];
-                    }
-                } else if (n == 2) {
-                    if (gout_id == 0) {
-                        double _Rt_0 = Rt[0];
-                        double _Rt_1 = Rt[1*nsq_per_block];
-                        double _Rt_2 = Rt[2*nsq_per_block];
-                        double _Rt_3 = Rt[3*nsq_per_block];
-                        Rt[1*nsq_per_block] = zpq * _Rt_0;
-                        Rt[2*nsq_per_block] = zpq * _Rt_1 + _Rt_0;
-                        Rt[3*nsq_per_block] = ypq * _Rt_0;
-                        Rt[4*nsq_per_block] = ypq * _Rt_1;
-                        Rt[5*nsq_per_block] = ypq * _Rt_2 + _Rt_0;
-                        Rt[6*nsq_per_block] = xpq * _Rt_0;
-                        Rt[7*nsq_per_block] = xpq * _Rt_1;
-                        Rt[8*nsq_per_block] = xpq * _Rt_2;
-                        Rt[9*nsq_per_block] = xpq * _Rt_3 + _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsq_per_block];
-                    }
-                } else {
-                    iter_Rt_n(Rt, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
-                    if (gout_id == 0) {
-                        Rt[0] = gamma_inc[(order-n)*nsq_per_block];
-                    }
+                iter_Rt_n(Rt, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
+                if (gout_id == 0) {
+                    Rt[0] = gamma_inc[(order-n)*nsq_per_block];
                 }
             }
             __syncthreads();
@@ -566,39 +594,67 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 boys_fn(gamma_inc, theta, rr, jk.omega, fac/(aij*akl*sqrt(aij+akl)),
                         order, 0, nsq_per_block);
                 Rt[0] = gamma_inc[order*nsq_per_block];
+                if (order >= 1) {
+                    double _Rt_0 = Rt[0];
+                    Rt[1*nsq_per_block] = zpq * _Rt_0;
+                    Rt[2*nsq_per_block] = ypq * _Rt_0;
+                    Rt[3*nsq_per_block] = xpq * _Rt_0;
+                    Rt[0] = gamma_inc[(order-1)*nsq_per_block];
+                }
+                if (order >= 2) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsq_per_block];
+                    double _Rt_2 = Rt[2*nsq_per_block];
+                    double _Rt_3 = Rt[3*nsq_per_block];
+                    Rt[1*nsq_per_block] = zpq * _Rt_0;
+                    Rt[2*nsq_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3*nsq_per_block] = ypq * _Rt_0;
+                    Rt[4*nsq_per_block] = ypq * _Rt_1;
+                    Rt[5*nsq_per_block] = ypq * _Rt_2 + _Rt_0;
+                    Rt[6*nsq_per_block] = xpq * _Rt_0;
+                    Rt[7*nsq_per_block] = xpq * _Rt_1;
+                    Rt[8*nsq_per_block] = xpq * _Rt_2;
+                    Rt[9*nsq_per_block] = xpq * _Rt_3 + _Rt_0;
+                    Rt[0] = gamma_inc[(order-2)*nsq_per_block];
+                }
+                if (order >= 3) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsq_per_block];
+                    double _Rt_2 = Rt[2*nsq_per_block];
+                    double _Rt_3 = Rt[3*nsq_per_block];
+                    double _Rt_4 = Rt[4*nsq_per_block];
+                    double _Rt_5 = Rt[5*nsq_per_block];
+                    double _Rt_6 = Rt[6*nsq_per_block];
+                    double _Rt_7 = Rt[7*nsq_per_block];
+                    double _Rt_8 = Rt[8*nsq_per_block];
+                    double _Rt_9 = Rt[9*nsq_per_block];
+                    Rt[1 *nsq_per_block] = zpq * _Rt_0;
+                    Rt[2 *nsq_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3 *nsq_per_block] = zpq * _Rt_2 + _Rt_1 * 2;
+                    Rt[4 *nsq_per_block] = ypq * _Rt_0;
+                    Rt[5 *nsq_per_block] = ypq * _Rt_1;
+                    Rt[6 *nsq_per_block] = ypq * _Rt_2;
+                    Rt[7 *nsq_per_block] = ypq * _Rt_3 + _Rt_0;
+                    Rt[8 *nsq_per_block] = ypq * _Rt_4 + _Rt_1;
+                    Rt[9 *nsq_per_block] = ypq * _Rt_5 + _Rt_3 * 2;
+                    Rt[10*nsq_per_block] = xpq * _Rt_0;
+                    Rt[11*nsq_per_block] = xpq * _Rt_1;
+                    Rt[12*nsq_per_block] = xpq * _Rt_2;
+                    Rt[13*nsq_per_block] = xpq * _Rt_3;
+                    Rt[14*nsq_per_block] = xpq * _Rt_4;
+                    Rt[15*nsq_per_block] = xpq * _Rt_5;
+                    Rt[16*nsq_per_block] = xpq * _Rt_6 + _Rt_0;
+                    Rt[17*nsq_per_block] = xpq * _Rt_7 + _Rt_1;
+                    Rt[18*nsq_per_block] = xpq * _Rt_8 + _Rt_3;
+                    Rt[19*nsq_per_block] = xpq * _Rt_9 + _Rt_6 * 2;
+                    Rt[0] = gamma_inc[(order-3)*nsq_per_block];
+                }
             }
-            for (int n = 1; n <= order; ++n) {
+            for (int n = 4; n <= order; ++n) {
                 __syncthreads();
-                if (n == 1) {
-                    if (gout_id == 0) {
-                        double _Rt_0 = Rt[0];
-                        Rt[1*nsq_per_block] = zpq * _Rt_0;
-                        Rt[2*nsq_per_block] = ypq * _Rt_0;
-                        Rt[3*nsq_per_block] = xpq * _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsq_per_block];
-                    }
-                } else if (n == 2) {
-                    if (gout_id == 0) {
-                        double _Rt_0 = Rt[0];
-                        double _Rt_1 = Rt[1*nsq_per_block];
-                        double _Rt_2 = Rt[2*nsq_per_block];
-                        double _Rt_3 = Rt[3*nsq_per_block];
-                        Rt[1*nsq_per_block] = zpq * _Rt_0;
-                        Rt[2*nsq_per_block] = zpq * _Rt_1 + _Rt_0;
-                        Rt[3*nsq_per_block] = ypq * _Rt_0;
-                        Rt[4*nsq_per_block] = ypq * _Rt_1;
-                        Rt[5*nsq_per_block] = ypq * _Rt_2 + _Rt_0;
-                        Rt[6*nsq_per_block] = xpq * _Rt_0;
-                        Rt[7*nsq_per_block] = xpq * _Rt_1;
-                        Rt[8*nsq_per_block] = xpq * _Rt_2;
-                        Rt[9*nsq_per_block] = xpq * _Rt_3 + _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsq_per_block];
-                    }
-                } else {
-                    iter_Rt_n(Rt, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
-                    if (gout_id == 0) {
-                        Rt[0] = gamma_inc[(order-n)*nsq_per_block];
-                    }
+                iter_Rt_n(Rt, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
+                if (gout_id == 0) {
+                    Rt[0] = gamma_inc[(order-n)*nsq_per_block];
                 }
             }
             __syncthreads();

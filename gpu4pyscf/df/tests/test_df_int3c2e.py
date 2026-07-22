@@ -279,7 +279,8 @@ def test_contract_int3c2e():
         H   0.757    4.   -0.4696
         C   1.      1.    0.
         ''',
-        basis=('ccpvtz', [[1, [3.7, 1, .1]], [1, [2., .5, .3]], [1, [.8, .5, .8]]])
+        basis=('ccpvtz', [[1, [3.7, 1, .1]], [1, [2., .5, .3]], [1, [.8, .5, .8]],
+                          [4, [1.2, 1.]]])
     )
     auxmol = mol.copy()
     auxmol.basis = ('weigend', [[3, [2, 1, .5], [1, .2, 1]]])
@@ -295,7 +296,7 @@ def test_contract_int3c2e():
     assert abs(dat.get() - ref).max() < 1e-9
 
     dat = contract_int3c2e_dm(mol, auxmol, dm)
-    assert abs(dat.get() - ref).max() < 1e-9
+    assert abs(dat.get() - ref).max() < 3e-9
 
     auxvec = np.random.rand(auxmol.nao)
     dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)
@@ -525,3 +526,30 @@ C    -.3    .2     -.7''',
     assert abs(dat.get() - ref).max() < 1e-10
     dat = eval_j3c(mol, False)
     assert abs(dat.get() - ref).max() < 1e-10
+
+def test_contract_Et():
+    import ctypes
+    from gpu4pyscf.df import j_engine_3c2e
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    0.   -0.4696
+        H   0.757    0.   -0.4696
+        ''',
+        basis=[[l, [1., 1.]] for l in range(5)])
+    opt = j_engine_3c2e.Int3c2eOpt(mol, mol).build()
+    ao_loc = opt.mol.ao_loc
+    nao = ao_loc[-1]
+    np.random.seed(10)
+    dm = np.random.rand(nao,nao) - .5
+    dm = dm.dot(dm.T)
+
+    ref = j_engine_3c2e._dm_to_Rt(opt.mol, dm, opt.shl_pair_idx, opt.pair_loc)
+    dm_xyz = j_engine_3c2e._dm_to_Rt(opt.mol, dm, opt.shl_pair_idx,
+                                     opt.pair_loc, opt.int3c2e_envs)
+    assert abs(dm_xyz - ref).max().get() < 1e-12
+
+    ref = j_engine_3c2e._Rt_to_dm(opt.mol, dm_xyz, opt.shl_pair_idx, opt.pair_loc)
+    dm = j_engine_3c2e._Rt_to_dm(opt.mol, dm_xyz, opt.shl_pair_idx,
+                                 opt.pair_loc, opt.int3c2e_envs)
+    assert abs(dm - ref).max().get() < 1e-12

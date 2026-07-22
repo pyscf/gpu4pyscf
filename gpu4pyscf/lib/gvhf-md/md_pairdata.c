@@ -164,9 +164,9 @@ void Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                                 double rho_t = 0.;
                                 for (int i = 0; i < nfi; i++) {
                                 for (int j = 0; j < nfj; j++, n++) {
-                                        rho_t += Et[n] * cc * pdm[i*nao+j];
+                                        rho_t += Et[n] * pdm[i*nao+j];
                                 } }
-                                rho[t] = rho_t;
+                                rho[t] = cc * rho_t;
                         }
                         pdm += nao2;
                         rho += Et_dm_size;

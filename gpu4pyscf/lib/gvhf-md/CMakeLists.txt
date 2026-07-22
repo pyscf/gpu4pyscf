@@ -5,6 +5,7 @@ add_library(gvhf_md SHARED
   md_indices.cu md_j_driver.cu md_pairdata.c 
   contract_int3c2e.cu
   pbc_md_contract_j.cu
+  contract_Et.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
