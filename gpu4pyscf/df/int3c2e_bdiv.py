@@ -562,7 +562,7 @@ def int3c2e_scheme(*, short_range=False, shm_size=SHM_SIZE, gout_width=None,
     if short_range:
         nroots *= 2
     g_size = (li+1+i_inc)*(lj+1+j_inc)*(lk+1+k_inc)
-    unit = g_size*3 + nroots*2 + 7
+    unit = g_size*3 + nroots*2 + 6
     shm_size = shm_size - 1024
     nsp_max = _nearest_power2(shm_size // (unit*8))
     nsp_per_block = THREADS

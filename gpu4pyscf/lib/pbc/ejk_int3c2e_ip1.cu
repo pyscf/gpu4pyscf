@@ -101,8 +101,8 @@ while (1) {
     extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
-    double *gx = shared_memory + nst_per_block * 7 + st_id;
-    double *rw = shared_memory + nst_per_block * (g_size*3+7) + st_id;
+    double *gx = shared_memory + nst_per_block * 6 + st_id;
+    double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
     int idx_i = lex_xyz_offset(li);
     int idx_j = lex_xyz_offset(lj);
     int idx_k = lex_xyz_offset(lk);
@@ -249,14 +249,12 @@ while (1) {
                         double xpq = xij - env[rk+0] - img_coords[kL*3+0];
                         double ypq = yij - env[rk+1] - img_coords[kL*3+1];
                         double zpq = zij - env[rk+2] - img_coords[kL*3+2];
-                        double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                         rjri[0*nst_per_block] = xjLxi;
                         rjri[1*nst_per_block] = yjLyi;
                         rjri[2*nst_per_block] = zjLzi;
                         Rpq[0*nst_per_block] = xpq;
                         Rpq[1*nst_per_block] = ypq;
                         Rpq[2*nst_per_block] = zpq;
-                        Rpq[3*nst_per_block] = rr;
                         int gx_len = g_size * nst_per_block;
                         gx[gx_len] = fac_ij;
                     }
@@ -267,8 +265,12 @@ while (1) {
                         if (gout_id == 0) {
                             gx[0] = env[ck+kp] / (aij*ak*sqrt(aij+ak));
                         }
+                        double xpq = Rpq[0*nst_per_block];
+                        double ypq = Rpq[1*nst_per_block];
+                        double zpq = Rpq[2*nst_per_block];
+                        double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                         double omega = env[PTR_RANGE_OMEGA];
-                        rys_roots_rs(nroots, theta, Rpq[3*nst_per_block], omega,
+                        rys_roots_rs(nroots, theta, rr, omega,
                                      rw, nst_per_block, gout_id, gout_stride);
                         for (int irys = 0; irys < nroots; ++irys) {
                             int lij = li + lj + 1;

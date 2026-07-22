@@ -117,10 +117,10 @@ while (1) {
     int stride_k = stride_j * (lj + 1);
     int gx_len = g_size * nst_per_block;
     double *rjri = shared_memory + st_id;
-    double *Rpq = shared_memory + nst_per_block * 4 + st_id;
-    double *gx = shared_memory + nst_per_block * 7 + st_id;
-    double *rw = shared_memory + nst_per_block * (g_size*3+7) + st_id;
-    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+7));
+    double *Rpq = shared_memory + nst_per_block * 3 + st_id;
+    double *gx = shared_memory + nst_per_block * 6 + st_id;
+    double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
+    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+6));
     int *idx_j = idx_i + nfi * 3;
     int *idx_k = idx_j + nfj * 3;
     if (thread_id < nfi * 3) {
@@ -162,11 +162,9 @@ while (1) {
             double xjxi = rj[0] - ri[0];
             double yjyi = rj[1] - ri[1];
             double zjzi = rj[2] - ri[2];
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             rjri[0*nst_per_block] = xjxi;
             rjri[1*nst_per_block] = yjyi;
             rjri[2*nst_per_block] = zjzi;
-            rjri[3*nst_per_block] = rr_ij;
         }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -191,9 +189,12 @@ while (1) {
             double ak = expk[kp];
             double aij = ai + aj;
             double aj_aij = aj / aij;
-            double xij = rjri[0*nst_per_block] * aj_aij + ri[0];
-            double yij = rjri[1*nst_per_block] * aj_aij + ri[1];
-            double zij = rjri[2*nst_per_block] * aj_aij + ri[2];
+            double xjxi = rjri[0*nst_per_block];
+            double yjyi = rjri[1*nst_per_block];
+            double zjzi = rjri[2*nst_per_block];
+            double xij = xjxi * aj_aij + ri[0];
+            double yij = yjyi * aj_aij + ri[1];
+            double zij = zjzi * aj_aij + ri[2];
             double xpq = xij - rk[0];
             double ypq = yij - rk[1];
             double zpq = zij - rk[2];
@@ -201,7 +202,7 @@ while (1) {
                 double cijk = ci[ip] * cj[jp] * ck[kp];
                 double fac = cijk / (aij*ak*sqrt(aij+ak));
                 double theta_ij = ai * aj_aij;
-                double rr_ij = rjri[3*nst_per_block];
+                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                 double Kab = theta_ij * rr_ij;
                 gx[0] = fac * exp(-Kab);
                 Rpq[0*nst_per_block] = xpq;

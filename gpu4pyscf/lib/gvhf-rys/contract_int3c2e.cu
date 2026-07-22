@@ -172,10 +172,10 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
     int stride_k = stride_j * (lj + 1);
     int gx_len = g_size * nst_per_block;
     double *rjri = shared_memory + sp_id;
-    double *Rpq = shared_memory + nst_per_block * 4 + sp_id;
-    double *gx = shared_memory + nst_per_block * 7 + sp_id;
-    double *rw = shared_memory + nst_per_block * (g_size*3+7) + sp_id;
-    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+7));
+    double *Rpq = shared_memory + nst_per_block * 3 + sp_id;
+    double *gx = shared_memory + nst_per_block * 6 + sp_id;
+    double *rw = shared_memory + nst_per_block * (g_size*3+6) + sp_id;
+    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+6));
     int *idx_j = idx_i + nfi * 3;
     int *idx_k = idx_j + nfj * 3;
     if (thread_id < nfi * 3) {
@@ -229,12 +229,10 @@ while (dm_id0 < n_dm) {
         double xjxi = env[rj+0] - xi;
         double yjyi = env[rj+1] - yi;
         double zjzi = env[rj+2] - zi;
-        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         if (gout_id == 0) {
             rjri[0*nst_per_block] = xjxi;
             rjri[1*nst_per_block] = yjyi;
             rjri[2*nst_per_block] = zjzi;
-            rjri[3*nst_per_block] = rr_ij;
         }
         double fac_ij = PI_FAC;
         if (ish == jsh) {
@@ -250,16 +248,19 @@ while (dm_id0 < n_dm) {
             double aj = env[expj+jp];
             double aij = ai + aj;
             double aj_aij = aj / aij;
-            double xij = xi + rjri[0*nst_per_block] * aj_aij;
-            double yij = yi + rjri[1*nst_per_block] * aj_aij;
-            double zij = zi + rjri[2*nst_per_block] * aj_aij;
+            double xjxi = rjri[0*nst_per_block];
+            double yjyi = rjri[1*nst_per_block];
+            double zjzi = rjri[2*nst_per_block];
+            double xij = xi + xjxi * aj_aij;
+            double yij = yi + yjyi * aj_aij;
+            double zij = zi + zjzi * aj_aij;
             double xpq = xij - xk;
             double ypq = yij - yk;
             double zpq = zij - zk;
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             if (gout_id == 0) {
                 double theta_ij = ai * aj_aij;
-                double rr_ij = rjri[3*nst_per_block];
+                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                 double Kab = theta_ij * rr_ij;
                 double cicj = fac_ij * env[ci+ip] * env[cj+jp];
                 gx[0] = cicj * exp(-Kab);
