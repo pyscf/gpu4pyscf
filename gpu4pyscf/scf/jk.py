@@ -589,9 +589,6 @@ class _VHFOpt:
 
         libvhf_rys.RYS_init_rysj_constant.restype = ctypes.c_int
         libvhf_rys.RYS_build_j.restype = ctypes.c_int
-        err = libvhf_rys.RYS_init_rysj_constant()
-        if err != 0:
-            raise RuntimeError('CUDA kernel initialization')
 
         def proc(dm_xyz, dm_cond):
             device_id = cp.cuda.device.get_device_id()
@@ -611,6 +608,10 @@ class _VHFOpt:
             _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
             bas_pair_cache = {k: [cp.asarray(x) for x in v]
                               for k, v in self.bas_pair_cache.items()}
+
+            err = libvhf_rys.RYS_init_rysj_constant()
+            if err != 0:
+                raise RuntimeError('CUDA kernel initialization')
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
