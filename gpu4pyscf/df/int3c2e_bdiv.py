@@ -477,7 +477,7 @@ class Int3c2eOpt:
             cart = mol.mol.cart
         nbas = mol.nbas
         ao_loc = mol.ao_loc_nr(cart=cart)
-        nao = ao_loc[-1]
+        nao = int(ao_loc[-1])
         ao_loc = cp.asarray(ao_loc)
         uniq_l = mol.uniq_l_ctr[:,0]
         if cart:
