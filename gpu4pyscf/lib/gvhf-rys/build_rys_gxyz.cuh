@@ -122,7 +122,7 @@
         } \
         __syncthreads()
 
-#define BUILD_3C_GXYZ(lj, rjri_stride, active) \
+#define BUILD_3C_GXYZ(lj, lk, rjri_stride, active) \
         __syncthreads(); \
         int nst = nst_per_block; \
         int gx_len = nst * g_size; \

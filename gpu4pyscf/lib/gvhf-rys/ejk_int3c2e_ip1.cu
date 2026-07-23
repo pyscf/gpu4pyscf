@@ -252,7 +252,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                         int lij = li + lj + 1;
                         int stride_j = li + 2;
                         int stride_k = stride_j * (lj + 1);
-                        BUILD_3C_GXYZ(lj, nsp_per_block, pair_ij < shl_pair1 && kidx < ksh1);
+                        BUILD_3C_GXYZ(lj, lk, nsp_per_block, pair_ij < shl_pair1 && kidx < ksh1);
                         if (pair_ij < shl_pair1 && kidx < ksh1) {
                             int nsp = nsp_per_block;
                             int nfi = c_nf[li];
@@ -574,7 +574,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                         int lij = li + lj + 1;
                         int stride_j = li + 2;
                         int stride_k = stride_j * (lj + 1);
-                        BUILD_3C_GXYZ(lj, nsp_per_block, pair_ij < shl_pair1 && kidx < ksh1);
+                        BUILD_3C_GXYZ(lj, lk, nsp_per_block, pair_ij < shl_pair1 && kidx < ksh1);
                         if (pair_ij < shl_pair1 && kidx < ksh1) {
                             int nsp = nsp_per_block;
                             int nfi = c_nf[li];

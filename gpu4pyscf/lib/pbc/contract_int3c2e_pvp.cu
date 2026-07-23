@@ -221,7 +221,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                                      rw, nst_per_block, gout_id, gout_stride);
                         for (int irys = 0; irys < nroots; ++irys) {
                             int lij = li + lj + 2;
-                            BUILD_3C_GXYZ(lj+1, nst_per_block, task_id < num_sub_tasks);
+                            BUILD_3C_GXYZ(lj+1, lk, nst_per_block, task_id < num_sub_tasks);
                             if (task_id < num_sub_tasks) {
                                 int nfk = c_nf[lk];
                                 for (int k = 0; k < nfk; ++k) {

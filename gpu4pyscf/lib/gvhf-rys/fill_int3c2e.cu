@@ -217,7 +217,7 @@ while (1) {
                 int lij = li + lj;
                 int stride_j = li + 1;
                 int stride_k = stride_j * (lj + 1);
-                BUILD_3C_GXYZ(lj, nst_per_block, ijk_idx < nksp);
+                BUILD_3C_GXYZ(lj, lk, nst_per_block, ijk_idx < nksp);
                 if (ijk_idx < nksp) {
                     float div_nfi = c_div_nf[li];
                     float div_nfk = c_div_nf[lk];

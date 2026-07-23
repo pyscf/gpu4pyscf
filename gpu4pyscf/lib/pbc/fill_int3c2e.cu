@@ -250,7 +250,7 @@ while (1) {
                                          rw, nst_per_block, gout_id, gout_stride);
                             for (int irys = 0; irys < nroots; ++irys) {
                                 int lij = li + lj;
-                                BUILD_3C_GXYZ(lj, nst_per_block, task_id < num_sub_tasks);
+                                BUILD_3C_GXYZ(lj, lk, nst_per_block, task_id < num_sub_tasks);
                                 if (task_id < num_sub_tasks) {
                                     int nfi = c_nf[li];
                                     int nfj = c_nf[lj];

@@ -242,7 +242,7 @@ while (shl_pair0 < shl_pair1) {
                                      rw, nst_per_block, gout_id, gout_stride);
                         for (int irys = 0; irys < nroots; ++irys) {
                             int lij = li + lj;
-                            BUILD_3C_GXYZ(lj+1, nst_per_block, task_id < num_sub_tasks);
+                            BUILD_3C_GXYZ(lj, lk, nst_per_block, task_id < num_sub_tasks);
                             if (task_id < num_sub_tasks) {
                                 float div_nfi = c_div_nf[li];
                                 for (int ij = gout_id; ij < nfij; ij += gout_stride) {
@@ -495,7 +495,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                                      rw, nst_per_block, gout_id, gout_stride);
                         for (int irys = 0; irys < nroots; ++irys) {
                             int lij = li + lj;
-                            BUILD_3C_GXYZ(lj, nst_per_block, task_id < num_sub_tasks);
+                            BUILD_3C_GXYZ(lj, lk, nst_per_block, task_id < num_sub_tasks);
                             if (task_id < num_sub_tasks) {
                                 float div_nfi = c_div_nf[li];
                                 for (int k = 0; k < nfk; ++k) {

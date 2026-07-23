@@ -281,7 +281,7 @@ while (dm_id0 < n_dm) {
                     int lij = li + lj;
                     int stride_j = li + 1;
                     int stride_k = stride_j * (lj + 1);
-                    BUILD_3C_GXYZ(lj, nst_per_block, pair_ij < shl_pair1);
+                    BUILD_3C_GXYZ(lj, lk, nst_per_block, pair_ij < shl_pair1);
                     if (pair_ij < shl_pair1) {
                         int nfi = c_nf[li];
                         int nfj = c_nf[lj];
@@ -523,7 +523,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, int n_dm, int n
                                      gout_id, gout_stride);
                         for (int irys = 0; irys < nroots; ++irys) {
                             int lij = li + lj;
-                            BUILD_3C_GXYZ(lj, nst_per_block, pair_ij < shl_pair1);
+                            BUILD_3C_GXYZ(lj, lk, nst_per_block, pair_ij < shl_pair1);
                             if (pair_ij < shl_pair1) {
                                 switch (dm_batch_size) {
                                 case 1: _dot_aux<IJ_WIDTH, 1>(vj_cache, gx, vj_aux, idx_i, idx_j,

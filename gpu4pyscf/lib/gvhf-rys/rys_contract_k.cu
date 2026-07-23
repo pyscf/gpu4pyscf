@@ -539,8 +539,8 @@ void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
     }
 }
 
-static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
-                                   int shm_size, int gout_stride_max)
+void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
+                          int shm_size, int gout_stride_max)
 {
 /*
     order = li + lj + lk + ll
@@ -589,9 +589,11 @@ static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
     if (nsq_per_block > 8) {
         nsq_per_block = nsq_per_block & 0xfffff8;
     }
-    tdims[0] = nsq_per_block;
-    tdims[1] = gout_stride;
-    return nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
+    int reserved_shm_size = nsq_per_block * unit + ijprim;
+    scheme[0] = nsq_per_block;
+    scheme[1] = gout_stride;
+    scheme[2] = reserved_shm_size*8 + cart_idx_size*4;
+    scheme[3] = reserved_shm_size;
 }
 
 extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
@@ -662,25 +664,26 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
                             ((lk == 0) << 1) |
                             ( ll == 0));
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
-        int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
 
         auto launch = [&](auto offset, int tile_chunk) {
             checkCudaErrors(
                 cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
                                    tile_chunk*sizeof(GXYZOffset),
                                    0, cudaMemcpyHostToDevice));
-            int tdims[2];
-            int buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
-            cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                        cudaGetErrorString(err));
-                return;
+            int scheme[4];
+            threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
+            int buflen = scheme[2];
+            if (buflen > 48000) {
+                cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) {
+                    fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                            cudaGetErrorString(err));
+                    return;
+                }
             }
-
-            dim3 threads(tdims[0], tdims[1]);
-            int reserved_shm_size = (buflen - cart_idx_size*4)/8;
+            dim3 threads(scheme[0], scheme[1]);
+            int reserved_shm_size = scheme[3];
             rys_k_kernel<<<workers, threads, buflen>>>(
                 *envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,

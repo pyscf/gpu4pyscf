@@ -244,7 +244,7 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                         int lij = li + lj + 2;
                         int stride_j = li + 2;
                         int stride_k = stride_j * (lj + 2);
-                        BUILD_3C_GXYZ(lj+1, nsp_per_block, pair_ij < shl_pair1 && kidx < ksh1);
+                        BUILD_3C_GXYZ(lj+1, lk, nsp_per_block, pair_ij < shl_pair1 && kidx < ksh1);
                         if (pair_ij < shl_pair1 && kidx < ksh1) {
                             int nsp = nsp_per_block;
                             int i_1 =          nst_per_block;

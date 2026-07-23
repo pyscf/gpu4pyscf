@@ -884,12 +884,14 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             int reserved_shm_size = buflen;
             buflen += iprim * jprim;
             buflen *= sizeof(double);
-            cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                        cudaGetErrorString(err));
-                return 1;
+            if (buflen > 48000) {
+                cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) {
+                    fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                            cudaGetErrorString(err));
+                    return 1;
+                }
             }
             rys_j_with_gout_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
@@ -900,12 +902,14 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             buflen += iprim * jprim;
             buflen += nf3_ij; // dm_ij_cache
             buflen *= sizeof(double);
-            cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                        cudaGetErrorString(err));
-                return 1;
+            if (buflen > 48000) {
+                cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) {
+                    fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                            cudaGetErrorString(err));
+                    return 1;
+                }
             }
             rys_j_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,

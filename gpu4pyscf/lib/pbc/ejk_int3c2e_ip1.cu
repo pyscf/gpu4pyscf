@@ -276,7 +276,7 @@ while (1) {
                             int lij = li + lj + 1;
                             int stride_j = li + 2;
                             int stride_k = stride_j * (lj + 1);
-                            BUILD_3C_GXYZ(lj, nst_per_block, task_id < num_sub_tasks);
+                            BUILD_3C_GXYZ(lj, lk, nst_per_block, task_id < num_sub_tasks);
                             if (task_id < num_sub_tasks) {
                                 int nst = nst_per_block;
                                 int nfi = c_nf[li];

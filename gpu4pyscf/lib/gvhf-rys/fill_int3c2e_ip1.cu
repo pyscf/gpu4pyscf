@@ -86,7 +86,7 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
     int st_id = thread_id - gout_id * nst_per_block;
     int gx_len = g_size * nst_per_block;
     extern __shared__ double shared_memory[];
-    double *rjri = shared_memory;
+    double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
     double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
@@ -124,9 +124,9 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
             double xjxi = env[rj+0] - env[ri+0];
             double yjyi = env[rj+1] - env[ri+1];
             double zjzi = env[rj+2] - env[ri+2];
-            rjri[st_id+0*nst_per_block] = xjxi;
-            rjri[st_id+1*nst_per_block] = yjyi;
-            rjri[st_id+2*nst_per_block] = zjzi;
+            rjri[0*nst_per_block] = xjxi;
+            rjri[1*nst_per_block] = yjyi;
+            rjri[2*nst_per_block] = zjzi;
         }
 #pragma unroll
         for (int n = 0; n < GOUT_IP1_WIDTH; ++n) {
@@ -154,9 +154,9 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
             double ak = env[expk+kp];
             double aij = ai + aj;
             double aj_aij = aj / aij;
-            double xjxi = rjri[st_id+0*nst_per_block];
-            double yjyi = rjri[st_id+1*nst_per_block];
-            double zjzi = rjri[st_id+2*nst_per_block];
+            double xjxi = rjri[0*nst_per_block];
+            double yjyi = rjri[1*nst_per_block];
+            double zjzi = rjri[2*nst_per_block];
             double xij = xjxi * aj_aij + env[ri+0];
             double yij = yjyi * aj_aij + env[ri+1];
             double zij = zjzi * aj_aij + env[ri+2];
@@ -181,7 +181,7 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
             for (int irys = 0; irys < nroots; ++irys) {
                 int stride_j = li + 2;
                 int stride_k = stride_j * (lj + 1);
-                BUILD_3C_GXYZ(lj+1, nst_per_block, ijk_idx < nksp);
+                BUILD_3C_GXYZ(lj, lk, nst_per_block, ijk_idx < nksp);
                 if (ijk_idx < nksp) {
                     int i_1 = nst_per_block;
                     int nfi = c_nf[li];
@@ -301,7 +301,7 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
     int st_id = thread_id - gout_id * nst_per_block;
     int gx_len = g_size * nst_per_block;
     extern __shared__ double shared_memory[];
-    double *rjri = shared_memory;
+    double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
     double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
@@ -343,9 +343,9 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
             double xjxi = env[rj+0] - env[ri+0];
             double yjyi = env[rj+1] - env[ri+1];
             double zjzi = env[rj+2] - env[ri+2];
-            rjri[st_id+0*nst_per_block] = xjxi;
-            rjri[st_id+1*nst_per_block] = yjyi;
-            rjri[st_id+2*nst_per_block] = zjzi;
+            rjri[0*nst_per_block] = xjxi;
+            rjri[1*nst_per_block] = yjyi;
+            rjri[2*nst_per_block] = zjzi;
         }
 #pragma unroll
         for (int n = 0; n < GOUT_IP1_WIDTH; ++n) {
@@ -369,9 +369,9 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
             double ak = env[expk+kp];
             double aij = ai + aj;
             double aj_aij = aj / aij;
-            double xjxi = rjri[st_id+0*nst_per_block];
-            double yjyi = rjri[st_id+1*nst_per_block];
-            double zjzi = rjri[st_id+2*nst_per_block];
+            double xjxi = rjri[0*nst_per_block];
+            double yjyi = rjri[1*nst_per_block];
+            double zjzi = rjri[2*nst_per_block];
             double xij = xjxi * aj_aij + env[ri+0];
             double yij = yjyi * aj_aij + env[ri+1];
             double zij = zjzi * aj_aij + env[ri+2];
@@ -396,7 +396,7 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
             for (int irys = 0; irys < nroots; ++irys) {
                 int stride_j = li + 1;
                 int stride_k = stride_j * (lj + 1);
-                BUILD_3C_GXYZ(lj, nst_per_block, ijk_idx < nksp);
+                BUILD_3C_GXYZ(lj, lk+1, nst_per_block, ijk_idx < nksp);
                 if (ijk_idx < nksp) {
                     int k_1 = stride_k*nst_per_block;
                     int nfi = c_nf[li];

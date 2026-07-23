@@ -1714,18 +1714,18 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int reserved_shm_size = (nroots*2 + g_size*3 + 8) * quartets_per_block;
+        int reserved_shm_size = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         int buflen = reserved_shm_size + ij_prims;
         buflen *= sizeof(double);
-
-        cudaFuncSetAttribute(rys_vjk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                    cudaGetErrorString(err));
-            return 1;
+        if (buflen > 48000) {
+            cudaFuncSetAttribute(rys_vjk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                        cudaGetErrorString(err));
+                return 1;
+            }
         }
-
         rys_vjk_ip1_kernel<<<workers, threads, buflen>>>(
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, nf,
@@ -1817,17 +1817,17 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
-        int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
+        int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
-
-        cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                    cudaGetErrorString(err));
-            return 1;
+        if (buflen > 48000) {
+            cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                        cudaGetErrorString(err));
+                return 1;
+            }
         }
-
         rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, dd_pool, nf,
@@ -1910,16 +1910,16 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
     int ij_prims = iprim * jprim;
     dim3 threads(quartets_per_block, gout_stride);
     int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
-    int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
+    int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
     buflen = (reserved_shm_size + ij_prims)*sizeof(double);
-    {
-    cudaFuncSetAttribute(rys_ejk_ip1_multidm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                cudaGetErrorString(err));
-        return 1;
-    }
+    if (buflen > 48000) {
+        cudaFuncSetAttribute(rys_ejk_ip1_multidm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                    cudaGetErrorString(err));
+            return 1;
+        }
     }
     size_t nao2 = nao * nao;
     int nf = nfi * nfj * nfk * nfl;
@@ -2017,16 +2017,16 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
     int ij_prims = iprim * jprim;
     dim3 threads(quartets_per_block, gout_stride);
     int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
-    int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
+    int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
     buflen = (reserved_shm_size + ij_prims)*sizeof(double);
-    {
-    cudaFuncSetAttribute(rys_ejk_ip1_sum_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                cudaGetErrorString(err));
-        return 1;
-    }
+    if (buflen > 48000) {
+        cudaFuncSetAttribute(rys_ejk_ip1_sum_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                    cudaGetErrorString(err));
+            return 1;
+        }
     }
     for (int i = 0; i < n_dm; ++i) {
         if (j_factor_cpu[i] != 0.) {

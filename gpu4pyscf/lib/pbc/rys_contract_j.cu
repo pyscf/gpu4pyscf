@@ -463,35 +463,8 @@ while (1) {
 
 extern void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds);
 
-static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
-                                   int shm_size, int gout_stride_max)
-{
-    int ijprim = bounds.iprim * bounds.jprim;
-    int ntiles_i = bounds.ntiles_i;
-    int ntiles_j = bounds.ntiles_j;
-    int ntiles_k = bounds.ntiles_k;
-    int ntiles_l = bounds.ntiles_l;
-    int ldi = ntiles_i * 3;
-    int ldj = ntiles_j * 3;
-    int ldk = ntiles_k * 3;
-    int ldl = ntiles_l * 3;
-    int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
-    int g_size = bounds.g_size;
-    int nroots = bounds.nroots;
-    int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
-    int root_g_cache_size = nroots*2 + g_size*3 + 6;
-    int unit = max(root_g_cache_size, dm_cache_size);
-    int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
-    int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
-    int gout_stride = min(n_tiles, gout_stride_max);
-    int nsq_per_block = min(counts, THREADS / gout_stride);
-    if (nsq_per_block > 8) {
-        nsq_per_block = nsq_per_block & 0xfffff8;
-    }
-    tdims[0] = nsq_per_block;
-    tdims[1] = gout_stride;
-    return nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
-}
+extern void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
+                                 int shm_size, int gout_stride_max);
 
 extern "C" {
 int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
@@ -554,25 +527,26 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                             ((lj == 0) << 2) |
                             ((lk == 0) << 1) |
                             ( ll == 0));
-        int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
 
         auto launch = [&](auto offset, int tile_chunk) {
             checkCudaErrors(
                 cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
                                    tile_chunk*sizeof(GXYZOffset),
                                    0, cudaMemcpyHostToDevice));
-            int tdims[2];
-            int buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
-            cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                        cudaGetErrorString(err));
-                return;
+            int scheme[4];
+            threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
+            int buflen = scheme[2];
+            if (buflen > 48000) {
+                cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) {
+                    fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                            cudaGetErrorString(err));
+                    return;
+                }
             }
-
-            dim3 threads(tdims[0], tdims[1]);
-            int reserved_shm_size = (buflen - cart_idx_size*4)/8;
+            dim3 threads(scheme[0], scheme[1]);
+            int reserved_shm_size = scheme[3];
             rys_j_kernel<<<workers, threads, buflen>>>(
                 *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,

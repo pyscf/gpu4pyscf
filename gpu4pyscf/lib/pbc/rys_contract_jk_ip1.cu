@@ -1025,17 +1025,17 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
-        int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
+        int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
-
-        cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                    cudaGetErrorString(err));
-            return 1;
+        if (buflen > 48000) {
+            cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                        cudaGetErrorString(err));
+                return 1;
+            }
         }
-
         rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, pair_ij_mapping, pair_kl_mapping,
                 bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
@@ -1110,17 +1110,17 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
-        int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
+        int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
-
-        cudaFuncSetAttribute(rys_ejk_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
-                    cudaGetErrorString(err));
-            return 1;
+        if (buflen > 48000) {
+            cudaFuncSetAttribute(rys_ejk_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                        cudaGetErrorString(err));
+                return 1;
+            }
         }
-
         rys_ejk_strain_deriv_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, sigma, pair_ij_mapping, pair_kl_mapping,
                 bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
