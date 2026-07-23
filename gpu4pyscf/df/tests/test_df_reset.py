@@ -73,11 +73,35 @@ class KnownValues(unittest.TestCase):
 
         assert abs(e_reused - e_fresh) < 1e-8
 
-    def test_reset_invalidates_geometry_caches(self):
+    def test_reset_preserves_auxmol_reference(self):
+        # Several internal callers (df/grad, hessian, tddft) hold a reference
+        # to with_df.auxmol across reset(), using reset() as a memory-release
+        # idiom. reset() without a geometry change must keep the object (and
+        # its identity) valid.
         mf = dft.RKS(mol.copy(), xc='wb97x').density_fit().to_gpu()
         mf.kernel()
+        aux_ref = mf.with_df.auxmol
+        assert aux_ref is not None
         mf.reset()
-        assert mf.with_df.auxmol is None
+        assert mf.with_df.auxmol is aux_ref
+        # The kept object must still be usable (the CI failure mode read
+        # auxmol.with_range_coulomb right after reset()).
+        with aux_ref.with_range_coulomb(0.3):
+            pass
+
+    def test_reset_repairs_geometry_caches_in_place(self):
+        # After an in-place displacement, reset() re-anchors auxmol to the
+        # runtime coordinates (same object) and drops the stale integral
+        # engines.
+        mf = dft.RKS(mol.copy(), xc='wb97x').density_fit().to_gpu()
+        mf.kernel()
+        aux_ref = mf.with_df.auxmol
+        mf.mol.set_geom_(_displaced_coords(mf.mol), unit='Bohr')
+        mf.mol.build(dump_input=False)
+        mf.reset()
+        assert mf.with_df.auxmol is aux_ref
+        dev = abs(aux_ref.atom_coords() - mf.mol.atom_coords()).max()
+        assert dev < 1e-10
         assert mf.with_df.intopt is None
 
     def test_auxmol_follows_runtime_coordinates(self):

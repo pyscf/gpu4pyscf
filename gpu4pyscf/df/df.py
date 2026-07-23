@@ -224,14 +224,27 @@ class DF(lib.StreamObject):
         '''Reset mol and clean up relevant attributes for scanner mode'''
         if mol is not None:
             self.mol = mol
-        # auxmol, intopt and j_engine depend on the geometry of self.mol, so
-        # they must be discarded even when reset() is called without a new mol
-        # (e.g. after an in-place mol.set_geom_()). Keeping them rebuilds
-        # _cderi against stale auxiliary-basis coordinates and yields silently
-        # wrong SCF energies (issue #827).
-        self.auxmol = None
-        self.intopt = None
-        self.j_engine = None
+            self.auxmol = None
+            self.intopt = None
+            self.j_engine = None
+        elif self.auxmol is not None and self.mol is not None:
+            # An in-place mol.set_geom_() leaves auxmol/intopt/j_engine at the
+            # old coordinates; rebuilding _cderi against them yields silently
+            # wrong SCF energies (issue #827). Re-anchor auxmol to the runtime
+            # coordinates *in place* (several callers hold a reference to
+            # with_df.auxmol across reset() as a memory-release idiom, so the
+            # object must stay valid), and drop the geometry-bound integral
+            # engines only when the geometry actually moved.
+            if self.auxmol.natm != self.mol.natm:
+                self.auxmol = None
+                self.intopt = None
+                self.j_engine = None
+            else:
+                mol_coords = self.mol.atom_coords()
+                if abs(self.auxmol.atom_coords() - mol_coords).max() > 1e-10:
+                    self.auxmol.set_geom_(mol_coords, unit='Bohr')
+                    self.intopt = None
+                    self.j_engine = None
         self._cderi = None
         self._cderi_idx = None
         self._cd_j2c = None
