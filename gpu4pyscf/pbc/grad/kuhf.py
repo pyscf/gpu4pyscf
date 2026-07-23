@@ -88,15 +88,12 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     log.timer('gradients of 1e part', *t1)
 
-    extra_force = np.empty([natm, 3])
-    for ia in range(natm):
-        extra_force[ia] = ensure_numpy(mf_grad.extra_force(ia, locals()))
-
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     dme0_sf = dme0[0] + dme0[1]
     ds = krhf_grad.contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
-    de = (dh1e - ds) / nkpts + e2_grad + extra_force
+    de = (dh1e - ds) / nkpts + e2_grad
+    de += cp.asnumpy(mf_grad.extra_force())
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
@@ -144,7 +141,6 @@ class Gradients(krhf_grad.GradientsBase):
         return cp.stack((dm1ea,dm1eb), axis=0)
 
     grad_elec = grad_elec
-    extra_force = krhf_grad.Gradients.extra_force
     as_scanner = krhf_grad.Gradients.as_scanner
     _finalize = krhf_grad.Gradients._finalize
     kernel = krhf_grad.Gradients.kernel

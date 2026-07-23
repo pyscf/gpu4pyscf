@@ -43,6 +43,17 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int gout_stride = blockDim.y;
     int threads = blockDim.x * blockDim.y;
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
+    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
+    extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int *bas = envs.bas;
     double *env = envs.env;
     int li = bounds.li;
@@ -70,7 +81,6 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int k_1 = stride_k*nsq_per_block;
     int l_1 = stride_l*nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
@@ -85,11 +95,6 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int do_k = jk.k_factor != 0.;
     int *ao_loc = envs.ao_loc;
     double *dm = jk.dm;
-
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
-    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
-    __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     __syncthreads();
     if (thread_id == 0) {
@@ -108,14 +113,11 @@ while (1) {
     _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
                        q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                       jk, envs, bounds);
+                       (int *)shared_memory, jk, envs, bounds);
     if (ntasks == 0) {
         continue;
     }
 
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
     if (thread_id == 0) {
         int _jsh = bas_mask_idx[jsh];
         ish_cell0 = ish;
@@ -123,12 +125,9 @@ while (1) {
         cell_j = _jsh / nbas_cell0;
         i0 = ao_loc[ish_cell0];
         j0 = ao_loc[jsh_cell0];
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -136,14 +135,16 @@ while (1) {
         rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
@@ -180,18 +181,16 @@ while (1) {
         }
         int k0 = ao_loc[ksh_cell0];
         int l0 = ao_loc[lsh_cell0];
-        double *expi = env + bas[ish_cell0*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
-            double xlxk = rl[0] - rk[0];
-            double ylyk = rl[1] - rk[1];
-            double zlzk = rl[2] - rk[2];
+            double xlxk = env[rl+0] - env[rk+0];
+            double ylyk = env[rl+1] - env[rk+1];
+            double zlzk = env[rl+2] - env[rk+2];
             rlrk[0*nsq_per_block] = xlxk;
             rlrk[1*nsq_per_block] = ylyk;
             rlrk[2*nsq_per_block] = zlzk;
@@ -278,8 +277,8 @@ while (1) {
             __syncthreads();
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double akl = ak + al;
             double al_akl = al / akl;
             double ak2 = ak * 2;
@@ -291,15 +290,15 @@ while (1) {
                 double rr_kl = xlxk*xlxk + ylyk*ylyk + zlzk*zlzk;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * rr_kl);
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;
@@ -307,9 +306,9 @@ while (1) {
                 double xij = ri[0] + (rjri[0]) * aj_aij;
                 double yij = ri[1] + (rjri[1]) * aj_aij;
                 double zij = ri[2] + (rjri[2]) * aj_aij;
-                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
-                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
-                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
@@ -572,6 +571,18 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     int gout_stride = blockDim.y;
     int threads = blockDim.x * blockDim.y;
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
+    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
+    extern __shared__ double shared_memory[];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
+    __shared__ double ri[3];
+    __shared__ double rj[3];
+    __shared__ double rjri[3];
+    __shared__ int expi;
+    __shared__ int expj;
+
     int *bas = envs.bas;
     double *env = envs.env;
     int li = bounds.li;
@@ -599,7 +610,6 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     int k_1 = stride_k*nsq_per_block;
     int l_1 = stride_l*nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
@@ -615,10 +625,6 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     int *ao_loc = envs.ao_loc;
     double *dm = jk.dm;
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
-    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
-    __shared__ int ntasks, pair_ij, pair_kl0;
     double sigma_xx = 0;
     double sigma_xy = 0;
     double sigma_xz = 0;
@@ -646,15 +652,11 @@ while (1) {
     _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
                        q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                       jk, envs, bounds);
+                       (int *)shared_memory, jk, envs, bounds);
     if (ntasks == 0) {
         continue;
     }
 
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rj[3];
-    __shared__ double rjri[3];
     if (thread_id == 0) {
         int _jsh = bas_mask_idx[jsh];
         ish_cell0 = ish;
@@ -662,12 +664,9 @@ while (1) {
         cell_j = _jsh / nbas_cell0;
         i0 = ao_loc[ish_cell0];
         j0 = ao_loc[jsh_cell0];
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -676,14 +675,16 @@ while (1) {
         rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
-        double ai = expi[ip];
-        double aj = expj[jp];
+        double ai = env[expi+ip];
+        double aj = env[expj+jp];
         double aij = ai + aj;
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
@@ -721,20 +722,18 @@ while (1) {
         }
         int k0 = ao_loc[ksh_cell0];
         int l0 = ao_loc[lsh_cell0];
-        double *expi = env + bas[ish_cell0*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xk = rk[0];
-        double yk = rk[1];
-        double zk = rk[2];
-        double xl = rl[0];
-        double yl = rl[1];
-        double zl = rl[2];
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xk = env[rk+0];
+        double yk = env[rk+1];
+        double zk = env[rk+2];
+        double xl = env[rl+0];
+        double yl = env[rl+1];
+        double zl = env[rl+2];
         if (gout_id == 0) {
             double xlxk = xl - xk;
             double ylyk = yl - yk;
@@ -822,8 +821,8 @@ while (1) {
             __syncthreads();
             int kp = klp / lprim;
             int lp = klp % lprim;
-            double ak = expk[kp];
-            double al = expl[lp];
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
             double akl = ak + al;
             double al_akl = al / akl;
             double ak2 = ak * 2;
@@ -835,15 +834,15 @@ while (1) {
                 double rr_kl = xlxk*xlxk + ylyk*ylyk + zlzk*zlzk;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * rr_kl);
-                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp / jprim;
                 int jp = ijp % jprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
                 double aij = ai + aj;

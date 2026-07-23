@@ -24,7 +24,6 @@ from gpu4pyscf.__config__ import num_devices
 from pyscf import __config__
 
 WITH_T2 = getattr(__config__, 'mp_dfmp2_with_t2', True)
-_einsum = cupy.einsum
 
 def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id=0):
     with cupy.cuda.Device(device_id):
@@ -97,8 +96,8 @@ def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
         gi = gi.reshape(nvir,nocc,nvir).transpose(1,0,2)
         #lib.direct_sum('jb+a->jba', eia, eia[i])
         t2i = gi/(eia[:,:,None] + eia[i])
-        edi = _einsum('jab,jab', t2i, gi) * 2
-        exi = -_einsum('jab,jba', t2i, gi)
+        edi = cupy.einsum('jab,jab', t2i, gi) * 2
+        exi = -cupy.einsum('jab,jba', t2i, gi)
         emp2_ss += edi*0.5 + exi
         emp2_os += edi*0.5
         if with_t2:
@@ -131,13 +130,12 @@ class DFMP2(mp2.MP2Base):
         mo_coeff = cupy.asarray(mo_coeff, order='C')
         Lov = None
         with_df = self.with_df
-        mo_coeff = with_df.intopt.sort_orbitals(mo_coeff, axis=[0])
         orbo = mo_coeff[:,:nocc]
         orbv = mo_coeff[:,nocc:]
         blksize = with_df.get_blksize()
         for cderi, cderi_sparse in with_df.loop(blksize=blksize):
-            tmp = _einsum('Lpq,po->Loq', cderi, orbo)
-            Lov = _einsum('Loq,qi->Loi', tmp, orbv)
+            tmp = contract('Lpq,po->Loq', cderi, orbo)
+            Lov = contract('Loq,qi->Loi', tmp, orbv)
             yield Lov
 
     def ao2mo(self, mo_coeff=None):

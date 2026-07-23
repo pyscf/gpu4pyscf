@@ -604,8 +604,8 @@ class SortedGTO:
         else:
             self = self.view(SortedMole)
         self.mol = self.cell = mol
-        self.recontract_bas = cp.asarray(recontract_bas, dtype=np.int32)
-        self.recontract_coef = cp.asarray(recontract_coef)
+        self.recontract_bas = np.asarray(recontract_bas, dtype=np.int32)
+        self.recontract_coef = np.asarray(recontract_coef)
 
         # Sort basis according to angular momentum and contraction patterns so
         # as to group the basis functions to blocks in GPU kernel.
@@ -636,12 +636,12 @@ class SortedGTO:
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_counts = l_ctr_counts
         self.sorted_idx = sorted_idx
-        inv_sorted = cp.empty(len(self._bas), dtype=np.int32)
-        inv_sorted[sorted_idx] = cp.arange(len(self._bas))
+        inv_sorted = np.empty(len(self._bas), dtype=np.int32)
+        inv_sorted[sorted_idx] = np.arange(len(self._bas))
         # recontraction_idx stores the indices of primitive shells (self._bas)
         # for each original contracted shell (self.mol._bas). The offset of each
         # contracted shell for recontraction_idx is provided by the
-        # recontract_bas[:,PTR_BAS_IDX]
+        # recontract_bas[:,PTR_PBAS_IDX]
         self.recontraction_idx = inv_sorted
         self.p_ao_loc = self.ao_loc_nr(cart=True)
 
@@ -658,7 +658,7 @@ class SortedGTO:
             dims = (l+1)*(l+2)//2 * self.recontract_bas[:,NCTR_OF]
         else:
             dims = (l*2+1) * self.recontract_bas[:,NCTR_OF]
-        return cp.append(np.int32(0), dims.cumsum(dtype=np.int32))
+        return cp.asarray(np.append(np.int32(0), dims.cumsum(dtype=np.int32)))
 
     def CT_dot_mat(self, mat, out=None):
         '''ctr_coeff.T.dot(mat)
@@ -938,6 +938,21 @@ class SortedGTO:
         mat = cp.eye(self.mol.nao)
         return self.C_dot_mat(mat)
 
+    def get_ao_idx(self, cart=None):
+        '''The ao_idx can transform the Cartesian AOs in the sorted mol (self)
+        to the AOs in the original mol: mol.ao == sorted_mol.ao[ao_idx]'''
+        if cart is None:
+            cart = self.cart
+        ao_loc = self.ao_loc_nr(cart)
+        nao = ao_loc[-1]
+        idx = np.split(np.arange(nao), ao_loc[1:-1])
+
+        sorted_idx = self.sorted_idx
+        inv_sorted = np.empty_like(sorted_idx)
+        inv_sorted[sorted_idx] = np.arange(len(sorted_idx))
+
+        return np.hstack([idx[i] for i in inv_sorted])
+
     @property
     def rys_envs(self):
         raise NotImplementedError
@@ -1002,6 +1017,17 @@ class SortedMole(Mole, SortedGTO):
         shl_pair_offsets.append(np.int32(sp1))
         shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
         return bas_ij_idx, shl_pair_offsets
+
+    def iter_pair_by_l(self, bas_ij_pairs):
+        '''Iterate over the bas_ij pair in bas_ij_pairs based on the angular
+        momentum of the two bases of each pair
+        '''
+        uniq_l = self.uniq_l_ctr[:,0].tolist()
+        li_lj = [uniq_l[i]*8+uniq_l[j] for i, j in bas_ij_pairs]
+        sorted_pairs = (k for _, k in sorted(zip(li_lj, bas_ij_pairs)))
+        if isinstance(bas_ij_pairs, dict):
+            return ((key, bas_ij_pairs[key]) for key in sorted_pairs)
+        return sorted_pairs
 
 class SortedCell(Cell, SortedGTO):
     @multi_gpu.property(cache='_rys_envs')

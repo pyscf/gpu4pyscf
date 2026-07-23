@@ -34,9 +34,11 @@ from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import member
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray)
+    contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray,
+    libcupy_helper)
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.__config__ import num_devices
+from gpu4pyscf.df.df import libvhf_rys
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
@@ -396,7 +398,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
             p0 = ao_pair_offsets[batch_id]
             p1 = ao_pair_offsets[batch_id+1]
             #:cderi[:,p0:p1] = j3c.get()
-            libpbc.store_col_segment(
+            libvhf_rys.store_col_segment(
                 cderi.ctypes,
                 ctypes.cast(j3c.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs),
@@ -560,13 +562,15 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
                 p0 = ao_pair_offsets[batch_id]
                 p1 = ao_pair_offsets[batch_id+1]
                 #:cderi[kp][:,p0:p1] = cderi_k.get()
-                libpbc.store_col_segment(
+                err = libvhf_rys.store_col_segment(
                     cderi[kp].ctypes,
                     ctypes.cast(cderi_k.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux),
                     # *2 for complex number
                     ctypes.c_int(nao_pairs*2),
                     ctypes.c_int(p0*2), ctypes.c_int(p1*2))
+                if err != 0:
+                    raise RuntimeError('store_col_segment kernel failed')
             j3c = None
             if num_devices > 1:
                 stream.synchronize()
@@ -744,9 +748,9 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     on_host = not isinstance(cderi_compressed, cp.ndarray)
     if cderi_compressed.flags.c_contiguous:
         if cderi_compressed.dtype == np.float64:
-            kern = libpbc.decompress_and_transpose
+            kern = libcupy_helper.decompress_and_transpose
         else:
-            kern = libpbc.z_decompress_and_transpose
+            kern = libcupy_helper.z_decompress_and_transpose
         if on_host:
             j3c_ptr = cderi_compressed.ctypes
         else:
@@ -755,11 +759,18 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
             fill_triu = True
         else:
             fill_triu = False
-        kern(ctypes.cast(cderi.data.ptr, ctypes.c_void_p), j3c_ptr,
-             ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
-             ctypes.c_int(nao_pairs), ctypes.c_int(nL*nao), ctypes.c_int(naux),
-             ctypes.c_int(0), ctypes.c_int(naux),
-             ctypes.c_int(fill_triu), ctypes.c_int(on_host))
+        stream = cp.cuda.get_current_stream()
+        err = kern(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(cderi.data.ptr, ctypes.c_void_p), ctypes.c_int(naux),
+            j3c_ptr,
+            ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nao_pairs),
+            ctypes.c_int(nL*nao),
+            ctypes.c_int(0), ctypes.c_int(naux),
+            ctypes.c_int(fill_triu), ctypes.c_int(on_host))
+        if err != 0:
+            raise RuntimeError('decompress_and_transpose kernel failed')
     else:
         assert not on_host
         assert cderi_compressed.flags.f_contiguous
@@ -767,12 +778,14 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
         if is_gamma_point:
             tril_idx = pair_address
             conj_ki_order = cp.zeros(1, dtype=np.int32)
-            libpbc.fill_indexed_triu(
+            err = libpbc.fill_indexed_triu(
                 ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
                 ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(conj_ki_order.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(tril_idx)), ctypes.c_int(1),
                 ctypes.c_int(nao), ctypes.c_int(naux))
+            if err != 0:
+                raise RuntimeError('fill_indexed_triu kernel failed')
     cderi = cderi.reshape(nao, nL, nao, naux)
     if is_gamma_point:
         return cderi.transpose(1,3,0,2)
@@ -813,7 +826,7 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     mask = cp.any(mask.reshape(nao, nL, nao), axis=1)
     tril_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
 
-    libpbc.fill_indexed_triu(
+    err = libpbc.fill_indexed_triu(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(conj_ki_order.data.ptr, ctypes.c_void_p),
@@ -821,6 +834,8 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
         ctypes.c_int(nao),
         # *2 for complex number
         ctypes.c_int(naux*2))
+    if err != 0:
+        raise RuntimeError('fill_indexed_triu kernel failed')
     return out.transpose(0,3,1,2)
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):

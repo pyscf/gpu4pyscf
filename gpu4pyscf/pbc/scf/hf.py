@@ -24,13 +24,13 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import hf as hf_cpu
-from pyscf.pbc import tools
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.smearing import smearing
+from gpu4pyscf.pbc import tools
 
 def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     '''Get energy bands at the given (arbitrary) 'band' k-points.
@@ -193,7 +193,7 @@ class SCF(mol_hf.SCF):
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
             isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
-            madelung = tools.pbc.madelung(cell, self.kpt[None])
+            madelung = tools.pbc.madelung(cell)
             log.info('    madelung (= occupied orbital energy shift) = %s', madelung)
             log.info('    Total energy shift due to Ewald probe charge'
                      ' = -1/2 * Nelec*madelung = %.12g',

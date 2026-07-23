@@ -20,11 +20,12 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, get_avail_mem
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.df.grad.rhf import (
-    int3c2e_scheme, _j_energy_per_atom, _factorize_dm, _gen_metric_solver)
+    int3c2e_scheme, _factorize_dm, _gen_metric_solver)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df_jk
+from gpu4pyscf.gto.mole import SortedMole
 
 __all__ = ['Gradients']
 
@@ -39,6 +40,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
+        from gpu4pyscf.df.grad.rhf import _j_energy_per_atom
         return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
                                   auxbasis_response, verbose) * j_factor
 
@@ -106,7 +108,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         auxvec = dm_oo.trace(axis1=2, axis2=3).sum(axis=0)
 
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+        short_range=mol.omega<0, gout_width=54, deriv=(1,0,0))
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
     lmax = mol.uniq_l_ctr[:,0].max()
     laux = auxmol.uniq_l_ctr[:,0].max()
@@ -122,23 +125,22 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         l_ctr_aux_offsets, auxmol.uniq_l_ctr, batch_size)
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
-    l_ctr_aux_counts = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
+    aux_offsets = aux_loc[ksh_offsets_cpu]
+    aux_batches = len(aux_offsets) - 1
 
     if j_factor != 0:
         dm = mol.apply_C_mat_CT(dm[0]+dm[1])
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libvhf_rys.sum_ejk_int3c2e_ip1
-    l = np.arange(laux+1)
-    nf = (l + 1) * (l + 2) // 2
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
     buf1 = cp.empty((blksize, nao, nao))
     buf2 = cp.empty(blksize*nao*max(2*nocc, nao))
     ejk = cp.zeros((mol.natm, 3))
     ejk_aux = cp.zeros((mol.natm, 3))
-    for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
-        naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
+    for kbatch in range(aux_batches):
+        naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -232,7 +234,8 @@ class Gradients(uhf_grad.Gradients):
         auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory
         with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+            sorted_mol = SortedMole.from_mol(mol, decontract=True)
+            int3c2e_opt = Int3c2eOpt(sorted_mol, auxmol).build()
         return _jk_energy_per_atom(
             int3c2e_opt, dm, j_factor, k_factor, hermi=hermi,
             auxbasis_response=self.auxbasis_response, verbose=verbose)

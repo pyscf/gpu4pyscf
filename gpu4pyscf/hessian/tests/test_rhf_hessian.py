@@ -14,7 +14,7 @@
 
 import unittest
 import numpy as np
-import cupy
+import cupy as cp
 import pyscf
 from pyscf import gto, lib
 from pyscf.hessian import rhf as rhf_cpu
@@ -198,8 +198,8 @@ class KnownValues(unittest.TestCase):
             ''',
         )
         nao = mol1.nao
-        mo_coeff = cupy.random.rand(nao, nao)
-        mo_occ = cupy.zeros([nao])
+        mo_coeff = cp.random.rand(nao, nao)
+        mo_occ = cp.zeros([nao])
         mo_occ[:3] = 2
         mocc = mo_coeff[:,:3]
         dm = mocc.dot(mocc.T) * 2
@@ -210,8 +210,8 @@ class KnownValues(unittest.TestCase):
         vj, vk = mf.get_jk(mol1, dm, hermi=1)
         vj_cpu = (mo_coeff.T @ vj @ mocc).reshape(1,-1)
         vk_cpu = (mo_coeff.T @ vk @ mocc).reshape(1,-1)
-        assert cupy.linalg.norm(vj_cpu - vj_mo) < 1e-5
-        assert cupy.linalg.norm(vk_cpu - vk_mo) < 1e-5
+        assert cp.linalg.norm(vj_cpu - vj_mo) < 1e-5
+        assert cp.linalg.norm(vk_cpu - vk_mo) < 1e-5
 
     @unittest.skipIf(num_devices > 1, '')
     def test_ecp_hess(self):

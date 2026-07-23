@@ -102,14 +102,11 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
 
     log.timer('gradients of 1e part', *t1)
 
-    extra_force = np.empty([natm, 3])
-    for ia in range(natm):
-        extra_force[ia] = ensure_numpy(mf_grad.extra_force(ia, locals()))
-
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     ds = contract_h1e_dm(cell, s1, dme0, hermi=1)
-    de = (dh1e - ds) / nkpts + e2_grad + extra_force
+    de = (dh1e - ds) / nkpts + e2_grad
+    de += cp.asnumpy(mf_grad.extra_force())
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
@@ -305,17 +302,6 @@ class Gradients(GradientsBase):
             e_occ = e[mask] * occ[mask]
             dm1e[k] = (c*e_occ).dot(c.conj().T)
         return dm1e
-
-    def extra_force(self, atom_id, envs):
-        '''Hook for extra contributions in analytical gradients.
-
-        Contributions like the response of auxiliary basis in density fitting
-        method, the grid response in DFT numerical integration can be put in
-        this function.
-        '''
-        #1 force from exxdiv corrections when madelung constant has non-zero derivative
-        #2 DFT grid response
-        return 0
 
     grad_elec = grad_elec
     as_scanner = molgrad.as_scanner

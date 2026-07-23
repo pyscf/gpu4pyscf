@@ -34,14 +34,12 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                     int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int ao_pair_offset, int aux_offset, int naux,
-                    int reorder_aux, int to_sph)
+                    int reorder_aux, int to_sph,
+                    int *head, int nbatches_shl_pair, int nbatches_ksh)
 {
     int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
-    int nbas = envs.nbas;
-    int *bas = envs.bas;
-    double *env = envs.env;
+    int worker_id = blockIdx.x;
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1, nksp;
     __shared__ int ksh0, ksh1;
     __shared__ int li, lj, lk, nroots;
@@ -49,6 +47,23 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     __shared__ int nf, aux_start;
     __shared__ int g_size;
     __shared__ int gout_stride, nst_per_block;
+    __shared__ int sp_block_id, ksh_block_id;
+while (1) {
+    __syncthreads();
+    if (thread_id == 0) {
+        int batch_id = atomicAdd(head, 1);
+        // For better load balance, process sp_blocks in the reversed order
+        sp_block_id = nbatches_shl_pair - 1 - batch_id / nbatches_ksh;
+        ksh_block_id = nbatches_ksh - 1 - batch_id % nbatches_ksh;
+    }
+    __syncthreads();
+    if (sp_block_id < 0) {
+        break;
+    }
+
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -88,8 +103,8 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                          shl_pair0, shl_pair1, ksh0, ksh1,
                          iprim, jprim, kprim, li, lj, lk, bas_ij_idx,
                          ao_pair_loc, ao_pair_offset, aux_start, naux,
-                         reorder_aux, to_sph)) {
-        return;
+                         reorder_aux, to_sph, thread_id, worker_id, shared_memory)) {
+        continue;
     }
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
@@ -100,7 +115,6 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 4 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;
@@ -329,7 +343,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
         if (to_sph && (li > 1 || lj > 1)) {
             i_stride = nst_per_block * nfk;
             aux_stride = nst_per_block;
-            out_local = pool + get_smid() * POOL_SIZE + st_id;
+            out_local = pool + worker_id * POOL_SIZE + st_id;
         }
         if (ijk_idx < nksp) {
 #pragma unroll
@@ -980,6 +994,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
             }
         }
     }
+}
 }
 
 static __global__
@@ -1658,12 +1673,16 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
                  int to_sph)
 {
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    int3c2e_kernel<<<blocks, THREADS, shm_size>>>(
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    int *head = (int *)(pool + workers * POOL_SIZE);
+    cudaMemset(head, 0, sizeof(int));
+    int3c2e_kernel<<<workers, THREADS, shm_size>>>(
             out, *envs, pool, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-            reorder_aux, to_sph);
+            reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));

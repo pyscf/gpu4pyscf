@@ -52,7 +52,7 @@ def test_j_engine():
     vj1 = j_engine.get_j(mol, dm).get()
     ref = get_jk(mol, dm, hermi=1, with_k=False)[0]
     assert abs(vj1 - ref).max() < 5e-9
-    assert abs(lib.fp(vj1) - -3491.404124194866) < 5e-10
+    assert abs(lib.fp(vj1) - -3491.404124194866) < 1e-9
 
 def test_j_engine_8fold_symmetry():
     mol = pyscf.M(

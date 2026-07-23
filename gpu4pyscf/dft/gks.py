@@ -81,7 +81,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
             exc += enlc
             vxc += vnlc
             log.debug('nelec with nlc grids = %s', n)
-        t0 = log.timer('vxc', *t0)
+    t1 = log.timer('vxc', *t0)
 
     dm_orig = dm = cp.asarray(dm)
     vj_last = getattr(vhf_last, 'vj', None)
@@ -91,39 +91,25 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         dm = dm - dm_last
     else:
         dm_last = None
-    if not ni.libxc.is_hybrid_xc(ks.xc):
-        vhf = vj = ks.get_j(mol, dm, hermi)
-        ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
-        if vj_last is not None:
-            vhf += asarray(vhf_last.vj)
-        vxc += vhf
-    else:
+    vhf = vj = ks.get_j(mol, dm, hermi)
+    ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
+    cput2 = log.timer_debug1('vj', *t1)
+
+    if ni.libxc.is_hybrid_xc(ks.xc):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
-        if omega == 0:
-            vj, vk = ks.get_jk(mol, dm, hermi)
-            vk *= hyb
-        elif alpha == 0: # LR=0, only SR exchange
-            vj = ks.get_j(mol, dm, hermi)
-            vk = ks.get_k(mol, dm, hermi, omega=-omega)
-            vk *= hyb
-        elif hyb == 0: # SR=0, only LR exchange
-            vj = ks.get_j(mol, dm, hermi)
-            vk = ks.get_k(mol, dm, hermi, omega=omega)
-            vk *= alpha
-        else: # SR and LR exchange with different ratios
-            vj, vk = ks.get_jk(mol, dm, hermi)
-            vk *= hyb
-            vklr = ks.get_k(mol, dm, hermi, omega=omega)
-            vklr *= (alpha - hyb)
-            vk += vklr
-        ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
-        vhf = vj - vk
+        vk = ks.get_k(mol, dm, hermi, omega, alpha, hyb)
+        vhf -= vk
         if vj_last is not None:
             vhf += asarray(vhf_last.vj)
         vxc += vhf
-        exc += float(cp.einsum('ij,ji->', dm_orig, vhf).real.get()) * .5
+        exc += float(cp.einsum('ij,ji', dm_orig, vhf).real.get()) * .5
         if ecoul is not None:
             exc -= ecoul
+        log.timer_debug1('vk', *cput2)
+    else:
+        if vj_last is not None:
+            vhf += asarray(vhf_last.vj)
+        vxc += vhf
     t0 = log.timer('veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vhf)
     return vxc
@@ -163,7 +149,7 @@ class GKS(rks.KohnShamDFT, GHF):
     @spin_samples.setter
     def spin_samples(self, val):
         self._numint.spin_samples = val
-    
+
     get_veff = get_veff
     reset = rks.RKS.reset
     energy_elec = rks.RKS.energy_elec

@@ -18,13 +18,12 @@ import cupyx.scipy.linalg as cpx_linalg
 
 from pyscf import gto, lib
 from gpu4pyscf import scf
-from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
 from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
 from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig, _krylov_tools
 from gpu4pyscf.tdscf import rhf as td_rhf
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
-from gpu4pyscf.df import int3c2e
+from gpu4pyscf.df import int3c2e_bdiv
 
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
@@ -172,43 +171,6 @@ BLKSIZE = 256
 AUXBLKSIZE = 256
 
 
-def get_int3c2e(mol, auxmol, aosym=True, omega=None):
-    '''
-    Generate full int3c2e tensor on GPU
-    for debug purpose
-    '''
-    nao = mol.nao
-    naux = auxmol.nao
-    intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(diag_block_with_triu=True, aosym=aosym, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    int3c = cp.empty([naux, nao, nao], order='C')
-    for cp_ij_id, _ in enumerate(intopt.log_qs):
-        cpi = intopt.cp_idx[cp_ij_id]
-        cpj = intopt.cp_jdx[cp_ij_id]
-        li = intopt.angular[cpi]
-        lj = intopt.angular[cpj]
-        i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-        j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
-
-        int3c_slice = cp.empty([naux, j1-j0, i1-i0], order='C')
-        for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-            k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
-            get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=int3c_slice[k0:k1], omega=omega)
-
-        if not mol.cart:
-            int3c_slice = cart2sph(int3c_slice, axis=1, ang=lj)
-            int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
-
-        i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
-        int3c[:, j0:j1, i0:i1] = int3c_slice
-    if aosym:
-        row, col = np.tril_indices(nao)
-        int3c[:, row, col] = int3c[:, col, row]
-    int3c = intopt.unsort_orbitals(int3c, aux_axis=[0], axis=[1,2])
-    return int3c
-
-
 def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
            calc='JK', aosym=True, omega=None, alpha=None, beta=None,
            group_size=BLKSIZE, group_size_aux=AUXBLKSIZE, log=None, 
@@ -225,6 +187,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     Returns:
         Tpq: cupy.ndarray (naux, nao, nao)
     """
+    from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
     nao = mol.nao
     naux = auxmol.nao
 
@@ -633,7 +596,7 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
 
     def get_erimo(auxmol_i):
         naux = auxmol_i.nao
-        int3c = int3c2e.get_int3c2e(mol, auxmol_i)
+        int3c = int3c2e_bdiv.aux_e2(mol, auxmol_i)
         int2c2e = auxmol_i.intor('int2c2e')
         int3c = cp.asarray(int3c)
         int2c2e = cp.asarray(int2c2e)
@@ -648,7 +611,7 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
         return eri_mo
     def get_erimo_omega(auxmol_i, omega):
         naux = auxmol_i.nao
-        int3c = int3c2e.get_int3c2e(mol, auxmol_i, omega=omega)
+        int3c = int3c2e_bdiv.aux_e2(mol, auxmol_i, omega=omega)
         with auxmol_i.with_range_coulomb(omega):
             int2c2e = auxmol_i.intor('int2c2e')
         int3c = cp.asarray(int3c)
