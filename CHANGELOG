@@ -1,4 +1,4 @@
-v1.8.0 (2026-07-20)
+v1.8.0 (2026-07-23)
 -------------------
 * New Features
   - geometry optimization for PM6.
@@ -9,17 +9,19 @@ v1.8.0 (2026-07-20)
   - Time-reversal symmetry support for k-point sampling calculations
   - Stress tensor using the multigrid integrator
 * Improvements
-  - Refactore the VV10 Hessian implementation to improve performance.
+  - Refactor the VV10 Hessian implementation to improve performance.
   - Eigenvalue decomposition is now used by default to handle the auxiliary basis linear dependency in PBC GDF.
-  - Refactore the molecular J/K matrix construction, improving K-matrix performance for range-separated hybrid functionals.
+  - Refactor the molecular J/K matrix construction, improving K-matrix performance for range-separated hybrid functionals.
   - Optimize int3c2e and auxvec contraction using the MD J-engine algorithm.
   - Optimize multigrid density kernel (`evaluate_density_kernel`).
   - Improve the stability of Hessian calculations for very large systems. (#783)
   - Improve the stability of gradient calculations: changing DF gradient routine full-/short-range j2c inversion algorithm to CD. (#803)
   - Refactor the density fitting generation code to reduce memory usage, improve density fitting initialization time.
-  - Optimiz density fitting integral evaluation for generally contracted basis sets.
+  - Optimize density fitting integral evaluation for generally contracted basis sets.
   - Improve the memory efficiency of loading and decompressing the cderi tensor.
   - Refactor the density fitting Hessian implementation to reduce memory usage, support larger systems, and enable multi-GPU execution.
+  - Optimize density-fitting Coulomb matrix computation (the get_j function)
+  - Optimize one-electron integral derivatives for Gradients and Hessians
   - Enhance scf_summary to include the energy gap, Ecoul, and Exc.
   - Reduce memory usage and Optimize memory allocation efficiency in numint.eval_xc_eff (#787)
   - Reduce memory footprint and increase the speed for C-PCM on large molecule (#809)
