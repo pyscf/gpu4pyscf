@@ -16,6 +16,7 @@
 3-center 2-electron Coulomb integral helper functions
 '''
 
+from functools import lru_cache
 import ctypes
 import math
 import numpy as np
@@ -242,7 +243,8 @@ class Int3c2eOpt:
 
             aux_loc = auxmol.ao_loc
             aux_offsets = aux_loc[ksh_offsets_cpu[aux_splits]]
-            if isinstance(aux_sorting, cp.ndarray):
+            if isinstance(aux_sorting, (np.ndarray, cp.ndarray)):
+                # aux_sorting can be a slice() instance
                 aux_sorting = cp.asarray(aux_sorting)
 
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
@@ -542,6 +544,7 @@ class Int3c2eEnvVars(ctypes.Structure):
         return Int3c2eEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc,
                                   self.log_cutoff)
 
+@lru_cache
 def int3c2e_scheme(*, short_range=False, shm_size=SHM_SIZE, gout_width=None,
                    gout_ndim='ijk', deriv=None, cache_cart_idx=False,
                    angular_inc=None):
@@ -623,8 +626,8 @@ def argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux):
     nksh = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
     for k, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         aux0, aux1 = aux1, aux1 + nf[k] * nksh[k]
-        aux_sorting.append(cp.arange(aux0, aux1).reshape(nf[k], nksh[k]).T.ravel())
-    return cp.hstack(aux_sorting)
+        aux_sorting.append(np.arange(aux0, aux1).reshape(nf[k], nksh[k]).T.ravel())
+    return cp.asarray(np.hstack(aux_sorting))
 
 def get_ao_pair_loc(uniq_l, bas_ij_cache, cart=True):
     '''

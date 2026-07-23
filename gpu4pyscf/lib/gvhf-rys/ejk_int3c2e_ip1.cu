@@ -103,7 +103,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     register int aux_id = st_id - sp_id * aux_per_block;
 
     int gx_len = g_size * nst_per_block;
-    double *rjri = shared_memory;
+    double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
     double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
@@ -137,9 +137,9 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
             double xjxi = env[rj+0] - env[ri+0];
             double yjyi = env[rj+1] - env[ri+1];
             double zjzi = env[rj+2] - env[ri+2];
-            rjri[sp_id+0*nsp_per_block] = xjxi;
-            rjri[sp_id+1*nsp_per_block] = yjyi;
-            rjri[sp_id+2*nsp_per_block] = zjzi;
+            rjri[0*nsp_per_block] = xjxi;
+            rjri[1*nsp_per_block] = yjyi;
+            rjri[2*nsp_per_block] = zjzi;
         }
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += aux_per_block) {
             int ksh = kidx;
@@ -208,9 +208,9 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 __syncthreads();
                 if (gout_id == 0) {
                     double theta_ij = ai * aj_aij;
-                    double xjxi = rjri[sp_id+0*nsp_per_block];
-                    double yjyi = rjri[sp_id+1*nsp_per_block];
-                    double zjzi = rjri[sp_id+2*nsp_per_block];
+                    double xjxi = rjri[0*nsp_per_block];
+                    double yjyi = rjri[1*nsp_per_block];
+                    double zjzi = rjri[2*nsp_per_block];
                     double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                     double Kab = theta_ij * rr_ij;
                     double fac_ij = PI_FAC;
@@ -306,9 +306,9 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 v_kx -= goutx;
                                 v_ky -= gouty;
                                 v_kz -= goutz;
-                                double gjx = gix - rjri[sp_id+0*nsp] * Ix;
-                                double gjy = giy - rjri[sp_id+1*nsp] * Iy;
-                                double gjz = giz - rjri[sp_id+2*nsp] * Iz;
+                                double gjx = gix - rjri[0*nsp] * Ix;
+                                double gjy = giy - rjri[1*nsp] * Iy;
+                                double gjz = giz - rjri[2*nsp] * Iz;
                                 double fjx = aj2 * gjx; if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
                                 double fjy = aj2 * gjy; if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
                                 double fjz = aj2 * gjz; if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
@@ -445,7 +445,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     register int aux_id = st_id - sp_id * aux_per_block;
 
     int gx_len = g_size * nst_per_block;
-    double *rjri = shared_memory;
+    double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
     double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
@@ -487,9 +487,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
             double xjxi = env[rj+0] - env[ri+0];
             double yjyi = env[rj+1] - env[ri+1];
             double zjzi = env[rj+2] - env[ri+2];
-            rjri[sp_id+0*nsp_per_block] = xjxi;
-            rjri[sp_id+1*nsp_per_block] = yjyi;
-            rjri[sp_id+2*nsp_per_block] = zjzi;
+            rjri[0*nsp_per_block] = xjxi;
+            rjri[1*nsp_per_block] = yjyi;
+            rjri[2*nsp_per_block] = zjzi;
         }
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += aux_per_block) {
             int ksh = kidx;
@@ -529,9 +529,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 __syncthreads();
                 if (gout_id == 0) {
                     double theta_ij = ai * aj_aij;
-                    double xjxi = rjri[sp_id+0*nsp_per_block];
-                    double yjyi = rjri[sp_id+1*nsp_per_block];
-                    double zjzi = rjri[sp_id+2*nsp_per_block];
+                    double xjxi = rjri[0*nsp_per_block];
+                    double yjyi = rjri[1*nsp_per_block];
+                    double zjzi = rjri[2*nsp_per_block];
                     double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                     double Kab = theta_ij * rr_ij;
                     double fac_ij = PI_FAC;
@@ -614,9 +614,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; }
                                 double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gx[addry-i_1]; }
                                 double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; }
-                                double fjx = aj2 * (gix - rjri[sp_id+0*nsp] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
-                                double fjy = aj2 * (giy - rjri[sp_id+1*nsp] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
-                                double fjz = aj2 * (giz - rjri[sp_id+2*nsp] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
+                                double fjx = aj2 * (gix - rjri[0*nsp] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
+                                double fjy = aj2 * (giy - rjri[1*nsp] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
+                                double fjz = aj2 * (giz - rjri[2*nsp] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
                                 //double gkx = gx[addrx+k_1];
                                 //double gky = gx[addry+k_1];
                                 //double gkz = gx[addrz+k_1];

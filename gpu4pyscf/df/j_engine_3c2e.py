@@ -1,4 +1,4 @@
-# Copyright 2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from functools import lru_cache
 import ctypes
 import math
 import numpy as np
@@ -115,27 +116,7 @@ class Int3c2eOpt:
         if hermi != 1:
             dm = transpose_sum(dm)
 
-        lmax = mol.uniq_l_ctr[:,0].max()
-        lmax_aux = auxmol._bas[:,ANG_OF].max()
-        li = np.arange(lmax*2+1)
-        lk = np.arange(lmax_aux+1)
-        order = li[:,None] + lk
-        nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
-        Rt_swap_size = np.array([42, 42, 42, 42, 42, 42, 30])[:lmax_aux+1]
-        Rt_stride = (nf3ijkl + Rt_swap_size-1) // Rt_swap_size
-        nsp_max = THREADS // Rt_stride
-
-        unit = order+1 + nf3ijkl
-        nsp_per_block = SHM_SIZE //(unit*8)
-        nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
-        nsp_per_block = _nearest_power2(nsp_per_block)
-        nsp_per_block[nsp_per_block>THREADS] = THREADS
-
-        shm_size = (nsp_per_block * unit).max() * 8
-        nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
-        nsp_lookup[:lmax*2+1,:lmax_aux+1] = nsp_per_block
-        nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
-
+        nsp_lookup, shm_size =  _int3c2e_dm_scheme()
         shl_pair_idx = asarray(self.shl_pair_idx, dtype=np.int32)
         pair_ij_offsets = cp.asarray(self.shl_pair_offsets, dtype=np.int32)
         sp_blocks = len(pair_ij_offsets) - 1
@@ -189,35 +170,9 @@ class Int3c2eOpt:
         nf3 = (l+1)*(l+2)*(l+3)//6
         aux_xyz_loc = np.asarray(np.append(0, np.cumsum(nf3)), dtype=np.int32)
 
-        lmax = mol.uniq_l_ctr[:,0].max()
-        lmax_aux = auxmol._bas[:,ANG_OF].max()
-        li = np.arange(lmax*2+1)
-        lk = np.arange(lmax_aux+1)
-        nf3k = (lmax_aux+1)*(lmax_aux+2)*(lmax_aux+3)//6
-        order = li[:,None] + lk
-        nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
-        Rt_swap_size = np.array([35, 35, 35, 35, 35, 21, 21])[:lmax_aux+1]
-        Rt_stride = (nf3ijkl + Rt_swap_size-1) // Rt_swap_size
-        nfij = (li + 1) * (li + 2) * (li + 3) // 6
-        IJ_SIZE = np.array([35, 21, 15, 11, 8, 8, 8])[:lmax_aux+1]
-        Rt_stride_min = (nfij[:,None] + IJ_SIZE-1) // IJ_SIZE
-        Rt_stride = np.where(Rt_stride > Rt_stride_min, Rt_stride, Rt_stride_min)
-
-        nsp_max = THREADS // Rt_stride
-        unit = order+1 + nf3ijkl #+ order * (order + 1) * (order + 2) // 6
-        shm_size = SHM_SIZE - nf3k * 8
-        nsp_per_block = shm_size //(unit*8)
-        nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
-        nsp_per_block = _nearest_power2(nsp_per_block)
-        nsp_per_block[nsp_per_block>THREADS] = THREADS
-
-        shm_size = ((nsp_per_block * unit).max() + nf3k) * 8
-        nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
-        nsp_lookup[:lmax*2+1,:lmax_aux+1] = nsp_per_block
-        nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
-
+        nsp_lookup, shm_size = _int3c2e_auxvec_scheme()
         shl_pair_idx = asarray(self.shl_pair_idx, dtype=np.int32)
-        pair_ij_offsets = cp.asarray(self.shl_pair_offsets, dtype=np.int32)
+        pair_ij_offsets = asarray(self.shl_pair_offsets, dtype=np.int32)
         sp_blocks = len(pair_ij_offsets) - 1
 
         # Split auxbasis into small batches for load balance
@@ -225,9 +180,9 @@ class Int3c2eOpt:
         k0 = k1 = mol.nbas
         for n in auxmol.l_ctr_counts:
             k0, k1 = k1, k1 + n
-            ksh_offsets.append(cp.arange(k0, k1, 16, dtype=np.int32))
+            ksh_offsets.append(np.arange(k0, k1, 16, dtype=np.int32))
         ksh_offsets.append(np.int32(k1))
-        ksh_offsets = cp.hstack(ksh_offsets, dtype=np.int32)
+        ksh_offsets = asarray(np.hstack(ksh_offsets, dtype=np.int32))
         ksh_blocks = len(ksh_offsets) - 1
 
         log.debug1('sp_blocks = %d, ksh_blocks = %d, shm_size = %d B',
@@ -273,3 +228,49 @@ class Int3c2eOpt:
         if auxvec_ndim == 1:
             vj = vj[0]
         return vj
+
+@lru_cache
+def _int3c2e_dm_scheme():
+    li = np.arange(LMAX*2+1)
+    lk = np.arange(L_AUX_MAX+1)
+    order = li[:,None] + lk
+    nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
+    Rt_swap_size = np.array([42, 42, 42, 42, 42, 42, 30])
+    Rt_stride = (nf3ijkl + Rt_swap_size-1) // Rt_swap_size
+    nsp_max = THREADS // Rt_stride
+
+    unit = order+1 + nf3ijkl
+    nsp_per_block = SHM_SIZE //(unit*8)
+    nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
+    nsp_per_block = _nearest_power2(nsp_per_block)
+    nsp_per_block[nsp_per_block>THREADS] = THREADS
+
+    shm_size = (nsp_per_block * unit).max() * 8
+    nsp_lookup = cp.asarray(nsp_per_block, dtype=np.int32)
+    return nsp_lookup, shm_size
+
+@lru_cache
+def _int3c2e_auxvec_scheme():
+    li = np.arange(LMAX*2+1)
+    lk = np.arange(L_AUX_MAX+1)
+    nf3k = (L_AUX_MAX+1)*(L_AUX_MAX+2)*(L_AUX_MAX+3)//6
+    order = li[:,None] + lk
+    nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
+    Rt_swap_size = np.array([35, 35, 35, 35, 35, 21, 21])
+    Rt_stride = (nf3ijkl + Rt_swap_size-1) // Rt_swap_size
+    nfij = (li + 1) * (li + 2) * (li + 3) // 6
+    IJ_SIZE = np.array([35, 21, 15, 11, 8, 8, 8])
+    Rt_stride_min = (nfij[:,None] + IJ_SIZE-1) // IJ_SIZE
+    Rt_stride = np.where(Rt_stride > Rt_stride_min, Rt_stride, Rt_stride_min)
+
+    nsp_max = THREADS // Rt_stride
+    unit = order+1 + nf3ijkl #+ order * (order + 1) * (order + 2) // 6
+    shm_size = SHM_SIZE - nf3k * 8
+    nsp_per_block = shm_size //(unit*8)
+    nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
+    nsp_per_block = _nearest_power2(nsp_per_block)
+    nsp_per_block[nsp_per_block>THREADS] = THREADS
+
+    shm_size = ((nsp_per_block * unit).max() + nf3k) * 8
+    nsp_lookup = asarray(nsp_per_block, dtype=np.int32)
+    return nsp_lookup, shm_size

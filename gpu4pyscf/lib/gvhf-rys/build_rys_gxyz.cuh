@@ -17,8 +17,9 @@
 
 #define BUILD_4C_GXYZ(lj, ll, active) \
         __syncthreads(); \
+        int gx_len = nsq_per_block * g_size; \
         if (gout_id == 0) { \
-            gx[nsq_per_block*g_size*2] = rw[(irys*2+1)*nsq_per_block]; \
+            gx[gx_len*2] = rw[(irys*2+1)*nsq_per_block]; \
         } \
         double rt = rw[irys*2*nsq_per_block]; \
         double aij = aij_cache[0]; \
@@ -30,7 +31,7 @@
             double b10 = .5/aij * (1 - rt_aij); \
             __syncthreads(); \
             for (int n = gout_id; n < 3; n += gout_stride) { \
-                double *_gx = gx + n * g_size * nsq_per_block; \
+                double *_gx = gx + n * gx_len; \
                 double Rpa = rjri[n] * aj_aij; \
                 double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block]; \
                 s0x = _gx[0]; \
@@ -52,7 +53,7 @@
             for (int n = gout_id; n < lij3+gout_id; n += gout_stride) { \
                 __syncthreads(); \
                 int i = n / 3; \
-                int _ix = n % 3; \
+                int _ix = n - i * 3; \
                 double *_gx = gx + (i + _ix * g_size) * nsq_per_block; \
                 double Rqc = rlrk[_ix*nsq_per_block] * al_akl; \
                 double cpx = Rqc + rt_akl * Rpq[_ix*nsq_per_block]; \
@@ -84,7 +85,7 @@
                 int lkl3 = (lkl+1)*3; \
                 for (int m = gout_id; m < lkl3; m += gout_stride) { \
                     int k = m / 3; \
-                    int _ix = m % 3; \
+                    int _ix = m - k * 3; \
                     double xjxi = rjri[_ix]; \
                     double *_gx = gx + (_ix*g_size + k*stride_k) * nsq_per_block; \
                     for (int j = 0; j < lj; ++j) { \
@@ -104,7 +105,7 @@
             if (active) { \
                 for (int n = gout_id; n < stride_k*3; n += gout_stride) { \
                     int i = n / 3; \
-                    int _ix = n % 3; \
+                    int _ix = n - i * 3; \
                     double xlxk = rlrk[_ix*nsq_per_block]; \
                     double *_gx = gx + (_ix*g_size + i) * nsq_per_block; \
                     for (int l = 0; l < ll; ++l) { \
@@ -124,8 +125,9 @@
 #define BUILD_3C_GXYZ(lj, rjri_stride, active) \
         __syncthreads(); \
         int nst = nst_per_block; \
+        int gx_len = nst * g_size; \
         if (gout_id == 0) { \
-            gx[nst*g_size*2] = rw[(irys*2+1)*nst]; \
+            gx[gx_len*2] = rw[(irys*2+1)*nst]; \
         } \
         double rt = rw[irys*2*nst]; \
         double rt_aa = rt / (aij + ak); \
@@ -135,7 +137,7 @@
             double b10 = .5/aij * (1 - rt_aij); \
             __syncthreads(); \
             for (int n = gout_id; n < 3; n += gout_stride) { \
-                double *_gx = gx + n * g_size * nst; \
+                double *_gx = gx + n * gx_len; \
                 double Rpa = rjri[n*rjri_stride] * aj_aij; \
                 double c0x = Rpa - rt_aij * Rpq[n*nst]; \
                 s0x = _gx[0]; \
@@ -157,7 +159,7 @@
             for (int n = gout_id; n < lij3+gout_id; n += gout_stride) { \
                 __syncthreads(); \
                 int i = n / 3; \
-                int _ix = n % 3; \
+                int _ix = n - i * 3; \
                 double *_gx = gx + (i + _ix * g_size) * nst; \
                 double cpx = rt_ak * Rpq[_ix*nst]; \
                 if (n < lij3) { \
@@ -188,7 +190,7 @@
                 int lk3 = (lk+1)*3; \
                 for (int m = gout_id; m < lk3; m += gout_stride) { \
                     int k = m / 3; \
-                    int _ix = m % 3; \
+                    int _ix = m - k * 3; \
                     double xjxi = rjri[_ix*rjri_stride]; \
                     double *_gx = gx + (_ix*g_size + k*stride_k) * nst; \
                     for (int j = 0; j < lj; ++j) { \
