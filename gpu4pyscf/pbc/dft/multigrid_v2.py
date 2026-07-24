@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -865,9 +865,16 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
         # e^{i \vec{k} \cdot (\vec{R}_1 - \vec{R}_2)}
         # Because during grid density evaluation, rho = \sum_{\mu\nu} D_{\mu\nu} \mu \nu^*
         # The conjugate is on \nu, which is different from other Fock integrals
-        density_matrix_with_translation = cp.einsum(
-            "kt, ikpq->itpq", phase_diff_among_images.conj(), dm_slice
-        )
+        if dm_slice.dtype == np.float64:
+            density_matrix_with_translation = contract(
+                "kt, ikpq->itpq", phase_diff_among_images.real, dm_slice
+            )
+        else:
+            density_matrix_with_translation = contract(
+                "ktz, ikpqz->itpq",
+                phase_diff_among_images[:,:,None].view(np.float64),
+                dm_slice[:,:,:,:,None].view(np.float64)
+            )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
 
@@ -984,13 +991,13 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
             :, :, :, n_ao_in_localized:
         ] += density_matrix_with_rows_in_diffused.transpose(0, 1, 3, 2).conj()
 
-        coeff_sandwiched_density_matrix = cp.einsum(
+        coeff_sandwiched_density_matrix = contract(
             "nkij,pi->nkpj",
             density_matrix_with_rows_in_localized,
             pairs["coeff_in_localized"],
         )
 
-        coeff_sandwiched_density_matrix = cp.einsum(
+        coeff_sandwiched_density_matrix = contract(
             "nkpj, qj -> nkpq",
             coeff_sandwiched_density_matrix,
             pairs["concatenated_coeff"],
@@ -1108,9 +1115,11 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
             raise RuntimeError(f'evaluate_xc_driver for li={i_angular} lj={j_angular} failed')
 
     if not (n_k_points == 1 and n_difference_images == 1):
-        return cp.einsum(
-            "kt, ntij -> nkij", phase_diff_among_images, fock
-        )
+        assert fock.dtype == np.float64
+        phase_z = phase_diff_among_images[:,:,None].view(np.float64)
+        return contract(
+            "ktz, ntij -> nkijz", phase_z, fock
+        ).view(np.complex128)[:,:,:,:,0]
     else:
         return fock
 
@@ -1180,8 +1189,8 @@ def convert_xc_on_g_mesh_to_fock(
         libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
         fock_slice = evaluate_xc_wrapper(pairs, interpolated_xc, img_phase, with_tau=with_tau)
-        fock_slice = cp.einsum("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
-        fock_slice = cp.einsum("nkiq,qj->nkij", fock_slice, pairs["concatenated_coeff"])
+        fock_slice = contract("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
+        fock_slice = contract("nkiq,qj->nkij", fock_slice, pairs["concatenated_coeff"])
 
         def atomic_add_complex128(dst, idx, src):
             if src.dtype == cp.float64:
@@ -1243,9 +1252,16 @@ def evaluate_xc_gradient_wrapper(
     if n_k_points == 1 and n_difference_images == 1:
         density_matrix_with_translation = dm_slice
     else:
-        density_matrix_with_translation = cp.einsum(
-            "kt, ikpq->itpq", phase_diff_among_images.conj(), dm_slice
-        )
+        if dm_slice.dtype == np.float64:
+            density_matrix_with_translation = contract(
+                "kt, ikpq->itpq", phase_diff_among_images.real, dm_slice
+            )
+        else:
+            density_matrix_with_translation = contract(
+                "ktz, ikpqz->itpq",
+                phase_diff_among_images[:,:,None].view(np.float64),
+                dm_slice[:,:,:,:,None].view(np.float64)
+            )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
     if ignore_imag is False:
@@ -1348,13 +1364,13 @@ def convert_xc_on_g_mesh_to_fock_gradient(
             :, :, :, n_ao_in_localized:
         ] += density_matrix_with_rows_in_diffused.transpose(0, 1, 3, 2).conj()
 
-        coeff_sandwiched_density_matrix = cp.einsum(
+        coeff_sandwiched_density_matrix = contract(
             "nkij,pi->nkpj",
             density_matrix_slice,
             pairs["coeff_in_localized"],
         )
 
-        coeff_sandwiched_density_matrix = cp.einsum(
+        coeff_sandwiched_density_matrix = contract(
             "nkpj, qj -> nkpq",
             coeff_sandwiched_density_matrix,
             pairs["concatenated_coeff"],
