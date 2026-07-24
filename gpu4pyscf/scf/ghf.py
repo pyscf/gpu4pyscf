@@ -223,25 +223,17 @@ class GHF(hf.SCF):
         nmo = mo_energy.size
         mo_occ = cp.zeros_like(mo_energy)
         nocc = self.mol.nelectron
-        
         if nocc > nmo:
             raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
             
         mo_occ[e_idx[:nocc]] = 1
-        
-        if nocc < nmo:
+        if self.verbose >= logger.INFO and nocc < nmo:
             homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
-            gap = (lumo - homo) * HARTREE2EV
-            self.scf_summary['gap'] = gap
-            if self.verbose >= logger.INFO:
-                if homo+1e-3 > lumo:
-                    logger.warn(self, 'HOMO %.15g == LUMO %.15g', homo, lumo)
-                else:
-                    logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap/eV = %.5f',
-                                homo, lumo, gap)
-        elif nocc > nmo:
-            raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
-        mo_occ[e_idx[:nocc]] = 1
+            if homo+1e-3 > lumo:
+                logger.warn(self, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+            else:
+                logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
+                            homo, lumo, (lumo-homo)*HARTREE2EV)
 
         if mo_coeff is not None and self.verbose >= logger.DEBUG:
             ss, s = self.spin_square(mo_coeff[:,mo_occ>0], self.get_ovlp())
