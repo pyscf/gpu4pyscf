@@ -738,6 +738,7 @@ class KnownValues(unittest.TestCase):
             pseudo = 'gth-pbe',
             precision = 1e-8,
             verbose = 0,
+            output='/dev/null'
         )
 
         kpts = cell.make_kpts([1,1,1])
@@ -793,6 +794,7 @@ class KnownValues(unittest.TestCase):
             pseudo = 'gth-pbe',
             precision = 1e-8,
             verbose = 5,
+            output='/dev/null'
         )
 
         kpts = cell.make_kpts([1,1,3])
@@ -846,6 +848,7 @@ class KnownValues(unittest.TestCase):
             pseudo = 'gth-pbe',
             precision = 1e-8,
             verbose = 5,
+            output='/dev/null'
         )
 
         kpts = cell.make_kpts([1,1,3])

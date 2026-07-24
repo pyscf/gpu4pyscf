@@ -369,14 +369,14 @@ def extract_pgto_params(mol, op='diffuse'):
         # value smaller than the required precision
         # c * r2**(l/2) * ((2*l+1)/4*np.pi)**.5 * exp(-e*r2) ~ precision
         tmp = (2*l+1)/(4*np.pi)/precision**2 * c**2 * 1e2**l
-        tmp = np.where(tmp > 0, tmp, 1e-200)
+        tmp[tmp <= 0] = 1e-200
         r2 = np.log(tmp) / (2*e)
         idx = groupby(basis_id, r2, 'argmax')
     else:
         # A quick estimation for the resolution of planewaves that each
         # primitive GTO requires
         tmp = c**2 / precision * 50**l
-        tmp = np.where(tmp > 0, tmp, 1e-200)
+        tmp[tmp <= 0] = 1e-200
         ke = np.log(tmp) * e
         idx = groupby(basis_id, ke, 'argmax')
     return e[idx], c[idx]

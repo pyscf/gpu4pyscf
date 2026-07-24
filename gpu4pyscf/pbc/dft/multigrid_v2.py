@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -865,11 +865,16 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
         # e^{i \vec{k} \cdot (\vec{R}_1 - \vec{R}_2)}
         # Because during grid density evaluation, rho = \sum_{\mu\nu} D_{\mu\nu} \mu \nu^*
         # The conjugate is on \nu, which is different from other Fock integrals
-        density_matrix_with_translation = contract(
-            "ktz, ikpqz->itpq",
-            phase_diff_among_images[:,:,None].view(np.float64),
-            dm_slice[:,:,:,:,None].view(np.float64)
-        )
+        if dm_slice.dtype == np.float64:
+            density_matrix_with_translation = contract(
+                "kt, ikpq->itpq", phase_diff_among_images.real, dm_slice
+            )
+        else:
+            density_matrix_with_translation = contract(
+                "ktz, ikpqz->itpq",
+                phase_diff_among_images[:,:,None].view(np.float64),
+                dm_slice[:,:,:,:,None].view(np.float64)
+            )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
 
@@ -1110,6 +1115,7 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
             raise RuntimeError(f'evaluate_xc_driver for li={i_angular} lj={j_angular} failed')
 
     if not (n_k_points == 1 and n_difference_images == 1):
+        assert fock.dtype == np.float64
         phase_z = phase_diff_among_images[:,:,None].view(np.float64)
         return contract(
             "ktz, ntij -> nkijz", phase_z, fock
@@ -1246,11 +1252,16 @@ def evaluate_xc_gradient_wrapper(
     if n_k_points == 1 and n_difference_images == 1:
         density_matrix_with_translation = dm_slice
     else:
-        density_matrix_with_translation = contract(
-            "ktz, ikpqz->itpq",
-            phase_diff_among_images[:,:,None].view(np.float64),
-            dm_slice[:,:,:,:,None].view(np.float64)
-        )
+        if dm_slice.dtype == np.float64:
+            density_matrix_with_translation = contract(
+                "kt, ikpq->itpq", phase_diff_among_images.real, dm_slice
+            )
+        else:
+            density_matrix_with_translation = contract(
+                "ktz, ikpqz->itpq",
+                phase_diff_among_images[:,:,None].view(np.float64),
+                dm_slice[:,:,:,:,None].view(np.float64)
+            )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
     if ignore_imag is False:
@@ -1466,7 +1477,9 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     Gv = get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
 
-    coulomb_on_g_mesh = density[:, 0] * coulomb_kernel_on_g_mesh
+    coulomb_on_g_mesh = cp.einsum(
+        "ng, g -> ng", density[:, 0], coulomb_kernel_on_g_mesh
+    )
     weight = cell.vol / ngrids
 
     density = density.reshape(-1, *mesh)
@@ -1744,7 +1757,9 @@ def get_veff_ip1(
 
     Gv = get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
-    coulomb_on_g_mesh = density[:, 0] * coulomb_kernel_on_g_mesh
+    coulomb_on_g_mesh = cp.einsum(
+        "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
+    )
 
     weight = cell.vol / ngrids
 
