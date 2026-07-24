@@ -865,8 +865,10 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
         # e^{i \vec{k} \cdot (\vec{R}_1 - \vec{R}_2)}
         # Because during grid density evaluation, rho = \sum_{\mu\nu} D_{\mu\nu} \mu \nu^*
         # The conjugate is on \nu, which is different from other Fock integrals
-        density_matrix_with_translation = cp.einsum(
-            "kt, ikpq->itpq", phase_diff_among_images.conj(), dm_slice
+        density_matrix_with_translation = contract(
+            "ktz, ikpqz->itpq",
+            phase_diff_among_images[:,:,None].view(np.float64),
+            dm_slice[:,:,:,:,None].view(np.float64)
         )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
@@ -984,13 +986,13 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
             :, :, :, n_ao_in_localized:
         ] += density_matrix_with_rows_in_diffused.transpose(0, 1, 3, 2).conj()
 
-        coeff_sandwiched_density_matrix = cp.einsum(
+        coeff_sandwiched_density_matrix = contract(
             "nkij,pi->nkpj",
             density_matrix_with_rows_in_localized,
             pairs["coeff_in_localized"],
         )
 
-        coeff_sandwiched_density_matrix = cp.einsum(
+        coeff_sandwiched_density_matrix = contract(
             "nkpj, qj -> nkpq",
             coeff_sandwiched_density_matrix,
             pairs["concatenated_coeff"],
@@ -1108,9 +1110,10 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
             raise RuntimeError(f'evaluate_xc_driver for li={i_angular} lj={j_angular} failed')
 
     if not (n_k_points == 1 and n_difference_images == 1):
-        return cp.einsum(
-            "kt, ntij -> nkij", phase_diff_among_images, fock
-        )
+        phase_z = phase_diff_among_images[:,:,None].view(np.float64)
+        return contract(
+            "ktz, ntij -> nkijz", phase_z, fock
+        ).view(np.complex128)[:,:,:,:,0]
     else:
         return fock
 
@@ -1180,8 +1183,8 @@ def convert_xc_on_g_mesh_to_fock(
         libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
         fock_slice = evaluate_xc_wrapper(pairs, interpolated_xc, img_phase, with_tau=with_tau)
-        fock_slice = cp.einsum("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
-        fock_slice = cp.einsum("nkiq,qj->nkij", fock_slice, pairs["concatenated_coeff"])
+        fock_slice = contract("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
+        fock_slice = contract("nkiq,qj->nkij", fock_slice, pairs["concatenated_coeff"])
 
         def atomic_add_complex128(dst, idx, src):
             if src.dtype == cp.float64:
@@ -1243,8 +1246,10 @@ def evaluate_xc_gradient_wrapper(
     if n_k_points == 1 and n_difference_images == 1:
         density_matrix_with_translation = dm_slice
     else:
-        density_matrix_with_translation = cp.einsum(
-            "kt, ikpq->itpq", phase_diff_among_images.conj(), dm_slice
+        density_matrix_with_translation = contract(
+            "ktz, ikpqz->itpq",
+            phase_diff_among_images[:,:,None].view(np.float64),
+            dm_slice[:,:,:,:,None].view(np.float64)
         )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
@@ -1348,13 +1353,13 @@ def convert_xc_on_g_mesh_to_fock_gradient(
             :, :, :, n_ao_in_localized:
         ] += density_matrix_with_rows_in_diffused.transpose(0, 1, 3, 2).conj()
 
-        coeff_sandwiched_density_matrix = cp.einsum(
+        coeff_sandwiched_density_matrix = contract(
             "nkij,pi->nkpj",
             density_matrix_slice,
             pairs["coeff_in_localized"],
         )
 
-        coeff_sandwiched_density_matrix = cp.einsum(
+        coeff_sandwiched_density_matrix = contract(
             "nkpj, qj -> nkpq",
             coeff_sandwiched_density_matrix,
             pairs["concatenated_coeff"],
@@ -1461,9 +1466,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     Gv = get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
 
-    coulomb_on_g_mesh = cp.einsum(
-        "ng, g -> ng", density[:, 0], coulomb_kernel_on_g_mesh
-    )
+    coulomb_on_g_mesh = density[:, 0] * coulomb_kernel_on_g_mesh
     weight = cell.vol / ngrids
 
     density = density.reshape(-1, *mesh)
@@ -1741,9 +1744,7 @@ def get_veff_ip1(
 
     Gv = get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
-    coulomb_on_g_mesh = cp.einsum(
-        "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
-    )
+    coulomb_on_g_mesh = density[:, 0] * coulomb_kernel_on_g_mesh
 
     weight = cell.vol / ngrids
 
