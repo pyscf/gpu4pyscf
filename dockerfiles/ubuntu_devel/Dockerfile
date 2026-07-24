@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.2-devel-ubuntu24.04
 
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
@@ -16,6 +16,7 @@ ENV CUDA_HOME="/usr/local/cuda" LD_LIBRARY_PATH="${CUDA_HOME}/lib64::${LD_LIBRAR
 RUN echo "export PATH=${CUDA_HOME}/bin:\$PATH" >> /etc/bash.bashrc
 RUN echo "export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:\$LD_LIBRARY_PATH" >> /etc/bash.bashrc
 
+RUN pip3 config set global.break-system-packages true
 RUN pip3 install --no-cache-dir cmake pytest pytest-cov pytest-benchmark
-RUN pip3 install --no-cache-dir pyscf==2.8.0 basis-set-exchange==0.11
+RUN pip3 install --no-cache-dir pyscf==2.14.0 basis-set-exchange==0.11
 RUN pip3 install --no-cache-dir cupy-cuda12x==13.4.1

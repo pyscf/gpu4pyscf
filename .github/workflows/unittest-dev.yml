@@ -32,7 +32,7 @@ jobs:
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.14
 
     - name: Test with pytest
       run: |
