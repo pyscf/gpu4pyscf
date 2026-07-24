@@ -30,15 +30,12 @@
 #define GOUT_WIDTH1     81
 
 // gout_pattern = ((li == 0) << 3) | ((lj == 0) << 2) | ((lk == 0) << 1) | (ll == 0);
-template <int OFFSET>
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                  uint32_t *pool, int *head, const GXYZOffset *p_gxyz_offsets,
-                  int gout_pattern, int reserved_shm_size)
+                  uint32_t *pool, int *head, int gout_pattern, int reserved_shm_size)
 {
-    const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -70,9 +67,8 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int g_size = bounds.g_size;
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
     int ntiles_i = bounds.ntiles_i;
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
@@ -198,13 +194,13 @@ while (1) {
 
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             __syncthreads();
+            int kp = klp / lprim;
+            int lp = klp % lprim;
+            double ak = env[expk+kp];
+            double al = env[expl+lp];
+            double akl = ak + al;
+            double al_akl = al / akl;
             if (gout_id == 0) {
-                int kp = klp / lprim;
-                int lp = klp % lprim;
-                double ak = env[expk+kp];
-                double al = env[expl+lp];
-                double akl = ak + al;
-                double al_akl = al / akl;
                 double xlxk = rlrk[0*nsq_per_block];
                 double ylyk = rlrk[1*nsq_per_block];
                 double zlzk = rlrk[2*nsq_per_block];
@@ -220,8 +216,6 @@ while (1) {
                     fac_sym = 0;
                 }
                 gx[0] = fac_sym * ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 __syncthreads();
@@ -231,8 +225,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double akl = akl_cache[0];
-                double al_akl = akl_cache[nsq_per_block];
                 double xij = ri[0] + (rjri[0]) * aj_aij;
                 double yij = ri[1] + (rjri[1]) * aj_aij;
                 double zij = ri[2] + (rjri[2]) * aj_aij;
@@ -267,7 +259,6 @@ while (1) {
                     }
                     double rt = rw[irys*2*nsq_per_block];
                     double aij = aij_cache[0];
-                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double s0x, s1x, s2x;
 
@@ -300,7 +291,6 @@ while (1) {
                     }
 
                     if (lkl > 0) {
-                        double al_akl = akl_cache[nsq_per_block];
                         double rt_akl = rt_aa * aij;
                         double b00 = .5 * rt_aa;
                         double b01 = .5/akl * (1 - rt_akl);
@@ -446,7 +436,7 @@ while (1) {
                     if (task_id >= ntasks) {
                         continue;
                     }
-                    GXYZOffset goff = gxyz_offsets[gout_id];
+                    GXYZOffset goff = c_gxyz_offset[gout_id];
                     int *addr_i = idx_i + goff.ioff*3;
                     int *addr_j = idx_j + goff.joff*3;
                     int *addr_k = idx_k + goff.koff*3;
@@ -475,7 +465,7 @@ while (1) {
         __syncthreads();
 
         if (task_id < ntasks) {
-            GXYZOffset goff = gxyz_offsets[gout_id];
+            GXYZOffset goff = c_gxyz_offset[gout_id];
             int ioff = goff.ioff;
             int joff = goff.joff;
             int koff = goff.koff;
@@ -512,7 +502,7 @@ while (1) {
 }
 }
 
-GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
+void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
 {
 /*
     nfi = (li + 1) * (li + 2) // 2
@@ -527,7 +517,6 @@ GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
     copy = 256 // len(gxyz_offset) + 1
     return cp.vstack([cp.asarray(gxyz_offset)]*copy, dtype=np.int8)
 */
-    GXYZOffset goff[625];
     int nfi = bounds.nfi;
     int nfj = bounds.nfj;
     int nfk = bounds.nfk;
@@ -537,27 +526,21 @@ GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
     for (int j = 0; j < nfj; j += 3) {
     for (int k = 0; k < nfk; k += 3) {
     for (int l = 0; l < nfl; l += 3) {
-        goff[nf].ioff = i;
-        goff[nf].joff = j;
-        goff[nf].koff = k;
-        goff[nf].loff = l;
+        gxyz_offset[nf].ioff = i;
+        gxyz_offset[nf].joff = j;
+        gxyz_offset[nf].koff = k;
+        gxyz_offset[nf].loff = l;
         ++nf;
     } } } }
     for (int n = nf; n < 256; n += nf) {
         for (int m = 0; m < nf; ++m) {
-            goff[n+m] = goff[m];
+            gxyz_offset[n+m] = gxyz_offset[m];
         }
     }
-    checkCudaErrors(
-        cudaMemcpyToSymbol(c_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset),
-                           0, cudaMemcpyHostToDevice));
-    GXYZOffset *p_gxyz_offset;
-    cudaGetSymbolAddress((void**)&p_gxyz_offset, c_gxyz_offset);
-    return p_gxyz_offset;
 }
 
-static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
-                                   int shm_size, int gout_stride_max)
+void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
+                          int shm_size, int gout_stride_max)
 {
 /*
     order = li + lj + lk + ll
@@ -578,7 +561,7 @@ static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
     nroots = order // 2 + 1
     if omega < 0: # SR
         nroots *= 2
-    root_g_cache_size = nroots*2 + g_size*3 + 8
+    root_g_cache_size = nroots*2 + g_size*3 + 6
     unit = root_g_cache_size;
     counts = (shm_size - cart_idx_size*4) // (unit*8)
     n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l
@@ -596,7 +579,7 @@ static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
     int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
     int g_size = bounds.g_size;
     int nroots = bounds.nroots;
-    int root_g_cache_size = nroots*2 + g_size*3 + 8;
+    int root_g_cache_size = nroots*2 + g_size*3 + 6;
     int unit = root_g_cache_size;
     int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -604,11 +587,13 @@ static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
     int gout_stride = min(n_tiles, gout_stride_max);
     int nsq_per_block = min(counts, THREADS / gout_stride);
     if (nsq_per_block > 8) {
-        nsq_per_block = nsq_per_block / 8 * 8;
+        nsq_per_block = nsq_per_block & 0xfffff8;
     }
-    tdims[0] = nsq_per_block;
-    tdims[1] = gout_stride;
-    return nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
+    int reserved_shm_size = nsq_per_block * unit + ijprim;
+    scheme[0] = nsq_per_block;
+    scheme[1] = gout_stride;
+    scheme[2] = reserved_shm_size*8 + cart_idx_size*4;
+    scheme[3] = reserved_shm_size;
 }
 
 extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
@@ -672,32 +657,42 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
 
     if (!rys_k_unrolled(envs, &kmat, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
                         s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers)) {
-        GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
+        GXYZOffset gxyz_offset[256*3];
+        RYS_make_gxyz_offset(gxyz_offset, bounds);
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
                             ((lk == 0) << 1) |
                             ( ll == 0));
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
-        int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
 
         auto launch = [&](auto offset, int tile_chunk) {
-            constexpr int OFFSET = decltype(offset)::value;
-            int tdims[2];
-            size_t buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
-            dim3 threads;
-            threads.x = tdims[0];
-            threads.y = tdims[1];
-            int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            rys_k_kernel<OFFSET><<<workers, threads, buflen>>>(
+            checkCudaErrors(
+                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
+                                   tile_chunk*sizeof(GXYZOffset),
+                                   0, cudaMemcpyHostToDevice));
+            int scheme[4];
+            threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
+            int buflen = scheme[2];
+            if (buflen > 48000) {
+                cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) {
+                    fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                            cudaGetErrorString(err));
+                    return;
+                }
+            }
+            dim3 threads(scheme[0], scheme[1]);
+            int reserved_shm_size = scheme[3];
+            rys_k_kernel<<<workers, threads, buflen>>>(
                 *envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
-                head + OFFSET/256, p_gxyz_offset,
-                gout_pattern, reserved_shm_size);
+                head + offset/256, gout_pattern, reserved_shm_size);
         };
 
-        launch(std::integral_constant<int,   0>{}, 256);
-        if (n_tiles > 256) launch(std::integral_constant<int, 256>{}, min(256, n_tiles-256));
-        if (n_tiles > 512) launch(std::integral_constant<int, 512>{}, min(256, n_tiles-512));
+        launch(0, 256);
+        if (n_tiles > 256) launch(256, min(256, n_tiles-256));
+        if (n_tiles > 512) launch(512, min(256, n_tiles-512));
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -707,20 +702,6 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
             printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
         }
         fprintf(stderr, "CUDA Error in RYS_build_k, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
-        return 1;
-    }
-    return 0;
-}
-
-int RYS_build_k_init(int shm_size)
-{
-    cudaFuncSetAttribute(rys_k_kernel<  0>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(rys_k_kernel<256>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(rys_k_kernel<512>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
-                cudaGetErrorString(err));
         return 1;
     }
     return 0;

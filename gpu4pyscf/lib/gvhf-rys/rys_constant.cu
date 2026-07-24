@@ -112,4 +112,4 @@ __constant__ int _c_cartesian_lexical_xyz[] = {
     0, 0, 6,
 };
 
-__constant__ GXYZOffset c_gxyz_offset[625];
+__constant__ GXYZOffset c_gxyz_offset[256];
