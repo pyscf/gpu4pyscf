@@ -6,7 +6,7 @@ on:
       pyscf_version:
         required: false
         default: "2.8.0"
-      cupy_versoin:
+      cupy_version:
         required: false
         default: "13.6.0"
       cutensor_version:
