@@ -356,6 +356,15 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
     int buflen = scheme[5];
     int bsizex = threads_ij * tilex;
     int bsizey = threads_kl * tiley;
+    {
+    cudaFuncSetAttribute(pbc_md_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                cudaGetErrorString(err));
+        return 1;
+    }
+    }
     int nsq_per_block = threads_ij * threads_kl;
     dim3 threads(nsq_per_block, gout_stride);
     int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;

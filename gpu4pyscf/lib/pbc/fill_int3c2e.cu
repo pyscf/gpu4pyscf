@@ -22,6 +22,7 @@
 #include <cub/cub.cuh>
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+#include "gvhf-rys/build_rys_gxyz.cuh"
 #include "int3c2e_create_tasks.cuh"
 #include "unrolled_int3c2e.cu"
 
@@ -155,8 +156,8 @@ while (1) {
             int st_id = thread_id - gout_id * nst_per_block;
             double *rjri = shared_memory + st_id;
             double *Rpq = shared_memory + nst_per_block * 3 + st_id;
-            double *gx = shared_memory + nst_per_block * 7 + st_id;
-            double *rw = shared_memory + nst_per_block * (g_size*3+7) + st_id;
+            double *gx = shared_memory + nst_per_block * 6 + st_id;
+            double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
             for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
                 ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
                 int ijk_id = 0;
@@ -224,14 +225,12 @@ while (1) {
                             double xpq = xij - env[rk+0] - img_coords[kL*3+0];
                             double ypq = yij - env[rk+1] - img_coords[kL*3+1];
                             double zpq = zij - env[rk+2] - img_coords[kL*3+2];
-                            double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                             rjri[0*nst_per_block] = xjLxi;
                             rjri[1*nst_per_block] = yjLyi;
                             rjri[2*nst_per_block] = zjLzi;
                             Rpq[0*nst_per_block] = xpq;
                             Rpq[1*nst_per_block] = ypq;
                             Rpq[2*nst_per_block] = zpq;
-                            Rpq[3*nst_per_block] = rr;
                             int gx_len = g_size * nst_per_block;
                             gx[gx_len] = fac_ij;
                         }
@@ -242,100 +241,16 @@ while (1) {
                             if (gout_id == 0) {
                                 gx[0] = env[ck+kp] / (aij*ak*sqrt(aij+ak));
                             }
+                            double xpq = Rpq[0*nst_per_block];
+                            double ypq = Rpq[1*nst_per_block];
+                            double zpq = Rpq[2*nst_per_block];
+                            double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                             double omega = env[PTR_RANGE_OMEGA];
-                            rys_roots_rs(nroots, theta, Rpq[3*nst_per_block], omega,
+                            rys_roots_rs(nroots, theta, rr, omega,
                                          rw, nst_per_block, gout_id, gout_stride);
-                            double s0x, s1x, s2x;
                             for (int irys = 0; irys < nroots; ++irys) {
-                                int stride_j = li + 1;
-                                int stride_k = stride_j * (lj + 1);
-                                int gx_len = g_size * nst_per_block;
-                                __syncthreads();
-                                if (gout_id == 0) {
-                                    gx[gx_len*2] = rw[(irys*2+1)*nst_per_block];
-                                }
-                                double rt = rw[ irys*2   *nst_per_block];
-                                double rt_aa = rt / (aij + ak);
                                 int lij = li + lj;
-                                if (lij > 0) {
-                                    __syncthreads();
-                                    double rt_aij = rt_aa * ak;
-                                    double b10 = .5/aij * (1 - rt_aij);
-                                    // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
-                                    for (int n = gout_id; n < 3; n += gout_stride) {
-                                        double *_gx = gx + n * gx_len;
-                                        double xpa = rjri[n*nst_per_block] * aj_aij;
-                                        //double c0x = Rpa[ir] - rt_aij * Rpq[n];
-                                        double c0x = xpa - rt_aij * Rpq[n*nst_per_block];
-                                        s0x = _gx[0];
-                                        s1x = c0x * s0x;
-                                        _gx[nst_per_block] = s1x;
-                                        for (int i = 1; i < lij; ++i) {
-                                            s2x = c0x * s1x + i * b10 * s0x;
-                                            _gx[(i+1)*nst_per_block] = s2x;
-                                            s0x = s1x;
-                                            s1x = s2x;
-                                        }
-                                    }
-                                }
-
-                                if (lk > 0) {
-                                    int lij3 = (lij+1)*3;
-                                    double rt_ak  = rt_aa * aij;
-                                    double b00 = .5 * rt_aa;
-                                    double b01 = .5/ak  * (1 - rt_ak);
-                                    for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                                        __syncthreads();
-                                        int i = n / 3; //for i in range(lij+1):
-                                        int _ix = n % 3; // TODO: remove _ix for nroots > 2
-                                        double *_gx = gx + (i + _ix * g_size) * nst_per_block;
-                                        double cpx = rt_ak * Rpq[_ix*nst_per_block];
-                                        if (n < lij3) {
-                                            s0x = _gx[0];
-                                            s1x = cpx * s0x;
-                                            if (i > 0) {
-                                                s1x += i * b00 * _gx[-nst_per_block];
-                                            }
-                                            _gx[stride_k*nst_per_block] = s1x;
-                                        }
-                                        for (int k = 1; k < lk; ++k) {
-                                            __syncthreads();
-                                            if (n < lij3) {
-                                                s2x = cpx*s1x + k*b01*s0x;
-                                                if (i > 0) {
-                                                    s2x += i * b00 * _gx[(k*stride_k-1)*nst_per_block];
-                                                }
-                                                _gx[(k*stride_k+stride_k)*nst_per_block] = s2x;
-                                                s0x = s1x;
-                                                s1x = s2x;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // hrr
-                                if (lj > 0) {
-                                    __syncthreads();
-                                    if (task_id < num_sub_tasks) {
-                                        int lk3 = (lk+1)*3;
-                                        for (int m = gout_id; m < lk3; m += gout_stride) {
-                                            int k = m / 3;
-                                            int _ix = m % 3;
-                                            double xjxi = rjri[_ix*nst_per_block];
-                                            double *_gx = gx + (_ix*g_size + k*stride_k) * nst_per_block;
-                                            for (int j = 0; j < lj; ++j) {
-                                                int ij = (lij-j) + j*stride_j;
-                                                s1x = _gx[ij*nst_per_block];
-                                                for (--ij; ij >= j*stride_j; --ij) {
-                                                    s0x = _gx[ij*nst_per_block];
-                                                    _gx[(ij+stride_j)*nst_per_block] = s1x - xjxi * s0x;
-                                                    s1x = s0x;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                __syncthreads();
+                                BUILD_3C_GXYZ(lj, lk, nst_per_block, task_id < num_sub_tasks);
                                 if (task_id < num_sub_tasks) {
                                     int nfi = c_nf[li];
                                     int nfj = c_nf[lj];

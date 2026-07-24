@@ -48,11 +48,6 @@ __constant__ float c_div_nf[] = {
 };
 
 extern "C" {
-int RYS_init_constant()
-{
-    return 0;
-}
-
 int cuda_version()
 {
     return CUDA_VERSION;

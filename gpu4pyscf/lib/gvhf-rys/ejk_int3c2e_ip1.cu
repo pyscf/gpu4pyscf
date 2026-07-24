@@ -22,6 +22,7 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+#include "build_rys_gxyz.cuh"
 
 #define THREADS         256
 #define BLOCK_SIZE      16
@@ -44,7 +45,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lij, lk, nroots, nf;
+    __shared__ int li, lj, lk, nroots, nf;
     __shared__ int iprim, jprim, kprim;
     __shared__ int g_size;
     __shared__ int nao;
@@ -66,7 +67,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
-        lij = li + lj + 1;
+        int lij = li + lj + 1;
         nroots = (lij + lk) / 2 + 1;
         if (omega < 0) {
             nroots *= 2;
@@ -102,10 +103,10 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     register int aux_id = st_id - sp_id * aux_per_block;
 
     int gx_len = g_size * nst_per_block;
-    double *rjri = shared_memory;
+    double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 3 + st_id;
-    double *gx = shared_memory + nst_per_block * 7 + st_id;
-    int rw = nst_per_block * (g_size*3+7) + st_id;
+    double *gx = shared_memory + nst_per_block * 6 + st_id;
+    double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
     int idx_i = lex_xyz_offset(li);
     int idx_j = lex_xyz_offset(lj);
     int idx_k = lex_xyz_offset(lk);
@@ -136,9 +137,9 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
             double xjxi = env[rj+0] - env[ri+0];
             double yjyi = env[rj+1] - env[ri+1];
             double zjzi = env[rj+2] - env[ri+2];
-            rjri[sp_id+0*nsp_per_block] = xjxi;
-            rjri[sp_id+1*nsp_per_block] = yjyi;
-            rjri[sp_id+2*nsp_per_block] = zjzi;
+            rjri[0*nsp_per_block] = xjxi;
+            rjri[1*nsp_per_block] = yjyi;
+            rjri[2*nsp_per_block] = zjzi;
         }
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += aux_per_block) {
             int ksh = kidx;
@@ -207,9 +208,9 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 __syncthreads();
                 if (gout_id == 0) {
                     double theta_ij = ai * aj_aij;
-                    double xjxi = rjri[sp_id+0*nsp_per_block];
-                    double yjyi = rjri[sp_id+1*nsp_per_block];
-                    double zjzi = rjri[sp_id+2*nsp_per_block];
+                    double xjxi = rjri[0*nsp_per_block];
+                    double yjyi = rjri[1*nsp_per_block];
+                    double zjzi = rjri[2*nsp_per_block];
                     double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                     double Kab = theta_ij * rr_ij;
                     double fac_ij = PI_FAC;
@@ -229,11 +230,9 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                     double xpq = xij - xk;
                     double ypq = yij - yk;
                     double zpq = zij - zk;
-                    double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                     Rpq[0*nst_per_block] = xpq;
                     Rpq[1*nst_per_block] = ypq;
                     Rpq[2*nst_per_block] = zpq;
-                    Rpq[3*nst_per_block] = rr;
                 }
                 for (int kp = 0; kp < kprim; ++kp) {
                     double ak = env[expk+kp];
@@ -242,98 +241,20 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                     if (gout_id == 0) {
                         gx[0] = env[ck+kp] / (aij*ak*sqrt(aij+ak));
                     }
+                    double xpq = Rpq[0*nst_per_block];
+                    double ypq = Rpq[1*nst_per_block];
+                    double zpq = Rpq[2*nst_per_block];
+                    double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                     //TODO: rys_roots_for_k
-                    rys_roots_rs(nroots, theta, Rpq[3*nst_per_block], omega,
-                                 shared_memory+rw, nst_per_block, gout_id, gout_stride);
+                    rys_roots_rs(nroots, theta, rr, omega,
+                                 rw, nst_per_block, gout_id, gout_stride);
                     for (int irys = 0; irys < nroots; ++irys) {
-                        int nsp = nsp_per_block;
-                        int nst = nst_per_block;
+                        int lij = li + lj + 1;
                         int stride_j = li + 2;
                         int stride_k = stride_j * (lj + 1);
-                        int gsize = g_size;
-                        __syncthreads();
-                        if (gout_id == 0) {
-                            gx[gx_len*2] = shared_memory[rw+(irys*2+1)*nst];
-                        }
-                        double rt = shared_memory[rw+ irys*2   *nst];
-                        double rt_aa = rt / (aij + ak);
-                        double rt_aij = rt_aa * ak;
-                        double b10 = .5/aij * (1 - rt_aij);
-                        double s0x, s1x, s2x;
-                        __syncthreads();
-                        // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
-                        for (int n = gout_id; n < 3; n += gout_stride) {
-                            double *_gx = gx + n * gx_len;
-                            double Rpa = rjri[sp_id+n*nsp] * aj_aij;
-                            //double c0x = Rpa[ir] - rt_aij * Rpq[n];
-                            double c0x = Rpa - rt_aij * Rpq[n*nst];
-                            s0x = _gx[0];
-                            s1x = c0x * s0x;
-                            _gx[nst] = s1x;
-                            for (int i = 1; i < lij; ++i) {
-                                s2x = c0x * s1x + i * b10 * s0x;
-                                _gx[(i+1)*nst] = s2x;
-                                s0x = s1x;
-                                s1x = s2x;
-                            }
-                        }
-                        if (lk > 0) {
-                            int lij3 = (lij+1)*3;
-                            double rt_ak  = rt_aa * aij;
-                            double b00 = .5 * rt_aa;
-                            double b01 = .5/ak  * (1 - rt_ak );
-                            for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                                __syncthreads();
-                                int i = n / 3; //for i in range(lij+1):
-                                int _ix = n - i*3; // TODO: remove _ix for nroots > 2
-                                double *_gx = gx + (i + _ix * gsize) * nst;
-                                double cpx = rt_ak * Rpq[_ix*nst];
-                                if (n < lij3) {
-                                    s0x = _gx[0];
-                                    s1x = cpx * s0x;
-                                    if (i > 0) {
-                                        s1x += i * b00 * _gx[-nst];
-                                    }
-                                    _gx[stride_k*nst] = s1x;
-                                }
-                                for (int k = 1; k < lk; ++k) {
-                                    __syncthreads();
-                                    if (n < lij3) {
-                                        s2x = cpx*s1x + k*b01*s0x;
-                                        if (i > 0) {
-                                            s2x += i * b00 * _gx[(k*stride_k-1)*nst];
-                                        }
-                                        _gx[(k*stride_k+stride_k)*nst] = s2x;
-                                        s0x = s1x;
-                                        s1x = s2x;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (lj > 0) {
-                            __syncthreads();
-                            if (pair_ij < shl_pair1 && kidx < ksh1) {
-                                int lk3 = (lk+1)*3;
-                                for (int m = gout_id; m < lk3; m += gout_stride) {
-                                    int k = m / 3;
-                                    int _ix = m - k*3;
-                                    double xjxi = rjri[sp_id+_ix*nsp];
-                                    double *_gx = gx + (_ix*gsize + k*stride_k) * nst;
-                                    for (int j = 0; j < lj; ++j) {
-                                        int ij = (lij-j) + j*stride_j;
-                                        s1x = _gx[ij*nst];
-                                        for (--ij; ij >= j*stride_j; --ij) {
-                                            s0x = _gx[ij*nst];
-                                            _gx[(ij+stride_j)*nst] = s1x - xjxi * s0x;
-                                            s1x = s0x;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        __syncthreads();
+                        BUILD_3C_GXYZ(lj, lk, nsp_per_block, pair_ij < shl_pair1 && kidx < ksh1);
                         if (pair_ij < shl_pair1 && kidx < ksh1) {
+                            int nsp = nsp_per_block;
                             int nfi = c_nf[li];
                             int nfj = c_nf[lj];
                             float div_nfi = c_div_nf[li];
@@ -361,8 +282,8 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 int kz = _c_cartesian_lexical_xyz[idx_k + k*3+2];
                                 double dm_ijk = dm_tensor[n];
                                 int addrx = (ix + jx*stride_j + kx*stride_k) * nst;
-                                int addry = (iy + jy*stride_j + ky*stride_k + gsize) * nst;
-                                int addrz = (iz + jz*stride_j + kz*stride_k + gsize*2) * nst;
+                                int addry = (iy + jy*stride_j + ky*stride_k + g_size) * nst;
+                                int addrz = (iz + jz*stride_j + kz*stride_k + g_size*2) * nst;
                                 double Ix = gx[addrx];
                                 double Iy = gx[addry];
                                 double Iz = gx[addrz];
@@ -385,9 +306,9 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 v_kx -= goutx;
                                 v_ky -= gouty;
                                 v_kz -= goutz;
-                                double gjx = gix - rjri[sp_id+0*nsp] * Ix;
-                                double gjy = giy - rjri[sp_id+1*nsp] * Iy;
-                                double gjz = giz - rjri[sp_id+2*nsp] * Iz;
+                                double gjx = gix - rjri[0*nsp] * Ix;
+                                double gjy = giy - rjri[1*nsp] * Iy;
+                                double gjz = giz - rjri[2*nsp] * Iz;
                                 double fjx = aj2 * gjx; if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
                                 double fjy = aj2 * gjy; if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
                                 double fjz = aj2 * gjz; if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
@@ -473,7 +394,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lij, lk, nroots, nf;
+    __shared__ int li, lj, lk, nroots, nf;
     __shared__ int iprim, jprim, kprim;
     __shared__ int g_size;
     __shared__ int nao;
@@ -494,7 +415,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
-        lij = li + lj + 1;
+        int lij = li + lj + 1;
         nroots = (lij + lk) / 2 + 1;
         double omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
@@ -524,10 +445,10 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     register int aux_id = st_id - sp_id * aux_per_block;
 
     int gx_len = g_size * nst_per_block;
-    double *rjri = shared_memory;
+    double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 3 + st_id;
-    double *gx = shared_memory + nst_per_block * 7 + st_id;
-    int rw = nst_per_block * (g_size*3+7) + st_id;
+    double *gx = shared_memory + nst_per_block * 6 + st_id;
+    double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
     int idx_i = lex_xyz_offset(li);
     int idx_j = lex_xyz_offset(lj);
     int idx_k = lex_xyz_offset(lk);
@@ -566,9 +487,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
             double xjxi = env[rj+0] - env[ri+0];
             double yjyi = env[rj+1] - env[ri+1];
             double zjzi = env[rj+2] - env[ri+2];
-            rjri[sp_id+0*nsp_per_block] = xjxi;
-            rjri[sp_id+1*nsp_per_block] = yjyi;
-            rjri[sp_id+2*nsp_per_block] = zjzi;
+            rjri[0*nsp_per_block] = xjxi;
+            rjri[1*nsp_per_block] = yjyi;
+            rjri[2*nsp_per_block] = zjzi;
         }
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += aux_per_block) {
             int ksh = kidx;
@@ -608,9 +529,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 __syncthreads();
                 if (gout_id == 0) {
                     double theta_ij = ai * aj_aij;
-                    double xjxi = rjri[sp_id+0*nsp_per_block];
-                    double yjyi = rjri[sp_id+1*nsp_per_block];
-                    double zjzi = rjri[sp_id+2*nsp_per_block];
+                    double xjxi = rjri[0*nsp_per_block];
+                    double yjyi = rjri[1*nsp_per_block];
+                    double zjzi = rjri[2*nsp_per_block];
                     double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                     double Kab = theta_ij * rr_ij;
                     double fac_ij = PI_FAC;
@@ -630,11 +551,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                     double xpq = xij - xk;
                     double ypq = yij - yk;
                     double zpq = zij - zk;
-                    double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                     Rpq[0*nst_per_block] = xpq;
                     Rpq[1*nst_per_block] = ypq;
                     Rpq[2*nst_per_block] = zpq;
-                    Rpq[3*nst_per_block] = rr;
                 }
                 for (int kp = 0; kp < kprim; ++kp) {
                     double ak = env[expk+kp];
@@ -643,99 +562,21 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                     if (gout_id == 0) {
                         gx[0] = env[ck+kp] / (aij*ak*sqrt(aij+ak));
                     }
+                    double xpq = Rpq[0*nst_per_block];
+                    double ypq = Rpq[1*nst_per_block];
+                    double zpq = Rpq[2*nst_per_block];
+                    double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                     //TODO: rys_roots_for_k
                     double omega = env[PTR_RANGE_OMEGA];
-                    rys_roots_rs(nroots, theta, Rpq[3*nst_per_block], omega,
-                                 shared_memory+rw, nst_per_block, gout_id, gout_stride);
+                    rys_roots_rs(nroots, theta, rr, omega,
+                                 rw, nst_per_block, gout_id, gout_stride);
                     for (int irys = 0; irys < nroots; ++irys) {
-                        int nsp = nsp_per_block;
-                        int nst = nst_per_block;
+                        int lij = li + lj + 1;
                         int stride_j = li + 2;
                         int stride_k = stride_j * (lj + 1);
-                        int gsize = g_size;
-                        __syncthreads();
-                        if (gout_id == 0) {
-                            gx[gx_len*2] = shared_memory[rw+(irys*2+1)*nst];
-                        }
-                        double rt = shared_memory[rw+ irys*2   *nst];
-                        double rt_aa = rt / (aij + ak);
-                        double rt_aij = rt_aa * ak;
-                        double b10 = .5/aij * (1 - rt_aij);
-                        double s0x, s1x, s2x;
-                        __syncthreads();
-                        // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
-                        for (int n = gout_id; n < 3; n += gout_stride) {
-                            double *_gx = gx + n * gx_len;
-                            double Rpa = rjri[sp_id+n*nsp] * aj_aij;
-                            //double c0x = Rpa[ir] - rt_aij * Rpq[n];
-                            double c0x = Rpa - rt_aij * Rpq[n*nst];
-                            s0x = _gx[0];
-                            s1x = c0x * s0x;
-                            _gx[nst] = s1x;
-                            for (int i = 1; i < lij; ++i) {
-                                s2x = c0x * s1x + i * b10 * s0x;
-                                _gx[(i+1)*nst] = s2x;
-                                s0x = s1x;
-                                s1x = s2x;
-                            }
-                        }
-                        if (lk > 0) {
-                            int lij3 = (lij+1)*3;
-                            double rt_ak  = rt_aa * aij;
-                            double b00 = .5 * rt_aa;
-                            double b01 = .5/ak  * (1 - rt_ak );
-                            for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                                __syncthreads();
-                                int i = n / 3; //for i in range(lij+1):
-                                int _ix = n - i*3; // TODO: remove _ix for nroots > 2
-                                double *_gx = gx + (i + _ix * gsize) * nst;
-                                double cpx = rt_ak * Rpq[_ix*nst];
-                                if (n < lij3) {
-                                    s0x = _gx[0];
-                                    s1x = cpx * s0x;
-                                    if (i > 0) {
-                                        s1x += i * b00 * _gx[-nst];
-                                    }
-                                    _gx[stride_k*nst] = s1x;
-                                }
-                                for (int k = 1; k < lk; ++k) {
-                                    __syncthreads();
-                                    if (n < lij3) {
-                                        s2x = cpx*s1x + k*b01*s0x;
-                                        if (i > 0) {
-                                            s2x += i * b00 * _gx[(k*stride_k-1)*nst];
-                                        }
-                                        _gx[(k*stride_k+stride_k)*nst] = s2x;
-                                        s0x = s1x;
-                                        s1x = s2x;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (lj > 0) {
-                            __syncthreads();
-                            if (pair_ij < shl_pair1 && kidx < ksh1) {
-                                int lk3 = (lk+1)*3;
-                                for (int m = gout_id; m < lk3; m += gout_stride) {
-                                    int k = m / 3;
-                                    int _ix = m - k*3;
-                                    double xjxi = rjri[sp_id+_ix*nsp];
-                                    double *_gx = gx + (_ix*gsize + k*stride_k) * nst;
-                                    for (int j = 0; j < lj; ++j) {
-                                        int ij = (lij-j) + j*stride_j;
-                                        s1x = _gx[ij*nst];
-                                        for (--ij; ij >= j*stride_j; --ij) {
-                                            s0x = _gx[ij*nst];
-                                            _gx[(ij+stride_j)*nst] = s1x - xjxi * s0x;
-                                            s1x = s0x;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        __syncthreads();
+                        BUILD_3C_GXYZ(lj, lk, nsp_per_block, pair_ij < shl_pair1 && kidx < ksh1);
                         if (pair_ij < shl_pair1 && kidx < ksh1) {
+                            int nsp = nsp_per_block;
                             int nfi = c_nf[li];
                             int nfj = c_nf[lj];
                             float div_nfi = c_div_nf[li];
@@ -762,8 +603,8 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 int ky = _c_cartesian_lexical_xyz[idx_k + k*3+1];
                                 int kz = _c_cartesian_lexical_xyz[idx_k + k*3+2];
                                 int addrx = (ix + jx*stride_j + kx*stride_k) * nst;
-                                int addry = (iy + jy*stride_j + ky*stride_k + gsize) * nst;
-                                int addrz = (iz + jz*stride_j + kz*stride_k + gsize*2) * nst;
+                                int addry = (iy + jy*stride_j + ky*stride_k + g_size) * nst;
+                                int addrz = (iz + jz*stride_j + kz*stride_k + g_size*2) * nst;
                                 double Ix = gx[addrx];
                                 double Iy = gx[addry];
                                 double Iz = gx[addrz];
@@ -773,9 +614,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; }
                                 double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gx[addry-i_1]; }
                                 double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; }
-                                double fjx = aj2 * (gix - rjri[sp_id+0*nsp] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
-                                double fjy = aj2 * (giy - rjri[sp_id+1*nsp] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
-                                double fjz = aj2 * (giz - rjri[sp_id+2*nsp] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
+                                double fjx = aj2 * (gix - rjri[0*nsp] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
+                                double fjy = aj2 * (giy - rjri[1*nsp] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
+                                double fjz = aj2 * (giz - rjri[2*nsp] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
                                 //double gkx = gx[addrx+k_1];
                                 //double gky = gx[addry+k_1];
                                 //double gkz = gx[addrz+k_1];
