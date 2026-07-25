@@ -10,7 +10,7 @@ jobs:
       fail-fast: false
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v7
     - name: Build wheels
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw \
@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v7
     - name: Build wheels
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw \
