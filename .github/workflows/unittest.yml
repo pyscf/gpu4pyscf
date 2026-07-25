@@ -17,11 +17,11 @@ jobs:
     runs-on: [self-hosted, Linux, X64, v100]
     timeout-minutes: 360
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.14
 
     - name: Test with pytest
       run: |
@@ -32,18 +32,18 @@ jobs:
           -e HTTPS_PROXY=$HTTPS_PROXY \
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
-          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          pyscf/gpu4pyscf-devel:pyscf-2.14 \
           /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && pip3 install MCFun && source build.sh && pytest -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
 
   multi-gpu:
     runs-on: [self-hosted, Linux, X64, 2T4]
     timeout-minutes: 360
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.14
 
     - name: Test with pytest
       run: |
@@ -54,5 +54,5 @@ jobs:
           -e HTTPS_PROXY=$HTTPS_PROXY \
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
-          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          pyscf/gpu4pyscf-devel:pyscf-2.14 \
           /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && pip3 install pyscf==2.8 && source build.sh && pytest -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
