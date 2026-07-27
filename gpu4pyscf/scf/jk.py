@@ -47,7 +47,7 @@ libgint = load_library('libgint')
 
 PTR_BAS_COORD = 7
 LMAX = 4
-TILE = 6
+TILE = 12
 QUEUE_DEPTH = 262144
 SHM_SIZE = shm_size - 1024
 del shm_size
