@@ -15,4 +15,4 @@ Fe 1 0 1
 
 # The .to_gpu() transfer must be executed before calling .smearing().
 # Currently, to_gpu() does not support the transfer of the smearing setup.
-mf = mol.RKS(xc='pbe').to_gpu().smearing(sigma=0.1).density_fit().run()
+mf = mol.RKS(xc='pbe').to_gpu().smearing(sigma=0.001).density_fit().run()

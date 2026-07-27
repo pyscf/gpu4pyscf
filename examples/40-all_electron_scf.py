@@ -1,1 +1,0 @@
-pbc/40-all_electron_scf.py

@@ -1,1 +1,0 @@
-tddft/36-tddft-ris-grad-opt.py
