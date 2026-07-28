@@ -14,6 +14,7 @@ add_library(pbc SHARED
   nr_eval_gto.cu
   sorting.c
   fill_triu.cu
+  contract_ft_ao_o1.cu
 )
 
 set_target_properties(pbc PROPERTIES
