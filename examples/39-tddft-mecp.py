@@ -1,1 +1,0 @@
-tddft/39-tddft-mecp.py
