@@ -112,6 +112,7 @@ class DF(lib.StreamObject):
         if not with_k and self._cderi is None:
             return df_jk.get_j(self, dm, hermi), None
 
+        assert omega is None or omega >= 0
         with self.range_coulomb(omega) as dfobj:
             return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k, omega=omega)
 
