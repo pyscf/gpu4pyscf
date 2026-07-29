@@ -118,14 +118,21 @@ class _DFHF:
     def get_k(self, mol=None, dm=None, hermi=1, omega=None,
               lr_factor=None, sr_factor=None):
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
-        vk = self.get_jk(mol, dm, hermi, False, True, omega=omega)[1]
-        vk *= sr_factor
-        if omega == 0:
+        if sr_factor == 0:
+            # Only LR
+            vk = self.get_jk(mol, dm, hermi, False, True, omega=omega)[1]
+            vk *= lr_factor
             return vk
 
-        vklr = self.get_jk(mol, dm, hermi, False, True, omega=omega)[1]
-        vklr *= lr_factor - sr_factor
-        vk += vklr
+        vk = self.get_jk(mol, dm, hermi, False, True)[1]
+
+        if sr_factor != 1:
+            vk *= sr_factor
+
+        if lr_factor != sr_factor:
+            vklr = self.get_jk(mol, dm, hermi, False, True, omega=omega)[1]
+            vklr *= lr_factor - sr_factor
+            vk += vklr
         return vk
 
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
