@@ -509,9 +509,9 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
     naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
 
     cp.get_default_memory_pool().free_all_blocks()
-    word_avail -= batch_size * naux
+    word_avail -= batch_size * naux_sorted
     if needs_recontraction:
-        word_avail -= cderi_batch_size * naux_per_device
+        word_avail -= batch_size * naux_per_device
 
     # Put cderi on GPU whenever possible
     on_gpu = True
@@ -571,7 +571,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         def proc():
             device_id = cp.cuda.device.get_device_id()
             aux0 = naux_per_device * device_id
-            aux1 = min(int(aux_coef.shape[1]), aux0 + naux_per_device)
+            aux1 = min(naux, aux0 + naux_per_device)
             c = cp.asarray(aux_coef[:,aux0:aux1])
 
             _eval_j3c = eval_j3c
