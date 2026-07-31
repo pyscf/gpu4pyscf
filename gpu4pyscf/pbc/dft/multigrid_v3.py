@@ -89,30 +89,10 @@ def _get_lattice_Ls_base(cell, rcut=None):
                     np.arange(-bounds[1], bounds[1]+1),
                     np.arange(-bounds[2], bounds[2]+1)))
 
-if __name__ == '__main__':
-    import pyscf
-    cell = pyscf.M(
-        atom='C1 0 0 0; C2 .2 .3 .7',
-        basis=[[0, [3, 1]], [1, [1, 1]], [1, [.8, 1]]],
-        a=np.eye(3) * 3.2,
-        mesh=[1,3,3]
-    )
-
-    cp.random.seed(4)
-    nao = cell.nao
-    dm = cp.random.rand(nao, nao)
-    dm = dm + dm.T
-
-    Gv, Gvbase, w = get_Gv_weights(cell)
-
-    Gpq = ft_ao.ft_aopair(cell, Gv)
-    rho_ref = cp.einsum('pq,Gpq->G', dm, Gpq)
-    vj_ref = cp.einsum('G,Gpq->pq', rho_ref, Gpq)
-    print('----------')
-
-    cell = SortedGTO.from_cell(cell)
+def _eval_density(ni, dm, hermi=1, kpts=None):
+    #cell = ni.cell
+    cell = ni
     mesh = np.asarray(cell.mesh, dtype=np.int32)
-
     ftopt = ft_ao.FTOpt(cell).build()
     envs = cell.rys_envs
     bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(ftopt.bas_ij_cache, 32)
@@ -120,6 +100,7 @@ if __name__ == '__main__':
     shl_pair_offsets = cp.asarray(shl_pair_offsets, dtype=np.int32)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
 
+    Gv, Gvbase, w = get_Gv_weights(cell)
     b = cell.reciprocal_vectors()
     G_bases = cp.array(np.hstack([Gvbase[0] * b[0,0],
                                   Gvbase[1] * b[1,1],
@@ -151,14 +132,42 @@ if __name__ == '__main__':
         ctypes.cast(mesh_cum.data.ptr, ctypes.c_void_p),
         ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
         mesh.ctypes, ctypes.c_int(nbatches_shl_pair))
-    print(abs(rho_ref.real - rhoR.ravel()).max())
-    print(abs(rho_ref.imag - rhoI.ravel()).max())
+    rhoG = cp.empty(mesh, dtype=np.complex128)
+    rhoG.real = rhoR
+    rhoG.imag = rhoI
+    return rhoG.ravel()
 
-    vj = cp.zeros_like(dm)
+def _eval_coul_matrix(ni, coulG, hermi=1, kpts=None):
+    #cell = ni.cell
+    cell = ni
+    mesh = np.asarray(cell.mesh, dtype=np.int32)
+    ftopt = ft_ao.FTOpt(cell).build()
+    envs = cell.rys_envs
+    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(ftopt.bas_ij_cache, 32)
+    bas_ij_idx = cp.asarray(bas_ij_idx, dtype=np.uint32)
+    shl_pair_offsets = cp.asarray(shl_pair_offsets, dtype=np.int32)
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+
+    Gv, Gvbase, w = get_Gv_weights(cell)
+    b = cell.reciprocal_vectors()
+    G_bases = cp.array(np.hstack([Gvbase[0] * b[0,0],
+                                  Gvbase[1] * b[1,1],
+                                  Gvbase[2] * b[2,2]]))
+
+    nimgs = (np.array(cell.nimgs)*2+1)
+    a = cell.lattice_vectors()
+    Tx = (np.arange(nimgs[0]) - nimgs[0]//2) * a[0,0]
+    Ty = (np.arange(nimgs[1]) - nimgs[1]//2) * a[1,1]
+    Tz = (np.arange(nimgs[2]) - nimgs[2]//2) * a[2,2]
+    L_bases = cp.array(np.hstack([Tx, Ty, Tz]))
+    mesh_cum = cp.array(np.append(0, np.cumsum(mesh)), dtype=np.int32)
+    nimgs_cum = cp.array(np.append(0, np.cumsum(nimgs)), dtype=np.int32)
+
+    nao = cell.nao
+    vj = cp.zeros((nao, nao))
     libpbc.contract_orth_aopair_coulG(
         ctypes.cast(vj.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rhoI.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coulG.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(G_bases.data.ptr, ctypes.c_void_p),
@@ -168,4 +177,33 @@ if __name__ == '__main__':
         mesh.ctypes, ctypes.c_int(len(bas_ij_idx)))
     transpose_sum(vj)
     vj = cell.apply_CT_mat_C(vj)
+    return vj
+
+if __name__ == '__main__':
+    import pyscf
+    cell = pyscf.M(
+        atom='C1 0 0 0; C2 .2 .3 .7',
+        basis=[[0, [3, 1]], [1, [1, 1]], [1, [.8, 1]]],
+        a=np.eye(3) * 3.2,
+        mesh=[1,3,3]
+    )
+
+    cp.random.seed(4)
+    nao = cell.nao
+    dm = cp.random.rand(nao, nao)
+    dm = dm + dm.T
+
+    Gv, Gvbase, w = get_Gv_weights(cell)
+
+    Gpq = ft_ao.ft_aopair(cell, Gv)
+    rho_ref = cp.einsum('pq,Gpq->G', dm, Gpq)
+    vj_ref = cp.einsum('G,Gpq->pq', rho_ref, Gpq)
+    print('----------')
+
+    cell = SortedGTO.from_cell(cell)
+    rhoG = _eval_density(cell, dm)
+    print(abs(rho_ref.real - rhoG.real).max())
+    print(abs(rho_ref.imag - rhoG.imag).max())
+
+    vj = _eval_coul_matrix(cell, rhoG)
     print(abs(vj_ref.real - vj).max())

@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <cuComplex.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 
@@ -28,6 +29,7 @@
 #define NGV_PER_BLOCK   16
 #define DENSITY_WIDTH   16
 #define TILES_PER_BATCH 64
+#define REMOTE_THRESHOLD 50
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
 
@@ -74,16 +76,10 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
     int x_id = thread_id / NGV_PER_BLOCK;
     int Gv_id = thread_id % NGV_PER_BLOCK;
     int tile_id = blockIdx.x / nbatches_shl_pair;
-    __shared__ int shl_pair0, shl_pair1;
-    if (thread_id == 0) {
-        int sp_block_id = blockIdx.x % nbatches_shl_pair;
-        shl_pair0 = shl_pair_offsets[sp_block_id];
-        shl_pair1 = shl_pair_offsets[sp_block_id+1];
-    }
-    __syncthreads();
+    int sp_block_id = blockIdx.x % nbatches_shl_pair;
     __shared__ double gx[NGV_PER_BLOCK*3*2*LMAX1*LMAX1];
     __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)];
-    __shared__ int mesh_offset[3];
+    __shared__ int mesh_start[3];
     __shared__ int i0, j0, ri, rj, nao;
     __shared__ double fac, ai, aj;
 
@@ -102,9 +98,9 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
     int *bas = envs.bas;
     double *env = envs.env;
     if (thread_id == 0) {
-        mesh_offset[0] = tile_x * NGV_PER_BLOCK;
-        mesh_offset[1] = tile_y * NGV_PER_BLOCK;
-        mesh_offset[2] = tile_z * NGV_PER_BLOCK;
+        mesh_start[0] = tile_x * NGV_PER_BLOCK;
+        mesh_start[1] = tile_y * NGV_PER_BLOCK;
+        mesh_start[2] = tile_z * NGV_PER_BLOCK;
         nao = envs.ao_loc[bvk_nbas];
     }
 
@@ -115,6 +111,9 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         density_R[n] = 0.;
         density_I[n] = 0.;
     }
+
+    int shl_pair0 = shl_pair_offsets[sp_block_id];
+    int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     for (int pair_idx = shl_pair0; pair_idx < shl_pair1; pair_idx++) {
         __syncthreads();
         uint32_t bas_ij = bas_ij_idx[pair_idx];
@@ -154,7 +153,7 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
             double aj_aij = aj * 2 * a2;
             double theta_ij = ai * aj_aij;
             double kx = 0;
-            int _Gv_id = mesh_cum[x_id] + mesh_offset[x_id] + Gv_id;
+            int _Gv_id = mesh_cum[x_id] + mesh_start[x_id] + Gv_id;
             if (_Gv_id < mesh_cum[x_id+1]) {
                 kx = G_bases[_Gv_id];
             }
@@ -165,13 +164,15 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
                 double Lx = L_bases[img];
                 double xi = env[ri+x_id];
                 double xjxi = env[rj+x_id] + Lx - xi;
+                double theta_rr = theta_ij * xjxi * xjxi + .5*a2 * kx * kx;
+                if (theta_rr > REMOTE_THRESHOLD) continue;
                 double xpa = xjxi * aj_aij;
                 double xij = xpa + xi;
                 double kR = kx * xij;
                 double s0xR, s1xR, s2xR;
                 double s0xI, s1xI, s2xI;
                 sincos(-kR, &s0xI, &s0xR);
-                double Kab = exp(-theta_ij*xjxi*xjxi - .5*a2*kx*kx);
+                double Kab = exp(-theta_rr);
                 s0xR *= Kab;
                 s0xI *= Kab;
                 swap[addrR] = s0xR;
@@ -231,7 +232,7 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         __syncthreads();
         int y_in_tile = thread_id / NGV_PER_BLOCK;
         int z_in_tile = Gv_id;
-        if (mesh_offset[1] + y_in_tile < mesh_y && mesh_offset[2] + z_in_tile < mesh_z) {
+        if (mesh_start[1] + y_in_tile < mesh_y && mesh_start[2] + z_in_tile < mesh_z) {
             int nfi = c_nf[li];
             int nfj = c_nf[lj];
             int idx_i = lex_xyz_offset(li);
@@ -261,7 +262,7 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
                     int x = n;
-                    if (mesh_offset[0] + x >= mesh_x) break;
+                    if (mesh_start[0] + x >= mesh_x) break;
                     double xR = gxR[addrx+x];
                     double xI = gxI[addrx+x];
                     double xyzR, xyzI;
@@ -273,9 +274,9 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         }
     }
 
-    int Gx0 = mesh_offset[0];
-    int Gy0 = mesh_offset[1];
-    int Gz0 = mesh_offset[2];
+    int Gx0 = mesh_start[0];
+    int Gy0 = mesh_start[1];
+    int Gz0 = mesh_start[2];
     int y_in_tile = thread_id / NGV_PER_BLOCK;
     int z_in_tile = Gv_id;
     int y = Gy0 + y_in_tile;
@@ -296,7 +297,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void orth_aopair_coulG_kernel(double *out, double *coulG_R, double *coulG_I,
+void orth_aopair_coulG_kernel(double *out, cuDoubleComplex *coulG,
                               PBCIntEnvVars envs, uint32_t *bas_ij_idx,
                               double *G_bases, double *L_bases,
                               int *mesh_cum, int *nimgs_cum,
@@ -312,7 +313,7 @@ void orth_aopair_coulG_kernel(double *out, double *coulG_R, double *coulG_I,
     }
     __shared__ double gx[NGV_PER_BLOCK*3*2*LMAX1*LMAX1];
     __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)];
-    __shared__ int mesh_offset[3];
+    __shared__ int mesh_start[3];
     __shared__ double vjR[NCART_MAX*NCART_MAX * WARPS];
     __shared__ int ri, rj, li, lj;
     __shared__ double ai, aj;
@@ -355,9 +356,9 @@ void orth_aopair_coulG_kernel(double *out, double *coulG_R, double *coulG_I,
         int tile_y = tile_xy % ntiles_y;
         int tile_x = tile_xy / ntiles_y;
         if (thread_id == 0) {
-            mesh_offset[0] = tile_x * NGV_PER_BLOCK;
-            mesh_offset[1] = tile_y * NGV_PER_BLOCK;
-            mesh_offset[2] = tile_z * NGV_PER_BLOCK;
+            mesh_start[0] = tile_x * NGV_PER_BLOCK;
+            mesh_start[1] = tile_y * NGV_PER_BLOCK;
+            mesh_start[2] = tile_z * NGV_PER_BLOCK;
         }
 
         constexpr int stride_i = NGV_PER_BLOCK * 6;
@@ -374,7 +375,7 @@ void orth_aopair_coulG_kernel(double *out, double *coulG_R, double *coulG_I,
             double aj_aij = aj * 2 * a2;
             double theta_ij = ai * aj_aij;
             double kx = 0;
-            int _Gv_id = mesh_cum[x_id] + mesh_offset[x_id] + Gv_id;
+            int _Gv_id = mesh_cum[x_id] + mesh_start[x_id] + Gv_id;
             if (_Gv_id < mesh_cum[x_id+1]) {
                 kx = G_bases[_Gv_id];
             }
@@ -384,13 +385,15 @@ void orth_aopair_coulG_kernel(double *out, double *coulG_R, double *coulG_I,
                 double Lx = L_bases[img];
                 double xi = env[ri+x_id];
                 double xjxi = env[rj+x_id] + Lx - xi;
+                double theta_rr = theta_ij * xjxi * xjxi + .5*a2 * kx * kx;
+                if (theta_rr > REMOTE_THRESHOLD) continue;
                 double xpa = xjxi * aj_aij;
                 double xij = xpa + xi;
                 double kR = kx * xij;
                 double s0xR, s1xR, s2xR;
                 double s0xI, s1xI, s2xI;
                 sincos(-kR, &s0xI, &s0xR);
-                double Kab = exp(-theta_ij*xjxi*xjxi - .5*a2*kx*kx);
+                double Kab = exp(-theta_rr);
                 s0xR *= Kab;
                 s0xI *= Kab;
                 swap[addrR] = s0xR;
@@ -451,18 +454,18 @@ void orth_aopair_coulG_kernel(double *out, double *coulG_R, double *coulG_I,
 
         int y_in_tile = thread_id / NGV_PER_BLOCK;
         int z_in_tile = Gv_id;
-        int y = mesh_offset[1] + y_in_tile;
-        int z = mesh_offset[2] + z_in_tile;
+        int y = mesh_start[1] + y_in_tile;
+        int z = mesh_start[2] + z_in_tile;
         double vG_R[DENSITY_WIDTH];
         double vG_I[DENSITY_WIDTH];
         if (y < mesh_y && z < mesh_z) {
 #pragma unroll
             for (int n = 0; n < DENSITY_WIDTH; ++n) {
-                int x = mesh_offset[0] + n;
+                int x = mesh_start[0] + n;
                 if (x >= mesh_x) break;
                 uint32_t addr = (x * mesh_y + y) * mesh_z + z;
-                vG_R[n] = coulG_R[addr];
-                vG_I[n] = coulG_I[addr];
+                vG_R[n] = coulG[addr].x;
+                vG_I[n] = coulG[addr].y;
             }
         }
 
@@ -494,7 +497,7 @@ void orth_aopair_coulG_kernel(double *out, double *coulG_R, double *coulG_I,
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
                     int x = n;
-                    if (mesh_offset[0] + x >= mesh_x) break;
+                    if (mesh_start[0] + x >= mesh_x) break;
                     double xR = gxR[addrx+x];
                     double xI = gxI[addrx+x];
                     double xyzR, xyzI;
@@ -578,7 +581,7 @@ int contract_orth_aopair_dm(double *outR, double *outI, double *dm,
     return 0;
 }
 
-int contract_orth_aopair_coulG(double *out, double *coulG_R, double *coulG_I,
+int contract_orth_aopair_coulG(double *out, cuDoubleComplex *coulG,
                                PBCIntEnvVars *envs, uint32_t *bas_ij_idx,
                                double *G_bases, double *L_bases, int *mesh_cum,
                                int *nimgs_cum, int *mesh, int npair)
@@ -592,7 +595,7 @@ int contract_orth_aopair_coulG(double *out, double *coulG_R, double *coulG_I,
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
     orth_aopair_coulG_kernel<<<ntile_batch*npair, THREADS>>>(
-        out, coulG_R, coulG_I, *envs, bas_ij_idx, G_bases, L_bases,
+        out, coulG, *envs, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

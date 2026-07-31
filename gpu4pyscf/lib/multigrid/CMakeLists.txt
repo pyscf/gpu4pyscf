@@ -24,3 +24,14 @@ set_target_properties(mgrid_v2 PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
         CUDA_SEPARABLE_COMPILATION ON
 )
+
+add_library(mgrid_v3 SHARED
+  multigrid_v3/eval_density.cu
+  multigrid_v3/eval_lda_mat.cu
+  multigrid_v3/screen.cu
+)
+
+set_target_properties(mgrid_v3 PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+  CUDA_SEPARABLE_COMPILATION ON
+)
