@@ -537,18 +537,18 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
                     reorder_aux=True, clone_context=clone_context, omega=omega)[0]
 
             work = cp.empty(naux_sorted * batch_size)
+            work2 = cp.empty(naux * batch_size)
             if needs_recontraction:
-                work1 = cp.empty(naux_sorted * cderi_batch_size)
-            work2 = cp.empty(naux * cderi_batch_size)
+                work1 = cp.empty(naux * cderi_batch_size)
 
             for batch_id in batch_iter:
                 log.debug1('processing cderi batch %d', batch_id)
                 j3c = _eval_j3c(shl_pair_batch_id=batch_id, out=work)
-                if needs_recontraction:
-                    tmp = ndarray((j3c.shape[0], naux_sorted), buffer=work1)
-                    j3c = recontract(batch_id, j3c, out=tmp)
                 cderi_gpu = ndarray((j3c.shape[0], naux), buffer=work2)
                 cderi_gpu = j3c.dot(c, out=cderi_gpu)
+                if needs_recontraction:
+                    cderi_gpu = recontract(batch_id, cderi_gpu, out=work1)
+
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 # TODO: async-write to host memory in another stream
                 err = libvhf_rys.transpose_write(
