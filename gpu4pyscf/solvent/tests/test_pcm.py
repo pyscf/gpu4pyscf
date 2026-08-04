@@ -267,6 +267,72 @@ H    0.000000   -0.935307   -1.082500
 
         assert abs(test_energy - ref_energy) < 1e-8
 
+    def test_ghost_atom(self):
+        mol = pyscf.M(
+            atom = """
+                ghost:O      -0.0456482954     0.3276635601     0.1150712045
+                ghost:H       0.8839023862     0.1379773801     0.1537324880
+                ghost:H      -0.4544197433    -0.3524420751     0.6270142868
+                O       2.8650684263    -0.1847028876     0.0859519520
+                H       3.1198758203    -0.2809098055    -0.8201356074
+                H       3.3367304058     0.5708588279     0.4048656762
+                ghost:Ne     100 0 0
+            """,
+            basis = "def2-SVP",
+            verbose = 0,
+        )
+        mf = scf.RHF(mol)
+        mf = mf.PCM()
+        mf.with_solvent.method = "IEF-PCM"
+        mf.with_solvent.eps = 80.0
+        mf.conv_tol = 1e-12
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+
+        ### Q-Chem reference input
+        # $molecule
+        # 0 1
+        #         @O      -0.0456482954     0.3276635601     0.1150712045
+        #         @H       0.8839023862     0.1379773801     0.1537324880
+        #         @H      -0.4544197433    -0.3524420751     0.6270142868
+        #         O       2.8650684263    -0.1847028876     0.0859519520
+        #         H       3.1198758203    -0.2809098055    -0.8201356074
+        #         H       3.3367304058     0.5708588279     0.4048656762
+        # $end
+
+        # $rem
+        # JOBTYPE freq
+        # METHOD HF
+        # BASIS def2-svp
+        # SCF_CONVERGENCE 12
+        # BASIS_LIN_DEP_THRESH 6
+        # SOLVENT_METHOD PCM
+        # SYMMETRY      FALSE
+        # SYM_IGNORE    TRUE
+        # MAX_SCF_CYCLES 100
+        # PURECART 1111
+        # THRESH        14
+        # $end
+        ref_energy = -75.9747732340
+
+        ref_gradient = numpy.array([
+            [-0.000112,      -0.000008,      -0.000007],
+            [-0.000936,      -0.000017,       0.000188],
+            [-0.000051,      -0.000021,       0.000016],
+            [ 0.003634,       0.003660,      -0.003067],
+            [-0.001186,      -0.001495,       0.001833],
+            [-0.001350,      -0.002120,       0.001037],
+            [0, 0, 0],
+        ])
+
+        assert abs(test_energy - ref_energy) < 1e-9
+        assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 2e-6
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()
