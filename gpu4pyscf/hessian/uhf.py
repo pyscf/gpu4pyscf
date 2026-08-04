@@ -28,8 +28,8 @@ from pyscf import lib
 from gpu4pyscf.scf import j_engine
 from gpu4pyscf.scf.jk import _VHFOpt, _check_rsh_factors
 from gpu4pyscf.gto.ecp import get_ecp_ip
-from gpu4pyscf.lib.cupy_helper import (contract, transpose_sum, get_avail_mem,
-                                       krylov, tag_array)
+from gpu4pyscf.lib.cupy_helper import (
+    contract, transpose_sum, get_avail_mem, krylov, tag_array)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess_gpu
@@ -355,7 +355,7 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
             mo1[:,:nmoa*nocca].reshape(nset, nmo, nocca),
             mo1[:,nmoa*nocca:].reshape(nset, nmo, noccb))
         mo1_mo = contract('snai,spa->snpi', mo1_aligned, mo_coeff)
-        dm1 = contract('snpi,sqi->snpq', mo1_mo, orbo)
+        dm1 = cp.asarray(contract('snpi,sqi->snpq', mo1_mo, orbo), order='C')
         transpose_sum(dm1.reshape(-1,nao,nao), inplace=True, hermi=1)
         dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=orbo, symmetrize=1)
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
