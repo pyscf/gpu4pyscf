@@ -23,7 +23,7 @@ import ctypes
 from cupyx.scipy.special import erf
 from pyscf import lib, gto
 from gpu4pyscf import scf
-from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
+from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent, natm_without_ghost
 from gpu4pyscf.solvent.grad.pcm import grad_qv, get_dD_dS, get_dF_dA, get_dSii, grad_switch_h
 from gpu4pyscf.solvent.grad.pcm import left_multiply_dS_offdiagonal
 from gpu4pyscf.lib import logger
@@ -33,7 +33,6 @@ from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.hessian.rhf import HessianBase, _ao2mo
 from gpu4pyscf.lib import utils
-from pyscf import lib as pyscf_lib
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 
 def gradgrad_switch_h(x):
@@ -316,7 +315,7 @@ def get_d2D_d2S(surface, with_S=True, with_D=False, stream=None):
     d2S = cupy.empty([3,3,n,n])
     d2D = None
     d2S_ptr = ctypes.cast(d2S.data.ptr, ctypes.c_void_p)
-    d2D_ptr = pyscf_lib.c_null_ptr()
+    d2D_ptr = lib.c_null_ptr()
     if with_D:
         d2D = cupy.empty([3,3,n,n])
         d2D_ptr = ctypes.cast(d2D.data.ptr, ctypes.c_void_p)
@@ -1331,6 +1330,8 @@ class WithSolventHess:
             dm = dm[0] + dm[1]
         if self.base.with_solvent.frozen_dm0_for_finite_difference_without_response is not None:
             raise NotImplementedError("frozen_dm0_for_finite_difference_without_response not implemented for PCM Hessian")
+        if natm_without_ghost(self.mol) != self.mol.natm:
+            raise NotImplementedError("Ghost atom not supported for PCM Hessian")
 
         with lib.temporary_env(self.base.with_solvent, equilibrium_solvation=True):
             logger.debug(self, 'Compute hessian from solutes')
