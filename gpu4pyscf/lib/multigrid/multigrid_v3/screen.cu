@@ -49,8 +49,8 @@ void accumulate(T lower, T upper, T c, T& min_val, T& max_val)
 }
 
 __global__ static
-void grid_ranges_kernel(float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
-                        PBCIntEnvVars envs, int64_t *bas_ij_idx, int li_inc, int lj_inc,
+void grid_ranges_kernel(float2 *grid_frac_ranges, PBCIntEnvVars envs,
+                        int64_t *bas_ij_idx, int li_inc, int lj_inc,
                         int npairs, float log_threshold)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -129,14 +129,17 @@ void grid_ranges_kernel(float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_
     float ycut_frac = x_cut * abs(b10) + y_cut * abs(b11) + z_cut * abs(b12);
     float zcut_frac = x_cut * abs(b20) + y_cut * abs(b21) + z_cut * abs(b22);
 
+    float2 *xfrac_range = grid_frac_ranges;
+    float2 *yfrac_range = grid_frac_ranges + npairs;
+    float2 *zfrac_range = grid_frac_ranges + npairs * 2;
     xfrac_range[pair_id] = {xp_frac - xcut_frac, xp_frac + xcut_frac};
     yfrac_range[pair_id] = {yp_frac - ycut_frac, yp_frac + ycut_frac};
     zfrac_range[pair_id] = {zp_frac - zcut_frac, zp_frac + zcut_frac};
 }
 
 __global__ static
-void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
-                                float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
+void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *supmol_bas_ij,
+                                int64_t *bas_ij_idx, float2 *grid_frac_ranges,
                                 int nimgs_x, int nimgs_y, int nimgs_z,
                                 int mesh_x, int mesh_y, int mesh_z, int npairs,
                                 int nbas, int *head)
@@ -147,13 +150,13 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *supmol_bas_ij, int6
     int64_t bas_ij = bas_ij_idx[pair_id];
     int64_t nbas_stride = nbas * NBAS_MAX;
 
-    float2 range = xfrac_range[pair_id];
+    float2 range = grid_frac_ranges[pair_id];
     float xfrac_lower = range.x;
     float xfrac_upper = range.y;
-    range = yfrac_range[pair_id];
+    range = grid_frac_ranges[npairs+pair_id];
     float yfrac_lower = range.x;
     float yfrac_upper = range.y;
-    range = zfrac_range[pair_id];
+    range = grid_frac_ranges[npairs*2+pair_id];
     float zfrac_lower = range.x;
     float zfrac_upper = range.y;
 
@@ -231,12 +234,8 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, PBCIntEnvVars *envs,
                               int li_inc, int lj_inc, float log_threshold)
 {
     int batches = (npairs + 255) / 256;
-    float2 *xfrac_range = grid_frac_ranges;
-    float2 *yfrac_range = grid_frac_ranges + npairs;
-    float2 *zfrac_range = grid_frac_ranges + npairs * 2;
     grid_ranges_kernel<<<batches, 256>>>(
-        xfrac_range, yfrac_range, zfrac_range, *envs, bas_ij_idx,
-        li_inc, lj_inc, npairs, log_threshold);
+        grid_frac_ranges, *envs, bas_ij_idx, li_inc, lj_inc, npairs, log_threshold);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in gaussian_prod_grid_ranges: %s\n", cudaGetErrorString(err));
@@ -257,11 +256,8 @@ int grid_range_to_tiles(int *grid_tile_idx, int64_t *supmol_bas_ij,
     int mesh_y = mesh[1];
     int mesh_z = mesh[2];
     int batches = (npairs + 255) / 256;
-    float2 *xfrac_range = grid_frac_ranges;
-    float2 *yfrac_range = grid_frac_ranges + npairs;
-    float2 *zfrac_range = grid_frac_ranges + npairs * 2;
     grid_range_to_tiles_kernel<<<batches, 256>>>(
-        grid_tile_idx, supmol_bas_ij, bas_ij_idx, xfrac_range, yfrac_range, zfrac_range,
+        grid_tile_idx, supmol_bas_ij, bas_ij_idx, grid_frac_ranges,
         nimgs_x, nimgs_y, nimgs_z, mesh_x, mesh_y, mesh_z, npairs, nbas, head);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -19,10 +19,11 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "constant_objects.cuh"
 
 __global__ static
 void aft_Ecut_kernel(float *Ecut, float *exps, float *log_cs, int *ls,
-                     float *bas_coords, float *lattice_vectors, int *nimgs,
+                     float *bas_coords, int *nimgs,
                      int nbas, float log_cutoff, float Ecut_max, int is_mgga)
 {
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -82,15 +83,15 @@ void aft_Ecut_kernel(float *Ecut, float *exps, float *log_cs, int *ls,
     float xjxi = xj - xi;
     float yjyi = yj - yi;
     float zjzi = zj - zi;
-    float a00 = lattice_vectors[0];
-    float a01 = lattice_vectors[1];
-    float a02 = lattice_vectors[2];
-    float a10 = lattice_vectors[3];
-    float a11 = lattice_vectors[4];
-    float a12 = lattice_vectors[5];
-    float a20 = lattice_vectors[6];
-    float a21 = lattice_vectors[7];
-    float a22 = lattice_vectors[8];
+    float a00 = c_lattice_vectors[0];
+    float a01 = c_lattice_vectors[1];
+    float a02 = c_lattice_vectors[2];
+    float a10 = c_lattice_vectors[3];
+    float a11 = c_lattice_vectors[4];
+    float a12 = c_lattice_vectors[5];
+    float a20 = c_lattice_vectors[6];
+    float a21 = c_lattice_vectors[7];
+    float a22 = c_lattice_vectors[8];
     for (int ix = -nimgs_x, n = 0; ix <= nimgs_x; ++ix) {
     for (int iy = -nimgs_y; iy <= nimgs_y; ++iy) {
     for (int iz = -nimgs_z; iz <= nimgs_z; ++iz, ++n) {
@@ -117,13 +118,13 @@ void aft_Ecut_kernel(float *Ecut, float *exps, float *log_cs, int *ls,
 
 extern "C" {
 int estimate_aft_Ecut(float *Ecut, float *exps, float *log_cs, int *ls,
-                      float *bas_coords, float *lattice_vectors, int *nimgs,
+                      float *bas_coords, int *nimgs,
                       int nbas, float log_cutoff, float Ecut_max, int is_mgga)
 {
     int threads = 256;
     int blocks = (nbas*nbas + threads-1)/threads;
     aft_Ecut_kernel<<<blocks, threads>>>(
-        Ecut, exps, log_cs, ls, bas_coords, lattice_vectors, nimgs, nbas,
+        Ecut, exps, log_cs, ls, bas_coords, nimgs, nbas,
         log_cutoff, Ecut_max, is_mgga);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

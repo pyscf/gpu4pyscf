@@ -48,11 +48,11 @@ double reduce(double val, double *swap, int thread_id)
     return val;
 }
 
-template <int LI, int LJ, int DM_SLICE_SIZE, bool is_non_orthogonal>
+template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
 __global__ static
 void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
                          int *shl_pair_offsets, int64_t *bas_ij_idx,
-                         int *grid_tile_idx, int ntiles,
+                         int *grid_tile_idx, int ntiles, int *supmol_to_bvk_mapping,
                          double a_dot_b, double a_dot_c, double b_dot_c,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c)
@@ -172,15 +172,13 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
         double exp_dadb = exp(-2 * aij * a_dot_b);
         double exp_dadc = exp(-2 * aij * a_dot_c);
         double exp_dbdc = exp(-2 * aij * b_dot_c);
-        for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += DM_SLICE_SIZE) {
-            double vj_cache[DM_SLICE_SIZE * nfj];
+        for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
+        for (int dm_j0 = 0; dm_j0 < nfj; dm_j0 += SLICE_SIZE_J) {
+            double vj_cache[SLICE_SIZE_I * SLICE_SIZE_J];
 #pragma unroll
-            for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
-                if (dm_i0 + i > nfi) break;
-#pragma unroll
-            for (int j = 0; j < nfj; ++j) {
-                vj_cache[i*nfj+j] = 0;
-            } }
+            for (int n = 0; n < SLICE_SIZE_I*SLICE_SIZE_J; ++n) {
+                vj_cache[n] = 0;
+            }
 
             double x, y, z;
             double recursion_factor_ab_pow_a = 1;
@@ -225,18 +223,46 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
                          recursion_factor_c *= exp_dc_squared) {
 
                         double i_cartesian[nfi];
+                        gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi, dm_i0);
+                        if (SLICE_SIZE_I < nfi) {
+                            if (dm_i0 == 1) {
+#pragma unroll
+                                for (int i = 0; i < min(SLICE_SIZE_I, nfi-SLICE_SIZE_I); i++) {
+                                    i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I];
+                                }
+                            } else if (dm_i0 == 2) {
+#pragma unroll
+                                for (int i = 0; i < nfi-SLICE_SIZE_I*2; i++) {
+                                    i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I*2];
+                                }
+                            }
+                        }
+
                         double j_cartesian[nfj];
-                        gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                        gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                        gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj, dm_j0);
+                        if (SLICE_SIZE_J < nfj) {
+                            if (dm_j0 == 1) {
+#pragma unroll
+                                for (int i = 0; i < min(SLICE_SIZE_J, nfj-SLICE_SIZE_J); i++) {
+                                    j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J];
+                                }
+                            } else if (dm_j0 == 2) {
+#pragma unroll
+                                for (int i = 0; i < nfj-SLICE_SIZE_J*2; i++) {
+                                    j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J*2];
+                                }
+                            }
+                        }
 
                         int abc_index = a_index * TILE*TILE + b_index*TILE + c_index;
                         double fac = gaussian_xyz * vxc_cache[abc_index];
 #pragma unroll
-                        for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
-                            if (dm_i0 + i > nfi) break;
+                        for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                            if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
                             double s = fac * i_cartesian[i];
 #pragma unroll
-                            for (int j = 0; j < nfj; j++) {
+                            for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                                if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                                 vj_cache[i*nfj+j] += s * j_cartesian[j];
                             }
                         }
@@ -270,28 +296,27 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
                 size_t nao2 = nao * nao;
                 int i0 = envs.ao_loc[ish_cell0];
                 int j0 = envs.ao_loc[jsh_cell0];
-                double *vj = out + jL * nao2;
+                double *vj = out + supmol_to_bvk_mapping[jL] * nao2;
 #pragma unroll
-                for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
-                    if (dm_i0 + i > nfi) break;
+                for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
 #pragma unroll
-                for (int j = 0; j < nfj; ++j) {
-                    if (pair_id < shl_pair1) {
-                        atomicAdd(vj + (i0+dm_i0+i)*nao+j0+j, vj_cache[i*nfj+j] * cc);
-                    }
+                for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                    atomicAdd(vj + (i0+dm_i0+i)*nao+j0+j, vj_cache[i*nfj+j] * cc);
                 } }
             }
-        }
+        } }
     }
 }
 
-template <int LI, int LJ, int DM_SLICE_SIZE>
+template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
 void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs,
-                         int64_t *bas_ij_idx, float2 *xfrac_range,
-                         float2 *yfrac_range, float2 *zfrac_range,
+                         int64_t *bas_ij_idx, float2 *grid_frac_ranges,
+                         int *supmol_to_bvk_mapping,
                          double da_squared, double db_squared, double dc_squared,
-                         int mesh_a, int mesh_b, int mesh_c)
+                         int mesh_a, int mesh_b, int mesh_c, int npairs)
 {
     constexpr int tile = 16;
     int tx = threadIdx.x;
@@ -341,13 +366,13 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
         zij = zjzi * aj_aij + zi;
         theta_rr = ai * aj_aij * rr;
 
-        float2 range = xfrac_range[pair_id];
+        float2 range = grid_frac_ranges[pair_id];
         float xfrac_lower = range.x;
         float xfrac_upper = range.y;
-        range = yfrac_range[pair_id];
+        range = grid_frac_ranges[npairs+pair_id];
         float yfrac_lower = range.x;
         float yfrac_upper = range.y;
-        range = zfrac_range[pair_id];
+        range = grid_frac_ranges[npairs*2+pair_id];
         float zfrac_lower = range.x;
         float zfrac_upper = range.y;
         a_start = ceil (xfrac_lower * mesh_a);
@@ -365,10 +390,11 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
 
-    for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += DM_SLICE_SIZE) {
-        double vj_cache[DM_SLICE_SIZE * nfj];
+    for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
+    for (int dm_j0 = 0; dm_j0 < nfj; dm_j0 += SLICE_SIZE_J) {
+        double vj_cache[SLICE_SIZE_I * SLICE_SIZE_J];
 #pragma unroll
-        for (int n = 0; n < DM_SLICE_SIZE*nfj; ++n) {
+        for (int n = 0; n < SLICE_SIZE_I*SLICE_SIZE_J; ++n) {
             vj_cache[n] = 0;
         }
 
@@ -394,15 +420,44 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
 
                 double v = vxc_weights[(a_index % mesh_a) * mesh_bc + bc_idx];
                 double i_cartesian[nfi];
-                double j_cartesian[nfj];
-                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi, dm_i0);
+                if (SLICE_SIZE_I < nfi) {
+                    if (dm_i0 == 1) {
 #pragma unroll
-                for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
-                    if (dm_i0 + i > nfi) break;
+                        for (int i = 0; i < min(SLICE_SIZE_I, nfi-SLICE_SIZE_I); i++) {
+                            i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I];
+                        }
+                    } else if (dm_i0 == 2) {
+#pragma unroll
+                        for (int i = 0; i < nfi-SLICE_SIZE_I*2; i++) {
+                            i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I*2];
+                        }
+                    }
+                }
+
+                double j_cartesian[nfj];
+                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj, dm_j0);
+                if (SLICE_SIZE_J < nfj) {
+                    if (dm_j0 == 1) {
+#pragma unroll
+                        for (int i = 0; i < min(SLICE_SIZE_J, nfj-SLICE_SIZE_J); i++) {
+                            j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J];
+                        }
+                    } else if (dm_j0 == 2) {
+#pragma unroll
+                        for (int i = 0; i < nfj-SLICE_SIZE_J*2; i++) {
+                            j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J*2];
+                        }
+                    }
+                }
+
+#pragma unroll
+                for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
                     double s = v * i_cartesian[i];
 #pragma unroll
-                    for (int j = 0; j < nfj; j++) {
+                for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                         vj_cache[i*nfj+j] += s * j_cartesian[j];
                     }
                 }
@@ -423,15 +478,43 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
 
                 double v = vxc_weights[(a_index % mesh_a) * mesh_bc + bc_idx];
                 double i_cartesian[nfi];
-                double j_cartesian[nfj];
-                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi, dm_i0);
+                if (SLICE_SIZE_I < nfi) {
+                    if (dm_i0 == 1) {
 #pragma unroll
-                for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
-                    if (dm_i0 + i > nfi) break;
+                        for (int i = 0; i < min(SLICE_SIZE_I, nfi-SLICE_SIZE_I); i++) {
+                            i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I];
+                        }
+                    } else if (dm_i0 == 2) {
+#pragma unroll
+                        for (int i = 0; i < nfi-SLICE_SIZE_I*2; i++) {
+                            i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I*2];
+                        }
+                    }
+                }
+
+                double j_cartesian[nfj];
+                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj, dm_j0);
+                if (SLICE_SIZE_J < nfj) {
+                    if (dm_j0 == 1) {
+#pragma unroll
+                        for (int i = 0; i < min(SLICE_SIZE_J, nfj-SLICE_SIZE_J); i++) {
+                            j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J];
+                        }
+                    } else if (dm_j0 == 2) {
+#pragma unroll
+                        for (int i = 0; i < nfj-SLICE_SIZE_J*2; i++) {
+                            j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J*2];
+                        }
+                    }
+                }
+#pragma unroll
+                for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
                     double s = v * i_cartesian[i];
 #pragma unroll
-                    for (int j = 0; j < nfj; j++) {
+                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                         vj_cache[i*nfj+j] += s * j_cartesian[j];
                     }
                 }
@@ -448,27 +531,28 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
         size_t nao2 = nao * nao;
         int i0 = envs.ao_loc[ish_cell0];
         int j0 = envs.ao_loc[jsh_cell0];
-        double *vj = out + jL * nao2;
+        double *vj = out + supmol_to_bvk_mapping[jL] * nao2;
 #pragma unroll
-        for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
-            if (dm_i0 + i > nfi) break;
+        for (int i = 0; i < SLICE_SIZE_I; ++i) {
+            if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
 #pragma unroll
-            for (int j = 0; j < nfj; j++) {
+            for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                 double val = reduce(vj_cache[i*nfj+j], swap, thread_id);
                 if (thread_id == 0) {
                     atomicAdd(vj + (i0+dm_i0+i)*nao+j0+j, vj_cache[i*nfj+j] * cc);
                 }
             }
         }
-    }
+    } }
 }
 
 extern "C" {
-#define eval_lda_mat_kernel_case(li, lj, dm_slice) \
+#define eval_lda_mat_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
-        eval_lda_mat_kernel<li,lj,dm_slice,0><<<block_grid, threads, shm_size>>>( \
+        eval_lda_mat_kernel<li,lj,slice_i,slice_j,0><<<block_grid, threads, shm_size>>>( \
             out, vxc_weights, *envs, shl_pair_offsets, bas_ij_idx, \
-            grid_tile_idx, n_contributing_tiles, \
+            grid_tile_idx, n_contributing_tiles, supmol_to_bvk_mapping, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c); \
     break
@@ -478,8 +562,8 @@ int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
                      int tiles_per_block, int nsp_per_block,
                      int shm_size, int i_angular, int j_angular,
                      int *shl_pair_offsets, int64_t *bas_ij_idx,
-                     int *grid_tile_idx, int n_contributing_tiles,
-                     int *mesh)
+                     int *grid_tile_idx, int *supmol_to_bvk_mapping,
+                     int n_contributing_tiles, int *mesh)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
@@ -493,21 +577,21 @@ int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
     switch (i_angular * LMAX1 + j_angular) {
-        eval_lda_mat_kernel_case(0,0, 1);
-        //eval_lda_mat_kernel_case(1,0, 3);
-        //eval_lda_mat_kernel_case(1,1, 3);
-        //eval_lda_mat_kernel_case(2,0, 6);
-        //eval_lda_mat_kernel_case(2,1, 6);
-        //eval_lda_mat_kernel_case(2,2, 6);
-        //eval_lda_mat_kernel_case(3,0,10);
-        //eval_lda_mat_kernel_case(3,1,10);
-        //eval_lda_mat_kernel_case(3,2,10);
-        //eval_lda_mat_kernel_case(3,3, 5);
-        //eval_lda_mat_kernel_case(4,0,15);
-        //eval_lda_mat_kernel_case(4,1,15);
-        //eval_lda_mat_kernel_case(4,2,15);
-        //eval_lda_mat_kernel_case(4,3, 8);
-        //eval_lda_mat_kernel_case(4,4, 5);
+        eval_lda_mat_kernel_case(0,0, 1, 1);
+        eval_lda_mat_kernel_case(1,0, 3, 1);
+        eval_lda_mat_kernel_case(1,1, 3, 3);
+        eval_lda_mat_kernel_case(2,0, 6, 1);
+        eval_lda_mat_kernel_case(2,1, 6, 3);
+        eval_lda_mat_kernel_case(2,2, 6, 6);
+        eval_lda_mat_kernel_case(3,0,10, 1);
+        eval_lda_mat_kernel_case(3,1,10, 3);
+        eval_lda_mat_kernel_case(3,2,10, 6);
+        eval_lda_mat_kernel_case(3,3, 5,10);
+        eval_lda_mat_kernel_case(4,0,15, 1);
+        eval_lda_mat_kernel_case(4,1,15, 3);
+        eval_lda_mat_kernel_case(4,2,15, 6);
+        eval_lda_mat_kernel_case(4,3,15, 5);
+        eval_lda_mat_kernel_case(4,4, 5,15);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -517,18 +601,17 @@ int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
     return 0;
 }
 
-#define eval_lda_mat_kernel_v2_case(li, lj, dm_slice) \
+#define eval_lda_mat_kernel_v2_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
-        eval_lda_mat_kernel_v2<li,lj,dm_slice><<<npairs, threads>>>( \
-            out, vxc_weights, *envs, bas_ij_idx, \
-            xfrac_range, yfrac_range, zfrac_range, \
-            da_squared, db_squared, dc_squared, \
-            mesh_a, mesh_b, mesh_c); \
+        eval_lda_mat_kernel_v2<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
+            out, vxc_weights, *envs, bas_ij_idx, grid_frac_ranges, \
+            supmol_to_bvk_mapping, da_squared, db_squared, dc_squared, \
+            mesh_a, mesh_b, mesh_c, npairs); \
     break
 
 int evaluate_lda_mat_v2(double *out, double *vxc_weights, PBCIntEnvVars *envs,
                      double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
-                     float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
+                     float2 *grid_frac_ranges, int *supmol_to_bvk_mapping,
                      int *mesh, int npairs)
 {
     int mesh_a = mesh[0];
@@ -539,21 +622,21 @@ int evaluate_lda_mat_v2(double *out, double *vxc_weights, PBCIntEnvVars *envs,
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
     dim3 threads(16, 16);
     switch (li * LMAX1 + lj) {
-        eval_lda_mat_kernel_v2_case(0,0, 1);
-        eval_lda_mat_kernel_v2_case(1,0, 3);
-        eval_lda_mat_kernel_v2_case(1,1, 3);
-        eval_lda_mat_kernel_v2_case(2,0, 6);
-        eval_lda_mat_kernel_v2_case(2,1, 6);
-        eval_lda_mat_kernel_v2_case(2,2, 6);
-        eval_lda_mat_kernel_v2_case(3,0,10);
-        eval_lda_mat_kernel_v2_case(3,1,10);
-        eval_lda_mat_kernel_v2_case(3,2,10);
-        eval_lda_mat_kernel_v2_case(3,3, 5);
-        eval_lda_mat_kernel_v2_case(4,0,15);
-        eval_lda_mat_kernel_v2_case(4,1,15);
-        eval_lda_mat_kernel_v2_case(4,2,15);
-        eval_lda_mat_kernel_v2_case(4,3, 8);
-        eval_lda_mat_kernel_v2_case(4,4, 5);
+        eval_lda_mat_kernel_v2_case(0,0, 1, 1);
+        eval_lda_mat_kernel_v2_case(1,0, 3, 1);
+        eval_lda_mat_kernel_v2_case(1,1, 3, 3);
+        eval_lda_mat_kernel_v2_case(2,0, 6, 1);
+        eval_lda_mat_kernel_v2_case(2,1, 6, 3);
+        eval_lda_mat_kernel_v2_case(2,2, 6, 6);
+        eval_lda_mat_kernel_v2_case(3,0,10, 1);
+        eval_lda_mat_kernel_v2_case(3,1,10, 3);
+        eval_lda_mat_kernel_v2_case(3,2,10, 6);
+        eval_lda_mat_kernel_v2_case(3,3, 5,10);
+        eval_lda_mat_kernel_v2_case(4,0,15, 1);
+        eval_lda_mat_kernel_v2_case(4,1,15, 3);
+        eval_lda_mat_kernel_v2_case(4,2,15, 6);
+        eval_lda_mat_kernel_v2_case(4,3,15, 5);
+        eval_lda_mat_kernel_v2_case(4,4, 5,15);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

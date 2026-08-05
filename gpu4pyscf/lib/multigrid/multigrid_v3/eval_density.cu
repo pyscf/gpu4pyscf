@@ -26,11 +26,11 @@
 #define TILE            4
 #define THREADS         256
 
-template <int LI, int LJ, int DM_SLICE_SIZE, bool is_non_orthogonal>
+template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
 __global__ static
 void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
                          int *shl_pair_offsets, int64_t *bas_ij_idx,
-                         int *grid_tile_index, int ntiles,
+                         int *grid_tile_index, int ntiles, int *supmol_to_bvk_mapping,
                          double a_dot_b, double a_dot_c, double b_dot_c,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c)
@@ -150,7 +150,8 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
         double exp_dadb = exp(-2 * aij * a_dot_b);
         double exp_dadc = exp(-2 * aij * a_dot_c);
         double exp_dbdc = exp(-2 * aij * b_dot_c);
-        for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += DM_SLICE_SIZE) {
+        for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
+        for (int dm_j0 = 0; dm_j0 < nfj; dm_j0 += SLICE_SIZE_J) {
             double ci = env[bas[ish_cell0*BAS_SLOTS+PTR_COEFF]];
             double cj = env[bas[jsh_cell0*BAS_SLOTS+PTR_COEFF]];
             double cc = ci * cj;
@@ -158,18 +159,22 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
             size_t nao2 = nao * nao;
             int i0 = envs.ao_loc[ish_cell0];
             int j0 = envs.ao_loc[jsh_cell0];
-            double *dm_image_shift = dm + jL * nao2;
-            double dm_cache[DM_SLICE_SIZE * nfj];
+            double *dm_image_shift = dm + supmol_to_bvk_mapping[jL] * nao2;
+            double dm_cache[SLICE_SIZE_I * SLICE_SIZE_J];
+            if (pair_id < shl_pair1) {
 #pragma unroll
-            for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
-                if (dm_i0 + i > nfi) break;
+                for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
 #pragma unroll
-            for (int j = 0; j < nfj; ++j) {
-                dm_cache[i*nfj+j] = 0;
-                if (pair_id < shl_pair1) {
+                for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                     dm_cache[i*nfj+j] = dm_image_shift[(i0+dm_i0+i)*nao+j0+j] * cc;
+                } }
+            } else {
+                for (int n = 0; n < SLICE_SIZE_I*SLICE_SIZE_J; ++n) {
+                    dm_cache[n] = 0.;
                 }
-            } }
+            }
 
             double x, y, z;
             double recursion_factor_ab_pow_a = 1;
@@ -214,17 +219,45 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
                          recursion_factor_c *= exp_dc_squared) {
 
                         double i_cartesian[nfi];
+                        gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi, dm_i0);
+                        if (SLICE_SIZE_I < nfi) {
+                            if (dm_i0 == 1) {
+#pragma unroll
+                                for (int i = 0; i < min(SLICE_SIZE_I, nfi-SLICE_SIZE_I); i++) {
+                                    i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I];
+                                }
+                            } else if (dm_i0 == 2) {
+#pragma unroll
+                                for (int i = 0; i < nfi-SLICE_SIZE_I*2; i++) {
+                                    i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I*2];
+                                }
+                            }
+                        }
+
                         double j_cartesian[nfj];
-                        gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                        gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                        gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj, dm_j0);
+                        if (SLICE_SIZE_J < nfj) {
+                            if (dm_j0 == 1) {
+#pragma unroll
+                                for (int i = 0; i < min(SLICE_SIZE_J, nfj-SLICE_SIZE_J); i++) {
+                                    j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J];
+                                }
+                            } else if (dm_j0 == 2) {
+#pragma unroll
+                                for (int i = 0; i < nfj-SLICE_SIZE_J*2; i++) {
+                                    j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J*2];
+                                }
+                            }
+                        }
 
                         double val = 0;
 #pragma unroll
-                        for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
-                            if (dm_i0 + i > nfi) break;
+                        for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                            if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
                             double s = 0;
 #pragma unroll
-                            for (int j = 0; j < nfj; j++) {
+                            for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                                if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                                 s += dm_cache[i * nfj + j] * j_cartesian[j];
                             }
                             val += s * i_cartesian[i];
@@ -257,7 +290,7 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
             } else {
                 x += c_dxyz_dabc[0];
             }
-        }
+        } }
     }
     __syncthreads();
 
@@ -279,11 +312,11 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
 }
 
 extern "C" {
-#define eval_density_kernel_case(li, lj, dm_slice) \
+#define eval_density_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
-        eval_density_kernel<li,lj,dm_slice,0><<<block_grid, threads, shm_size>>>( \
+        eval_density_kernel<li,lj,slice_i,slice_j,0><<<block_grid, threads, shm_size>>>( \
             density, dm, *envs, shl_pair_offsets, bas_ij_idx, \
-            grid_tile_index, n_contributing_tiles, \
+            grid_tile_index, n_contributing_tiles, supmol_to_bvk_mapping, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c); \
     break
@@ -293,7 +326,8 @@ int evaluate_density(double *density, double *dm, PBCIntEnvVars *envs,
                      int tiles_per_block, int nsp_per_block,
                      int shm_size, int i_angular, int j_angular,
                      int *shl_pair_offsets, int64_t *bas_ij_idx,
-                     int *grid_tile_index, int n_contributing_tiles, int *mesh)
+                     int *grid_tile_index, int *supmol_to_bvk_mapping,
+                     int n_contributing_tiles, int *mesh)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
@@ -307,21 +341,21 @@ int evaluate_density(double *density, double *dm, PBCIntEnvVars *envs,
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
     switch (i_angular * LMAX1 + j_angular) {
-        eval_density_kernel_case(0,0, 1);
-        eval_density_kernel_case(1,0, 3);
-        eval_density_kernel_case(1,1, 3);
-        eval_density_kernel_case(2,0, 6);
-        eval_density_kernel_case(2,1, 6);
-        eval_density_kernel_case(2,2, 6);
-        eval_density_kernel_case(3,0,10);
-        eval_density_kernel_case(3,1,10);
-        eval_density_kernel_case(3,2,10);
-        eval_density_kernel_case(3,3, 5);
-        eval_density_kernel_case(4,0,15);
-        eval_density_kernel_case(4,1,15);
-        eval_density_kernel_case(4,2,15);
-        eval_density_kernel_case(4,3, 8);
-        eval_density_kernel_case(4,4, 5);
+        eval_density_kernel_case(0,0, 1, 1);
+        eval_density_kernel_case(1,0, 3, 1);
+        eval_density_kernel_case(1,1, 3, 3);
+        eval_density_kernel_case(2,0, 6, 1);
+        eval_density_kernel_case(2,1, 6, 3);
+        eval_density_kernel_case(2,2, 6, 6);
+        eval_density_kernel_case(3,0,10, 1);
+        eval_density_kernel_case(3,1,10, 3);
+        eval_density_kernel_case(3,2,10, 6);
+        eval_density_kernel_case(3,3, 5,10);
+        eval_density_kernel_case(4,0,15, 1);
+        eval_density_kernel_case(4,1,15, 3);
+        eval_density_kernel_case(4,2,15, 6);
+        eval_density_kernel_case(4,3,15, 5);
+        eval_density_kernel_case(4,4, 5,15);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

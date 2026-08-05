@@ -22,7 +22,7 @@ __host__ __device__ T distance_squared(const T x, const T y, const T z) {
 }
 
 template <int ANG> __forceinline__ __device__
-void gto_cartesian(double values[], const double fx, const double fy, const double fz)
+void gto_cartesian(double values[], double fx, double fy, double fz, int start)
 {
     if constexpr (ANG == 0) {
         values[0] = 1;
@@ -41,11 +41,13 @@ void gto_cartesian(double values[], const double fx, const double fy, const doub
         double xx = fx * fx;
         double yy = fy * fy;
         double zz = fz * fz;
-        values[0] = xx * fx;
-        values[1] = xx * fy;
-        values[2] = xx * fz;
-        values[3] = fx * yy;
-        values[4] = fx * fy * fz;
+        if (start < 5) {
+            values[0] = xx * fx;
+            values[1] = xx * fy;
+            values[2] = xx * fz;
+            values[3] = fx * yy;
+            values[4] = fx * fy * fz;
+        }
         values[5] = fx * zz;
         values[6] = yy * fy;
         values[7] = yy * fz;
@@ -58,16 +60,20 @@ void gto_cartesian(double values[], const double fx, const double fy, const doub
         double xxx = xx * fx;
         double yyy = yy * fy;
         double zzz = zz * fz;
-        values[0 ] = xxx * fx;
-        values[1 ] = xxx * fy;
-        values[2 ] = xxx * fz;
-        values[3 ] = xx * yy;
-        values[4 ] = xx * fy * fz;
-        values[5 ] = xx * zz;
-        values[6 ] = fx * yyy;
-        values[7 ] = fx * yy * fz;
-        values[8 ] = fx * fy * zz;
-        values[9 ] = fx * zzz;
+        if (start < 5) {
+            values[0 ] = xxx * fx;
+            values[1 ] = xxx * fy;
+            values[2 ] = xxx * fz;
+            values[3 ] = xx * yy;
+            values[4 ] = xx * fy * fz;
+        }
+        if (start < 10) {
+            values[5 ] = xx * zz;
+            values[6 ] = fx * yyy;
+            values[7 ] = fx * yy * fz;
+            values[8 ] = fx * fy * zz;
+            values[9 ] = fx * zzz;
+        }
         values[10] = yyy * fy;
         values[11] = yyy * fz;
         values[12] = yy * zz;

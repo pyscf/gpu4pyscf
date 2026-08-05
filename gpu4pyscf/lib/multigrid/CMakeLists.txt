@@ -27,6 +27,7 @@ set_target_properties(mgrid_v2 PROPERTIES
 
 add_library(mgrid_v3 SHARED
   multigrid_v3/eval_density.cu
+  multigrid_v3/eval_tau.cu
   multigrid_v3/eval_lda_mat.cu
   multigrid_v3/screen.cu
   multigrid_v3/drivers.cu
