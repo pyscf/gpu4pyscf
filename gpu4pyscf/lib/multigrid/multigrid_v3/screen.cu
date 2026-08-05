@@ -50,15 +50,15 @@ void accumulate(T lower, T upper, T c, T& min_val, T& max_val)
 
 __global__ static
 void grid_ranges_kernel(float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
-                        PBCIntEnvVars envs, int2 *bas_ij_idx, int li_inc, int lj_inc,
+                        PBCIntEnvVars envs, int64_t *bas_ij_idx, int li_inc, int lj_inc,
                         int npairs, float log_threshold)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id >= npairs) return;
 
-    int2 bas_ij = bas_ij_idx[pair_id];
-    int ish = bas_ij.x;
-    int jsh = bas_ij.y;
+    int64_t bas_ij = bas_ij_idx[pair_id];
+    int ish = bas_ij / NBAS_MAX;
+    int jsh = bas_ij % NBAS_MAX;
     int *bas = envs.bas;
     double *env = envs.env;
     // li_inc and lj_inc to account for derivatives
@@ -111,15 +111,15 @@ void grid_ranges_kernel(float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_
     float y_cut = estimate_rcut(li, lj, -radius, aij, ypi, ypj, log_factor);
     float z_cut = estimate_rcut(li, lj, -radius, aij, zpi, zpj, log_factor);
 
-    float b00 = reciprocal_lattice_vectors[0];
-    float b01 = reciprocal_lattice_vectors[1];
-    float b02 = reciprocal_lattice_vectors[2];
-    float b10 = reciprocal_lattice_vectors[3];
-    float b11 = reciprocal_lattice_vectors[4];
-    float b12 = reciprocal_lattice_vectors[5];
-    float b20 = reciprocal_lattice_vectors[6];
-    float b21 = reciprocal_lattice_vectors[7];
-    float b22 = reciprocal_lattice_vectors[8];
+    float b00 = c_reciprocal_lattice_vectors[0];
+    float b01 = c_reciprocal_lattice_vectors[1];
+    float b02 = c_reciprocal_lattice_vectors[2];
+    float b10 = c_reciprocal_lattice_vectors[3];
+    float b11 = c_reciprocal_lattice_vectors[4];
+    float b12 = c_reciprocal_lattice_vectors[5];
+    float b20 = c_reciprocal_lattice_vectors[6];
+    float b21 = c_reciprocal_lattice_vectors[7];
+    float b22 = c_reciprocal_lattice_vectors[8];
 
     float xp_frac = xp * b00 + yp * b01 + zp * b02;
     float yp_frac = xp * b10 + yp * b11 + zp * b12;
@@ -135,13 +135,18 @@ void grid_ranges_kernel(float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_
 }
 
 __global__ static
-void range_to_tiles_kernel(int *grid_tile_idx, int *latsum_idx,
-                           float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
-                           int *nimgs, int mesh_x, int mesh_y, int mesh_z, int npairs,
-                           int *head)
+void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
+                                float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
+                                int nimgs_x, int nimgs_y, int nimgs_z,
+                                int mesh_x, int mesh_y, int mesh_z, int npairs,
+                                int nbas, int *head)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id >= npairs) return;
+
+    int64_t bas_ij = bas_ij_idx[pair_id];
+    int64_t nbas_stride = nbas * NBAS_MAX;
+
     float2 range = xfrac_range[pair_id];
     float xfrac_lower = range.x;
     float xfrac_upper = range.y;
@@ -152,9 +157,6 @@ void range_to_tiles_kernel(int *grid_tile_idx, int *latsum_idx,
     float zfrac_lower = range.x;
     float zfrac_upper = range.y;
 
-    int nimgs_x = nimgs[0];
-    int nimgs_y = nimgs[1];
-    int nimgs_z = nimgs[2];
     int tiles_x = (mesh_x + TILE - 1) / TILE;
     int tiles_y = (mesh_y + TILE - 1) / TILE;
     int tiles_z = (mesh_z + TILE - 1) / TILE;
@@ -174,12 +176,12 @@ void range_to_tiles_kernel(int *grid_tile_idx, int *latsum_idx,
     img_x_upper = min(img_x_upper,  nimgs_x);
     img_y_upper = min(img_y_upper,  nimgs_y);
     img_z_upper = min(img_z_upper,  nimgs_z);
-    int tile_x_lower = floor((xfrac_lower - img_x_lower) * mesh_x / tile_size_x);
-    int tile_y_lower = floor((yfrac_lower - img_y_lower) * mesh_y / tile_size_y);
-    int tile_z_lower = floor((zfrac_lower - img_z_lower) * mesh_z / tile_size_z);
-    int tile_x_upper = ceil((xfrac_upper - img_x_upper) * mesh_x / tile_size_x);
-    int tile_y_upper = ceil((yfrac_upper - img_y_upper) * mesh_y / tile_size_y);
-    int tile_z_upper = ceil((zfrac_upper - img_z_upper) * mesh_z / tile_size_z);
+    int tile_x_lower = floor(max(xfrac_lower - img_x_lower, 0.f) * mesh_x / tile_size_x);
+    int tile_y_lower = floor(max(yfrac_lower - img_y_lower, 0.f) * mesh_y / tile_size_y);
+    int tile_z_lower = floor(max(zfrac_lower - img_z_lower, 0.f) * mesh_z / tile_size_z);
+    int tile_x_upper = ceil (min(xfrac_upper - img_x_upper, 1.f) * mesh_x / tile_size_x);
+    int tile_y_upper = ceil (min(yfrac_upper - img_y_upper, 1.f) * mesh_y / tile_size_y);
+    int tile_z_upper = ceil (min(zfrac_upper - img_z_upper, 1.f) * mesh_z / tile_size_z);
     int count_x = tile_x_upper - tile_x_lower + (img_x_upper - img_x_lower) * tiles_x;
     int count_y = tile_y_upper - tile_y_lower + (img_y_upper - img_y_lower) * tiles_y;
     int count_z = tile_z_upper - tile_z_lower + (img_z_upper - img_z_lower) * tiles_z;
@@ -195,7 +197,11 @@ void range_to_tiles_kernel(int *grid_tile_idx, int *latsum_idx,
             for (int z = tile_z_lower, img_z = img_z_lower; z < tile_z_upper || img_z < img_z_upper;) {
                 // when (x, y, z) lies out of the unit cell, they can be repositioned
                 // by shifting the lattice sum index on bra
-                latsum_idx[n] = img_offset + (img_x * nimgs_y + img_y) * nimgs_z + img_z;
+                int64_t latsum_idx = img_offset + (img_x * nimgs_y + img_y) * nimgs_z + img_z;
+                // supmol_bas_ij stores (latsum_idx*nbas+ish, jL*nbas+jsh).
+                // latsum_idx is the image index to reposition bra whereas jL is
+                // the image index relative to bra.
+                supmol_bas_ij[n] = latsum_idx * nbas_stride + bas_ij;
                 grid_tile_idx[n] = (x * tiles_y + y) * tiles_z + z;
 
                 n++;
@@ -220,11 +226,14 @@ void range_to_tiles_kernel(int *grid_tile_idx, int *latsum_idx,
 }
 
 extern "C" {
-int gaussian_prod_grid_ranges(float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
-                              PBCIntEnvVars *envs, int2 *bas_ij_idx,
-                              int li_inc, int lj_inc, int npairs, double log_threshold)
+int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, PBCIntEnvVars *envs,
+                              int64_t *bas_ij_idx, int npairs,
+                              int li_inc, int lj_inc, float log_threshold)
 {
     int batches = (npairs + 255) / 256;
+    float2 *xfrac_range = grid_frac_ranges;
+    float2 *yfrac_range = grid_frac_ranges + npairs;
+    float2 *zfrac_range = grid_frac_ranges + npairs * 2;
     grid_ranges_kernel<<<batches, 256>>>(
         xfrac_range, yfrac_range, zfrac_range, *envs, bas_ij_idx,
         li_inc, lj_inc, npairs, log_threshold);
@@ -236,16 +245,24 @@ int gaussian_prod_grid_ranges(float2 *xfrac_range, float2 *yfrac_range, float2 *
     return 0;
 }
 
-int grid_range_to_tiles(int *grid_tile_idx, int *latsum_idx,
-                        float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
-                        int *nimgs, int mesh_x, int mesh_y, int mesh_z, int npairs,
-                        int *head)
+int grid_range_to_tiles(int *grid_tile_idx, int64_t *supmol_bas_ij,
+                        int64_t *bas_ij_idx, float2 *grid_frac_ranges,
+                        int *nimgs, int *mesh, int npairs, int nbas, int *head)
 {
     cudaMemset(head, 0, sizeof(int));
+    int nimgs_x = nimgs[0];
+    int nimgs_y = nimgs[1];
+    int nimgs_z = nimgs[2];
+    int mesh_x = mesh[0];
+    int mesh_y = mesh[1];
+    int mesh_z = mesh[2];
     int batches = (npairs + 255) / 256;
-    range_to_tiles_kernel<<<batches, 256>>>(
-        grid_tile_idx, latsum_idx, xfrac_range, yfrac_range, zfrac_range,
-        nimgs, mesh_x, mesh_y, mesh_z, npairs, head);
+    float2 *xfrac_range = grid_frac_ranges;
+    float2 *yfrac_range = grid_frac_ranges + npairs;
+    float2 *zfrac_range = grid_frac_ranges + npairs * 2;
+    grid_range_to_tiles_kernel<<<batches, 256>>>(
+        grid_tile_idx, supmol_bas_ij, bas_ij_idx, xfrac_range, yfrac_range, zfrac_range,
+        nimgs_x, nimgs_y, nimgs_z, mesh_x, mesh_y, mesh_z, npairs, nbas, head);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in grid_range_to_tiles: %s\n", cudaGetErrorString(err));

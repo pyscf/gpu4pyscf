@@ -51,9 +51,8 @@ double reduce(double val, double *swap, int thread_id)
 template <int LI, int LJ, int DM_SLICE_SIZE, bool is_non_orthogonal>
 __global__ static
 void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
-                         double *img_coords,
-                         int *shl_pair_offsets, int2 *bas_ij_idx, int *bas_image_idx,
-                         int *grid_tile_idx, int *latsum_idx, int ntiles,
+                         int *shl_pair_offsets, int64_t *bas_ij_idx,
+                         int *grid_tile_idx, int ntiles,
                          double a_dot_b, double a_dot_c, double b_dot_c,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c)
@@ -92,9 +91,9 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[tile_index];
         shl_pair1 = shl_pair_offsets[tile_index+1];
-        start_position_x = dxyz_dabc[0] * a_start + dxyz_dabc[3] * b_start + dxyz_dabc[6] * c_start;
-        start_position_y = dxyz_dabc[1] * a_start + dxyz_dabc[4] * b_start + dxyz_dabc[7] * c_start;
-        start_position_z = dxyz_dabc[2] * a_start + dxyz_dabc[5] * b_start + dxyz_dabc[8] * c_start;
+        start_position_x = c_dxyz_dabc[0] * a_start + c_dxyz_dabc[3] * b_start + c_dxyz_dabc[6] * c_start;
+        start_position_y = c_dxyz_dabc[1] * a_start + c_dxyz_dabc[4] * b_start + c_dxyz_dabc[7] * c_start;
+        start_position_z = c_dxyz_dabc[2] * a_start + c_dxyz_dabc[5] * b_start + c_dxyz_dabc[8] * c_start;
         a_upper = min(a_start + TILE, mesh_a) - a_start;
         b_upper = min(b_start + TILE, mesh_b) - b_start;
         c_upper = min(c_start + TILE, mesh_c) - c_start;
@@ -123,24 +122,27 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
         int ish = 0;
         int jsh = 0;
         if (pair_id < shl_pair1) {
-            int2 bas_ij = bas_ij_idx[pair_id];
-            ish = bas_ij.x;
-            jsh = bas_ij.y;
+            int64_t bas_ij = bas_ij_idx[pair_id];
+            ish = bas_ij / NBAS_MAX;
+            jsh = bas_ij % NBAS_MAX;
         }
-        int L = latsum_idx[tile_id];
-        double Lx = img_coords[L*3+0];
-        double Ly = img_coords[L*3+1];
-        double Lz = img_coords[L*3+2];
-        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
-        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        int latsum_idx = ish / nbas;
+        int ish_cell0 = ish - nbas * latsum_idx;
+        int jL = jsh / nbas;
+        int jsh_cell0 = jsh - nbas * jL;
+        double Lx = envs.img_coords[latsum_idx*3+0];
+        double Ly = envs.img_coords[latsum_idx*3+1];
+        double Lz = envs.img_coords[latsum_idx*3+2];
+        int expi = bas[ish_cell0*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
+        int ri = bas[ish_cell0*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh_cell0*BAS_SLOTS+PTR_BAS_COORD];
         double xi = env[ri+0] - Lx;
         double yi = env[ri+1] - Ly;
         double zi = env[ri+2] - Lz;
-        double xj = env[rj+0] - Lx;
-        double yj = env[rj+1] - Ly;
-        double zj = env[rj+2] - Lz;
+        double xj = env[rj+0] - Lx + envs.img_coords[jL*3+0];
+        double yj = env[rj+1] - Ly + envs.img_coords[jL*3+1];
+        double zj = env[rj+2] - Lz + envs.img_coords[jL*3+2];
         double xjxi = xj - xi;
         double yjyi = yj - yi;
         double zjzi = zj - zi;
@@ -158,9 +160,9 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
         double z0 = start_position_z - zij;
         double gaussian_exponent_at_reference = aij * distance_squared(x0, y0, z0);
         double gaussian_starting_point = exp(-(theta_ij * rr_ij + gaussian_exponent_at_reference));
-        double cross_term_a = dxyz_dabc[0] * x0 + dxyz_dabc[1] * y0 + dxyz_dabc[2] * z0;
-        double cross_term_b = dxyz_dabc[3] * x0 + dxyz_dabc[4] * y0 + dxyz_dabc[5] * z0;
-        double cross_term_c = dxyz_dabc[6] * x0 + dxyz_dabc[7] * y0 + dxyz_dabc[8] * z0;
+        double cross_term_a = c_dxyz_dabc[0] * x0 + c_dxyz_dabc[1] * y0 + c_dxyz_dabc[2] * z0;
+        double cross_term_b = c_dxyz_dabc[3] * x0 + c_dxyz_dabc[4] * y0 + c_dxyz_dabc[5] * z0;
+        double cross_term_c = c_dxyz_dabc[6] * x0 + c_dxyz_dabc[7] * y0 + c_dxyz_dabc[8] * z0;
         double recursion_factor_a_start = exp(-aij * (2 * cross_term_a + da_squared));
         double recursion_factor_b_start = exp(-aij * (2 * cross_term_b + db_squared));
         double recursion_factor_c_start = exp(-aij * (2 * cross_term_c + dc_squared));
@@ -209,9 +211,9 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
                      recursion_factor_b *= exp_db_squared) {
 
                     if constexpr (is_non_orthogonal) {
-                        x = start_position_x + a_index * dxyz_dabc[0] + b_index * dxyz_dabc[3];
-                        y = start_position_y + a_index * dxyz_dabc[1] + b_index * dxyz_dabc[4];
-                        z = start_position_z + a_index * dxyz_dabc[2] + b_index * dxyz_dabc[5];
+                        x = start_position_x + a_index * c_dxyz_dabc[0] + b_index * c_dxyz_dabc[3];
+                        y = start_position_y + a_index * c_dxyz_dabc[1] + b_index * c_dxyz_dabc[4];
+                        z = start_position_z + a_index * c_dxyz_dabc[2] + b_index * c_dxyz_dabc[5];
                     } else {
                         z = start_position_z;
                     }
@@ -240,38 +242,34 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
                         }
                     }
                     if constexpr (is_non_orthogonal) {
-                        x += dxyz_dabc[6];
-                        y += dxyz_dabc[7];
-                        z += dxyz_dabc[8];
+                        x += c_dxyz_dabc[6];
+                        y += c_dxyz_dabc[7];
+                        z += c_dxyz_dabc[8];
                     } else {
-                        z += dxyz_dabc[8];
+                        z += c_dxyz_dabc[8];
                     }
                 }
                 if constexpr (is_non_orthogonal) {
                     recursion_factor_bc_pow_b *= exp_dbdc;
                 } else {
-                    y += dxyz_dabc[4];
+                    y += c_dxyz_dabc[4];
                 }
             }
             if constexpr (is_non_orthogonal) {
                 recursion_factor_ab_pow_a *= exp_dadb;
                 recursion_factor_ac_pow_a *= exp_dadc;
             } else {
-                x += dxyz_dabc[0];
+                x += c_dxyz_dabc[0];
             }
 
             if (pair_id < shl_pair1) {
-                int2 bas_ij = bas_ij_idx[pair_id];
-                int ish = bas_ij.x;
-                int jsh = bas_ij.y;
-                double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
-                double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+                double ci = env[bas[ish_cell0*BAS_SLOTS+PTR_COEFF]];
+                double cj = env[bas[jsh_cell0*BAS_SLOTS+PTR_COEFF]];
                 double cc = ci * cj;
                 size_t nao = envs.ao_loc[nbas];
                 size_t nao2 = nao * nao;
-                int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
-                int jL = bas_image_idx[jsh];
+                int i0 = envs.ao_loc[ish_cell0];
+                int j0 = envs.ao_loc[jsh_cell0];
                 double *vj = out + jL * nao2;
 #pragma unroll
                 for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
@@ -290,8 +288,8 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
 template <int LI, int LJ, int DM_SLICE_SIZE>
 __global__ static
 void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs,
-                         int2 *bas_ij_idx, int *bas_image_idx,
-                         float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
+                         int64_t *bas_ij_idx, float2 *xfrac_range,
+                         float2 *yfrac_range, float2 *zfrac_range,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c)
 {
@@ -310,16 +308,20 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
     __shared__ double xij, yij, zij, aij, theta_rr;
     __shared__ double swap[WARPS];
 
-    int2 bas_ij = bas_ij_idx[pair_id];
-    int ish = bas_ij.x;
-    int jsh = bas_ij.y;
     int *bas = envs.bas;
+    int nbas = envs.nbas;
     double *env = envs.env;
+    int64_t bas_ij = bas_ij_idx[pair_id];
+    int ish = bas_ij / NBAS_MAX;
+    int jsh = bas_ij % NBAS_MAX;
+    int jL = jsh / nbas;
+    int ish_cell0 = ish;
+    int jsh_cell0 = jsh - nbas * jL;
     if (thread_id == 0) {
-        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
-        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        int expi = bas[ish_cell0*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
+        int ri = bas[ish_cell0*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh_cell0*BAS_SLOTS+PTR_BAS_COORD];
         double ai = env[expi];
         double aj = env[expj];
         aij = ai + aj;
@@ -327,9 +329,9 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
         xi = env[ri+0];
         yi = env[ri+1];
         zi = env[ri+2];
-        xj = env[rj+0];
-        yj = env[rj+1];
-        zj = env[rj+2];
+        xj = env[rj+0] + envs.img_coords[jL*3+0];
+        yj = env[rj+1] + envs.img_coords[jL*3+1];
+        zj = env[rj+2] + envs.img_coords[jL*3+2];
         double xjxi = xj - xi;
         double yjyi = yj - yi;
         double zjzi = zj - zi;
@@ -372,14 +374,14 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
 
         for (int b_index = b_start+ty; b_index < b_stop; b_index += tile) {
         for (int c_index = c_start+tx; c_index < c_stop; c_index += tile) {
-            double x = a_center * dxyz_dabc[0] + b_index * dxyz_dabc[3] + c_index * dxyz_dabc[6];
-            double y = a_center * dxyz_dabc[1] + b_index * dxyz_dabc[4] + c_index * dxyz_dabc[7];
-            double z = a_center * dxyz_dabc[2] + b_index * dxyz_dabc[5] + c_index * dxyz_dabc[8];
+            double x = a_center * c_dxyz_dabc[0] + b_index * c_dxyz_dabc[3] + c_index * c_dxyz_dabc[6];
+            double y = a_center * c_dxyz_dabc[1] + b_index * c_dxyz_dabc[4] + c_index * c_dxyz_dabc[7];
+            double z = a_center * c_dxyz_dabc[2] + b_index * c_dxyz_dabc[5] + c_index * c_dxyz_dabc[8];
             double x_xij = x - xij;
             double y_yij = y - yij;
             double z_zij = z - zij;
             double gaussian_starting_point = exp(-theta_rr - aij * distance_squared(x_xij, y_yij, z_zij));
-            double cross_term_a = dxyz_dabc[0] * x_xij + dxyz_dabc[1] * y_yij + dxyz_dabc[2] * z_zij;
+            double cross_term_a = c_dxyz_dabc[0] * x_xij + c_dxyz_dabc[1] * y_yij + c_dxyz_dabc[2] * z_zij;
             double recursion_factor_a = exp(-aij * (2 * cross_term_a + da_squared));
 
             int bc_idx = (b_index % mesh_b) * mesh_c + (c_index % mesh_c);
@@ -404,14 +406,14 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
                         vj_cache[i*nfj+j] += s * j_cartesian[j];
                     }
                 }
-                x += dxyz_dabc[0];
-                y += dxyz_dabc[1];
-                z += dxyz_dabc[2];
+                x += c_dxyz_dabc[0];
+                y += c_dxyz_dabc[1];
+                z += c_dxyz_dabc[2];
             }
 
-            x -= dxyz_dabc[0] * (a_stop - a_center);
-            y -= dxyz_dabc[1] * (a_stop - a_center);
-            z -= dxyz_dabc[2] * (a_stop - a_center);
+            x -= c_dxyz_dabc[0] * (a_stop - a_center);
+            y -= c_dxyz_dabc[1] * (a_stop - a_center);
+            z -= c_dxyz_dabc[2] * (a_stop - a_center);
             recursion_factor_a = 1./recursion_factor_a;
             gaussian_xyz = gaussian_starting_point;
             for (int a_index = a_center - 1; a_index >= a_start; a_index--,
@@ -433,24 +435,19 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
                         vj_cache[i*nfj+j] += s * j_cartesian[j];
                     }
                 }
-                x += dxyz_dabc[0];
-                y += dxyz_dabc[1];
-                z += dxyz_dabc[2];
+                x += c_dxyz_dabc[0];
+                y += c_dxyz_dabc[1];
+                z += c_dxyz_dabc[2];
             }
         } }
 
-        int2 bas_ij = bas_ij_idx[pair_id];
-        int ish = bas_ij.x;
-        int jsh = bas_ij.y;
-        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
-        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double ci = env[bas[ish_cell0*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh_cell0*BAS_SLOTS+PTR_COEFF]];
         double cc = ci * cj;
-        int nbas = envs.nbas;
         size_t nao = envs.ao_loc[nbas];
         size_t nao2 = nao * nao;
-        int i0 = envs.ao_loc[ish];
-        int j0 = envs.ao_loc[jsh];
-        int jL = bas_image_idx[jsh];
+        int i0 = envs.ao_loc[ish_cell0];
+        int j0 = envs.ao_loc[jsh_cell0];
         double *vj = out + jL * nao2;
 #pragma unroll
         for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
@@ -470,19 +467,19 @@ extern "C" {
 #define eval_lda_mat_kernel_case(li, lj, dm_slice) \
     case (li * LMAX1 + lj): \
         eval_lda_mat_kernel<li,lj,dm_slice,0><<<block_grid, threads, shm_size>>>( \
-            out, vxc_weights, *envs, img_coords, shl_pair_offsets, bas_ij_idx, \
-            bas_image_idx, grid_tile_idx, latsum_idx, n_contributing_tiles, \
+            out, vxc_weights, *envs, shl_pair_offsets, bas_ij_idx, \
+            grid_tile_idx, n_contributing_tiles, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c); \
     break
 
 int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
-                     double *img_coords, double *dxyz_dabc,
-                     int shm_size, int i_angular, int j_angular,
-                     int *shl_pair_offsets, int2 *bas_ij_idx,
-                     int *grid_tile_idx, int *latsum_idx, int n_contributing_tiles,
+                     double *dxyz_dabc,
                      int tiles_per_block, int nsp_per_block,
-                     int *bas_image_idx, int *mesh)
+                     int shm_size, int i_angular, int j_angular,
+                     int *shl_pair_offsets, int64_t *bas_ij_idx,
+                     int *grid_tile_idx, int n_contributing_tiles,
+                     int *mesh)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
@@ -523,16 +520,15 @@ int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
 #define eval_lda_mat_kernel_v2_case(li, lj, dm_slice) \
     case (li * LMAX1 + lj): \
         eval_lda_mat_kernel_v2<li,lj,dm_slice><<<npairs, threads>>>( \
-            out, vxc_weights, *envs, bas_ij_idx, bas_image_idx, \
+            out, vxc_weights, *envs, bas_ij_idx, \
             xfrac_range, yfrac_range, zfrac_range, \
             da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c); \
     break
 
 int evaluate_lda_mat_v2(double *out, double *vxc_weights, PBCIntEnvVars *envs,
-                     double *dxyz_dabc, int li, int lj, int2 *bas_ij_idx,
-                     int *bas_image_idx, float2 *xfrac_range,
-                     float2 *yfrac_range, float2 *zfrac_range,
+                     double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
+                     float2 *xfrac_range, float2 *yfrac_range, float2 *zfrac_range,
                      int *mesh, int npairs)
 {
     int mesh_a = mesh[0];

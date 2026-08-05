@@ -16,7 +16,8 @@
 
 #pragma once
 
-extern __constant__ double lattice_vectors[9];
-extern __constant__ double reciprocal_lattice_vectors[9];
-extern __constant__ double dxyz_dabc[9];
-extern __constant__ double reciprocal_norm[3];
+extern __constant__ double c_lattice_vectors[9];
+extern __constant__ double c_reciprocal_lattice_vectors[9];
+extern __constant__ double c_dxyz_dabc[9];
+
+#define NBAS_MAX        16777216

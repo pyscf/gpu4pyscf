@@ -20,12 +20,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
+#include "constant_objects.cuh"
 #include "cartesian.cuh"
-
-__constant__ double reciprocal_lattice_vectors[9];
-__constant__ double lattice_vectors[9];
-__constant__ double dxyz_dabc[9];
-__constant__ double reciprocal_norm[3];
 
 #define TILE            4
 #define THREADS         256
@@ -33,9 +29,8 @@ __constant__ double reciprocal_norm[3];
 template <int LI, int LJ, int DM_SLICE_SIZE, bool is_non_orthogonal>
 __global__ static
 void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
-                         int *shl_pair_offsets, int2 *bas_ij_idx,
+                         int *shl_pair_offsets, int64_t *bas_ij_idx,
                          int *grid_tile_index, int ntiles,
-                         int *bas_image_idx, int *Ts_ij_lookup,
                          double a_dot_b, double a_dot_c, double b_dot_c,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c)
@@ -68,16 +63,15 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
     int *bas = envs.bas;
     double *env = envs.env;
     int nbas = envs.nbas;
-    int nimgs = envs.nimgs;
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int a_upper, b_upper, c_upper;
     __shared__ double start_position_x, start_position_y, start_position_z;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[tile_index];
         shl_pair1 = shl_pair_offsets[tile_index+1];
-        start_position_x = dxyz_dabc[0] * a_start + dxyz_dabc[3] * b_start + dxyz_dabc[6] * c_start;
-        start_position_y = dxyz_dabc[1] * a_start + dxyz_dabc[4] * b_start + dxyz_dabc[7] * c_start;
-        start_position_z = dxyz_dabc[2] * a_start + dxyz_dabc[5] * b_start + dxyz_dabc[8] * c_start;
+        start_position_x = c_dxyz_dabc[0] * a_start + c_dxyz_dabc[3] * b_start + c_dxyz_dabc[6] * c_start;
+        start_position_y = c_dxyz_dabc[1] * a_start + c_dxyz_dabc[4] * b_start + c_dxyz_dabc[7] * c_start;
+        start_position_z = c_dxyz_dabc[2] * a_start + c_dxyz_dabc[5] * b_start + c_dxyz_dabc[8] * c_start;
         a_upper = min(a_start + TILE, mesh_a) - a_start;
         b_upper = min(b_start + TILE, mesh_b) - b_start;
         c_upper = min(c_start + TILE, mesh_c) - c_start;
@@ -94,20 +88,27 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
         int ish = 0;
         int jsh = 0;
         if (pair_id < shl_pair1) {
-            int2 bas_ij = bas_ij_idx[pair_id];
-            ish = bas_ij.x;
-            jsh = bas_ij.y;
+            int64_t bas_ij = bas_ij_idx[pair_id];
+            ish = bas_ij / NBAS_MAX;
+            jsh = bas_ij % NBAS_MAX;
         }
-        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
-        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xi = env[ri+0];
-        double yi = env[ri+1];
-        double zi = env[ri+2];
-        double xj = env[rj+0];
-        double yj = env[rj+1];
-        double zj = env[rj+2];
+        int latsum_idx = ish / nbas;
+        int ish_cell0 = ish - nbas * latsum_idx;
+        int jL = jsh / nbas;
+        int jsh_cell0 = jsh - nbas * jL;
+        double Lx = envs.img_coords[latsum_idx*3+0];
+        double Ly = envs.img_coords[latsum_idx*3+1];
+        double Lz = envs.img_coords[latsum_idx*3+2];
+        int expi = bas[ish_cell0*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
+        int ri = bas[ish_cell0*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh_cell0*BAS_SLOTS+PTR_BAS_COORD];
+        double xi = env[ri+0] - Lx;
+        double yi = env[ri+1] - Ly;
+        double zi = env[ri+2] - Lz;
+        double xj = env[rj+0] - Lx + envs.img_coords[jL*3+0];
+        double yj = env[rj+1] - Ly + envs.img_coords[jL*3+1];
+        double zj = env[rj+2] - Lz + envs.img_coords[jL*3+2];
         double xjxi = xj - xi;
         double yjyi = yj - yi;
         double zjzi = zj - zi;
@@ -128,9 +129,9 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
         double exp_da_squared = exp(-2 * aij * da_squared);
         double exp_db_squared = exp(-2 * aij * db_squared);
         double exp_dc_squared = exp(-2 * aij * dc_squared);
-        double cross_term_a = dxyz_dabc[0] * x0 + dxyz_dabc[1] * y0 + dxyz_dabc[2] * z0;
-        double cross_term_b = dxyz_dabc[3] * x0 + dxyz_dabc[4] * y0 + dxyz_dabc[5] * z0;
-        double cross_term_c = dxyz_dabc[6] * x0 + dxyz_dabc[7] * y0 + dxyz_dabc[8] * z0;
+        double cross_term_a = c_dxyz_dabc[0] * x0 + c_dxyz_dabc[1] * y0 + c_dxyz_dabc[2] * z0;
+        double cross_term_b = c_dxyz_dabc[3] * x0 + c_dxyz_dabc[4] * y0 + c_dxyz_dabc[5] * z0;
+        double cross_term_c = c_dxyz_dabc[6] * x0 + c_dxyz_dabc[7] * y0 + c_dxyz_dabc[8] * z0;
 
         // BUG: when aij gets too large and x0 is negative and large, the
         // exponential can overflow and return inf.
@@ -150,16 +151,14 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
         double exp_dadc = exp(-2 * aij * a_dot_c);
         double exp_dbdc = exp(-2 * aij * b_dot_c);
         for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += DM_SLICE_SIZE) {
-            double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
-            double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+            double ci = env[bas[ish_cell0*BAS_SLOTS+PTR_COEFF]];
+            double cj = env[bas[jsh_cell0*BAS_SLOTS+PTR_COEFF]];
             double cc = ci * cj;
             size_t nao = envs.ao_loc[nbas];
             size_t nao2 = nao * nao;
-            int iL = bas_image_idx[ish];
-            int jL = bas_image_idx[jsh];
-            int i0 = envs.ao_loc[ish];
-            int j0 = envs.ao_loc[jsh];
-            double *dm_image_shift = dm + Ts_ij_lookup[jL*nimgs+iL] * nao2;
+            int i0 = envs.ao_loc[ish_cell0];
+            int j0 = envs.ao_loc[jsh_cell0];
+            double *dm_image_shift = dm + jL * nao2;
             double dm_cache[DM_SLICE_SIZE * nfj];
 #pragma unroll
             for (int i = 0; i < min(nfi, DM_SLICE_SIZE); ++i) {
@@ -201,9 +200,9 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
                      recursion_factor_b *= exp_db_squared) {
 
                     if constexpr (is_non_orthogonal) {
-                        x = start_position_x + a_index * dxyz_dabc[0] + b_index * dxyz_dabc[3];
-                        y = start_position_y + a_index * dxyz_dabc[1] + b_index * dxyz_dabc[4];
-                        z = start_position_z + a_index * dxyz_dabc[2] + b_index * dxyz_dabc[5];
+                        x = start_position_x + a_index * c_dxyz_dabc[0] + b_index * c_dxyz_dabc[3];
+                        y = start_position_y + a_index * c_dxyz_dabc[1] + b_index * c_dxyz_dabc[4];
+                        z = start_position_z + a_index * c_dxyz_dabc[2] + b_index * c_dxyz_dabc[5];
                     } else {
                         z = start_position_z;
                     }
@@ -239,24 +238,24 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
                         }
                     }
                     if constexpr (is_non_orthogonal) {
-                        x += dxyz_dabc[6];
-                        y += dxyz_dabc[7];
-                        z += dxyz_dabc[8];
+                        x += c_dxyz_dabc[6];
+                        y += c_dxyz_dabc[7];
+                        z += c_dxyz_dabc[8];
                     } else {
-                        z += dxyz_dabc[8];
+                        z += c_dxyz_dabc[8];
                     }
                 }
                 if constexpr (is_non_orthogonal) {
                     recursion_factor_bc_pow_b *= exp_dbdc;
                 } else {
-                    y += dxyz_dabc[4];
+                    y += c_dxyz_dabc[4];
                 }
             }
             if constexpr (is_non_orthogonal) {
                 recursion_factor_ab_pow_a *= exp_dadb;
                 recursion_factor_ac_pow_a *= exp_dadc;
             } else {
-                x += dxyz_dabc[0];
+                x += c_dxyz_dabc[0];
             }
         }
     }
@@ -281,21 +280,20 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
 
 extern "C" {
 #define eval_density_kernel_case(li, lj, dm_slice) \
-    case (li * 10 + lj): \
+    case (li * LMAX1 + lj): \
         eval_density_kernel<li,lj,dm_slice,0><<<block_grid, threads, shm_size>>>( \
             density, dm, *envs, shl_pair_offsets, bas_ij_idx, \
-            grid_tile_index, n_contributing_tiles, bas_image_idx, Ts_ij_lookup, \
+            grid_tile_index, n_contributing_tiles, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c); \
     break
 
 int evaluate_density(double *density, double *dm, PBCIntEnvVars *envs,
                      double *dxyz_dabc,
-                     int shm_size, int i_angular, int j_angular,
-                     int *shl_pair_offsets, int2 *bas_ij_idx,
-                     int *grid_tile_index, int n_contributing_tiles,
                      int tiles_per_block, int nsp_per_block,
-                     int *bas_image_idx, int *Ts_ij_lookup, int *mesh)
+                     int shm_size, int i_angular, int j_angular,
+                     int *shl_pair_offsets, int64_t *bas_ij_idx,
+                     int *grid_tile_index, int n_contributing_tiles, int *mesh)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
@@ -308,7 +306,7 @@ int evaluate_density(double *density, double *dm, PBCIntEnvVars *envs,
     double da_squared = distance_squared(dxyz_dabc[0], dxyz_dabc[1], dxyz_dabc[2]);
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
-    switch (i_angular * 10 + j_angular) {
+    switch (i_angular * LMAX1 + j_angular) {
         eval_density_kernel_case(0,0, 1);
         eval_density_kernel_case(1,0, 3);
         eval_density_kernel_case(1,1, 3);
