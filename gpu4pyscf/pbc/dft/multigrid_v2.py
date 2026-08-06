@@ -1464,13 +1464,6 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     coulomb_on_g_mesh = cp.einsum(
         "ng, g -> ng", density[:, 0], coulomb_kernel_on_g_mesh
     )
-    weight = cell.vol / ngrids
-
-    density = density.reshape(-1, *mesh)
-    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
-    # computing rhoR with IFFT, the weight factor is not needed.
-    density = ifft_in_place(density).real.reshape(nset, -1, ngrids)
-    density /= weight
 
     #if kpts_band is not None:
     #    ni = ni.copy().reset().build()

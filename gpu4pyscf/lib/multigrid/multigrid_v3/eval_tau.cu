@@ -22,328 +22,38 @@
 #include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
+#include "utils.cuh"
 
 #define TILE            4
-#define THREADS         256
-
-template <int ANG> __forceinline__ __device__
-void gto_deriv1(double gradient_values[], double original_values[],
-                double fx, double fy, double fz, double exponent, int start)
-{
-    double a2 = -2 * exponent;
-    double minus_2afx = a2 * fx;
-    double minus_2afy = a2 * fy;
-    double minus_2afz = a2 * fz;
-    if constexpr (ANG == 0) {
-        // For s orbital (ANG=0), f(x,y,z) = 1
-        // f'_x = 0, so g_x = -2 * exponent * fx
-        gradient_values[0] = minus_2afx; // x gradient
-        gradient_values[1] = minus_2afy; // y gradient
-        gradient_values[2] = minus_2afz; // z gradient
-    } else if constexpr (ANG == 1) {
-        // For p orbitals (ANG=1), f(x,y,z) = {x, y, z}
-        // First row: x gradient
-        gradient_values[0] = 1 + minus_2afx * fx; // d/dx(x) - 2*exponent*x*fx
-        gradient_values[1] = minus_2afx * fy;     // d/dx(y) - 2*exponent*y*fx
-        gradient_values[2] = minus_2afx * fz;     // d/dx(z) - 2*exponent*z*fx
-        // Second row: y gradient
-        gradient_values[3] = minus_2afy * fx;     // d/dy(x) - 2*exponent*x*fy
-        gradient_values[4] = 1 + minus_2afy * fy; // d/dy(y) - 2*exponent*y*fy
-        gradient_values[5] = minus_2afy * fz;     // d/dy(z) - 2*exponent*z*fy
-        // Third row: z gradient
-        gradient_values[6] = minus_2afz * fx;     // d/dz(x) - 2*exponent*x*fz
-        gradient_values[7] = minus_2afz * fy;     // d/dz(y) - 2*exponent*y*fz
-        gradient_values[8] = 1 + minus_2afz * fz; // d/dz(z) - 2*exponent*z*fz
-    } else if constexpr (ANG == 2) {
-        // For d orbitals (ANG=2), f(x,y,z) = {xx, xy, xz, yy, yz, zz}
-        // First row: x gradient
-        gradient_values[0] =
-            2 * fx + minus_2afx * original_values[0]; // d/dx(xx) - 2*exponent*xx*fx
-        gradient_values[1] =
-            fy + minus_2afx * original_values[1]; // d/dx(xy) - 2*exponent*xy*fx
-        gradient_values[2] =
-            fz + minus_2afx * original_values[2]; // d/dx(xz) - 2*exponent*xz*fx
-        gradient_values[3] =
-            minus_2afx * original_values[3]; // d/dx(yy) - 2*exponent*yy*fx
-        gradient_values[4] =
-            minus_2afx * original_values[4]; // d/dx(yz) - 2*exponent*yz*fx
-        gradient_values[5] =
-            minus_2afx * original_values[5]; // d/dx(zz) - 2*exponent*zz*fx
-        // Second row: y gradient
-        gradient_values[6] =
-            minus_2afy * original_values[0]; // d/dy(xx) - 2*exponent*xx*fy
-        gradient_values[7] =
-            fx + minus_2afy * original_values[1]; // d/dy(xy) - 2*exponent*xy*fy
-        gradient_values[8] =
-            minus_2afy * original_values[2]; // d/dy(xz) - 2*exponent*xz*fy
-        gradient_values[9] =
-            2 * fy + minus_2afy * original_values[3]; // d/dy(yy) - 2*exponent*yy*fy
-        gradient_values[10] =
-            fz + minus_2afy * original_values[4]; // d/dy(yz) - 2*exponent*yz*fy
-        gradient_values[11] =
-            minus_2afy * original_values[5]; // d/dy(zz) - 2*exponent*zz*fy
-        // Third row: z gradient
-        gradient_values[12] =
-            minus_2afz * original_values[0]; // d/dz(xx) - 2*exponent*xx*fz
-        gradient_values[13] =
-            minus_2afz * original_values[1]; // d/dz(xy) - 2*exponent*xy*fz
-        gradient_values[14] =
-            fx + minus_2afz * original_values[2]; // d/dz(xz) - 2*exponent*xz*fz
-        gradient_values[15] =
-            minus_2afz * original_values[3]; // d/dz(yy) - 2*exponent*yy*fz
-        gradient_values[16] =
-            fy + minus_2afz * original_values[4]; // d/dz(yz) - 2*exponent*yz*fz
-        gradient_values[17] =
-            2 * fz + minus_2afz * original_values[5]; // d/dz(zz) - 2*exponent*zz*fz
-    } else if constexpr (ANG == 3) {
-        // For f orbitals (ANG=3), f(x,y,z) = {xxx, xxy, xxz, xyy, xyz, xzz, yyy,
-        // yyz, yzz, zzz}
-        if (start < 5) {
-            // First row: x gradient
-            gradient_values[0] =
-                3 * fx * fx +
-                minus_2afx * original_values[0]; // d/dx(xxx) - 2*exponent*xxx*fx
-            gradient_values[1] =
-                2 * fx * fy +
-                minus_2afx * original_values[1]; // d/dx(xxy) - 2*exponent*xxy*fx
-            gradient_values[2] =
-                2 * fx * fz +
-                minus_2afx * original_values[2]; // d/dx(xxz) - 2*exponent*xxz*fx
-            gradient_values[3] =
-                fy * fy +
-                minus_2afx * original_values[3]; // d/dx(xyy) - 2*exponent*xyy*fx
-            gradient_values[4] =
-                fy * fz +
-                minus_2afx * original_values[4]; // d/dx(xyz) - 2*exponent*xyz*fx
-            // Second row: y gradient
-            gradient_values[10] =
-                minus_2afy * original_values[0]; // d/dy(xxx) - 2*exponent*xxx*fy
-            gradient_values[11] =
-                fx * fx +
-                minus_2afy * original_values[1]; // d/dy(xxy) - 2*exponent*xxy*fy
-            gradient_values[12] =
-                minus_2afy * original_values[2]; // d/dy(xxz) - 2*exponent*xxz*fy
-            gradient_values[13] =
-                2 * fx * fy +
-                minus_2afy * original_values[3]; // d/dy(xyy) - 2*exponent*xyy*fy
-            gradient_values[14] =
-                fx * fz +
-                minus_2afy * original_values[4]; // d/dy(xyz) - 2*exponent*xyz*fy
-            // Third row: z gradient
-            gradient_values[20] =
-                minus_2afz * original_values[0]; // d/dz(xxx) - 2*exponent*xxx*fz
-            gradient_values[21] =
-                minus_2afz * original_values[1]; // d/dz(xxy) - 2*exponent*xxy*fz
-            gradient_values[22] =
-                fx * fx +
-                minus_2afz * original_values[2]; // d/dz(xxz) - 2*exponent*xxz*fz
-            gradient_values[23] =
-                minus_2afz * original_values[3]; // d/dz(xyy) - 2*exponent*xyy*fz
-            gradient_values[24] =
-                fx * fy +
-                minus_2afz * original_values[4]; // d/dz(xyz) - 2*exponent*xyz*fz
-        }
-        // First row: x gradient
-        gradient_values[5] =
-            fz * fz +
-            minus_2afx * original_values[5]; // d/dx(xzz) - 2*exponent*xzz*fx
-        gradient_values[6] =
-            minus_2afx * original_values[6]; // d/dx(yyy) - 2*exponent*yyy*fx
-        gradient_values[7] =
-            minus_2afx * original_values[7]; // d/dx(yyz) - 2*exponent*yyz*fx
-        gradient_values[8] =
-            minus_2afx * original_values[8]; // d/dx(yzz) - 2*exponent*yzz*fx
-        gradient_values[9] =
-            minus_2afx * original_values[9]; // d/dx(zzz) - 2*exponent*zzz*fx
-        // Second row: y gradient
-        gradient_values[15] =
-            minus_2afy * original_values[5]; // d/dy(xzz) - 2*exponent*xzz*fy
-        gradient_values[16] =
-            3 * fy * fy +
-            minus_2afy * original_values[6]; // d/dy(yyy) - 2*exponent*yyy*fy
-        gradient_values[17] =
-            2 * fy * fz +
-            minus_2afy * original_values[7]; // d/dy(yyz) - 2*exponent*yyz*fy
-        gradient_values[18] =
-            fz * fz +
-            minus_2afy * original_values[8]; // d/dy(yzz) - 2*exponent*yzz*fy
-        gradient_values[19] =
-            minus_2afy * original_values[9]; // d/dy(zzz) - 2*exponent*zzz*fy
-        // Third row: z gradient
-        gradient_values[25] =
-            2 * fx * fz +
-            minus_2afz * original_values[5]; // d/dz(xzz) - 2*exponent*xzz*fz
-        gradient_values[26] =
-            minus_2afz * original_values[6]; // d/dz(yyy) - 2*exponent*yyy*fz
-        gradient_values[27] =
-            fy * fy +
-            minus_2afz * original_values[7]; // d/dz(yyz) - 2*exponent*yyz*fz
-        gradient_values[28] =
-            2 * fy * fz +
-            minus_2afz * original_values[8]; // d/dz(yzz) - 2*exponent*yzz*fz
-        gradient_values[29] =
-            3 * fz * fz +
-            minus_2afz * original_values[9]; // d/dz(zzz) - 2*exponent*zzz*fz
-    } else if constexpr (ANG == 4) {
-        // For g orbitals (ANG=4), f(x,y,z) = {xxxx, xxxy, xxxz, xxyy, xxyz, xxzz,
-        // xyyy, xyyz, xyzz, xzzz, yyyy, yyyz, yyzz, yzzz, zzzz}
-        if (start < 5) {
-            // First row: x gradient
-            gradient_values[0] =
-                4 * fx * fx * fx +
-                minus_2afx * original_values[0]; // d/dx(xxxx) - 2*exponent*xxxx*fx
-            gradient_values[1] =
-                3 * fx * fx * fy +
-                minus_2afx * original_values[1]; // d/dx(xxxy) - 2*exponent*xxxy*fx
-            gradient_values[2] =
-                3 * fx * fx * fz +
-                minus_2afx * original_values[2]; // d/dx(xxxz) - 2*exponent*xxxz*fx
-            gradient_values[3] =
-                2 * fx * fy * fy +
-                minus_2afx * original_values[3]; // d/dx(xxyy) - 2*exponent*xxyy*fx
-            gradient_values[4] =
-                2 * fx * fy * fz +
-                minus_2afx * original_values[4]; // d/dx(xxyz) - 2*exponent*xxyz*fx
-            // Second row: y gradient
-            gradient_values[15] =
-                minus_2afy * original_values[0]; // d/dy(xxxx) - 2*exponent*xxxx*fy
-            gradient_values[16] =
-                fx * fx * fx +
-                minus_2afy * original_values[1]; // d/dy(xxxy) - 2*exponent*xxxy*fy
-            gradient_values[17] =
-                minus_2afy * original_values[2]; // d/dy(xxxz) - 2*exponent*xxxz*fy
-            gradient_values[18] =
-                2 * fx * fx * fy +
-                minus_2afy * original_values[3]; // d/dy(xxyy) - 2*exponent*xxyy*fy
-            gradient_values[19] =
-                fx * fx * fz +
-                minus_2afy * original_values[4]; // d/dy(xxyz) - 2*exponent*xxyz*fy
-            // Third row: z gradient
-            gradient_values[30] =
-                minus_2afz * original_values[0]; // d/dz(xxxx) - 2*exponent*xxxx*fz
-            gradient_values[31] =
-                minus_2afz * original_values[1]; // d/dz(xxxy) - 2*exponent*xxxy*fz
-            gradient_values[32] =
-                fx * fx * fx +
-                minus_2afz * original_values[2]; // d/dz(xxxz) - 2*exponent*xxxz*fz
-            gradient_values[33] =
-                minus_2afz * original_values[3]; // d/dz(xxyy) - 2*exponent*xxyy*fz
-            gradient_values[34] =
-                fx * fx * fy +
-                minus_2afz * original_values[4]; // d/dz(xxyz) - 2*exponent*xxyz*fz
-        }
-        if (start < 10) {
-            // First row: x gradient
-            gradient_values[5] =
-                2 * fx * fz * fz +
-                minus_2afx * original_values[5]; // d/dx(xxzz) - 2*exponent*xxzz*fx
-            gradient_values[6] =
-                fy * fy * fy +
-                minus_2afx * original_values[6]; // d/dx(xyyy) - 2*exponent*xyyy*fx
-            gradient_values[7] =
-                fy * fy * fz +
-                minus_2afx * original_values[7]; // d/dx(xyyz) - 2*exponent*xyyz*fx
-            gradient_values[8] =
-                fy * fz * fz +
-                minus_2afx * original_values[8]; // d/dx(xyzz) - 2*exponent*xyzz*fx
-            gradient_values[9] =
-                fz * fz * fz +
-                minus_2afx * original_values[9]; // d/dx(xzzz) - 2*exponent*xzzz*fx
-            // Second row: y gradient
-            gradient_values[20] =
-                minus_2afy * original_values[5]; // d/dy(xxzz) - 2*exponent*xxzz*fy
-            gradient_values[21] =
-                3 * fx * fy * fy +
-                minus_2afy * original_values[6]; // d/dy(xyyy) - 2*exponent*xyyy*fy
-            gradient_values[22] =
-                2 * fx * fy * fz +
-                minus_2afy * original_values[7]; // d/dy(xyyz) - 2*exponent*xyyz*fy
-            gradient_values[23] =
-                fx * fz * fz +
-                minus_2afy * original_values[8]; // d/dy(xyzz) - 2*exponent*xyzz*fy
-            gradient_values[24] =
-                minus_2afy * original_values[9]; // d/dy(xzzz) - 2*exponent*xzzz*fy
-            // Third row: z gradient
-            gradient_values[35] =
-                2 * fx * fx * fz +
-                minus_2afz * original_values[5]; // d/dz(xxzz) - 2*exponent*xxzz*fz
-            gradient_values[36] =
-                minus_2afz * original_values[6]; // d/dz(xyyy) - 2*exponent*xyyy*fz
-            gradient_values[37] =
-                fx * fy * fy +
-                minus_2afz * original_values[7]; // d/dz(xyyz) - 2*exponent*xyyz*fz
-            gradient_values[38] =
-                2 * fx * fy * fz +
-                minus_2afz * original_values[8]; // d/dz(xyzz) - 2*exponent*xyzz*fz
-            gradient_values[39] =
-                3 * fx * fz * fz +
-                minus_2afz * original_values[9]; // d/dz(xzzz) - 2*exponent*xzzz*fz
-        }
-        // First row: x gradient
-        gradient_values[10] =
-            minus_2afx * original_values[10]; // d/dx(yyyy) - 2*exponent*yyyy*fx
-        gradient_values[11] =
-            minus_2afx * original_values[11]; // d/dx(yyyz) - 2*exponent*yyyz*fx
-        gradient_values[12] =
-            minus_2afx * original_values[12]; // d/dx(yyzz) - 2*exponent*yyzz*fx
-        gradient_values[13] =
-            minus_2afx * original_values[13]; // d/dx(yzzz) - 2*exponent*yzzz*fx
-        gradient_values[14] =
-            minus_2afx * original_values[14]; // d/dx(zzzz) - 2*exponent*zzzz*fx
-        // Second row: y gradient
-        gradient_values[25] =
-            4 * fy * fy * fy +
-            minus_2afy * original_values[10]; // d/dy(yyyy) - 2*exponent*yyyy*fy
-        gradient_values[26] =
-            3 * fy * fy * fz +
-            minus_2afy * original_values[11]; // d/dy(yyyz) - 2*exponent*yyyz*fy
-        gradient_values[27] =
-            2 * fy * fz * fz +
-            minus_2afy * original_values[12]; // d/dy(yyzz) - 2*exponent*yyzz*fy
-        gradient_values[28] =
-            fz * fz * fz +
-            minus_2afy * original_values[13]; // d/dy(yzzz) - 2*exponent*yzzz*fy
-        gradient_values[29] =
-            minus_2afy * original_values[14]; // d/dy(zzzz) - 2*exponent*zzzz*fy
-        // Third row: z gradient
-        gradient_values[40] =
-            minus_2afz * original_values[10]; // d/dz(yyyy) - 2*exponent*yyyy*fz
-        gradient_values[41] =
-            fy * fy * fy +
-            minus_2afz * original_values[11]; // d/dz(yyyz) - 2*exponent*yyyz*fz
-        gradient_values[42] =
-            2 * fy * fy * fz +
-            minus_2afz * original_values[12]; // d/dz(yyzz) - 2*exponent*yyzz*fz
-        gradient_values[43] =
-            3 * fy * fz * fz +
-            minus_2afz * original_values[13]; // d/dz(yzzz) - 2*exponent*yzzz*fz
-        gradient_values[44] =
-            4 * fz * fz * fz +
-            minus_2afz * original_values[14]; // d/dz(zzzz) - 2*exponent*zzzz*fz
-    }
-}
+#define WARP_SIZE       32
+#define THREADS         64
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
 __global__ static
-void eval_tau_kernel(double *tau, double *dm, PBCIntEnvVars envs,
-                         int *shl_pair_offsets, int64_t *bas_ij_idx,
-                         int *grid_tile_index, int ntiles, int *supmol_to_bvk_mapping,
-                         double a_dot_b, double a_dot_c, double b_dot_c,
-                         double da_squared, double db_squared, double dc_squared,
-                         int mesh_a, int mesh_b, int mesh_c)
+void eval_tau_kernel(double *density, double *tau, double *dm, PBCIntEnvVars envs,
+                     double *supmol_img_coords, double factor,
+                     int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,
+                     int *grid_tile_index, int ntiles, int tiles_per_block,
+                     double a_dot_b, double a_dot_c, double b_dot_c,
+                     double da_squared, double db_squared, double dc_squared,
+                     int mesh_a, int mesh_b, int mesh_c)
 {
-    int nsp_per_block = blockDim.x;
-    int tiles_per_block = blockDim.y;
-    int threads = nsp_per_block * tiles_per_block;
-    int sp_id = threadIdx.x;
-    int tile_id_in_block = threadIdx.y;
-    int thread_id = sp_id + nsp_per_block * tile_id_in_block;
-    int tile_id = blockIdx.x * tiles_per_block + tile_id_in_block;
+    constexpr int threads = THREADS;
+    constexpr int WARPS = THREADS / WARP_SIZE;
+    int thread_id = threadIdx.x;
+    int tile_id0 = blockIdx.x * tiles_per_block;
+    __shared__ int a_upper, b_upper, c_upper;
+    __shared__ double start_position_x, start_position_y, start_position_z;
+    __shared__ double rho_value[TILE*TILE*TILE*WARPS];
+    __shared__ double tau_value[TILE*TILE*TILE*WARPS];
 
-    int tile_index = 0;
-    if (tile_id < ntiles) {
-        tile_index = grid_tile_index[tile_id];
-    }
+    constexpr int nfi = (LI + 1) * (LI + 2) / 2;
+    constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
+
+for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); tile_id++) {
+    int tile_index = grid_tile_index[tile_id];
+    int shl_pair0 = shl_pair_offsets[tile_id];
+    int shl_pair1 = shl_pair_offsets[tile_id+1];
     int n_tiles_b = (mesh_b + TILE - 1) / TILE;
     int n_tiles_c = (mesh_c + TILE - 1) / TILE;
     int tile_ab_index = tile_index / n_tiles_c;
@@ -354,18 +64,12 @@ void eval_tau_kernel(double *tau, double *dm, PBCIntEnvVars envs,
     int b_start = tile_b_index * TILE;
     int c_start = tile_c_index * TILE;
 
-    constexpr int nfi = (LI + 1) * (LI + 2) / 2;
-    constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
-
     int *bas = envs.bas;
     double *env = envs.env;
     int nbas = envs.nbas;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int a_upper, b_upper, c_upper;
-    __shared__ double start_position_x, start_position_y, start_position_z;
+    int bvk_nbas = envs.bvk_ncells * envs.nbas;
+
     if (thread_id == 0) {
-        shl_pair0 = shl_pair_offsets[tile_index];
-        shl_pair1 = shl_pair_offsets[tile_index+1];
         start_position_x = c_dxyz_dabc[0] * a_start + c_dxyz_dabc[3] * b_start + c_dxyz_dabc[6] * c_start;
         start_position_y = c_dxyz_dabc[1] * a_start + c_dxyz_dabc[4] * b_start + c_dxyz_dabc[7] * c_start;
         start_position_z = c_dxyz_dabc[2] * a_start + c_dxyz_dabc[5] * b_start + c_dxyz_dabc[8] * c_start;
@@ -374,32 +78,34 @@ void eval_tau_kernel(double *tau, double *dm, PBCIntEnvVars envs,
         c_upper = min(c_start + TILE, mesh_c) - c_start;
     }
 
-    extern __shared__ double tau_value[];
-    int valid_tiles = min(tiles_per_block, ntiles - blockIdx.x * tiles_per_block);
-    for (int n = thread_id; n < TILE*TILE*TILE*valid_tiles; n += threads) {
+    int lane = thread_id % WARP_SIZE;
+    int warp = thread_id / WARP_SIZE;
+    for (int n = thread_id; n < TILE*TILE*TILE*WARPS; n += threads) {
+        rho_value[n] = 0;
         tau_value[n] = 0;
     }
     __syncthreads();
 
-    for (int pair_id = shl_pair0+sp_id; pair_id < shl_pair1+sp_id; pair_id += nsp_per_block) {
+    for (int pair_id = shl_pair0+thread_id; pair_id < shl_pair1+thread_id; pair_id += threads) {
         int ish = 0;
         int jsh = 0;
         if (pair_id < shl_pair1) {
-            int64_t bas_ij = bas_ij_idx[pair_id];
+            int64_t bas_ij = dressed_bas_ij_idx[pair_id];
             ish = bas_ij / NBAS_MAX;
             jsh = bas_ij % NBAS_MAX;
         }
         int latsum_idx = ish / nbas;
-        int ish_cell0 = ish - nbas * latsum_idx;
-        int jL = jsh / nbas;
-        int jsh_cell0 = jsh - nbas * jL;
-        double Lx = envs.img_coords[latsum_idx*3+0];
-        double Ly = envs.img_coords[latsum_idx*3+1];
-        double Lz = envs.img_coords[latsum_idx*3+2];
-        int expi = bas[ish_cell0*BAS_SLOTS+PTR_EXP];
-        int expj = bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
-        int ri = bas[ish_cell0*BAS_SLOTS+PTR_BAS_COORD];
-        int rj = bas[jsh_cell0*BAS_SLOTS+PTR_BAS_COORD];
+        ish = ish - nbas * latsum_idx;
+        int jL = jsh / bvk_nbas;
+        jsh = jsh - bvk_nbas * jL;
+        int jsh_cell0 = jsh % nbas;
+        double Lx = supmol_img_coords[latsum_idx*3+0];
+        double Ly = supmol_img_coords[latsum_idx*3+1];
+        double Lz = supmol_img_coords[latsum_idx*3+2];
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double xi = env[ri+0] - Lx;
         double yi = env[ri+1] - Ly;
         double zi = env[ri+2] - Lz;
@@ -422,41 +128,46 @@ void eval_tau_kernel(double *tau, double *dm, PBCIntEnvVars envs,
         double y0 = start_position_y - yij;
         double z0 = start_position_z - zij;
         double gaussian_exponent_at_reference = aij * distance_squared(x0, y0, z0);
-        double gaussian_starting_point = exp(-(theta_ij * rr_ij + gaussian_exponent_at_reference));
-        double exp_da_squared = exp(-2 * aij * da_squared);
-        double exp_db_squared = exp(-2 * aij * db_squared);
-        double exp_dc_squared = exp(-2 * aij * dc_squared);
-        double cross_term_a = c_dxyz_dabc[0] * x0 + c_dxyz_dabc[1] * y0 + c_dxyz_dabc[2] * z0;
-        double cross_term_b = c_dxyz_dabc[3] * x0 + c_dxyz_dabc[4] * y0 + c_dxyz_dabc[5] * z0;
-        double cross_term_c = c_dxyz_dabc[6] * x0 + c_dxyz_dabc[7] * y0 + c_dxyz_dabc[8] * z0;
-
-        // BUG: when aij gets too large and x0 is negative and large, the
-        // exponential can overflow and return inf.
-        // ideally recursion should start from the nearest grid point to the pair
-        // center, instead of the fixed recursion path
-        // (min a, min b, min c) -> (max a, max b, max c)
-        // The inf ususally occurs when pseudo-potential is not used,
-        // and core electrons appear with large exponents.
-        // Potentially another fix is to have a better designed multi-grid
-        // structure, where the gaussians with large exponents are evaluated
-        // on a more dense grid. Around the boundary the numbers should be
-        // within the range of double precision.
-        double recursion_factor_a_start = exp(-aij * (2 * cross_term_a + da_squared));
-        double recursion_factor_b_start = exp(-aij * (2 * cross_term_b + db_squared));
-        double recursion_factor_c_start = exp(-aij * (2 * cross_term_c + dc_squared));
-        double exp_dadb = exp(-2 * aij * a_dot_b);
-        double exp_dadc = exp(-2 * aij * a_dot_c);
-        double exp_dbdc = exp(-2 * aij * b_dot_c);
-        for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
-        for (int dm_j0 = 0; dm_j0 < nfj; dm_j0 += SLICE_SIZE_J) {
-            double ci = env[bas[ish_cell0*BAS_SLOTS+PTR_COEFF]];
-            double cj = env[bas[jsh_cell0*BAS_SLOTS+PTR_COEFF]];
+        double gaussian_starting_exponent = theta_ij * rr_ij + gaussian_exponent_at_reference;
+        double gaussian_starting_point = 0.;
+        double recursion_factor_a_start = 0.;
+        double recursion_factor_b_start = 0.;
+        double recursion_factor_c_start = 0.;
+        double exp_da_squared = 0.;
+        double exp_db_squared = 0.;
+        double exp_dc_squared = 0.;
+        double exp_dadb = 0.;
+        double exp_dadc = 0.;
+        double exp_dbdc = 0.;
+        if (gaussian_starting_exponent < 680.) {
+            double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+            double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
             double cc = ci * cj;
-            size_t nao = envs.ao_loc[nbas];
-            size_t nao2 = nao * nao;
-            int i0 = envs.ao_loc[ish_cell0];
-            int j0 = envs.ao_loc[jsh_cell0];
-            double *dm_image_shift = dm + supmol_to_bvk_mapping[jL] * nao2;
+            gaussian_starting_point = exp(-gaussian_starting_exponent);
+            gaussian_starting_point *= factor * cc;
+            if (ish == jsh_cell0) {
+                gaussian_starting_point *= 0.5;
+            }
+            double cross_term_a = c_dxyz_dabc[0] * x0 + c_dxyz_dabc[1] * y0 + c_dxyz_dabc[2] * z0;
+            double cross_term_b = c_dxyz_dabc[3] * x0 + c_dxyz_dabc[4] * y0 + c_dxyz_dabc[5] * z0;
+            double cross_term_c = c_dxyz_dabc[6] * x0 + c_dxyz_dabc[7] * y0 + c_dxyz_dabc[8] * z0;
+            recursion_factor_a_start = exp(-aij * (2 * cross_term_a + da_squared));
+            recursion_factor_b_start = exp(-aij * (2 * cross_term_b + db_squared));
+            recursion_factor_c_start = exp(-aij * (2 * cross_term_c + dc_squared));
+            exp_da_squared = exp(-2 * aij * da_squared);
+            exp_db_squared = exp(-2 * aij * db_squared);
+            exp_dc_squared = exp(-2 * aij * dc_squared);
+            exp_dadb = exp(-2 * aij * a_dot_b);
+            exp_dadc = exp(-2 * aij * a_dot_c);
+            exp_dbdc = exp(-2 * aij * b_dot_c);
+        }
+#pragma unroll
+        for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
+#pragma unroll
+        for (int dm_j0 = 0; dm_j0 < nfj; dm_j0 += SLICE_SIZE_J) {
+            size_t nao = envs.ao_loc[bvk_nbas];
+            int i0 = envs.ao_loc[ish];
+            int j0 = envs.ao_loc[jsh];
             double dm_cache[SLICE_SIZE_I * SLICE_SIZE_J];
             if (pair_id < shl_pair1) {
 #pragma unroll
@@ -465,12 +176,8 @@ void eval_tau_kernel(double *tau, double *dm, PBCIntEnvVars envs,
 #pragma unroll
                 for (int j = 0; j < SLICE_SIZE_J; ++j) {
                     if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                    dm_cache[i*nfj+j] = dm_image_shift[(i0+dm_i0+i)*nao+j0+j] * cc;
+                    dm_cache[i*SLICE_SIZE_J+j] = dm[(i0+dm_i0+i)*nao+j0+dm_j0+j];
                 } }
-            } else {
-                for (int n = 0; n < SLICE_SIZE_I*SLICE_SIZE_J; ++n) {
-                    dm_cache[n] = 0.;
-                }
             }
 
             double x, y, z;
@@ -515,150 +222,122 @@ void eval_tau_kernel(double *tau, double *dm, PBCIntEnvVars envs,
                          gaussian_xyz *= recursion_factor_c,
                          recursion_factor_c *= exp_dc_squared) {
 
-                        double i_cartesian[nfi];
-                        double i_gradient[3*nfi];
-                        gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi, dm_i0);
-                        gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai, dm_i0);
-                        if (SLICE_SIZE_I < nfi) {
-                            if (dm_i0 == 1) {
-#pragma unroll
-                                for (int i = 0; i < min(SLICE_SIZE_I, nfi-SLICE_SIZE_I); i++) {
-                                    i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I];
-                                    i_gradient[i] = i_gradient[i+SLICE_SIZE_I            ];
-                                    i_gradient[i] = i_gradient[i+SLICE_SIZE_I+nfi  +nfi  ];
-                                    i_gradient[i] = i_gradient[i+SLICE_SIZE_I+nfi*2+nfi*2];
-                                }
-                            } else if (dm_i0 == 2) {
-#pragma unroll
-                                for (int i = 0; i < nfi-SLICE_SIZE_I*2; i++) {
-                                    i_cartesian[i] = i_cartesian[i+SLICE_SIZE_I*2];
-                                    i_gradient[i      ] = i_gradient[i+SLICE_SIZE_I*2      ];
-                                    i_gradient[i+nfi  ] = i_gradient[i+SLICE_SIZE_I*2+nfi  ];
-                                    i_gradient[i+nfi*2] = i_gradient[i+SLICE_SIZE_I*2+nfi*2];
-                                }
-                            }
-                        }
-
-                        double j_cartesian[nfj];
-                        double j_gradient[3*nfj];
-                        gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj, dm_j0);
-                        gto_deriv1<LJ>(j_gradient, j_cartesian, x - xj, y - yj, z - zj, aj, dm_j0);
-                        if (SLICE_SIZE_J < nfj) {
-                            if (dm_j0 == 1) {
-#pragma unroll
-                                for (int i = 0; i < min(SLICE_SIZE_J, nfj-SLICE_SIZE_J); i++) {
-                                    j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J];
-                                    j_gradient[i      ] = j_gradient[i+SLICE_SIZE_J      ];
-                                    j_gradient[i+nfj  ] = j_gradient[i+SLICE_SIZE_J+nfj  ];
-                                    j_gradient[i+nfj*2] = j_gradient[i+SLICE_SIZE_J+nfj*2];
-                                }
-                            } else if (dm_j0 == 2) {
-#pragma unroll
-                                for (int i = 0; i < nfj-SLICE_SIZE_J*2; i++) {
-                                    j_cartesian[i] = j_cartesian[i+SLICE_SIZE_J*2];
-                                    j_gradient[i      ] = j_gradient[i+SLICE_SIZE_J*2      ];
-                                    j_gradient[i+nfj  ] = j_gradient[i+SLICE_SIZE_J*2+nfj  ];
-                                    j_gradient[i+nfj*2] = j_gradient[i+SLICE_SIZE_J*2+nfj*2];
-                                }
-                            }
-                        }
-
-                        //double rho = 0;
+                        double rho = 0;
                         double val = 0;
+                        if (pair_id < shl_pair1 && fabs(gaussian_xyz) > 1e-18) {
+                            double i_cartesian[nfi];
+                            double i_gradient[3*nfi];
+                            gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
+                            gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai);
+                            rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
+                            rename_registers(i_gradient      , dm_i0, nfi, SLICE_SIZE_I);
+                            rename_registers(i_gradient+nfi  , dm_i0, nfi, SLICE_SIZE_I);
+                            rename_registers(i_gradient+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
+
+                            double j_cartesian[nfj];
+                            double j_gradient[3*nfj];
+                            gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                            gto_deriv1<LJ>(j_gradient, j_cartesian, x - xj, y - yj, z - zj, aj);
+                            rename_registers(j_cartesian, dm_j0, nfj, SLICE_SIZE_J);
+                            rename_registers(j_gradient      , dm_j0, nfj, SLICE_SIZE_J);
+                            rename_registers(j_gradient+nfj  , dm_j0, nfj, SLICE_SIZE_J);
+                            rename_registers(j_gradient+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
 #pragma unroll
-                        for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                            if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
-                            //double s0 = 0;
-                            double s1 = 0;
-                            double s2 = 0;
-                            double s3 = 0;
+                            for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                                if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                                double s0 = 0;
+                                double s1 = 0;
+                                double s2 = 0;
+                                double s3 = 0;
 #pragma unroll
-                            for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                                if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                                double dm_val = dm_cache[i * nfj + j];
-                                //s0 += dm_val * j_cartesian[j];
-                                s1 += dm_val * j_gradient[j      ];
-                                s2 += dm_val * j_gradient[j+nfj  ];
-                                s3 += dm_val * j_gradient[j+nfj*2];
+                                for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                                    double dm_val = dm_cache[i * SLICE_SIZE_J + j];
+                                    s0 += dm_val * j_cartesian[j];
+                                    s1 += dm_val * j_gradient[j      ];
+                                    s2 += dm_val * j_gradient[j+nfj  ];
+                                    s3 += dm_val * j_gradient[j+nfj*2];
+                                }
+                                rho += s0 * i_cartesian[i];
+                                val += s1 * i_gradient[i      ];
+                                val += s2 * i_gradient[i+nfi  ];
+                                val += s3 * i_gradient[i+nfi*2];
                             }
-                            //rho += s0 * i_cartesian[i];
-                            val += s1 * i_gradient[i      ];
-                            val += s2 * i_gradient[i+nfi  ];
-                            val += s3 * i_gradient[i+nfi*2];
+                            rho *= gaussian_xyz;
+                            val *= gaussian_xyz;
                         }
-                        for (int offset = nsp_per_block/2; offset > 0; offset >>= 1) {
-                            //rho += __shfl_down_sync(0xffffffff, rho, offset);
+                        for (int offset = WARP_SIZE/2; offset > 0; offset >>= 1) {
+                            rho += __shfl_down_sync(0xffffffff, rho, offset);
                             val += __shfl_down_sync(0xffffffff, val, offset);
                         }
-                        if (sp_id == 0) {
+                        if (lane == 0) {
                             int abc_index = a_index * TILE*TILE + b_index*TILE + c_index;
-                            //density_value[tile_id_in_block*TILE*TILE*TILE+abc_index] += rho * gaussian_xyz;
-                            tau_value[tile_id_in_block*TILE*TILE*TILE+abc_index] += val * gaussian_xyz/2;
+                            rho_value[abc_index+TILE*TILE*TILE*warp] += rho;
+                            tau_value[abc_index+TILE*TILE*TILE*warp] += val;
+                        }
+                        if constexpr (is_non_orthogonal) {
+                            x += c_dxyz_dabc[6];
+                            y += c_dxyz_dabc[7];
+                            z += c_dxyz_dabc[8];
+                        } else {
+                            z += c_dxyz_dabc[8];
                         }
                     }
                     if constexpr (is_non_orthogonal) {
-                        x += c_dxyz_dabc[6];
-                        y += c_dxyz_dabc[7];
-                        z += c_dxyz_dabc[8];
+                        recursion_factor_bc_pow_b *= exp_dbdc;
                     } else {
-                        z += c_dxyz_dabc[8];
+                        y += c_dxyz_dabc[4];
                     }
                 }
                 if constexpr (is_non_orthogonal) {
-                    recursion_factor_bc_pow_b *= exp_dbdc;
+                    recursion_factor_ab_pow_a *= exp_dadb;
+                    recursion_factor_ac_pow_a *= exp_dadc;
                 } else {
-                    y += c_dxyz_dabc[4];
+                    x += c_dxyz_dabc[0];
                 }
-            }
-            if constexpr (is_non_orthogonal) {
-                recursion_factor_ab_pow_a *= exp_dadb;
-                recursion_factor_ac_pow_a *= exp_dadc;
-            } else {
-                x += c_dxyz_dabc[0];
             }
         } }
     }
     __syncthreads();
 
-    for (int n = thread_id; n < TILE*TILE*TILE*valid_tiles; n += threads) {
-        int tile_id = blockIdx.x * tiles_per_block + n / (TILE*TILE*TILE);
-        int tile_index = grid_tile_index[tile_id];
-        int tile_ab_index = tile_index / n_tiles_c;
-        int tile_c_index = tile_index % n_tiles_c;
-        int tile_a_index = tile_ab_index / n_tiles_b;
-        int tile_b_index = tile_ab_index % n_tiles_b;
-        int a_start = tile_a_index * TILE;
-        int b_start = tile_b_index * TILE;
-        int c_start = tile_c_index * TILE;
-        int a_idx = a_start + n / (TILE*TILE) % TILE;
-        int b_idx = b_start + n / TILE % TILE;
-        int c_idx = c_start + n % TILE;
-        atomicAdd(tau + (a_idx * mesh_b + b_idx) * mesh_c + c_idx, tau_value[n]);
+    int a_idx = a_start + thread_id / (TILE*TILE);
+    int b_idx = b_start + thread_id / TILE % TILE;
+    int c_idx = c_start + thread_id % TILE;
+    if (a_idx < mesh_a && b_idx < mesh_b && c_idx < mesh_c) {
+        double rho = rho_value[thread_id];
+        double val = tau_value[thread_id];
+        for (int i = 1; i < WARPS; i++) {
+            rho += rho_value[thread_id+i*TILE*TILE*TILE];
+            val += tau_value[thread_id+i*TILE*TILE*TILE];
+        }
+        atomicAdd(density + (a_idx * mesh_b + b_idx) * mesh_c + c_idx, rho);
+        atomicAdd(tau + (a_idx * mesh_b + b_idx) * mesh_c + c_idx, val);
     }
+    __syncthreads();
+}
 }
 
 extern "C" {
-#define eval_tau_kernel_case(li, lj, slice_i, slice_j) \
+#define eval_tau_kernel_case(li, lj, slice_i, slice_j, orth) \
     case (li * LMAX1 + lj): \
-        eval_tau_kernel<li,lj,slice_i,slice_j,0><<<block_grid, threads, shm_size>>>( \
-            tau, dm, *envs, shl_pair_offsets, bas_ij_idx, \
-            grid_tile_index, n_contributing_tiles, supmol_to_bvk_mapping, \
+        eval_tau_kernel<li,lj,slice_i,slice_j,orth><<<block_grid, THREADS>>>( \
+            density, tau, dm, *envs, supmol_img_coords, factor, \
+            shl_pair_offsets, dressed_bas_ij_idx, \
+            grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c); \
     break
 
-int evaluate_tau(double *tau, double *dm, PBCIntEnvVars *envs,
-                 double *dxyz_dabc,
-                 int tiles_per_block, int nsp_per_block,
-                 int shm_size, int i_angular, int j_angular,
-                 int *shl_pair_offsets, int64_t *bas_ij_idx,
-                 int *grid_tile_index, int *supmol_to_bvk_mapping,
-                 int n_contributing_tiles, int *mesh)
+int evaluate_tau(double *density, double *tau, double *dm, PBCIntEnvVars *envs,
+                 double *dxyz_dabc, double *supmol_img_coords,
+                 int i_angular, int j_angular, int tiles_per_block,
+                 int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,
+                 int *grid_tile_index, int n_contributing_tiles, int *mesh,
+                 double factor)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
     int mesh_c = mesh[2];
-    dim3 threads(TILE, tiles_per_block, nsp_per_block);
     int block_grid = (n_contributing_tiles + tiles_per_block-1) / tiles_per_block;
     double a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] + dxyz_dabc[1] * dxyz_dabc[4] + dxyz_dabc[2] * dxyz_dabc[5];
     double a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] + dxyz_dabc[1] * dxyz_dabc[7] + dxyz_dabc[2] * dxyz_dabc[8];
@@ -667,21 +346,21 @@ int evaluate_tau(double *tau, double *dm, PBCIntEnvVars *envs,
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
     switch (i_angular * LMAX1 + j_angular) {
-        eval_tau_kernel_case(0,0, 1, 1);
-        eval_tau_kernel_case(1,0, 3, 1);
-        eval_tau_kernel_case(1,1, 3, 3);
-        eval_tau_kernel_case(2,0, 6, 1);
-        eval_tau_kernel_case(2,1, 6, 3);
-        eval_tau_kernel_case(2,2, 6, 6);
-        eval_tau_kernel_case(3,0,10, 1);
-        eval_tau_kernel_case(3,1,10, 3);
-        eval_tau_kernel_case(3,2,10, 6);
-        eval_tau_kernel_case(3,3,10, 5);
-        eval_tau_kernel_case(4,0,15, 1);
-        eval_tau_kernel_case(4,1,15, 3);
-        eval_tau_kernel_case(4,2, 8, 6);
-        eval_tau_kernel_case(4,3, 5,10);
-        eval_tau_kernel_case(4,4, 8, 5);
+        eval_tau_kernel_case(0,0, 1, 1, 0);
+        eval_tau_kernel_case(1,0, 3, 1, 0);
+        eval_tau_kernel_case(1,1, 3, 3, 0);
+        eval_tau_kernel_case(2,0, 6, 1, 0);
+        eval_tau_kernel_case(2,1, 6, 3, 0);
+        eval_tau_kernel_case(2,2, 6, 6, 0);
+        eval_tau_kernel_case(3,0,10, 1, 0);
+        eval_tau_kernel_case(3,1,10, 3, 0);
+        eval_tau_kernel_case(3,2,10, 6, 0);
+        eval_tau_kernel_case(3,3,10, 5, 0);
+        eval_tau_kernel_case(4,0,15, 1, 0);
+        eval_tau_kernel_case(4,1,15, 3, 0);
+        eval_tau_kernel_case(4,2, 8, 6, 0);
+        eval_tau_kernel_case(4,3, 8, 5, 0);
+        eval_tau_kernel_case(4,4,15, 3, 0);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

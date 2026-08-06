@@ -17,10 +17,35 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <gvhf-rys/rys_constant.cu>
 
 __constant__ double c_lattice_vectors[9];
 __constant__ double c_reciprocal_lattice_vectors[9];
 __constant__ double c_dxyz_dabc[9];
+
+__constant__ int c_nf[] = {
+    1,
+    3,
+    6,
+    10,
+    15,
+    21,
+    28,
+    36,
+    45,
+};
+
+__constant__ float c_div_nf[] = {
+    1.f,
+    0.333334f,
+    0.166667f,
+    0.100001f,
+    0.066667f,
+    0.047620f,
+    0.035715f,
+    0.027778f,
+    0.022223f,
+};
 
 // input[nc,nx,ny,nz], output[nc,mx,my,mz]
 __global__ static
