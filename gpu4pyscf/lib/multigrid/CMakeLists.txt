@@ -29,6 +29,7 @@ add_library(mgrid_v3 SHARED
   multigrid_v3/eval_density.cu
   multigrid_v3/eval_tau.cu
   multigrid_v3/eval_lda_mat.cu
+  multigrid_v3/eval_mgga_mat.cu
   multigrid_v3/screen.cu
   multigrid_v3/drivers.cu
   multigrid_v3/aft_eval_density.cu
