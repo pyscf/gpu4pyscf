@@ -27,6 +27,7 @@
 #define TILE            4
 #define WARP_SIZE       32
 #define THREADS         64
+#define NEGLIGIBLE      1e-18
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
 __global__ static
@@ -232,7 +233,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                          recursion_factor_c *= exp_dc_squared) {
 
                         double val = 0;
-                        if (pair_id < shl_pair1 && fabs(gaussian_xyz) > 1e-18) {
+                        if (pair_id < shl_pair1 && fabs(gaussian_xyz) > NEGLIGIBLE) {
                             double i_cartesian[nfi];
                             gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
                             rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);

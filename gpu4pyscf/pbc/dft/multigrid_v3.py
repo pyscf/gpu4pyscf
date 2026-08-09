@@ -22,7 +22,7 @@ from pyscf import lib
 from pyscf.gto import ANG_OF, PTR_EXP, PTR_COEFF, gto_norm
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.tools.pbc import mesh_to_cutoff, cutoff_to_mesh, super_cell
+from pyscf.pbc.tools.pbc import super_cell
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -91,9 +91,13 @@ def _aft_eval_density(ni, dm_sc):
         tmp_rhoG.real = rhoR
         tmp_rhoG.imag = rhoI
         _takebak_4d(rhoG, tmp_rhoG, mesh)
-    return rhoG.ravel()
+    return rhoG
+
+def _aft_eval_tau(ni, dm_sc):
+    raise NotImplementedError
 
 def _aft_eval_lda_matrix(ni, vxcG):
+    # FIXME
     cell = ni.cell
     bvkcell = ni.bvkcell
     envs = ni.mg_envs
@@ -129,7 +133,8 @@ def _aft_eval_lda_matrix(ni, vxcG):
             ctypes.cast(L_bases.data.ptr, ctypes.c_void_p),
             ctypes.cast(mesh_cum.data.ptr, ctypes.c_void_p),
             ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
-            mesh.ctypes, ctypes.c_int(len(bas_ij_idx)))
+            (ctypes.c_int*3)(*mesh),
+            ctypes.c_int(len(bas_ij_idx)))
         if err != 0:
             raise RuntimeError('contract_orth_aopair_coulG kernel failed')
 
@@ -153,7 +158,6 @@ def _eval_rhoG(ni, dm_sc):
 
     mg_envs = ni.mg_envs
     kern = libmgrid.evaluate_density
-    uniq_l = cell.uniq_l_ctr[:,0]
     work = None
 
     fft_buckets = ni.fft_buckets or []
@@ -200,8 +204,9 @@ def _eval_tauG(ni, dm_sc, kmesh=None, verbose=None):
     cell = ni.cell
     n_dm = dm_sc.shape[0]
     if ni.aft_buckets is not None:
-        tauG = _aft_eval_tau(ni, dm_sc)
+        rhoG, tauG = _aft_eval_tau(ni, dm_sc)
     else:
+        rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
         tauG = cp.zeros(ni.mesh, dtype=np.complex128)
 
     a = cell.lattice_vectors()
@@ -211,7 +216,6 @@ def _eval_tauG(ni, dm_sc, kmesh=None, verbose=None):
 
     mg_envs = ni.mg_envs
     kern = libmgrid.evaluate_tau
-    uniq_l = cell.uniq_l_ctr[:,0]
     work = None
 
     fft_buckets = ni.fft_buckets or []
@@ -263,7 +267,6 @@ def _eval_lda_mat(ni, vxcG):
     if ni.aft_buckets is not None:
         vxc_mat = _aft_eval_lda_matrix(ni, vxcG)
     else:
-        n_dm = 1
         nkpts = len(ni.bvkmesh_Ls)
         nao = cell.nao
         vxc_mat = cp.zeros((nao, nkpts, nao))
@@ -287,7 +290,7 @@ def _eval_lda_mat(ni, vxcG):
         vxc = ifft_in_place(sub_vxcG)
         vxcR = cp.asarray(vxc.real, order='C')
 
-        if 1:
+        if 0:
             for (li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets) \
                     in bucket['grid_tile_cache'].items():
                 if len(dressed_bas_ij_idx) == 0: continue
@@ -377,62 +380,6 @@ def _estimate_Ecut_and_grid_ranges(cell, mg_envs, bas_ij_idx, ke_max, precision,
         raise RuntimeError('grid range kernel failed')
     return pair_ke, grid_frac_ranges
 
-def _balance_init_mesh(a, mesh):
-    ke = mesh_to_cutoff(a, mesh)
-    mesh = cutoff_to_mesh(a, np.mean(ke))
-    return mesh // 2 * 2
-
-def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_mesh, ke_max, precision,
-                          xctype, log):
-    cell = ni.cell
-    bvkcell = ni.bvkcell
-    a = cell.lattice_vectors()
-    mesh = np.asarray(init_mesh, dtype=np.int32)
-    ke_lower = 0
-    ke_cutoff = ni.ke_cutoff
-    ke_max = min(ke_max, ke_cutoff)
-    ke_upper = min(mesh_to_cutoff(a, init_mesh).min(), ke_max)
-
-    ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
-
-    nimgs = np.asarray(bvkcell.nimgs, dtype=np.int32)
-
-    buckets = []
-    while ke_lower < ke_max:
-        ke_upper = mesh_to_cutoff(a, mesh).min()
-        if ke_upper >= ke_max:
-            if ke_upper >= ke_cutoff:
-                mesh = np.asarray(ni.mesh, dtype=np.int32)
-            else:
-                mesh_upper = cutoff_to_mesh(a, ke_max)
-                mesh = np.where(mesh < mesh_upper, mesh, mesh_upper)
-
-        filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
-        if len(filtered_pairs) > 0:
-            ish, jsh = divmod(filtered_pairs, NBAS_MAX)
-            lij = ang_per_shell[ish] * 5 + ang_per_shell[jsh]
-            idx = cp.argsort(lij)
-            filtered_pairs = filtered_pairs[idx]
-            lij = lij[idx]
-            shl_pair_offsets = _segment_offsets(lij)
-
-            # TODO: nimgs can be reduced for large Ecut
-            # filtered_pairs -> rcut_for_each_pair -> max_rcut -> nimgs
-
-            buckets.append({
-                'ke_cutoff': ke_upper,
-                'mesh': np.asarray(mesh, dtype=np.int32),
-                'nimgs': nimgs,
-                'bas_ij_idx': filtered_pairs,
-                'shl_pair_offsets': shl_pair_offsets,
-            })
-            log.debug('Add bucket: mesh=%s, shl_pairs=%d', tuple(mesh),
-                      len(filtered_pairs))
-
-        mesh = (mesh * 0.75).astype(np.int32) * 2
-        ke_lower = ke_upper
-    return buckets
-
 def _estimate_fft_Ecut_per_shell(cell, precision):
     # To accurately describe the orbital in real space, the resolution for
     # real-space grid cannot be reduced, even a small normalized function is
@@ -451,17 +398,87 @@ def _estimate_fft_Ecut_per_shell(cell, precision):
     Ecut = E2 * 2
     return Ecut
 
-def _partition_ke_for_fft(ni, pair_idx, init_mesh, precision, xctype, log):
-    cell = ni.cell
-    a = cell.lattice_vectors()
-    mesh = np.asarray(init_mesh, dtype=np.int32)
-    ke_lower = 0
-    ke_max = ni.ke_cutoff
-    ke_upper = min(mesh_to_cutoff(a, init_mesh).min(), ke_max)
+def ke_to_mesh(a, cutoff):
+    '''
+    Based on pyscf.pbc.tools.pbc.cutoff_to_mesh
+    '''
+    b = 2 * np.pi * np.linalg.inv(a.T)
+    rx = np.linalg.qr(b[[1,2,0]].T)[1][2,2]
+    ry = np.linalg.qr(b[[2,0,1]].T)[1][2,2]
+    rz = np.linalg.qr(b.T)[1][2,2]
 
+    Gmax = (2*cutoff)**.5 / np.abs([rx, ry, rz])
+    mesh = np.ceil(Gmax * 2).astype(np.int32)
+    return mesh
+
+def mesh_to_ke(a, mesh):
+    '''
+    Based on pyscf.pbc.tools.pbc.mesh_to_cutoff
+    '''
+    b = 2 * np.pi * np.linalg.inv(a.T)
+    rx = np.linalg.qr(b[[1,2,0]].T)[1][2,2]
+    ry = np.linalg.qr(b[[2,0,1]].T)[1][2,2]
+    rz = np.linalg.qr(b.T)[1][2,2]
+
+    gs = np.asarray(mesh) / 2
+    Gmax = gs * np.array([rx, ry, rz])
+    ke_cutoff = Gmax**2 / 2
+    return ke_cutoff.min()
+
+def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, precision,
+                          xctype, log):
+    cell = ni.cell
     bvkcell = ni.bvkcell
+    a = cell.lattice_vectors()
+    mesh = ke_to_mesh(a, init_ke)
+    ke_cutoff = ni.ke_cutoff
+    ke_max = min(ke_max, ke_cutoff)
+
     ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
-    nimgs = np.asarray(cell.nimgs, dtype=np.int32)
+    nimgs = np.asarray(bvkcell.nimgs, dtype=np.int32)
+
+    buckets = []
+
+    ke_lower, ke_upper = 0, init_ke
+    while ke_lower < ke_max:
+        if ke_upper >= ke_max:
+            mesh_upper = ke_to_mesh(a, ke_max)
+            mesh = np.where(mesh < mesh_upper, mesh, mesh_upper)
+
+        filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
+        if len(filtered_pairs) > 0:
+            ish, jsh = divmod(filtered_pairs, NBAS_MAX)
+            lij = ang_per_shell[ish] * 5 + ang_per_shell[jsh]
+            idx = cp.argsort(lij)
+            filtered_pairs = filtered_pairs[idx]
+            lij = lij[idx]
+            shl_pair_offsets = _segment_offsets(lij).get()
+
+            # TODO: nimgs can be reduced for large Ecut
+            # filtered_pairs -> rcut_for_each_pair -> max_rcut -> nimgs
+
+            buckets.append({
+                'ke_cutoff': ke_upper,
+                'mesh': np.asarray(mesh, dtype=np.int32),
+                'nimgs': nimgs,
+                'bas_ij_idx': filtered_pairs,
+                'shl_pair_offsets': shl_pair_offsets,
+            })
+            log.debug('Add bucket: mesh=%s, shl_pairs=%d', tuple(mesh),
+                      len(filtered_pairs))
+
+        mesh = (mesh * 0.75).astype(np.int32) * 2
+        ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
+    return buckets
+
+def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
+    cell = ni.cell
+    bvkcell = ni.bvkcell
+    a = cell.lattice_vectors()
+    mesh = ke_to_mesh(a, init_ke)
+    ke_max = ni.ke_cutoff
+
+    ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
 
     supmol_bas_ij_idx = _bvk_pairs_to_supmol_pairs(
         ni.mg_envs, pair_idx, precision, xctype)
@@ -470,8 +487,10 @@ def _partition_ke_for_fft(ni, pair_idx, init_mesh, precision, xctype, log):
         cell, ni.mg_envs, supmol_bas_ij_idx, ke_max, precision, xctype)
 
     buckets = []
+
+    ke_lower, ke_upper = 0, init_ke
     while ke_lower < ke_max:
-        ke_upper = mesh_to_cutoff(a, mesh).min()
+        ke_upper = mesh_to_ke(a, mesh).min()
         if ke_upper >= ke_max:
             mesh = np.asarray(ni.mesh, dtype=np.int32)
 
@@ -922,7 +941,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         Ls = cp.asarray(bvkcell.get_lattice_Ls())
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
-        log.debug('ft_ao bvk_ncells=%d, nimgs=%d', bvk_ncells, nimgs)
+        log.debug1('ft_ao bvk_ncells=%d, nimgs=%d', bvk_ncells, nimgs)
         _env = _scale_sp_ctr_coeff(cell)
         ao_loc = cell.ao_loc
         self.mg_envs = PBCIntEnvVars.new(
@@ -946,7 +965,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
 
         # FIXME: ni.mesh and ni.ke_cutoff are coupled, might need only one of them
         mesh = self.mesh
-        self.ke_cutoff = max(0.1, mesh_to_cutoff(a, mesh).min())
+        self.ke_cutoff = max(0.1, mesh_to_ke(a, mesh).min())
 
         if self.enable_aft and is_orth_lattice:
             # Estimate Ecut for AFT integrals. These can be potentially handled by
@@ -956,32 +975,35 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             aft_Ecut = _aft_Ecut_estimation(
                 self, bas_ij_idx, self.ke_cutoff, precision, xctype)
 
-            aft_init_mesh = _balance_init_mesh(a, [16]*3)
-            aft_final_mesh = aft_init_mesh * 5 # or 7.5
-            aft_ke_max = mesh_to_cutoff(a, aft_final_mesh).max()
+            aft_init_ke = mesh_to_ke(a, [16]*3)
+            aft_final_ke = aft_init_ke * 25
+            log.debug1('aft initial/final ke_cutoff = %g, %g', aft_init_ke,
+                       aft_final_ke)
             self.aft_buckets = _partition_ke_for_aft(
-                self, bas_ij_idx, aft_Ecut, aft_init_mesh, aft_ke_max,
+                self, bas_ij_idx, aft_Ecut, aft_init_ke, aft_final_ke,
                 precision, xctype, log)
 
             # Filter shell pairs that are not handled by AFT. The remaining pairs
             # are handled by FFT.
-            if aft_ke_max < self.ke_cutoff:
-                bas_ij_idx = bas_ij_idx[aft_Ecut > aft_ke_max]
-            else:
-                bas_ij_idx = None
+            if self.aft_buckets:
+                aft_ke_max = self.aft_buckets[-1]['ke_cutoff']
+                if aft_ke_max < self.ke_cutoff:
+                    bas_ij_idx = bas_ij_idx[aft_Ecut > aft_ke_max]
+                else:
+                    bas_ij_idx = None
 
-            fft_init_mesh = aft_final_mesh * 3//2
+            fft_init_ke = aft_final_ke * 2.5
         else:
-            fft_init_mesh = [32]*3
+            fft_init_ke = mesh_to_ke(a, [32]*3)
+        log.debug1('fft initial ke_cutoff = %g', fft_init_ke)
 
         if bas_ij_idx is not None and len(bas_ij_idx) > 0:
             # bas_ij_idx are the effective paris between cell0 and bvkcell.
             # The FFT-MultiGrid code operates on cell0-supmol paris.
             # Every bvkcell shell in bas_ij_idx needs to be unpacked to several
             # primitive shells in supmol.
-            fft_init_mesh = _balance_init_mesh(a, fft_init_mesh)
             self.fft_buckets = _partition_ke_for_fft(
-                self, bas_ij_idx, fft_init_mesh, precision, xctype, log)
+                self, bas_ij_idx, fft_init_ke, precision, xctype, log)
 
             nimgs = cell.nimgs
             Tx = np.arange(-nimgs[0], nimgs[0]+1, dtype=np.float64)

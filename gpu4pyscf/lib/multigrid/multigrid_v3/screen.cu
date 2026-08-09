@@ -291,7 +291,7 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, PBCIntEnvVars envs,
     float yjyi = yj - yi;
     float zjzi = zj - zi;
 
-    float log_cicj = logf(ci * cj);
+    float log_cicj = logf(fabsf(ci * cj));
     float log_fac = log_cicj + 1.717f - 1.5f * logf(aij) - log_cutoff;
     log_fac = max(log_fac, 1e-9f);
     float rr_raw = log_fac / theta;

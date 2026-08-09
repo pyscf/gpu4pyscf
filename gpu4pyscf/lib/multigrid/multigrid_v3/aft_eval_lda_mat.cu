@@ -86,7 +86,7 @@ void orth_aopair_coulG_kernel(double *out, cuDoubleComplex *coulG,
     int nfi = c_nf[li];
     int nfj = c_nf[lj];
     for (int n = thread_id; n < nfi * nfj * WARPS; n += THREADS) {
-        vjR[thread_id] = 0.;
+        vjR[n] = 0.;
     }
 
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
@@ -261,7 +261,7 @@ void orth_aopair_coulG_kernel(double *out, cuDoubleComplex *coulG,
     }
 
     __syncthreads();
-    if (thread_id < nfi * nfj) {
+    for (int n = thread_id; n < nfi * nfj; n += THREADS) {
         int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
         int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
         double aij = ai + aj;
@@ -274,11 +274,11 @@ void orth_aopair_coulG_kernel(double *out, cuDoubleComplex *coulG,
         int i0 = envs.ao_loc[ish];
         int j0 = envs.ao_loc[jsh];
         int nao = envs.ao_loc[bvk_nbas];
-        int i = thread_id * c_div_nf[lj];
-        int j = thread_id - nfj * i;
+        int i = n * c_div_nf[lj];
+        int j = n - nfj * i;
         double s = 0;
-        for (int n = 0; n < WARPS; n++) {
-            s += vjR[thread_id*WARPS+n];
+        for (int m = 0; m < WARPS; m++) {
+            s += vjR[n*WARPS+m];
         }
         atomicAdd(out+(i0+i)*nao+j0+j, s * fac);
     }
