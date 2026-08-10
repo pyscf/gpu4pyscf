@@ -117,6 +117,8 @@ class _DFHF:
 
     def get_k(self, mol=None, dm=None, hermi=1, omega=None,
               lr_factor=None, sr_factor=None):
+        if mol is None:
+            mol = self.mol
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
         if sr_factor == 0:
             # Only LR

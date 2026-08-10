@@ -4683,7 +4683,7 @@ class CuESTGradientWrapper(lib.StreamObject):
         assert dm.shape == (mol.nao, mol.nao)
 
         if not self.base.turn_on_cuest_hcore:
-            from gpu4pyscf.grad.rhf import int3c2e, get_ecp_ip, contract, contract_h1e_dm, ensure_numpy
+            from gpu4pyscf.grad.rhf import int3c2e, get_ecp_ip, contract, contract_h1e_dm
 
             # (\nabla i | hcore | j) - (\nabla i | j)
             h1 = cp.asarray(super().get_hcore(mol, exclude_ecp=True))
@@ -4700,7 +4700,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                 dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm)
 
             dh = contract_h1e_dm(mol, h1, dm, hermi=1)
-            dh += ensure_numpy(dh1e)
+            dh += cp.asnumpy(dh1e)
 
             return dh
 

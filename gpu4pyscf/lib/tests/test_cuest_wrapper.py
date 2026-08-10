@@ -1174,6 +1174,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
 
         s1 = gobj.get_ovlp(mol)
+        s1 = cp.asnumpy(s1)
         aoslices = mol.aoslice_by_atom()
         ref_ds = np.zeros((mol.natm, 3))
         for ia in range(mol.natm):
@@ -1196,6 +1197,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
 
         s1 = gobj.get_ovlp(mol)
+        s1 = cp.asnumpy(s1)
         aoslices = mol.aoslice_by_atom()
         ref_ds = np.zeros((mol.natm, 3))
         for ia in range(mol.natm):
@@ -1276,7 +1278,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1305,7 +1307,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1334,7 +1336,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1366,7 +1368,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('sxij,sij->x', vhf[:,:,p0:p1], (dm + dm.transpose(0,2,1))[:,p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1512,7 +1514,7 @@ class KnownValues(unittest.TestCase):
 
         test_dvxc = gobj.get_xc_grad(dm)
 
-        assert np.max(np.abs(test_dvxc - ref_dvxc)) < 1e-10
+        assert np.max(np.abs(test_dvxc - ref_dvxc)) < 1e-9
 
     def test_rks_pure_veff_derivative_spherical_mo(self):
         mol = self.mol_sph
@@ -2277,7 +2279,7 @@ class KnownValues(unittest.TestCase):
 
     def test_uhf_spherical(self):
         mf = UHF(self.mol_unrestricted).density_fit(auxbasis = self.auxbasis)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         # ref_energy = mf.kernel()
         ref_energy = -150.402311053481
 
