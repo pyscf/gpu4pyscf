@@ -27,7 +27,6 @@
 #define TILE            4
 #define WARP_SIZE       32
 #define THREADS         64
-#define NEGLIGIBLE      1e-18
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
 __global__ static
@@ -37,7 +36,7 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
                          int *grid_tile_index, int ntiles, int tiles_per_block,
                          double a_dot_b, double a_dot_c, double b_dot_c,
                          double da_squared, double db_squared, double dc_squared,
-                         int mesh_a, int mesh_b, int mesh_c)
+                         int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
     constexpr int threads = THREADS;
     int thread_id = threadIdx.x;
@@ -199,7 +198,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                          gaussian_xyz *= recursion_factor_c,
                          recursion_factor_c *= exp_dc_squared) {
 
-                        if (fabs(gaussian_xyz) > NEGLIGIBLE) {
+                        if (fabs(gaussian_xyz) > negligible) {
                             double i_cartesian[nfi];
                             gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
                             rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
@@ -264,7 +263,8 @@ __global__ static
 void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs,
                          int64_t *bas_ij_idx, float2 *grid_frac_ranges,
                          double da_squared, double db_squared, double dc_squared,
-                         int mesh_a, int mesh_b, int mesh_c, int npairs)
+                         int mesh_a, int mesh_b, int mesh_c, int npairs,
+                         double negligible)
 {
     constexpr int tile = 16;
     int tx = threadIdx.x;
@@ -367,7 +367,7 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
             double y_yij = y - yij;
             double z_zij = z - zij;
             double e = theta_rr + aij * distance_squared(x_xij, y_yij, z_zij);
-            if (e > 50.) break;
+            if (e > 42.) continue; // ~1e-18
             double gaussian_starting_point = exp(-e) * cc;
             double cross_term_a = c_dxyz_dabc[0] * x_xij + c_dxyz_dabc[1] * y_yij + c_dxyz_dabc[2] * z_zij;
             double recursion_factor_a_start = exp(-aij * (2 * cross_term_a + da_squared));
@@ -387,7 +387,7 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
             for (int a_index = a_center; a_index <= a_stop; a_index++,
                  gaussian_xyz *= recursion_factor_a,
                  recursion_factor_a *= exp_da_squared) {
-                if (fabs(gaussian_xyz) < NEGLIGIBLE) break;
+                if (fabs(gaussian_xyz) < negligible) break;
 
                 double v = vxc_weights[abc_idx] * gaussian_xyz;
                 double i_cartesian[nfi];
@@ -425,7 +425,7 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
             for (int a_index = a_center - 1; a_index >= a_start; a_index--,
                 inv_recursion_factor_a *= exp_da_squared) {
                 gaussian_xyz *= inv_recursion_factor_a;
-                if (fabs(gaussian_xyz) < NEGLIGIBLE) break;
+                if (fabs(gaussian_xyz) < negligible) break;
                 x -= c_dxyz_dabc[0];
                 y -= c_dxyz_dabc[1];
                 z -= c_dxyz_dabc[2];
@@ -479,14 +479,15 @@ extern "C" {
             out, vxc_weights, *envs, supmol_img_coords, shl_pair_offsets, dressed_bas_ij_idx, \
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
-            mesh_a, mesh_b, mesh_c); \
+            mesh_a, mesh_b, mesh_c, negligible); \
     break
 
 int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
                      double *dxyz_dabc, double *supmol_img_coords,
                      int i_angular, int j_angular, int tiles_per_block,
                      int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,
-                     int *grid_tile_index, int n_contributing_tiles, int *mesh)
+                     int *grid_tile_index, int n_contributing_tiles, int *mesh,
+                     double negligible)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
@@ -527,12 +528,14 @@ int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
     case (li * LMAX1 + lj): \
         eval_lda_mat_kernel_v2<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
             out, vxc_weights, *envs, bas_ij_idx, grid_frac_ranges, \
-            da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs); \
+            da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
+            negligible); \
     break
 
 int evaluate_lda_mat_v2(double *out, double *vxc_weights, PBCIntEnvVars *envs,
                      double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
-                     float2 *grid_frac_ranges, int *mesh, int npairs)
+                     float2 *grid_frac_ranges, int *mesh, int npairs,
+                     double negligible)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

@@ -27,7 +27,6 @@
 #define TILE            4
 #define WARP_SIZE       32
 #define THREADS         64
-#define NEGLIGIBLE      1e-18
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
 __global__ static
@@ -37,7 +36,7 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
                          int *grid_tile_index, int ntiles, int tiles_per_block,
                          double a_dot_b, double a_dot_c, double b_dot_c,
                          double da_squared, double db_squared, double dc_squared,
-                         int mesh_a, int mesh_b, int mesh_c)
+                         int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
     constexpr int threads = THREADS;
     constexpr int WARPS = THREADS / WARP_SIZE;
@@ -233,7 +232,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                          recursion_factor_c *= exp_dc_squared) {
 
                         double val = 0;
-                        if (pair_id < shl_pair1 && fabs(gaussian_xyz) > NEGLIGIBLE) {
+                        if (pair_id < shl_pair1 && fabs(gaussian_xyz) > negligible) {
                             double i_cartesian[nfi];
                             gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
                             rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
@@ -308,7 +307,7 @@ extern "C" {
             shl_pair_offsets, dressed_bas_ij_idx, \
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
-            mesh_a, mesh_b, mesh_c); \
+            mesh_a, mesh_b, mesh_c, negligible); \
     break
 
 int evaluate_density(double *density, double *dm, PBCIntEnvVars *envs,
@@ -316,7 +315,7 @@ int evaluate_density(double *density, double *dm, PBCIntEnvVars *envs,
                      int i_angular, int j_angular, int tiles_per_block,
                      int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,
                      int *grid_tile_index, int n_contributing_tiles, int *mesh,
-                     double factor)
+                     double factor, double negligible)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

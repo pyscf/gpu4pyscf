@@ -107,15 +107,16 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
 
     // let s = r - Rp
     // rho[r-Rp] ~ ci*cj * exp(-theta*(Ri-Rj)**2) * (s+Rp-Ri)**li * (s+Rp-Rj)**lj * exp(-aij*s**2)
-    //           ~= ovlp * (s+Rp-Ri)**li * (s+Rp-Rj)**lj * exp(-aij*s**2)
-    // radius can be solved using fixed iteration
-    // radius = (log(ovlp/precision * radius**(lij+l_inc)) / aij)**.5
-    // where l_inc = 0 (LDA), 1 (GGA), 2 (MGGA)
-    float log_r = 2.996f; // log(20)
     float log_factor = log_cicj + 1.717f - 1.5f * logf(aij) - log_threshold - theta_rr;
     log_factor += derivative_penalty;
     // initial guess
+    float log_r = 2.303f; // log(10)
     float radius = sqrtf(max(log_factor + (li+lj)*log_r, 1e-20f) / aij);
+    // to encounter the integral over remaining space ~ int_radius^inf 4*pi*r^2 exp(-aij*r^2);
+    float penalty = 6.283f * radius / (2*aij);
+    // To accurately integrate a gaussian, the required resolution (Ngrid/Bohr) ~ 2*a**.5
+    float resolution = 2*sqrtf(aij);
+    log_factor += max(logf(max(penalty, 12.56f*radius*radius/resolution)), 0.f);
     float x_cut = estimate_rcut(li, lj, radius, aij, xpi, xpj, log_factor);
     float y_cut = estimate_rcut(li, lj, radius, aij, ypi, ypj, log_factor);
     float z_cut = estimate_rcut(li, lj, radius, aij, zpi, zpj, log_factor);

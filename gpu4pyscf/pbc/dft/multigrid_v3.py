@@ -26,7 +26,8 @@ from pyscf.pbc.tools.pbc import super_cell
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, transpose_sum, ndarray, asarray, tag_array, load_library, absmax)
+    contract, transpose_sum, ndarray, asarray, tag_array, load_library, absmax,
+    get_avail_mem)
 from gpu4pyscf.lib.utils import nearest_power2
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.dft import numint
@@ -173,8 +174,8 @@ def _eval_rhoG(ni, dm_sc):
 
         rhoR = ndarray(mesh, buffer=work)
         rhoR.fill(0)
-        for (li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets) \
-                in bucket['grid_tile_cache'].items():
+        for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
+                in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
             if len(dressed_bas_ij_idx) == 0: continue
             ntiles = len(grid_tile_idx)
             tiles_per_block = min(60, max(1, ntiles // 10000))
@@ -191,7 +192,8 @@ def _eval_rhoG(ni, dm_sc):
                 ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ntiles),
                 (ctypes.c_int*3)(*mesh),
-                ctypes.c_double(weight))
+                ctypes.c_double(weight),
+                ctypes.c_double(bucket['negligible']))
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
@@ -233,8 +235,8 @@ def _eval_tauG(ni, dm_sc, kmesh=None, verbose=None):
         tauR = None#ndarray(mesh, buffer=work)
         rhoR.fill(0)
         tauR.fill(0)
-        for (li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets) \
-                in bucket['grid_tile_cache'].items():
+        for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
+                in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
             if len(dressed_bas_ij_idx) == 0: continue
             ntiles = len(grid_tile_idx)
             tiles_per_block = min(60, max(1, ntiles // 10000))
@@ -252,7 +254,8 @@ def _eval_tauG(ni, dm_sc, kmesh=None, verbose=None):
                 ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ntiles),
                 (ctypes.c_int*3)(*mesh),
-                ctypes.c_double(weight))
+                ctypes.c_double(weight),
+                ctypes.c_double(bucket['negligible']))
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
@@ -291,8 +294,8 @@ def _eval_lda_mat(ni, vxcG):
         vxcR = cp.asarray(vxc.real, order='C')
 
         if 0:
-            for (li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets) \
-                    in bucket['grid_tile_cache'].items():
+            for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
+                    in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
                 if len(dressed_bas_ij_idx) == 0: continue
                 ntiles = len(grid_tile_idx)
                 tiles_per_block = min(60, max(1, ntiles // 10000))
@@ -308,14 +311,16 @@ def _eval_lda_mat(ni, vxcG):
                     ctypes.cast(dressed_bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(len(grid_tile_idx)),
-                    (ctypes.c_int*3)(*mesh))
+                    (ctypes.c_int*3)(*mesh),
+                    ctypes.c_double(bucket['negligible']))
                 if err != 0:
                     raise RuntimeError('evaluate_lda_mat kernel failed')
         else:
             grid_ranges_cache = bucket['grid_ranges_cache']
-            for (li, lj), bas_ij_idx in bucket['bas_ij_cache'].items():
+            for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
+                    bucket['lij_patterns'], bucket['bas_ij_cache'],
+                    bucket['grid_ranges_cache']):
                 if len(bas_ij_idx) == 0: continue
-                grid_frac_ranges = grid_ranges_cache[li, lj]
                 err = kern1(
                     ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
                     ctypes.cast(vxcR[0].data.ptr, ctypes.c_void_p),
@@ -326,7 +331,8 @@ def _eval_lda_mat(ni, vxcG):
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
                     (ctypes.c_int*3)(*mesh),
-                    ctypes.c_int(len(bas_ij_idx)))
+                    ctypes.c_int(len(bas_ij_idx)),
+                    ctypes.c_double(bucket['negligible']))
                 if err != 0:
                     raise RuntimeError('evaluate_lda_mat kernel failed')
     return vxc_mat
@@ -348,10 +354,10 @@ def _get_L_bases(nimgs, a):
     L_bases = cp.array(np.hstack([Tx, Ty, Tz]))
     return L_bases
 
-def _estimate_Ecut_and_grid_ranges(cell, mg_envs, bas_ij_idx, ke_max, precision, xctype):
+def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     '''Estimate the FFT energy cutoff and the spread of each orbital pair
     in real space'''
-
+    cell = ni.cell
     # Some orbitals may require high Ecut, sometimes higher than ni.ke_cutoff.
     # Use ke_max to limit the highest Ecut. This ensures that these orbital
     # pairs are included in the last bucket in _partition_ke_for_fft.
@@ -371,7 +377,7 @@ def _estimate_Ecut_and_grid_ranges(cell, mg_envs, bas_ij_idx, ke_max, precision,
         ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
         ctypes.cast(pair_ke.data.ptr, ctypes.c_void_p),
         ctypes.cast(Ecut_by_shell.data.ptr, ctypes.c_void_p),
-        ctypes.byref(mg_envs),
+        ctypes.byref(ni.mg_envs),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.c_int(npairs),
         ctypes.c_int(li_inc), ctypes.c_int(lj_inc),
@@ -390,8 +396,8 @@ def _estimate_fft_Ecut_per_shell(cell, precision):
     ci = gto_norm(li, ai)
 
     # Ecut ~ ci * (Ecut/2/ai**2)**(li/2) * exp(-Ecut/(2*ai))
-    #      = ci * ai**li * E2**(li/2) * exp(-E2/ai), where E2 = Ecut/2
-    log_fac = np.log(ci) - li*np.log(ai) - np.log(precision)
+    #      = ci / ai**li * E2**(li/2) * exp(-E2/ai), where E2 = Ecut/2
+    log_fac = np.log(ci) + 1.717 - (li+1.5)*np.log(ai) - np.log(precision)
     log_fac[log_fac <= 0] = 1e-9
     E2 = log_fac * ai
     E2 = (log_fac + .5 * li * np.log(E2)) * ai
@@ -464,8 +470,8 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, precision,
                 'bas_ij_idx': filtered_pairs,
                 'shl_pair_offsets': shl_pair_offsets,
             })
-            log.debug('Add bucket: mesh=%s, shl_pairs=%d', tuple(mesh),
-                      len(filtered_pairs))
+            log.debug('Add aft bucket: ke=%g mesh=%s, shl_pairs=%d', ke_upper,
+                      tuple(mesh), len(filtered_pairs))
 
         mesh = (mesh * 0.75).astype(np.int32) * 2
         ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
@@ -474,17 +480,27 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, precision,
 def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
     cell = ni.cell
     bvkcell = ni.bvkcell
+
     a = cell.lattice_vectors()
     mesh = ke_to_mesh(a, init_ke)
     ke_max = ni.ke_cutoff
 
     ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
 
+    # a penalty to encounter for lattice sum
+    rad = cell.rcut / ni.bvkcell.vol**(1./3) + 1
+    surface = 4*np.pi * rad**2
+    lattice_sum_factor = surface
+    log.debug1('lattice_sum_factor for fft_buckets = %g', lattice_sum_factor)
+    precision /= lattice_sum_factor
+
+    vol = cell.vol
+
     supmol_bas_ij_idx = _bvk_pairs_to_supmol_pairs(
-        ni.mg_envs, pair_idx, precision, xctype)
+        ni, pair_idx, precision, xctype)
 
     pair_ke, grid_frac_ranges = _estimate_Ecut_and_grid_ranges(
-        cell, ni.mg_envs, supmol_bas_ij_idx, ke_max, precision, xctype)
+        ni, supmol_bas_ij_idx, ke_max, precision, xctype)
 
     buckets = []
 
@@ -503,17 +519,18 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
             lij = ang_per_shell[ish] * 5 + ang_per_shell[jsh % bvkcell.nbas]
             idx = cp.argsort(lij)
             lij = lij[idx]
-            split_points = cp.where(lij[1:] != lij[:-1])[0] + 1
+            split_points = (cp.where(lij[1:] != lij[:-1])[0] + 1)
+
+            #TODO: to avoid too many bas_ij in each sub-bucket, Add more
+            # split_points and divide idx into more segments.
 
             # Group bas_ij_idx and grid_frac_ranges by (li, lj) patterns
-            idx_by_pattern = cp.split(idx, split_points.get())
-            lij_patterns = np.append(lij[0].get(), lij[split_points].get())
-            lij_patterns = [divmod(x, 5) for x in lij_patterns.tolist()]
+            idx_by_pattern = cp.split(idx, split_points)
+            lilj_patterns = np.append(lij[0].get(), lij[split_points].get())
+            lilj_patterns = [divmod(x, 5) for x in lilj_patterns.tolist()]
 
-            bas_ij_cache = {key: filtered_pairs[idx]
-                            for key, idx in zip(lij_patterns, idx_by_pattern)}
-            grid_ranges_cache = {key: filtered_grid_ranges[:,idx]
-                                 for key, idx in zip(lij_patterns, idx_by_pattern)}
+            bas_ij_cache = [filtered_pairs[idx] for idx in idx_by_pattern]
+            grid_ranges_cache = [filtered_grid_ranges[:,idx] for idx in idx_by_pattern]
 
             # * bas_ij_cache[key] are shell-pairs (one shell in the unit cell,
             #   the other in supmol)
@@ -527,17 +544,21 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
             #     Shell-pair indices contributing to the tiles in grid_tile_idx.
             #   - shl_pair_offsets:
             #     Partition the shell pairs in supmol_pair_idx by grid tile.
+            weight = vol / np.prod(mesh)
+            ao_val_threshold = precision*1e-2 / (12.56*40**2 * weight)
             buckets.append({
                 'ke_cutoff': ke_upper,
                 'mesh': np.asarray(mesh, dtype=np.int32),
+                'lij_patterns': lilj_patterns,
                 'bas_ij_cache': bas_ij_cache,
                 'grid_ranges_cache': grid_ranges_cache,
-                'grid_tile_cache': None
+                'grid_tile_cache': None,
+                'negligible': ao_val_threshold
             })
-            log.debug('Add bucket: mesh=%s, shl_pairs=%d', tuple(mesh),
-                      len(filtered_pairs))
+            log.debug('Add fft bucket: ke=%g mesh=%s, shl_pairs=%d, ao_val_threshold=%',
+                      ke_upper, tuple(mesh), len(filtered_pairs), ao_val_threshold)
 
-        mesh = (mesh * 0.75).astype(np.int32) * 2
+        mesh = (mesh * 1.2).astype(np.int32)
         ke_lower = ke_upper
     return buckets
 
@@ -568,11 +589,11 @@ def _non_trivial_bvk_pairs(ni, precision):
     bas_ij = ish * NBAS_MAX + jsh
     return bas_ij
 
-def _bvk_pairs_to_supmol_pairs(mg_envs, bas_ij_idx, precision, xctype):
+def _bvk_pairs_to_supmol_pairs(ni, bas_ij_idx, precision, xctype):
     # The bas_ij_idx stores the effective shells in bvkcell. Each of these
     # shells involve multiple primitive shells in supmol. Unpack the bvk-shells
     # and provide the primitive pair indices in supmol.
-    nimgs = mg_envs.nimgs
+    nimgs = ni.mg_envs.nimgs
     npairs = len(bas_ij_idx)
     supmol_bas_ij_idx = cp.empty(npairs * nimgs, dtype=np.int64)
     is_mgga = 1 if xctype == 'MGGA' else 0
@@ -580,7 +601,7 @@ def _bvk_pairs_to_supmol_pairs(mg_envs, bas_ij_idx, precision, xctype):
     err = libmgrid.supmol_non_trivial_pairs(
         ctypes.cast(supmol_bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.byref(mg_envs),
+        ctypes.byref(ni.mg_envs),
         ctypes.c_int(npairs),
         ctypes.c_float(math.log(precision)),
         ctypes.c_int(is_mgga),
@@ -621,31 +642,31 @@ def _aft_Ecut_estimation(ni, bas_ij_idx, ke_max, precision, xctype='LDA'):
 def _cache_grid_range_to_tiles(fft_buckets, cell):
     buf_size = 0
     for bucket in fft_buckets:
-        tiles_per_cell = cp.asarray(bucket['mesh'] / 4, dtype=np.float32)
+        tiles_per_cell = cp.asarray((bucket['mesh']+3) / 4, dtype=np.float32)
         for (bas_ij, grid_range) in zip(
-                bucket['bas_ij_cache'].values(), bucket['grid_ranges_cache'].values()):
+                bucket['bas_ij_cache'], bucket['grid_ranges_cache']):
             raw_tiles = grid_range[:,:,1] - grid_range[:,:,0]
             raw_tiles *= tiles_per_cell[:,None]
             raw_tiles = cp.ceil(raw_tiles)
-            raw_tiles += 3 # penalty for roundings near boundary
+            raw_tiles += 1 # penalty for rounding on the boundary
             n = (raw_tiles[0] * raw_tiles[1] * raw_tiles[2]).sum().get()
             buf_size = max(buf_size, int(n))
 
     # temporary space to store grid_tile_idx
-    work = cp.empty(buf_size+10, dtype=np.int32)
+    work = cp.empty(buf_size+1, dtype=np.int32)
     tile_counts = work[-1:]
     # temporary space to store dressed_bas_ij
-    work1 = cp.empty(buf_size+10, dtype=np.int64)
+    work1 = cp.empty(buf_size, dtype=np.int64)
 
     nimgs = cell.nimgs
     nbas = cell.nbas
     kern = libmgrid.grid_range_to_tiles
     for bucket in fft_buckets:
-        bucket['grid_tile_cache'] = grid_tile_cache = {}
+        bucket['grid_tile_cache'] = grid_tile_cache = []
         grid_ranges_cache = bucket['grid_ranges_cache']
-        for key, bas_ij_idx in bucket['bas_ij_cache'].items():
-            if len(bas_ij_idx) == 0: continue
-            grid_range = grid_ranges_cache[key]
+        for bas_ij_idx, grid_range in zip(
+                bucket['bas_ij_cache'], bucket['grid_ranges_cache']):
+            assert len(bas_ij_idx) > 0
             npairs = len(bas_ij_idx)
             err = kern(
                 ctypes.cast(work.data.ptr, ctypes.c_void_p),
@@ -663,18 +684,19 @@ def _cache_grid_range_to_tiles(fft_buckets, cell):
             assert n < 2**31, 'int32 indexing in shl_pair_offsets'
 
             sorted_idx = cp.argsort(work[:n])
-            grid_tile_ids = work[sorted_idx]
-            dressed_bas_ij = work1[sorted_idx]
-
-            shl_pair_offsets = _segment_offsets(grid_tile_ids)
+            grid_tile_idx = work[sorted_idx]
+            shl_pair_offsets = _segment_offsets(grid_tile_idx)
 
             # TODO: Further divide large entry in shell_pair_offsets for better
             # load balance.
 
             # Store only the unique grid tile ids.
-            grid_tile_idx = grid_tile_ids[shl_pair_offsets[:-1]]
-            grid_tile_cache[key] = (
-                grid_tile_idx, dressed_bas_ij, shl_pair_offsets)
+            grid_tile_idx = grid_tile_idx[shl_pair_offsets[:-1]]
+
+            dressed_bas_ij = work1[sorted_idx]
+            sorted_idx = None
+            grid_tile_cache.append((
+                grid_tile_idx, dressed_bas_ij, shl_pair_offsets))
 
 def fft_in_place(x):
     return fft.fftn(x, axes=(-3, -2, -1), overwrite_x=True)
@@ -952,10 +974,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         b = cell.reciprocal_vectors(norm_to=1)
         libmgrid.update_lattice_vectors(a.ctypes, b.ctypes)
 
-        # FIXME: weight_penalty in terms of overlap integrals?
-        vol = cell.vol
-        weight_penalty = vol
-        precision = cell.precision / max(weight_penalty, 1)
+        precision = cell.precision
         bas_ij_idx = _non_trivial_bvk_pairs(self, precision)
 
         # Initialize buckets
@@ -992,9 +1011,9 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
                 else:
                     bas_ij_idx = None
 
-            fft_init_ke = aft_final_ke * 2.5
+            fft_init_ke = aft_final_ke * 1.5
         else:
-            fft_init_ke = mesh_to_ke(a, [32]*3)
+            fft_init_ke = mesh_to_ke(a, [16]*3)
         log.debug1('fft initial ke_cutoff = %g', fft_init_ke)
 
         if bas_ij_idx is not None and len(bas_ij_idx) > 0:
