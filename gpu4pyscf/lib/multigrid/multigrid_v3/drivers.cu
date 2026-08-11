@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <cuComplex.h>
 #include <gvhf-rys/rys_constant.cu>
 
 __constant__ double c_lattice_vectors[9];
@@ -76,7 +77,7 @@ void fft_take_kernel(double2* __restrict__ out, double2* __restrict__ in,
 }
 
 // output[nc,nx,ny,nz], input[nc,mx,my,mz]
-__global__
+__global__ static
 void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
                         int mx, int my, int mz, int nx, int ny, int nz, int nc)
 {
@@ -100,6 +101,35 @@ void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
             size_t src = (((size_t)c*mx + x )*my + y )*mz + z;
             out[dst].x += in[src].x;
             out[dst].y += in[src].y;
+        }
+    }
+}
+
+// output[nc,nx,ny,nz], input[nc,mx,my,mz]
+__global__ static
+void fft_takebak_kernel(double2* __restrict__ out, double* __restrict__ inR, double* __restrict__ inI,
+                        int mx, int my, int mz, int nx, int ny, int nz, int nc)
+{
+    int x = blockIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int tx = threadIdx.x;
+    int threadsx = blockDim.x;
+    if (x >= mx || y >= my) return;
+
+    int sx = x;
+    int sy = y;
+    // fftfreq indexing
+    if (x > mx/2) sx = nx + x - mx;
+    if (y > my/2) sy = ny + y - my;
+    for (int z = tx; z < mz; z += threadsx) {
+        int sz = z;
+        if (z > mz/2) sz = nz + z - mz;
+
+        for (int c = 0; c < nc; ++c) {
+            size_t dst = (((size_t)c*nx + sx)*ny + sy)*nz + sz;
+            size_t src = (((size_t)c*mx + x )*my + y )*mz + z;
+            out[dst].x += inR[src];
+            out[dst].y += inI[src];
         }
     }
 }
@@ -143,6 +173,23 @@ int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int co
     dim3 grids(mx, (my+15)/16);
     fft_takebak_kernel<<<grids, threads>>>(
         out, in, mx, my, mz, out_shape[0], out_shape[1], out_shape[2], counts);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in fft_takebak kernel: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int fft_takebak1(double2 *out, double *inR, double *inI, int *out_shape, int *in_shape, int counts)
+{
+    int mx = in_shape[0];
+    int my = in_shape[1];
+    int mz = in_shape[2];
+    dim3 threads(32, 16);
+    dim3 grids(mx, (my+15)/16);
+    fft_takebak_kernel<<<grids, threads>>>(
+        out, inR, inI, mx, my, mz, out_shape[0], out_shape[1], out_shape[2], counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_takebak kernel: %s\n", cudaGetErrorString(err));
