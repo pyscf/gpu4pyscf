@@ -135,7 +135,7 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
         for ao, mask, weight, coords \
                 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
             p0, p1 = p1, p1 + weight.size
-            mask_2c = np.concatenate([mask, mask + nao])
+            mask_2c = cp.concatenate([mask, mask + nao])
             dm_mask = dms[mask_2c[:,None],mask_2c]
             rho_tot[...,p0:p1] = eval_rho(_sorted_mol, ao, dm_mask, non0tab=None, xctype=xctype, hermi=hermi,
                         with_lapl=False, verbose=None)
