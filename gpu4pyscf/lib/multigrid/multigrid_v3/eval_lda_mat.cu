@@ -122,9 +122,9 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
         double z0 = start_position_z - zij;
         double gaussian_exponent_at_reference = aij * distance_squared(x0, y0, z0);
         double gaussian_starting_exponent = theta_ij * rr_ij + gaussian_exponent_at_reference;
-//        if (gaussian_starting_exponent > 680.) {
-//            continue;
-//        }
+        if (gaussian_starting_exponent > 680.) {
+            continue;
+        }
         double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
         double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
         double cc = ci * cj;

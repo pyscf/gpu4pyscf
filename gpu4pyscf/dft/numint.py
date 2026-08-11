@@ -2219,7 +2219,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
         return self
 
     def eval_xc_eff(self, xc_code, rho, deriv=1, *, omega=None, xctype=None,
-                    spin=None, work=None):
+                    spin=None, work=None, inplace=False):
         if spin is None:
             if rho.ndim >= 2 and rho.shape[0] == 2:
                 spin = 1
@@ -2264,9 +2264,12 @@ class NumInt(lib.StreamObject, LibXCMixin):
             nvar = 4
         else:
             nvar = 5
+
         out = [None] * 4
         for i in range(deriv+1):
-            if spin == 0:
+            if i == 1 and inplace:
+                out[i] = rho
+            elif spin == 0:
                 out[i] = cupy.empty([nvar] * i + [ngrids])
             else:
                 out[i] = cupy.empty([2, nvar] * i + [ngrids])

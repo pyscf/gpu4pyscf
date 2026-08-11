@@ -558,7 +558,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
                 'grid_tile_cache': None,
                 'negligible': ao_val_threshold
             })
-            log.debug('Add fft bucket: ke=%g mesh=%s, shl_pairs=%d, ao_val_threshold=%',
+            log.debug('Add fft bucket: ke=%g mesh=%s, shl_pairs=%d, ao_val_threshold=%g',
                       ke_upper, tuple(mesh), len(filtered_pairs), ao_val_threshold)
 
         mesh = (mesh * 1.2).astype(np.int32)
@@ -837,12 +837,13 @@ void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *vx
            (out, xc, Gx, Gy, Gz, len(Gx), len(Gy), len(Gz)))
     return out
 
-def _get_coulG(Gv_bases, out=None):
+def _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=None):
+    '''rhoG * 4pi/G^2'''
     fn_name = 'get_coulG'
     if fn_name not in _kernel_registery:
         kernel_code = ('''\
 extern "C" __global__
-void ''' + fn_name + r'''(double* __restrict__ coulG,
+void ''' + fn_name + r'''(double2* __restrict__ out, double2* __restrict__ rhoG,
     double *Gx, double *Gy, double *Gz, long long nx, long long ny, long long nz) {
     size_t nyz = ny * nz;
     size_t ng = nx * nyz;
@@ -857,26 +858,29 @@ void ''' + fn_name + r'''(double* __restrict__ coulG,
         double Gv = Gx[n*nx+ix] + Gy[n*ny+iy] + Gz[n*nz+iz];
         GG += Gv * Gv;
     }
-    if (GG == 0) {
-        coulG[g] = 0;
-    } else {
-        coulG[g] = 12.566370614359172 / GG;
+    double2 coul = {0., 0.};
+    if (GG != 0) {
+        double fac = 12.566370614359172 / GG;
+        double2 rho = rhoG[g];
+        coul.x = fac * rho.x;
+        coul.y = fac * rho.y;
     }
+    out[g] = coul;
 }''')
         _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
 
     kernel = _kernel_registery[fn_name]
     nx, ny, nz = [x.shape[1] for x in Gv_bases]
     ng = nx * ny * nz
-    out = ndarray(ng, np.float64, out)
+    assert rhoG.size == ng
+    out = ndarray(ng, dtype=np.complex128, buffer=out)
     kernel(((ng + 1023) // 1024,), (1024,),
-           (out, Gv_bases[0], Gv_bases[1], Gv_bases[2], nx, ny, nz))
+           (out, rhoG, Gv_bases[0], Gv_bases[1], Gv_bases[2], nx, ny, nz))
     return out
 
-def _inplace_transform_reciprocal_to_real_space(rhoG, Gv_bases, tauG=None, out=None):
+def _density_to_real_space_inplace(rhoG, Gv_bases, tauG=None, out=None):
     assert rhoG.ndim == 3
     mesh = rhoG.shape
-    ngrids = np.prod(mesh)
     nvar = 4
     if tauG is not None:
         nvar = 5
@@ -896,36 +900,32 @@ def _inplace_transform_reciprocal_to_real_space(rhoG, Gv_bases, tauG=None, out=N
     out[0] = ifft_in_place(rhoG).real
     return out
 
-def _inplace_transform_real_to_reciprocal_space(vxc, Gv_bases, out=None):
+def _vxc_to_reciprocal_space_inplace(vxc, vxcG, Gv_bases=None, work=None):
     assert vxc.ndim == 4
     mesh = vxc.shape[1:]
-    ngrids = np.prod(mesh)
     is_mgga = len(vxc) == 5
-    nvar = 1
-    if is_mgga:
-        nvar = 2
 
-    out = ndarray((nvar, *mesh), dtype=np.complex128, buffer=out)
+    work = ndarray(mesh, dtype=np.complex128, buffer=work)
+
+    work.real = vxc[0].reshape(mesh)
+    work.imag.fill(0.)
+    fft_in_place(work)
+    vxcG += work
+
+    if Gv_bases is not None:
+        Gx, Gy, Gz = Gv_bases
+        for n in range(3):
+            work.real = vxc[n+1].reshape(mesh)
+            work.imag.fill(0.)
+            _contract_Gv_1j(vxcG, fft_in_place(work), Gx[n], Gy[n], Gz[n])
+
     if is_mgga:
-        work = out[1]
+        work.real = vxc[4].reshape(mesh)
+        work.imag.fill(0.)
+        vxcG_tau = fft_in_place(work)
+        return vxcG, vxcG_tau
     else:
-        work = cp.empty(mesh, dtype=np.complex128)
-
-    out[0].real = vxc[0].reshape(mesh)
-    out[0].imag = 0
-    fft_in_place(out[0])
-
-    Gx, Gy, Gz = Gv_bases
-    for n in range(3):
-        work.real = vxc[n+1].reshape(mesh)
-        work.imag = 0
-        _contract_Gv_1j(out[0], fft_in_place(work), Gx[n], Gy[n], Gz[n])
-
-    if is_mgga:
-        out[1].real = vxc[4].reshape(mesh)
-        out[1].imag = 0
-        fft_in_place(out[1])
-    return out
+        return vxcG
 
 def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
@@ -1013,67 +1013,70 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     ngrids = np.prod(mesh)
     Gv_bases = _get_G_bases(mesh, cell.reciprocal_vectors())
 
+    tauG = None
     if xctype == "LDA" or xctype == 'HF' or xctype == 'GGA':
         rhoG = _eval_rhoG(ni, dm_sc)
     else: # MGGA
         raise
         rhoG, tauG = _eval_tauG(ni, dms, kmesh)
 
-    rhoG = rhoG.ravel()
-    n_electrons = float(rhoG[0].real.get())
-
-    coulG = _get_coulG(Gv_bases)
-    coulomb_on_g_mesh = rhoG * coulG
-    coulG = None
-    ecoul = .5 * float(_conj_dot(rhoG, coulomb_on_g_mesh).get())
-    log.debug('Multigrid Coulomb energy %s', ecoul)
+    rhoG = rhoG.reshape(mesh)
+    n_electrons = float(rhoG[0,0,0].real.get())
     t0 = log.timer_debug1("density and coulomb", *t0)
 
     if xctype == 'HF':
         assert with_j
+        coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases)
         xc_for_fock = coulomb_on_g_mesh
+        ecoul = .5 * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
+        log.debug('Multigrid Coulomb energy %s', ecoul)
         rhoG = coulomb_on_g_mesh = None
         xc_energy_sum = 0
+
     else:
         weight = cell.vol / ngrids
         if xctype == 'LDA':
             density = ifft_in_place(rhoG.reshape(mesh)).real
         elif xctype == 'GGA':
-            density = _inplace_transform_reciprocal_to_real_space(
+            density = _density_to_real_space_inplace(
                 rhoG.reshape(mesh), Gv_bases)
         else: # MGGA
-            density = _inplace_transform_reciprocal_to_real_space(
+            density = _density_to_real_space_inplace(
                 rhoG.reshape(mesh), Gv_bases, tauG)
-        rhoG = tauG = None
         density = density.reshape(nvar,ngrids)
 
         # *(1./weight) because rhoR is scaled by weight in _eval_rhoG. If
         # computing rhoR with IFFT, the weight factor is not needed.
         density *= 1/weight
+        density = cp.asarray(density, dtype=np.float64, order='C')
+        rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
+        rho_sf[:] = density[0].real
 
         # eval_xc_eff supports float64 only
-        density = cp.asarray(density, dtype=np.float64, order='C')
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xctype, spin=0
-        )[:2]
+            xc_code, density, deriv=1, xctype=xctype, spin=0, inplace=True)[:2]
 
-        rho_sf = density[0].real
         xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).get()) * weight
-        xc_for_energy = rho_sf = density = None
+        xc_for_energy = density = rho_sf = None
         log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
         t0 = log.timer_debug1("eval_xc_eff", *t0)
 
-        if xctype == "LDA":
-            # Now xc_for_fock represents xc on G space
-            xc_for_fock = fft_in_place(xc_for_fock.reshape(mesh)).reshape(nvar, ngrids)
-        else: # GGA or MGGA
-            xc_for_fock = _inplace_transform_real_to_reciprocal_space(
-                xc_for_fock.reshape(nvar, *mesh), Gv_bases)
-        xc_for_fock = xc_for_fock.reshape(-1, ngrids)
+        if with_j:
+            coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=tauG)
+            ecoul = .5 * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
+            log.debug('Multigrid Coulomb energy %s', ecoul)
+        else:
+            coulomb_on_g_mesh = cp.zeros_like(rhoG)
+        coulomb_on_g_mesh = coulomb_on_g_mesh.reshape(mesh)
 
         xc_for_fock *= weight
-        if with_j:
-            xc_for_fock[0] += coulomb_on_g_mesh
+        if xctype == "LDA":
+            # Now xc_for_fock represents xc on G space
+            xc_for_fock = _vxc_to_reciprocal_space_inplace(
+                xc_for_fock.reshape(mesh), coulomb_on_g_mesh, work=rhoG)
+        else: # GGA or MGGA
+            xc_for_fock = _vxc_to_reciprocal_space_inplace(
+                xc_for_fock.reshape(nvar, *mesh), coulomb_on_g_mesh, Gv_bases, work=rhoG)
         coulomb_on_g_mesh = None
 
     if kpts_band is not None:
