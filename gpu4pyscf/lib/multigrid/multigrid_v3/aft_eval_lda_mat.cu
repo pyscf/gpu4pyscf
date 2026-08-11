@@ -40,11 +40,11 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void orth_aopair_coulG_kernel(double *out, cuDoubleComplex *coulG,
-                              PBCIntEnvVars envs, int64_t *bas_ij_idx,
-                              double *G_bases, double *L_bases,
-                              int *mesh_cum, int *nimgs_cum,
-                              int npair, int ntiles_x, int ntiles_y, int ntiles_z)
+void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
+                         PBCIntEnvVars envs, int64_t *bas_ij_idx,
+                         double *G_bases, double *L_bases,
+                         int *mesh_cum, int *nimgs_cum,
+                         int npair, int ntiles_x, int ntiles_y, int ntiles_z)
 {
     int thread_id = threadIdx.x;
     int x_id = thread_id / NGV_PER_BLOCK;
@@ -105,9 +105,8 @@ void orth_aopair_coulG_kernel(double *out, cuDoubleComplex *coulG,
         }
 
         constexpr int stride_i = NGV_PER_BLOCK * 6;
-        int stride_j = stride_i * (li + 1);
-        int g_size = stride_j * (lj + 1);
-        for (int n = thread_id; n < g_size; n += THREADS) {
+        constexpr int stride_j = stride_i * LMAX1;
+        for (int n = thread_id; n < stride_j*(lj+2); n += THREADS) {
             gx[n] = 0;
         }
         __syncthreads();
@@ -207,7 +206,7 @@ void orth_aopair_coulG_kernel(double *out, cuDoubleComplex *coulG,
                 int x = mesh_start[0] + n;
                 if (x >= mesh_x) break;
                 size_t addr = (x * mesh_y + y) * (size_t)mesh_z + z;
-                cuDoubleComplex val = coulG[addr];
+                cuDoubleComplex val = vxcG[addr];
                 vG_R[n] = val.x;
                 vG_I[n] = val.y;
             }
@@ -294,10 +293,10 @@ void orth_aopair_coulG_kernel(double *out, cuDoubleComplex *coulG,
 //}
 
 extern "C" {
-int contract_orth_aopair_coulG(double *out, cuDoubleComplex *coulG,
-                               PBCIntEnvVars *envs, int64_t *bas_ij_idx,
-                               double *G_bases, double *L_bases, int *mesh_cum,
-                               int *nimgs_cum, int *mesh, int npair)
+int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeholder,
+                     PBCIntEnvVars *envs, int64_t *bas_ij_idx,
+                     double *G_bases, double *L_bases, int *mesh_cum,
+                     int *nimgs_cum, int *mesh, int npair)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -307,12 +306,12 @@ int contract_orth_aopair_coulG(double *out, cuDoubleComplex *coulG,
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
-    orth_aopair_coulG_kernel<<<ntile_batch*npair, THREADS>>>(
-        out, coulG, *envs, bas_ij_idx, G_bases, L_bases,
+    orth_lda_mat_kernel<<<ntile_batch*npair, THREADS>>>(
+        out, vxcG, *envs, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in orth_aopair_coulG_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in orth_lda_mat_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

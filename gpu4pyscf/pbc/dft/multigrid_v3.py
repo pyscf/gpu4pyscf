@@ -45,16 +45,19 @@ LMAX = 4
 
 _kernel_registery = {}
 
-def _aft_eval_density(ni, dm_sc, out=None):
+def _aft_eval_density(ni, dm_sc, with_tau=False):
     bvkcell = ni.bvkcell
-    envs = ni.mg_envs
 
     a = bvkcell.lattice_vectors()
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
     b = bvkcell.reciprocal_vectors()
 
-    rhoG = ndarray(ni.mesh, buffer=out, dtype=np.complex128)
-    rhoG.fill(0.)
+    rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
+    kern = libmgrid.orth_contract_aopair_dm
+    tauG = None
+    if with_tau:
+        tauG = cp.zeros(ni.mesh, dtype=np.complex128)
+        kern = libmgrid.orth_contract_ft_tau_dm
 
     for bucket in ni.aft_buckets:
         mesh = bucket['mesh']
@@ -78,11 +81,17 @@ def _aft_eval_density(ni, dm_sc, out=None):
 
         rhoR = cp.zeros(mesh)
         rhoI = cp.zeros(mesh)
-        err = libmgrid.contract_orth_aopair_dm(
+        tauR = tauI = rhoR
+        if with_tau:
+            tauR = cp.zeros(mesh)
+            tauI = cp.zeros(mesh)
+        err = kern(
             ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
             ctypes.cast(rhoI.data.ptr, ctypes.c_void_p),
+            ctypes.cast(tauR.data.ptr, ctypes.c_void_p),
+            ctypes.cast(tauI.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
-            ctypes.byref(envs),
+            ctypes.byref(ni.mg_envs),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bucket['bas_ij_idx'].data.ptr, ctypes.c_void_p),
             ctypes.cast(G_bases.data.ptr, ctypes.c_void_p),
@@ -93,21 +102,26 @@ def _aft_eval_density(ni, dm_sc, out=None):
         if err != 0:
             raise RuntimeError('contract_orth_aopair_dm kernel failed')
         _takebak_4d(rhoG, (rhoR, rhoI), mesh)
-    return rhoG
+        if with_tau:
+            _takebak_4d(tauG, (tauR, tauI), mesh)
+    return rhoG, tauG
 
-def _aft_eval_tau(ni, dm_sc):
-    raise NotImplementedError
-
-def _aft_eval_lda_matrix(ni, vxcG):
-    # FIXME
+def _aft_eval_xc_matrix(ni, vxcG):
     cell = ni.cell
     bvkcell = ni.bvkcell
-    envs = ni.mg_envs
 
     a = bvkcell.lattice_vectors()
     b = bvkcell.reciprocal_vectors()
 
-    vxcG = vxcG.reshape(ni.mesh)
+    if isinstance(vxcG, cp.ndarray):
+        vrhoG = vxcG.reshape(ni.mesh)
+        vtauG = None
+        kern = libmgrid.orth_aft_lda_mat
+    else:
+        vrhoG, vtauG = vxcG
+        vrhoG = vrhoG.reshape(ni.mesh)
+        vtauG = vtauG.reshape(ni.mesh)
+        kern = libmgrid.orth_aft_mgga_mat
 
     nao = cell.nao
     nkpts = len(ni.bvkmesh_Ls)
@@ -126,11 +140,15 @@ def _aft_eval_lda_matrix(ni, vxcG):
 
         bas_ij_idx = bucket['bas_ij_idx']
 
-        sub_vG = _take_4d(vxcG, mesh)
-        err = libmgrid.contract_orth_aopair_coulG(
+        sub_vrhoG = _take_4d(vrhoG, mesh)
+        sub_vtauG = sub_vrhoG
+        if vtauG is not None:
+            sub_vtauG = _take_4d(vtauG, mesh)
+        err = kern(
             ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sub_vG.data.ptr, ctypes.c_void_p),
-            ctypes.byref(envs),
+            ctypes.cast(sub_vrhoG.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sub_vtauG.data.ptr, ctypes.c_void_p),
+            ctypes.byref(ni.mg_envs),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(G_bases.data.ptr, ctypes.c_void_p),
             ctypes.cast(L_bases.data.ptr, ctypes.c_void_p),
@@ -146,82 +164,27 @@ def _aft_eval_lda_matrix(ni, vxcG):
     vxc_mat *= weight
     return vxc_mat
 
-def _eval_rhoG(ni, dm_sc, out=None):
+def _eval_density(ni, dm_sc, with_tau=False):
     cell = ni.cell
-    n_dm = dm_sc.shape[0]
     if ni.aft_buckets is not None:
-        rhoG = _aft_eval_density(ni, dm_sc, out=out)
-    else:
-        rhoG = ndarray(ni.mesh, buffer=out, dtype=np.complex128)
-        rhoG.fill(0.)
-
-    a = cell.lattice_vectors()
-
-    vol = cell.vol
-    nkpts = np.prod(ni.kmesh)
-
-    mg_envs = ni.mg_envs
-    kern = libmgrid.evaluate_density
-    work = None
-
-    fft_buckets = ni.fft_buckets or []
-    for bucket in fft_buckets:
-        assert bucket['grid_tile_cache'] is not None
-        mesh = bucket['mesh']
-        ngrids = np.prod(mesh)
-
-        weight = vol / ngrids / nkpts
-
-        dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
-
-        rhoR = ndarray(mesh, buffer=work)
-        rhoR.fill(0)
-        for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
-                in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
-            if len(dressed_bas_ij_idx) == 0: continue
-            ntiles = len(grid_tile_idx)
-            tiles_per_block = min(60, max(1, ntiles // 10000))
-            err = kern(
-                ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm_sc[0].data.ptr, ctypes.c_void_p),
-                ctypes.byref(mg_envs),
-                dxyz_dabc.ctypes,
-                ctypes.cast(ni.supmol_img_coords.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(li), ctypes.c_int(lj),
-                ctypes.c_int(tiles_per_block),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dressed_bas_ij_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ntiles),
-                (ctypes.c_int*3)(*mesh),
-                ctypes.c_double(weight),
-                ctypes.c_double(bucket['negligible']))
-            if err != 0:
-                raise RuntimeError('evaluate_density kernel failed')
-
-        density = fft_in_place(rhoR)
-        _takebak_4d(rhoG, density.reshape(mesh), mesh)
-
-    return rhoG.reshape(n_dm,-1)
-
-def _eval_tauG(ni, dm_sc, kmesh=None, verbose=None):
-    cell = ni.cell
-    n_dm = dm_sc.shape[0]
-    if ni.aft_buckets is not None:
-        rhoG, tauG = _aft_eval_tau(ni, dm_sc)
+        rhoG, tauG = _aft_eval_density(ni, dm_sc, with_tau)
     else:
         rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
-        tauG = cp.zeros(ni.mesh, dtype=np.complex128)
+        tauG = None
+        if with_tau:
+            tauG = cp.zeros(ni.mesh, dtype=np.complex128)
 
     a = cell.lattice_vectors()
-
-    vol = cell.vol
+    vol = np.linalg.det(a)
     nkpts = np.prod(ni.kmesh)
 
+    work = cp.empty_like(rhoG)
+    if not with_tau:
+        kern = libmgrid.evaluate_density
+    else:
+        kern = libmgrid.evaluate_tau
+        work1 = cp.empty_like(rhoG)
     mg_envs = ni.mg_envs
-    kern = libmgrid.evaluate_tau
-    work = None
 
     fft_buckets = ni.fft_buckets or []
     for bucket in fft_buckets:
@@ -234,10 +197,12 @@ def _eval_tauG(ni, dm_sc, kmesh=None, verbose=None):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        rhoR = ndarray(mesh, buffer=work)
-        tauR = None#ndarray(mesh, buffer=work)
+        rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
         rhoR.fill(0)
-        tauR.fill(0)
+        tauR = rhoR # placeholder
+        if with_tau:
+            tauR = ndarray(mesh, dtype=np.complex128, buffer=work1)
+            tauR.fill(0)
         for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
                 in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
             if len(dressed_bas_ij_idx) == 0: continue
@@ -246,7 +211,7 @@ def _eval_tauG(ni, dm_sc, kmesh=None, verbose=None):
             err = kern(
                 ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
                 ctypes.cast(tauR.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm_sc[0].data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
                 ctypes.byref(mg_envs),
                 dxyz_dabc.ctypes,
                 ctypes.cast(ni.supmol_img_coords.data.ptr, ctypes.c_void_p),
@@ -262,16 +227,16 @@ def _eval_tauG(ni, dm_sc, kmesh=None, verbose=None):
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
-        density_tmp = fft_in_place(rhoR)
-        tau_tmp = fft_in_place(tauR)
-        _takebak_4d(rhoG, density_tmp.reshape(mesh), mesh)
-        _takebak_4d(tauG, tau_tmp.reshape(mesh), mesh)
-    return tauG.reshape(n_dm,-1)
+        _takebak_4d(rhoG, fft_in_place(rhoR).reshape(mesh), mesh)
+        if with_tau:
+            _takebak_4d(tauG, fft_in_place(tauR).reshape(mesh), mesh)
 
-def _eval_lda_mat(ni, vxcG):
+    return rhoG, tauG
+
+def _eval_xc_mat(ni, vxcG):
     cell = ni.cell
     if ni.aft_buckets is not None:
-        vxc_mat = _aft_eval_lda_matrix(ni, vxcG)
+        vxc_mat = _aft_eval_xc_matrix(ni, vxcG)
     else:
         nkpts = len(ni.bvkmesh_Ls)
         nao = cell.nao
@@ -279,11 +244,24 @@ def _eval_lda_mat(ni, vxcG):
 
     a = cell.lattice_vectors()
 
-    vxcG = vxcG.reshape(ni.mesh)
+    if isinstance(vxcG, cp.ndarray):
+        vrhoG = vxcG.reshape(ni.mesh)
+        vtauG = None
+        work = cp.empty(vrhoG.size, dtype=np.complex128)
+        work1 = cp.empty(vrhoG.size, dtype=np.float64)
+        kern = libmgrid.evaluate_lda_mat
+        kern1 = libmgrid.evaluate_lda_mat_v2
+    else:
+        vrhoG, vtauG = vxcG
+        vrhoG = vrhoG.reshape(ni.mesh)
+        vtauG = vtauG.reshape(ni.mesh)
+        work = cp.empty(vrhoG.size, dtype=np.complex128)
+        work1 = cp.empty(vrhoG.size, dtype=np.float64)
+        work2 = cp.empty(vrhoG.size, dtype=np.float64)
+        kern = libmgrid.evaluate_mgga_mat
+        kern1 = libmgrid.evaluate_mgga_mat_v2
 
     mg_envs = ni.mg_envs
-    kern = libmgrid.evaluate_lda_mat
-    kern1 = libmgrid.evaluate_lda_mat_v2
 
     fft_buckets = ni.fft_buckets or []
     for bucket in fft_buckets:
@@ -292,9 +270,15 @@ def _eval_lda_mat(ni, vxcG):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        sub_vxcG = _take_4d(vxcG, mesh)
-        vxc = ifft_in_place(sub_vxcG)
-        vxcR = cp.asarray(vxc.real, order='C')
+        sub_vrhoG = _take_4d(vrhoG, mesh, work)
+        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work1)
+        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
+        sub_vtauR = sub_vrhoR # placeholder
+
+        if vtauG is not None:
+            sub_vtauG = _take_4d(vtauG, mesh, work)
+            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work2)
+            sub_vtauR[:] = ifft_in_place(sub_vtauG).real
 
         if 0:
             for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
@@ -304,7 +288,8 @@ def _eval_lda_mat(ni, vxcG):
                 tiles_per_block = min(60, max(1, ntiles // 10000))
                 err = kern(
                     ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(vxcR[0].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
                     ctypes.byref(mg_envs),
                     dxyz_dabc.ctypes,
                     ctypes.cast(ni.supmol_img_coords.data.ptr, ctypes.c_void_p),
@@ -317,7 +302,7 @@ def _eval_lda_mat(ni, vxcG):
                     (ctypes.c_int*3)(*mesh),
                     ctypes.c_double(bucket['negligible']))
                 if err != 0:
-                    raise RuntimeError('evaluate_lda_mat kernel failed')
+                    raise RuntimeError('evaluate_xc_mat kernel failed')
         else:
             for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
                     bucket['lij_patterns'], bucket['bas_ij_cache'],
@@ -325,7 +310,8 @@ def _eval_lda_mat(ni, vxcG):
                 if len(bas_ij_idx) == 0: continue
                 err = kern1(
                     ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(vxcR[0].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
                     ctypes.byref(mg_envs),
                     dxyz_dabc.ctypes,
                     ctypes.c_int(li),
@@ -336,11 +322,8 @@ def _eval_lda_mat(ni, vxcG):
                     ctypes.c_int(len(bas_ij_idx)),
                     ctypes.c_double(bucket['negligible']))
                 if err != 0:
-                    raise RuntimeError('evaluate_lda_mat kernel failed')
+                    raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
-
-def _eval_mgga_mat(ni, vxc, kmesh=None, verbose=None):
-    pass
 
 def _get_G_bases(mesh, b):
     Gx = cp.array(np.fft.fftfreq(mesh[0], 1./mesh[0]) * b[0,:,None])
@@ -657,48 +640,52 @@ def _cache_grid_range_to_tiles(fft_buckets, cell):
 
     # temporary space to store grid_tile_idx
     work = cp.empty(buf_size+1, dtype=np.int32)
-    tile_counts = work[-1:]
     # temporary space to store dressed_bas_ij
     work1 = cp.empty(buf_size, dtype=np.int64)
 
     nimgs = cell.nimgs
     nbas = cell.nbas
-    kern = libmgrid.grid_range_to_tiles
     for bucket in fft_buckets:
         bucket['grid_tile_cache'] = grid_tile_cache = []
+        mesh = bucket['mesh']
         for bas_ij_idx, grid_range in zip(
                 bucket['bas_ij_cache'], bucket['grid_ranges_cache']):
-            assert len(bas_ij_idx) > 0
-            npairs = len(bas_ij_idx)
-            err = kern(
-                ctypes.cast(work.data.ptr, ctypes.c_void_p),
-                ctypes.cast(work1.data.ptr, ctypes.c_void_p),
-                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(grid_range.data.ptr, ctypes.c_void_p),
-                (ctypes.c_int*3)(*nimgs),
-                (ctypes.c_int*3)(*bucket['mesh']),
-                ctypes.c_int(npairs),
-                ctypes.c_int(nbas),
-                ctypes.cast(tile_counts.data.ptr, ctypes.c_void_p))
-            if err != 0:
-                raise RuntimeError('grid_range_to_tiles failed')
-            n = int(tile_counts[0].get())
-            assert n < 2**31, 'int32 indexing in shl_pair_offsets'
-
-            sorted_idx = cp.argsort(work[:n])
-            grid_tile_idx = work[sorted_idx]
-            shl_pair_offsets = _segment_offsets(grid_tile_idx)
-
-            # TODO: Further divide large entry in shell_pair_offsets for better
-            # load balance.
-
-            # Store only the unique grid tile ids.
-            grid_tile_idx = grid_tile_idx[shl_pair_offsets[:-1]]
-
-            dressed_bas_ij = work1[sorted_idx]
-            sorted_idx = None
+            grid_tile_idx, dressed_bas_ij, shl_pair_offsets = _group_pairs_in_tile(
+                bas_ij_idx, grid_range, nimgs, mesh, nbas, work, work1)
             grid_tile_cache.append((
                 grid_tile_idx, dressed_bas_ij, shl_pair_offsets))
+
+def _group_pairs_in_tile(bas_ij_idx, grid_range, nimgs, mesh, nbas, work, work1):
+    npairs = len(bas_ij_idx)
+    assert npairs > 0
+    tile_counts = work[-1:]
+    err = libmgrid.grid_range_to_tiles(
+        ctypes.cast(work.data.ptr, ctypes.c_void_p),
+        ctypes.cast(work1.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grid_range.data.ptr, ctypes.c_void_p),
+        (ctypes.c_int*3)(*nimgs),
+        (ctypes.c_int*3)(*mesh),
+        ctypes.c_int(npairs),
+        ctypes.c_int(nbas),
+        ctypes.cast(tile_counts.data.ptr, ctypes.c_void_p))
+    if err != 0:
+        raise RuntimeError('grid_range_to_tiles failed')
+    n = int(tile_counts[0].get())
+    assert n < 2**31, 'int32 indexing in shl_pair_offsets'
+
+    sorted_idx = cp.argsort(work[:n])
+    grid_tile_idx = work[sorted_idx]
+    shl_pair_offsets = _segment_offsets(grid_tile_idx)
+
+    # TODO: Further divide large entry in shell_pair_offsets for better
+    # load balance.
+
+    # Store only the unique grid tile ids.
+    grid_tile_idx = grid_tile_idx[shl_pair_offsets[:-1]]
+
+    dressed_bas_ij = work1[sorted_idx]
+    return grid_tile_idx, dressed_bas_ij, shl_pair_offsets
 
 def fft_in_place(x):
     return fft.fftn(x, axes=(-3, -2, -1), overwrite_x=True)
@@ -730,11 +717,13 @@ def _take_4d(a, mesh, out=None):
     return out
 
 def _takebak_4d(out, a, mesh):
-    aI = None
     if isinstance(a, cp.ndarray):
         assert a.dtype == np.complex128
     else:
-        a, aI = a
+        aR, aI = a
+        a = cp.empty(aR.shape, dtype=np.complex128)
+        a.real = aR
+        a.imag = aI
     assert out.dtype == np.complex128
     assert out.ndim == a.ndim
     mesh = tuple(mesh)
@@ -743,25 +732,14 @@ def _takebak_4d(out, a, mesh):
     counts = 1
     if out.ndim == 4:
         counts, out_shape = out_shape[0], out_shape[1:]
-    if aI is None:
-        err = libmgrid.fft_takebak(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(a.data.ptr, ctypes.c_void_p),
-            (ctypes.c_int*3)(*out_shape),
-            (ctypes.c_int*3)(*mesh),
-            ctypes.c_int(counts))
-        if err != 0:
-            raise RuntimeError('fft_takebak kernel failed')
-    else:
-        err = libmgrid.fft_takebak1(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(a.data.ptr, ctypes.c_void_p),
-            ctypes.cast(aI.data.ptr, ctypes.c_void_p),
-            (ctypes.c_int*3)(*out_shape),
-            (ctypes.c_int*3)(*mesh),
-            ctypes.c_int(counts))
-        if err != 0:
-            raise RuntimeError('fft_takebak1 kernel failed')
+    err = libmgrid.fft_takebak(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        (ctypes.c_int*3)(*out_shape),
+        (ctypes.c_int*3)(*mesh),
+        ctypes.c_int(counts))
+    if err != 0:
+        raise RuntimeError('fft_takebak kernel failed')
     return out
 
 def _segment_offsets(label, dtype=np.int32):
@@ -878,7 +856,12 @@ void ''' + fn_name + r'''(double2* __restrict__ out, double2* __restrict__ rhoG,
            (out, rhoG, Gv_bases[0], Gv_bases[1], Gv_bases[2], nx, ny, nz))
     return out
 
-def _density_to_real_space_inplace(rhoG, Gv_bases, tauG=None, out=None):
+def _density_to_real_space(rhoG, Gv_bases, tauG=None, out=None):
+    '''
+    Perform
+        stack(ifft(rhoG), cp.einsum('g,gx->xg', rhoG, 1j*Gv), ifft(tauG)).real
+    with reduced memory footprint
+    '''
     assert rhoG.ndim == 3
     mesh = rhoG.shape
     nvar = 4
@@ -900,7 +883,12 @@ def _density_to_real_space_inplace(rhoG, Gv_bases, tauG=None, out=None):
     out[0] = ifft_in_place(rhoG).real
     return out
 
-def _vxc_to_reciprocal_space_inplace(vxc, vxcG, Gv_bases=None, work=None):
+def _vxc_to_reciprocal_space(vxc, vxcG, Gv_bases=None, work=None):
+    '''
+    Perform
+        fft(vxc[0]) + cp.einsum('xg,gx->g', fft(vxc[0]), -1j*Gv)
+    with reduced memory footprint
+    '''
     assert vxc.ndim == 4
     mesh = vxc.shape[1:]
     is_mgga = len(vxc) == 5
@@ -1013,12 +1001,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     ngrids = np.prod(mesh)
     Gv_bases = _get_G_bases(mesh, cell.reciprocal_vectors())
 
-    tauG = None
-    if xctype == "LDA" or xctype == 'HF' or xctype == 'GGA':
-        rhoG = _eval_rhoG(ni, dm_sc)
-    else: # MGGA
-        raise
-        rhoG, tauG = _eval_tauG(ni, dms, kmesh)
+    rhoG, tauG = _eval_density(ni, dm_sc, with_tau=xctype=='MGGA')
 
     rhoG = rhoG.reshape(mesh)
     n_electrons = float(rhoG[0,0,0].real.get())
@@ -1038,14 +1021,12 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         if xctype == 'LDA':
             density = ifft_in_place(rhoG.reshape(mesh)).real
         elif xctype == 'GGA':
-            density = _density_to_real_space_inplace(
-                rhoG.reshape(mesh), Gv_bases)
+            density = _density_to_real_space(rhoG.reshape(mesh), Gv_bases)
         else: # MGGA
-            density = _density_to_real_space_inplace(
-                rhoG.reshape(mesh), Gv_bases, tauG)
+            density = _density_to_real_space(rhoG.reshape(mesh), Gv_bases, tauG)
         density = density.reshape(nvar,ngrids)
 
-        # *(1./weight) because rhoR is scaled by weight in _eval_rhoG. If
+        # *(1./weight) because rhoR is scaled by weight in _eval_density. If
         # computing rhoR with IFFT, the weight factor is not needed.
         density *= 1/weight
         density = cp.asarray(density, dtype=np.float64, order='C')
@@ -1072,10 +1053,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_for_fock *= weight
         if xctype == "LDA":
             # Now xc_for_fock represents xc on G space
-            xc_for_fock = _vxc_to_reciprocal_space_inplace(
+            xc_for_fock = _vxc_to_reciprocal_space(
                 xc_for_fock.reshape(mesh), coulomb_on_g_mesh, work=rhoG)
         else: # GGA or MGGA
-            xc_for_fock = _vxc_to_reciprocal_space_inplace(
+            xc_for_fock = _vxc_to_reciprocal_space(
                 xc_for_fock.reshape(nvar, *mesh), coulomb_on_g_mesh, Gv_bases, work=rhoG)
         coulomb_on_g_mesh = None
 
@@ -1083,7 +1064,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         raise NotImplementedError
         ni = ni.copy().reset().build()
 
-    veff = _eval_lda_mat(ni, xc_for_fock)
+    veff = _eval_xc_mat(ni, xc_for_fock)
     if nkpts == 1:
         veff = veff[:,0]
     else:

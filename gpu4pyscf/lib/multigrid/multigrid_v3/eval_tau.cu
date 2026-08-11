@@ -36,7 +36,7 @@ void eval_tau_kernel(double *density, double *tau, double *dm, PBCIntEnvVars env
                      int *grid_tile_index, int ntiles, int tiles_per_block,
                      double a_dot_b, double a_dot_c, double b_dot_c,
                      double da_squared, double db_squared, double dc_squared,
-                     int mesh_a, int mesh_b, int mesh_c)
+                     int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
     constexpr int threads = THREADS;
     constexpr int WARPS = THREADS / WARP_SIZE;
@@ -224,7 +224,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
 
                         double rho = 0;
                         double val = 0;
-                        if (pair_id < shl_pair1 && fabs(gaussian_xyz) > 1e-18) {
+                        if (pair_id < shl_pair1 && fabs(gaussian_xyz) > negligible) {
                             double i_cartesian[nfi];
                             double i_gradient[3*nfi];
                             gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
@@ -310,8 +310,10 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
             rho += rho_value[thread_id+i*TILE*TILE*TILE];
             val += tau_value[thread_id+i*TILE*TILE*TILE];
         }
-        atomicAdd(density + (a_idx * mesh_b + b_idx) * mesh_c + c_idx, rho);
-        atomicAdd(tau + (a_idx * mesh_b + b_idx) * mesh_c + c_idx, val);
+        size_t abc_idx = (a_idx * mesh_b + b_idx) * (size_t)mesh_c + c_idx;
+        // update the density.real, skip the imaginary part
+        atomicAdd(density + abc_idx*2, rho);
+        atomicAdd(tau + abc_idx*2, val/2);
     }
     __syncthreads();
 }
@@ -325,7 +327,7 @@ extern "C" {
             shl_pair_offsets, dressed_bas_ij_idx, \
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
-            mesh_a, mesh_b, mesh_c); \
+            mesh_a, mesh_b, mesh_c, negligible); \
     break
 
 int evaluate_tau(double *density, double *tau, double *dm, PBCIntEnvVars *envs,
@@ -333,7 +335,7 @@ int evaluate_tau(double *density, double *tau, double *dm, PBCIntEnvVars *envs,
                  int i_angular, int j_angular, int tiles_per_block,
                  int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,
                  int *grid_tile_index, int n_contributing_tiles, int *mesh,
-                 double factor)
+                 double factor, double negligible)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

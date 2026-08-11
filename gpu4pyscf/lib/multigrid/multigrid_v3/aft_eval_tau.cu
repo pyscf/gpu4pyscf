@@ -32,13 +32,9 @@
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
 
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128) static
-#else
 __global__ static
-#endif
-void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
-                           PBCIntEnvVars envs, int *shl_pair_offsets,
+void orth_ft_tau_dm_kernel(double *densityR, double *densityI, double *tauR, double *tauI,
+                           double *dm, PBCIntEnvVars envs, int *shl_pair_offsets,
                            int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                            int *mesh_cum, int *nimgs_cum, int ntiles)
 {
@@ -47,8 +43,8 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
     int Gv_id = thread_id % NGV_PER_BLOCK;
     int sp_block_id = blockIdx.x / ntiles;
     int tile_id = blockIdx.x % ntiles;
-    __shared__ double gx[NGV_PER_BLOCK*3*2*LMAX1*LMAX1];
-    __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)];
+    __shared__ double gx[NGV_PER_BLOCK*3*2*(LMAX1+1)*(LMAX1+1)];
+    __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+3)];
     __shared__ int mesh_start[3];
     __shared__ int i0, j0, ri, rj, nao;
     __shared__ double fac, ai, aj;
@@ -75,12 +71,16 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         nao = envs.ao_loc[bvk_nbas];
     }
 
-    double density_R[DENSITY_WIDTH];
-    double density_I[DENSITY_WIDTH];
+    double rho_R[DENSITY_WIDTH];
+    double rho_I[DENSITY_WIDTH];
+    double tau_R[DENSITY_WIDTH];
+    double tau_I[DENSITY_WIDTH];
 #pragma unroll
     for (int n = 0; n < DENSITY_WIDTH; ++n) {
-        density_R[n] = 0.;
-        density_I[n] = 0.;
+        rho_R[n] = 0.;
+        rho_I[n] = 0.;
+        tau_R[n] = 0.;
+        tau_I[n] = 0.;
     }
 
     int shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -111,8 +111,8 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         }
 
         constexpr int stride_i = NGV_PER_BLOCK * 6;
-        int stride_j = stride_i * LMAX1;
-        for (int n = thread_id; n < stride_j*(lj+1); n += THREADS) {
+        constexpr int stride_j = stride_i * (LMAX+2);
+        for (int n = thread_id; n < stride_j*(lj+2); n += THREADS) {
             gx[n] = 0;
         }
         __syncthreads();
@@ -127,7 +127,7 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
             if (_Gv_id < mesh_cum[x_id+1]) {
                 kx = G_bases[_Gv_id];
             }
-            int lij = li + lj;
+            int lij = li + lj + 2;
             int addrR = x_id * NGV_PER_BLOCK*2 + Gv_id;
             int addrI = addrR + NGV_PER_BLOCK;
             for (int img = nimgs_cum[x_id]; img < nimgs_cum[x_id+1]; ++img) {
@@ -149,34 +149,30 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
                 swap[addrI] = s0xI;
                 gx[addrR] += s0xR;
                 gx[addrI] += s0xI;
-                if (lij > 0) {
-                    double RpaR = xpa;
-                    double RpaI = -a2 * kx;
-                    s1xR = RpaR * s0xR - RpaI * s0xI;
-                    s1xI = RpaR * s0xI + RpaI * s0xR;
-                    swap[addrR+stride_i] = s1xR;
-                    swap[addrI+stride_i] = s1xI;
-                    if (0 < li) {
-                        gx[addrR+stride_i] += s1xR;
-                        gx[addrI+stride_i] += s1xI;
+                double RpaR = xpa;
+                double RpaI = -a2 * kx;
+                s1xR = RpaR * s0xR - RpaI * s0xI;
+                s1xI = RpaR * s0xI + RpaI * s0xR;
+                swap[addrR+stride_i] = s1xR;
+                swap[addrI+stride_i] = s1xI;
+                gx[addrR+stride_i] += s1xR;
+                gx[addrI+stride_i] += s1xI;
+                for (int i = 2; i <= lij; i++) {
+                    double ia2 = (i-1) * a2;
+                    s2xR = ia2 * s0xR + RpaR * s1xR - RpaI * s1xI;
+                    s2xI = ia2 * s0xI + RpaR * s1xI + RpaI * s1xR;
+                    swap[addrR+i*stride_i] = s2xR;
+                    swap[addrI+i*stride_i] = s2xI;
+                    if (i <= li + 1) {
+                        gx[addrR+i*stride_i] += s2xR;
+                        gx[addrI+i*stride_i] += s2xI;
                     }
-                    for (int i = 2; i <= lij; i++) {
-                        double ia2 = (i-1) * a2;
-                        s2xR = ia2 * s0xR + RpaR * s1xR - RpaI * s1xI;
-                        s2xI = ia2 * s0xI + RpaR * s1xI + RpaI * s1xR;
-                        swap[addrR+i*stride_i] = s2xR;
-                        swap[addrI+i*stride_i] = s2xI;
-                        if (i <= li) {
-                            gx[addrR+i*stride_i] += s2xR;
-                            gx[addrI+i*stride_i] += s2xI;
-                        }
-                        s0xR = s1xR;
-                        s0xI = s1xI;
-                        s1xR = s2xR;
-                        s1xI = s2xI;
-                    }
+                    s0xR = s1xR;
+                    s0xI = s1xI;
+                    s1xR = s2xR;
+                    s1xI = s2xI;
                 }
-                for (int j = 1; j <= lj; ++j) {
+                for (int j = 1; j <= lj+1; ++j) {
                     int i = lij - j;
                     s1xR = swap[addrR+(i+1)*stride_i];
                     s1xI = swap[addrI+(i+1)*stride_i];
@@ -187,7 +183,7 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
                         s2xI = s1xI - xjxi * s0xI;
                         swap[addrR+i*stride_i] = s2xR;
                         swap[addrI+i*stride_i] = s2xI;
-                        if (i <= li) {
+                        if (i <= li + 1) {
                             int ij = i * stride_i + j * stride_j;
                             gx[addrR+ij] += s2xR;
                             gx[addrI+ij] += s2xI;
@@ -229,16 +225,90 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
                 multiply(yR, yI, zR, zI, yzR, yzI);
                 yzR *= dm_fac;
                 yzI *= dm_fac;
+
+                double ai2 = ai * -2;
+                double aj2 = aj * -2;
+                double f3yR = ai2 * gxR[addry+stride_i+stride_j];
+                double f3yI = ai2 * gxR[addry+stride_i+stride_j+NGV_PER_BLOCK];
+                if (iy > 0) {
+                    f3yR += iy * gxR[addry-stride_i+stride_j];
+                    f3yI += iy * gxR[addry-stride_i+stride_j+NGV_PER_BLOCK];
+                }
+                f3yR *= aj2;
+                f3yI *= aj2;
+                if (jy > 0) {
+                    double fyR = ai2 * gxR[addry+stride_i-stride_j];
+                    double fyI = ai2 * gxR[addry+stride_i-stride_j+NGV_PER_BLOCK];
+                    if (iy > 0) {
+                        fyR += iy * gxR[addry-stride_i-stride_j];
+                        fyI += iy * gxR[addry-stride_i-stride_j+NGV_PER_BLOCK];
+                    }
+                    f3yR += jy * fyR;
+                    f3yI += jy * fyI;
+                }
+                double YZR, YZI;
+                multiply(f3yR, f3yI, zR, zI, YZR, YZI);
+
+                double f3zR = ai2 * gxR[addrz+stride_i+stride_j];
+                double f3zI = ai2 * gxR[addrz+stride_i+stride_j+NGV_PER_BLOCK];
+                if (iz > 0) {
+                    f3zR += iz * gxR[addrz-stride_i+stride_j];
+                    f3zI += iz * gxR[addrz-stride_i+stride_j+NGV_PER_BLOCK];
+                }
+                f3zR *= aj2;
+                f3zI *= aj2;
+                if (jz > 0) {
+                    double fzR = ai2 * gxR[addrz+stride_i-stride_j];
+                    double fzI = ai2 * gxR[addrz+stride_i-stride_j+NGV_PER_BLOCK];
+                    if (iz > 0) {
+                        fzR += iz * gxR[addrz-stride_i-stride_j];
+                        fzI += iz * gxR[addrz-stride_i-stride_j+NGV_PER_BLOCK];
+                    }
+                    f3zR += jz * fzR;
+                    f3zI += jz * fzI;
+                }
+                double tmpR, tmpI;
+                multiply(yR, yI, f3zR, f3zI, tmpR, tmpI);
+                YZR = (YZR + tmpR) * dm_fac;
+                YZI = (YZI + tmpI) * dm_fac;
+
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
                     int x = n;
                     if (mesh_start[0] + x >= mesh_x) break;
-                    double xR = gxR[addrx+x];
-                    double xI = gxI[addrx+x];
+                    int addr = addrx + x;
+                    double xR = gxR[addr];
+                    double xI = gxI[addr];
                     double xyzR, xyzI;
                     multiply(xR, xI, yzR, yzI, xyzR, xyzI);
-                    density_R[n] += xyzR;
-                    density_I[n] += xyzI;
+                    rho_R[n] += xyzR;
+                    rho_I[n] += xyzI;
+
+                    multiply(xR, xI, YZR, YZI, xyzR, xyzI);
+                    tau_R[n] += xyzR;
+                    tau_I[n] += xyzI;
+
+                    double f3xR = ai2 * gxR[addr+stride_i+stride_j];
+                    double f3xI = ai2 * gxR[addr+stride_i+stride_j+NGV_PER_BLOCK];
+                    if (ix > 0) {
+                        f3xR += ix * gxR[addr-stride_i+stride_j];
+                        f3xI += ix * gxR[addr-stride_i+stride_j+NGV_PER_BLOCK];
+                    }
+                    f3xR *= aj2;
+                    f3xI *= aj2;
+                    if (jx > 0) {
+                        double fxR = ai2 * gxR[addr+stride_i-stride_j];
+                        double fxI = ai2 * gxR[addr+stride_i-stride_j+NGV_PER_BLOCK];
+                        if (ix > 0) {
+                            fxR += ix * gxR[addr-stride_i-stride_j];
+                            fxI += ix * gxR[addr-stride_i-stride_j+NGV_PER_BLOCK];
+                        }
+                        f3xR += jx * fxR;
+                        f3xI += jx * fxI;
+                    }
+                    multiply(f3xR, f3xI, yzR, yzI, xyzR, xyzI);
+                    tau_R[n] += xyzR;
+                    tau_I[n] += xyzI;
                 }
             } }
         }
@@ -256,24 +326,18 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         for (int n = 0; n < DENSITY_WIDTH; ++n) {
             int x = Gx0 + n;
             if (x >= mesh_x) break;
-            atomicAdd(outR+(x*mesh_y+y)*mesh_z+z, density_R[n]);
-            atomicAdd(outI+(x*mesh_y+y)*mesh_z+z, density_I[n]);
+            int abc_idx = (x * mesh_y + y) * mesh_z + z;
+            atomicAdd(densityR+abc_idx, rho_R[n]);
+            atomicAdd(densityI+abc_idx, rho_I[n]);
+            atomicAdd(tauR+abc_idx, tau_R[n]/2);
+            atomicAdd(tauI+abc_idx, tau_I[n]/2);
         }
     }
 }
 
-//__global__ static
-//void monoclinic_aopair_dm_kernel(double *outR, double *outI, double *dm,
-//                                 PBCIntEnvVars *envs,
-//                                 int *shl_pair_offsets, int64_t *bas_ij_idx,
-//                                 double *G_bases, int *mesh_cum, int *nimgs_cum,
-//                                 int *mesh, int nbatches_shl_pair)
-//{
-//}
-
 extern "C" {
-int orth_contract_aopair_dm(double *outR, double *outI,
-                            double *placeholderR, double *placeholderI, double *dm,
+int orth_contract_ft_tau_dm(double *densityR, double *densityI,
+                            double *tauR, double *tauI, double *dm,
                             PBCIntEnvVars *envs, int *shl_pair_offsets,
                             int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                             int *mesh_cum, int *nimgs_cum, int *mesh,
@@ -286,12 +350,12 @@ int orth_contract_aopair_dm(double *outR, double *outI,
     int ntiles_y = (mesh_y + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
-    orth_aopair_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS>>>(
-        outR, outI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
+    orth_ft_tau_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS>>>(
+        densityR, densityI, tauR, tauI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, ntiles);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in orth_aopair_dm_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in orth_ft_tau_dm_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

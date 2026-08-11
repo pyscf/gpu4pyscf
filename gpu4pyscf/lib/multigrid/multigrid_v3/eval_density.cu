@@ -293,7 +293,9 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
         for (int i = 1; i < WARPS; i++) {
             val += density_value[thread_id+i*TILE*TILE*TILE];
         }
-        atomicAdd(density + (a_idx * mesh_b + b_idx) * mesh_c + c_idx, val);
+        size_t abc_idx = (a_idx * mesh_b + b_idx) * (size_t)mesh_c + c_idx;
+        // update the density.real, skip the imaginary part
+        atomicAdd(density + abc_idx*2, val);
     }
     __syncthreads();
 }
@@ -310,7 +312,8 @@ extern "C" {
             mesh_a, mesh_b, mesh_c, negligible); \
     break
 
-int evaluate_density(double *density, double *dm, PBCIntEnvVars *envs,
+int evaluate_density(double *density, double *placeholder,
+                     double *dm, PBCIntEnvVars *envs,
                      double *dxyz_dabc, double *supmol_img_coords,
                      int i_angular, int j_angular, int tiles_per_block,
                      int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,

@@ -80,7 +80,8 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
     int b_idx = b_start + thread_id / TILE % TILE;
     int c_idx = c_start + thread_id % TILE;
     if (a_idx < mesh_a && b_idx < mesh_b && c_idx < mesh_c) {
-        vxc_cache[thread_id] = vxc_weights[(a_idx * mesh_b + b_idx) * mesh_c + c_idx];
+        size_t abc_idx = (a_idx * mesh_b + b_idx) * (size_t)mesh_c + c_idx;
+        vxc_cache[thread_id] = vxc_weights[abc_idx];
     }
     __syncthreads();
 
@@ -378,10 +379,10 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
             // multiplier to a_index, b_index, c_index to avoid the negative modulo.
             // Images spreads in supmol are typically < 10. A shift of 100* images
             // should be enough.
-            int abc_idx_start = (a_center + 100 * mesh_a) % mesh_a * mesh_bc +
+            int64_t abc_idx_start = (a_center + 100 * mesh_a) % mesh_a * (int64_t)mesh_bc +
                 (b_index + 100 * mesh_b) % mesh_b * mesh_c +
                 (c_index + 100 * mesh_c) % mesh_c;
-            int abc_idx = abc_idx_start;
+            int64_t abc_idx = abc_idx_start;
             double gaussian_xyz = gaussian_starting_point;
             double recursion_factor_a = recursion_factor_a_start;
             for (int a_index = a_center; a_index <= a_stop; a_index++,
@@ -476,13 +477,13 @@ extern "C" {
 #define eval_lda_mat_kernel_case(li, lj, slice_i, slice_j, orth) \
     case (li * LMAX1 + lj): \
         eval_lda_mat_kernel<li,lj,slice_i,slice_j,orth><<<block_grid, THREADS>>>( \
-            out, vxc_weights, *envs, supmol_img_coords, shl_pair_offsets, dressed_bas_ij_idx, \
+            out, vxc, *envs, supmol_img_coords, shl_pair_offsets, dressed_bas_ij_idx, \
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c, negligible); \
     break
 
-int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
+int evaluate_lda_mat(double *out, double *vxc, double *placeholder, PBCIntEnvVars *envs,
                      double *dxyz_dabc, double *supmol_img_coords,
                      int i_angular, int j_angular, int tiles_per_block,
                      int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,
@@ -527,12 +528,12 @@ int evaluate_lda_mat(double *out, double *vxc_weights, PBCIntEnvVars *envs,
 #define eval_lda_mat_kernel_v2_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
         eval_lda_mat_kernel_v2<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
-            out, vxc_weights, *envs, bas_ij_idx, grid_frac_ranges, \
+            out, vxc, *envs, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
             negligible); \
     break
 
-int evaluate_lda_mat_v2(double *out, double *vxc_weights, PBCIntEnvVars *envs,
+int evaluate_lda_mat_v2(double *out, double *vxc, double *placeholder, PBCIntEnvVars *envs,
                      double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
                      float2 *grid_frac_ranges, int *mesh, int npairs,
                      double negligible)
