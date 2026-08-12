@@ -51,7 +51,6 @@ from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.tools import k2gamma, get_coulG
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
-from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
 
@@ -84,7 +83,7 @@ def _aft_eval_density(ni, dm_sc, with_tau=False):
         mesh_cum = cp.array(np.append(0, np.cumsum(mesh)), dtype=np.int32)
         nimgs = bucket['nimgs']
         nimgs_cum = cp.array(np.append(0, np.cumsum(nimgs*2+1)), dtype=np.int32)
-        Gx, Gy, Gz = _get_G_bases(mesh, b)
+        Gx, Gy, Gz = _get_Gv_bases(mesh, b)
         G_bases = cp.hstack([Gx[0], Gy[1], Gz[2]])
         L_bases = _get_L_bases(nimgs, a)
 
@@ -157,7 +156,7 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
         nimgs_cum = cp.array(np.append(0, np.cumsum(nimgs*2+1)), dtype=np.int32)
         # In real space formula, VxcG in reciprocal space is first IFFT to real
         # space. Here, AFT integrals for -G are identical to the inverse FT.
-        Gx, Gy, Gz = _get_G_bases(mesh, b)
+        Gx, Gy, Gz = _get_Gv_bases(mesh, b)
         G_bases = -cp.hstack([Gx[0], Gy[1], Gz[2]])
         L_bases = _get_L_bases(nimgs, a)
 
@@ -350,7 +349,7 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
                     raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
 
-def _get_G_bases(mesh, b):
+def _get_Gv_bases(mesh, b):
     Gx = cp.array(np.fft.fftfreq(mesh[0], 1./mesh[0]) * b[0,:,None])
     Gy = cp.array(np.fft.fftfreq(mesh[1], 1./mesh[1]) * b[1,:,None])
     Gz = cp.array(np.fft.fftfreq(mesh[2], 1./mesh[2]) * b[2,:,None])
@@ -1007,6 +1006,82 @@ def get_rho(ni, dm_kpts, kpts=None):
     rhoR *= 1./weight
     return rhoR
 
+def get_nuc(ni, kpts=None):
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+
+    kmesh = k2gamma.kpts_to_kmesh(ni.cell, kpts)
+    if ni.bvkcell is None or any(ni.kmesh != kmesh):
+        ni.build(kmesh, 'LDA') # change to MGGA?
+
+    cell = ni.cell
+    mesh = ni.mesh
+    vneG = eval_nucG(cell, mesh)
+    vne = _eval_xc_mat(ni, vneG)
+
+    nkpts = np.prod(ni.kmesh)
+    if nkpts != 1:
+        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        expLk = fft_matrix(ni.kmesh)
+        expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
+        vne = contract('pLq,Lkz->kpqz', vne, expLkz)
+        vne = vne.view(np.complex128)[:,:,:,0]
+
+    vne = cell.apply_CT_mat_C(vne)
+    vne = transpose_sum(vne)
+
+    if is_single_kpt:
+        vne = vne[0]
+    return vne
+
+def eval_nucG(cell, mesh):
+    '''Nuclear attraction potential on Gv'''
+    assert cell.dimension == 3
+    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+    coords = cp.asarray(cell.atom_coords())
+    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
+    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
+    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
+    SIx *= cp.asarray(-cell.atom_charges())[:,None]
+    rho_xy = SIx[:,:,None] * SIy[:,None,:]
+    nuc_density = contract('qxy,qz->xyz', rho_xy, SIz)
+    return _get_coulomb_on_g_mesh(nuc_density, Gv_bases, out=nuc_density).ravel()
+
+def get_pp(ni, kpts=None):
+    """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
+#?    if ni.sorted_gaussian_pairs is None:
+#?        ni.build()
+#?    is_single_kpt = kpts is not None and kpts.ndim == 1
+#?    if kpts is None:
+#?        kpts = np.zeros((1, 3))
+#?    else:
+#?        kpts = kpts.reshape(-1, 3)
+#?    cell = ni.cell
+#?    log = logger.new_logger(cell)
+#?    t0 = log.init_timer()
+#?    mesh = ni.mesh
+#?    # Compute the vpplocG as
+#?    # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
+#?    vpplocG = multigrid_v1.eval_vpplocG(cell, mesh)
+#?    vpp = convert_xc_on_g_mesh_to_fock(ni, vpplocG, hermi=1, kpts=kpts)[0]
+#?    t1 = log.timer_debug1("vpploc", *t0)
+#?
+#?    vppnl = get_pp_nl_gpu(cell, kpts)
+#?    for k, kpt in enumerate(kpts):
+#?        if is_single_kpt:
+#?            vpp[k] += cp.asarray(vppnl[k].real)
+#?        else:
+#?            vpp[k] += cp.asarray(vppnl[k])
+#?
+#?    if is_single_kpt:
+#?        vpp = vpp[0]
+#?    log.timer_debug1("vppnl", *t1)
+#?    log.timer("get_pp", *t0)
+#?    return vpp
+
 def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
 
@@ -1064,7 +1139,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     else:
         raise NotImplementedError(f'XC functional {xc_code}')
 
-    assert kpts_band is None
     kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
     if ni.bvkcell is None or any(ni.kmesh != kmesh):
         ni.build(kmesh, xctype)
@@ -1076,7 +1150,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     cell = ni.cell
     mesh = ni.mesh
     ngrids = np.prod(mesh)
-    Gv_bases = _get_G_bases(mesh, cell.reciprocal_vectors())
+    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
     rhoG, tauG = _eval_density(ni, dm_sc, with_tau=xctype=='MGGA')
 
@@ -1215,7 +1289,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     ngrids = np.prod(mesh)
     weight = cell.vol / ngrids
 
-    Gv_bases = _get_G_bases(mesh, cell.reciprocal_vectors())
+    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
     density = cp.empty((2, nvar, *mesh))
     rhoG_sf = None
@@ -1326,7 +1400,14 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     return n_electrons, xc_energy_sum, veff
 
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
+    # Enable analytical Fourier transforms (AFT), which are typically more
+    # efficient for small unit cells.
     enable_aft = True
+
+    # Mesh in the final bucket is likely bwlow the estimated cell.mesh.
+    # Allow the overall mesh to be reduced to the one in the final bucket.
+    # This may introduce small errors.
+    allow_mesh_reduction = False
 
     def __init__(self, cell):
         self.reset(cell)
@@ -1432,26 +1513,28 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             Tz = np.arange(-nimgs[2], nimgs[2]+1, dtype=np.float64)
             self.supmol_img_coords = cp.asarray(lib.cartesian_prod([Tx, Ty, Tz]).dot(a))
 
-            # TODO: skip grid_tile_cache when memory is insufficient
+            # TODO: skip grid_tile_cache and generate them on-the-fly when memory
+            # is insufficient
             cache_tile_idx = True
             if cache_tile_idx:
                 _cache_grid_range_to_tiles(self.fft_buckets, cell)
 
-        # mesh of last bucket is likely smaller than the cell.mesh estimation
-        #if self.fft_buckets:
-        #    self.mesh = self.fft_buckets[-1]['mesh']
-        #else:
-        #    self.mesh = self.aft_buckets[-1]['mesh']
-        #log.info('set MultiGrid maximum mesh %s', self.mesh)
+        if self.allow_mesh_reduction:
+            mesh = self.mesh
+            if self.fft_buckets:
+                self.mesh = self.fft_buckets[-1]['mesh']
+            else:
+                self.mesh = self.aft_buckets[-1]['mesh']
+            log.info('Reduce MultiGrid maximum mesh %s to %s', mesh, self.mesh)
         t0 = log.timer_debug1('Initialize buckets', *t0)
         return self
 
-#    get_nuc = get_nuc
-#    get_pp = get_pp
-
-    get_j = get_j_kpts
+    get_nuc = get_nuc
+    get_pp = get_pp
 
     get_rho = get_rho
+
+    get_j = get_j_kpts
     nr_rks = nr_rks
     nr_uks = nr_uks
 
