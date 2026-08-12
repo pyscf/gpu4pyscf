@@ -13,6 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+'''
+MultiGrid numerical integration for computing XC matrices
+
+In the current implementation, the memory required by Vxc integrals are
+       RKS     UKS
+LDA    5*N^3   8*N^3
+GGA    8*N^3   14*N^3
+MGGA   9*N^3   16*N^3
+
+For 80 GB memory, the upper limits of mesh are approximately
+       RKS     UKS
+LDA    1200    1000
+GGA    1000    850
+MGGA   1000    800
+'''
+
 import math
 import ctypes
 import numpy as np
@@ -112,7 +128,7 @@ def _aft_eval_density(ni, dm_sc, with_tau=False):
             _takebak_4d(tauG, (tauR, tauI), mesh)
     return rhoG, tauG
 
-def _aft_eval_xc_matrix(ni, vxcG):
+def _aft_eval_xc_matrix(ni, vxcG, out=None):
     cell = ni.cell
     bvkcell = ni.bvkcell
 
@@ -131,7 +147,8 @@ def _aft_eval_xc_matrix(ni, vxcG):
 
     nao = cell.nao
     nkpts = len(ni.bvkmesh_Ls)
-    vxc_mat = cp.zeros((nao, nkpts, nao))
+    vxc_mat = ndarray((nao, nkpts, nao), dtype=np.float64, buffer=out)
+    vxc_mat.fill(0.)
 
     for bucket in ni.aft_buckets:
         mesh = bucket['mesh']
@@ -239,31 +256,31 @@ def _eval_density(ni, dm_sc, with_tau=False):
 
     return rhoG, tauG
 
-def _eval_xc_mat(ni, vxcG):
+def _eval_xc_mat(ni, vxcG, out=None, work=None):
+    '''Note, contents of vxcG will be destroyed in this function
+    '''
     cell = ni.cell
     if ni.aft_buckets is not None:
-        vxc_mat = _aft_eval_xc_matrix(ni, vxcG)
+        vxc_mat = _aft_eval_xc_matrix(ni, vxcG, out)
     else:
         nkpts = len(ni.bvkmesh_Ls)
         nao = cell.nao
-        vxc_mat = cp.zeros((nao, nkpts, nao))
+        vxc_mat = ndarray((nao, nkpts, nao), dtype=np.float64, buffer=out)
+        vxc_mat.fill(0.)
 
     a = cell.lattice_vectors()
 
     if isinstance(vxcG, cp.ndarray):
         vrhoG = vxcG.reshape(ni.mesh)
         vtauG = None
-        work = cp.empty(vrhoG.size, dtype=np.complex128)
-        work1 = cp.empty(vrhoG.size, dtype=np.float64)
+        work = ndarray((3,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_lda_mat
         kern1 = libmgrid.evaluate_lda_mat_v2
     else:
         vrhoG, vtauG = vxcG
         vrhoG = vrhoG.reshape(ni.mesh)
         vtauG = vtauG.reshape(ni.mesh)
-        work = cp.empty(vrhoG.size, dtype=np.complex128)
-        work1 = cp.empty(vrhoG.size, dtype=np.float64)
-        work2 = cp.empty(vrhoG.size, dtype=np.float64)
+        work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_mat
         kern1 = libmgrid.evaluate_mgga_mat_v2
 
@@ -276,14 +293,16 @@ def _eval_xc_mat(ni, vxcG):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        sub_vrhoG = _take_4d(vrhoG, mesh, work)
-        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work1)
+        # _take_4d does not always make a copy. In the last bucket, the contents
+        # of vrhoG will be overwritten by ifft_in_place
+        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
+        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
         sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
         sub_vtauR = sub_vrhoR # placeholder
 
         if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh, work)
-            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work2)
+            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
+            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
             sub_vtauR[:] = ifft_in_place(sub_vtauG).real
 
         if 0:
@@ -865,7 +884,7 @@ void ''' + fn_name + r'''(double2* __restrict__ out, double2* __restrict__ rhoG,
     nx, ny, nz = [x.shape[1] for x in Gv_bases]
     ng = nx * ny * nz
     assert rhoG.size == ng
-    out = ndarray(ng, dtype=np.complex128, buffer=out)
+    out = ndarray((nx, ny, nz), dtype=np.complex128, buffer=out)
     kernel(((ng + 1023) // 1024,), (1024,),
            (out, rhoG, Gv_bases[0], Gv_bases[1], Gv_bases[2], nx, ny, nz))
     return out
@@ -929,6 +948,32 @@ def _vxc_to_reciprocal_space(vxc, vxcG, Gv_bases=None, work=None):
     else:
         return vxcG
 
+def _real_dm_in_bvkcell(ni, dm_kpts, kpts, hermi=1):
+    cell = ni.cell
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dms = _format_dms(dm_kpts, kpts)
+    n_dm, nkpts, nao = dms.shape[:3]
+    dms = dms.reshape(n_dm*nkpts, nao, nao)
+
+    dms = cell.apply_C_mat_CT(dms)
+    if hermi == 1:
+        dms *= 2
+    else:
+        #Only the tril part is processed by the integral code
+        dms = transpose_sum(dms)
+    nao = dms.shape[-1]
+    dms = dms.reshape(n_dm, nkpts, nao, nao)
+
+    if nkpts == 1:
+        dm_sc = dms
+    else:
+        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        expLk = fft_matrix(ni.kmesh)
+        dm_sc = contract('nkpq,Lk->nqLp', dms, expLk)
+        assert absmax(dm_sc.imag) < cell.precision*5e2
+        dm_sc = cp.asarray(dm_sc.real, order='C')
+    return dm_sc
+
 def get_rho(ni, dm_kpts, kpts=None):
     '''Density in real space
 
@@ -942,6 +987,7 @@ def get_rho(ni, dm_kpts, kpts=None):
         kpts: (N, 3) ndarray
             k points. If not specified, gamma point is assumed
     '''
+    assert dm_kpts.ndim < 4
     cell = ni.cell
     mesh = ni.mesh
 
@@ -950,30 +996,15 @@ def get_rho(ni, dm_kpts, kpts=None):
         ni.build(kmesh, 'LDA')
     assert len(dm_kpts) == np.prod(ni.kmesh)
 
-    cell = ni.cell
-    dm_kpts = cp.asarray(dm_kpts, order='C')
-    dms = _format_dms(dm_kpts, kpts)
-    n_dm, nkpts, nao = dms.shape[:3]
+    dm_sc = _real_dm_in_bvkcell(ni, dm_kpts, kpts)
+    n_dm, nkpts, nao = dm_sc.shape[:3]
     assert n_dm == 1
-    dms = dms[0]
-
-    dms = cell.apply_C_mat_CT(dms)
-    dms *= 2
-
-    if nkpts == 1:
-        dm_sc = dms
-    else:
-        #expLk = fft_matrix(kmesh)
-        expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        dm_sc, dms = contract('kpq,Lk->qLp', dm_sc, expLk), None
-        assert absmax(dms.imag) < cell.precision*5e2
-        dm_sc = cp.asarray(dm_sc.real, order='C')
+    dm_sc = dm_sc[0]
 
     rhoG = _eval_density(ni, dm_sc)[0]
-
     rhoR = ifft_in_place(rhoG.reshape(mesh)).real.ravel()
-    ngrids = np.prod(mesh)
-    rhoR *= ngrids / cell.vol
+    weight = cell.vol / np.prod(mesh)
+    rhoR *= 1./weight
     return rhoR
 
 def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
@@ -994,6 +1025,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         vj : (*, nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
+    assert dm_kpts.ndim < 4
     return nr_rks(ni, ni.cell, None, 'HF', dm_kpts,
                   kpts=kpts, kpts_band=kpts_band, with_j=True)[2]
 
@@ -1037,29 +1069,11 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.bvkcell is None or any(ni.kmesh != kmesh):
         ni.build(kmesh, xctype)
 
+    dm_sc = _real_dm_in_bvkcell(ni, dm_kpts, kpts, hermi)
+    assert len(dm_sc) == 1
+    dm_sc = dm_sc[0]
+
     cell = ni.cell
-    dm_kpts = cp.asarray(dm_kpts, order='C')
-    dms = _format_dms(dm_kpts, kpts)
-    n_dm, nkpts, nao = dms.shape[:3]
-    assert n_dm == 1
-    dms = dms[0]
-
-    dms = cell.apply_C_mat_CT(dms)
-    if hermi == 1:
-        dms *= 2
-    else:
-        #Only the tril part is processed by the integral code
-        dms = transpose_sum(dms)
-
-    if nkpts == 1:
-        dm_sc = dms
-    else:
-        #expLk = fft_matrix(kmesh)
-        expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        dm_sc, dms = contract('kpq,Lk->qLp', dms, expLk), None
-        assert absmax(dm_sc.imag) < cell.precision*5e2
-        dm_sc = cp.asarray(dm_sc.real, order='C')
-
     mesh = ni.mesh
     ngrids = np.prod(mesh)
     Gv_bases = _get_G_bases(mesh, cell.reciprocal_vectors())
@@ -1068,7 +1082,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     rhoG = rhoG.reshape(mesh)
     n_electrons = float(rhoG[0,0,0].real.get())
-    t0 = log.timer_debug1("density and coulomb", *t0)
 
     if xctype == 'HF':
         assert with_j
@@ -1077,28 +1090,32 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         ecoul = .5 * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
         log.debug('Multigrid Coulomb energy %s', ecoul)
         rhoG = coulomb_on_g_mesh = None
-        xc_energy_sum = 0
+        xc_energy_sum = None
 
     else:
         weight = cell.vol / ngrids
         if xctype == 'LDA':
-            density = ifft_in_place(rhoG.reshape(mesh)).real
+            density = ifft_in_place(rhoG).real
         elif xctype == 'GGA':
-            density = _density_to_real_space(rhoG.reshape(mesh), Gv_bases)
+            density = _density_to_real_space(rhoG, Gv_bases)
         else: # MGGA
-            density = _density_to_real_space(rhoG.reshape(mesh), Gv_bases, tauG)
+            density = _density_to_real_space(rhoG, Gv_bases, tauG)
         density = density.reshape(nvar,ngrids)
-
+        density = cp.asarray(density, dtype=np.float64, order='C')
         # *(1./weight) because rhoR is scaled by weight in _eval_density. If
         # computing rhoR with IFFT, the weight factor is not needed.
         density *= 1/weight
-        density = cp.asarray(density, dtype=np.float64, order='C')
+        t0 = log.timer_debug1("density", *t0)
+
         rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
         rho_sf[:] = density[0].real
 
         # eval_xc_eff supports float64 only
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
             xc_code, density, deriv=1, xctype=xctype, spin=0, inplace=True)[:2]
+
+        xc_for_fock *= weight
+        xc_for_fock = xc_for_fock.reshape(nvar, *mesh)
 
         xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).get()) * weight
         xc_for_energy = density = rho_sf = None
@@ -1110,32 +1127,39 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             ecoul = .5 * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
             log.debug('Multigrid Coulomb energy %s', ecoul)
         else:
+            ecoul = None
             coulomb_on_g_mesh = cp.zeros_like(rhoG)
-        coulomb_on_g_mesh = coulomb_on_g_mesh.reshape(mesh)
+        tauG = None
 
-        xc_for_fock *= weight
         if xctype == "LDA":
             # Now xc_for_fock represents xc on G space
             xc_for_fock = _vxc_to_reciprocal_space(
-                xc_for_fock.reshape(mesh), coulomb_on_g_mesh, work=rhoG)
+                xc_for_fock, coulomb_on_g_mesh, work=rhoG)
         else: # GGA or MGGA
             xc_for_fock = _vxc_to_reciprocal_space(
-                xc_for_fock.reshape(nvar, *mesh), coulomb_on_g_mesh, Gv_bases, work=rhoG)
-        coulomb_on_g_mesh = None
+                xc_for_fock, coulomb_on_g_mesh, Gv_bases, work=rhoG)
+        coulomb_on_g_mesh = rhoG = None
 
+    nkpts = np.prod(ni.kmesh)
     if kpts_band is not None:
         raise NotImplementedError
-        ni = ni.copy().reset().build()
-
-    veff = _eval_xc_mat(ni, xc_for_fock)
-    if nkpts == 1:
-        veff = veff[:,0]
+        ni1 = ni.copy().reset().build(kmesh=kpts_band)
+        veff = _eval_xc_mat(ni1, xc_for_fock)
     else:
-        veff = contract('pLq,Lk->kpq', veff, expLk)
+        veff = _eval_xc_mat(ni, xc_for_fock, out=dm_sc)
+
+    if nkpts != 1:
+        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        expLk = fft_matrix(ni.kmesh)
+        expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
+        veff = contract('pLq,Lkz->kpqz', veff, expLkz)
+        veff = veff.view(np.complex128)[:,:,:,0]
+
     veff = cell.apply_CT_mat_C(veff)
     veff = transpose_sum(veff)
 
     veff = _format_jks(veff, dm_kpts, kpts_band, kpts)
+    veff = tag_array(veff, ecoul=ecoul, exc=xc_energy_sum)
     t0 = log.timer_debug1("xc matrix", *t0)
     return n_electrons, xc_energy_sum, veff
 
@@ -1161,7 +1185,145 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    raise NotImplementedError
+    log = logger.new_logger(cell, verbose)
+    t0 = log.init_timer()
+
+    xctype = ni._xc_type(xc_code)
+    if xctype == 'LDA':
+        nvar = 1
+    elif xctype == 'GGA':
+        nvar = 4
+    elif xctype == 'MGGA':
+        nvar = 5
+    elif xctype == 'HF':
+        vj = ni.get_j(dm_kpts[0]+dm_kpts[1], hermi, kpts, kpts_band)
+        veff = cp.stack([vj, vj])
+        return lib.tag_array(veff, ecoul=vj.ecoul, exc=0)
+    else:
+        raise NotImplementedError(f'XC functional {xc_code}')
+
+    assert kpts_band is None
+    kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
+    if ni.bvkcell is None or any(ni.kmesh != kmesh):
+        ni.build(kmesh, xctype)
+
+    dm_sc = _real_dm_in_bvkcell(ni, dm_kpts, kpts, hermi)
+    assert len(dm_sc) == 2
+
+    cell = ni.cell
+    mesh = ni.mesh
+    ngrids = np.prod(mesh)
+    weight = cell.vol / ngrids
+
+    Gv_bases = _get_G_bases(mesh, cell.reciprocal_vectors())
+
+    density = cp.empty((2, nvar, *mesh))
+    rhoG_sf = None
+    for s in range(2):
+        rhoG, tauG = _eval_density(ni, dm_sc[s], with_tau=xctype=='MGGA')
+        rhoG = rhoG.reshape(mesh)
+        if rhoG_sf is None:
+            rhoG_sf = rhoG
+        else:
+            rhoG_sf += rhoG
+
+        if xctype == 'LDA':
+            density[s,0] = ifft_in_place(rhoG.reshape(mesh)).real
+        elif xctype == 'GGA':
+            _density_to_real_space(rhoG, Gv_bases, out=density[s])
+        else: # MGGA
+            _density_to_real_space(rhoG, Gv_bases, tauG, out=density[s])
+
+        tauG = None # release memory
+
+    n_electrons = float(rhoG_sf[0,0,0].real.get())
+
+    density = density.reshape(2,nvar,ngrids)
+    density = cp.asarray(density, dtype=np.float64, order='C')
+    # *(1./weight) because rhoR is scaled by weight in _eval_density. If
+    # computing rhoR with IFFT, the weight factor is not needed.
+    density *= 1./weight
+    t0 = log.timer_debug1("density", *t0)
+
+    rho_sf = ndarray(ngrids, dtype=np.float64, buffer=rhoG)
+    rho_sf[:] = density[0,0].real
+    rho_sf[:] += density[1,0].real
+
+    # eval_xc_eff supports float64 only
+    xc_for_energy, xc_for_fock = ni.eval_xc_eff(
+        xc_code, density, deriv=1, xctype=xctype, spin=1, inplace=True)[:2]
+
+    xc_for_fock *= weight
+    xc_for_fock = xc_for_fock.reshape(2, nvar, *mesh)
+
+    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).get()) * weight
+    xc_for_energy = density = rho_sf = None
+    log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
+    t0 = log.timer_debug1("eval_xc_eff", *t0)
+
+    if with_j:
+        coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG_sf, Gv_bases, out=rhoG)
+        ecoul = .5 * float(_conj_dot(rhoG_sf.ravel(), coulomb_on_g_mesh.ravel()).get())
+        log.debug('Multigrid Coulomb energy %s', ecoul)
+
+        coulomb_a = coulomb_on_g_mesh
+        coulomb_b = rhoG_sf # reuse memory
+        coulomb_b[:] = coulomb_a
+    else:
+        ecoul = None
+        coulomb_a = cp.zeros_like(rhoG)
+        coulomb_b = cp.zeros_like(rhoG)
+    rhoG = rhoG_sf = None
+
+    if kpts_band is not None:
+        raise NotImplementedError
+
+    # dm_sc and the output have the shape shape. Reuse its memory.
+    veff = dm_sc
+
+    if xctype == "LDA":
+        # maximum memory usage = (2,ngrids) float64s + 3*ngrids complex128s
+        # The 3*ngrids complex128s consist of coulomb_a, coulomb_b and the
+        # workspace required by _vxc_to_reciprocal_space.
+        vxc = _vxc_to_reciprocal_space(xc_for_fock[0], coulomb_a)
+        _eval_xc_mat(ni, vxc, out=veff[0])
+        vxc = coulomb_a = None # release memory
+        vxc = _vxc_to_reciprocal_space(xc_for_fock[1], coulomb_b)
+        _eval_xc_mat(ni, vxc, out=veff[1])
+        vxc = coulomb_b = xc_for_fock = None
+
+    else: # GGA or MGGA
+        # maximum memory usage = (2,nvar,ngrids) float64s + 3*ngrids complex128s
+        # The 3*ngrids complex128s consist of coulomb_a, coulomb_b and the
+        # workspace required by _vxc_to_reciprocal_space.
+        vxc = _vxc_to_reciprocal_space(xc_for_fock[0], coulomb_a, Gv_bases)
+        # It's safe to reuse the memory of xc_for_fock[0] as the workspace.
+        # The size of xc_for_fock[0] is 4*ngrids or 5*ngrids (float64), more
+        # than the workspace required by _eval_xc_mat (2*ngrids float64).
+        _eval_xc_mat(ni, vxc, out=veff[0], work=xc_for_fock[0])
+        vxc = coulomb_a = None # release memory
+        vxc = _vxc_to_reciprocal_space(xc_for_fock[1], coulomb_b, Gv_bases)
+        _eval_xc_mat(ni, vxc, out=veff[1], work=xc_for_fock[0])
+        vxc = coulomb_b = xc_for_fock = None
+
+    nkpts = np.prod(ni.kmesh)
+    if nkpts != 1:
+        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        expLk = fft_matrix(ni.kmesh)
+        expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
+        veff = contract('spLq,Lkz->skpqz', veff, expLkz)
+        veff = veff.view(np.complex128)[:,:,:,:,0]
+
+    nao = veff.shape[-1]
+    veff = cell.apply_CT_mat_C(veff.reshape(2*nkpts,nao,nao))
+    veff = transpose_sum(veff)
+    nao = veff.shape[-1]
+    veff = veff.reshape(2,nkpts,nao,nao)
+
+    veff = _format_jks(veff, dm_kpts, kpts_band, kpts)
+    veff = tag_array(veff, ecoul=ecoul, exc=xc_energy_sum)
+    t0 = log.timer_debug1("xc matrix", *t0)
+    return n_electrons, xc_energy_sum, veff
 
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     enable_aft = True
