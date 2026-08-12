@@ -127,20 +127,17 @@ void orth_mgga_mat_kernel(double *out, cuDoubleComplex *vrhoG,
     int mesh_x = mesh_cum[1] - mesh_cum[0];
     int mesh_y = mesh_cum[2] - mesh_cum[1];
     int mesh_z = mesh_cum[3] - mesh_cum[2];
-    int ncells = envs.bvk_ncells;
-    int bvk_nbas = envs.nbas * ncells;
+    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int64_t bas_ij = bas_ij_idx[pair_id];
     int ish = bas_ij / NBAS_MAX;
     int jsh = bas_ij % NBAS_MAX;
     if (thread_id == 0) {
-        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         li = bas[ish*BAS_SLOTS+ANG_OF];
         lj = bas[jsh*BAS_SLOTS+ANG_OF];
-        ai = env[expi];
-        aj = env[expj];
+        ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
         ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
     }
@@ -373,20 +370,21 @@ void orth_mgga_mat_kernel(double *out, cuDoubleComplex *vrhoG,
         double aij = ai + aj;
         double fac = OVERLAP_FAC * env[ci] * env[cj] / (aij * sqrt(aij));
         int ish_cell0 = ish;
-        int jsh_cell0 = jsh % envs.nbas;
+        int bvk_cell_id = jsh / nbas;
+        int jsh_cell0 = jsh - nbas * bvk_cell_id;
         if (ish_cell0 == jsh_cell0) {
             fac *= .5;
         }
-        int i0 = envs.ao_loc[ish];
-        int j0 = envs.ao_loc[jsh];
-        int nao = envs.ao_loc[bvk_nbas];
+        uint32_t nao = envs.ao_loc[nbas];
+        int i0 = envs.ao_loc[ish_cell0];
+        int j0 = envs.ao_loc[jsh_cell0];
         int i = n * c_div_nf[lj];
         int j = n - nfj * i;
         double s = 0;
         for (int m = 0; m < WARPS; m++) {
             s += vjR[n*WARPS+m];
         }
-        atomicAdd(out+(i0+i)*nao+j0+j, s * fac);
+        atomicAdd(out + bvk_cell_id*nao*nao + (i0+i)*nao + j0+j, s * fac);
     }
 }
 

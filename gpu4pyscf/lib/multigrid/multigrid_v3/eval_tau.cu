@@ -98,12 +98,14 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
         ish = ish - nbas * latsum_idx;
         int jL = jsh / bvk_nbas;
         jsh = jsh - bvk_nbas * jL;
-        int jsh_cell0 = jsh % nbas;
+        int ish_cell0 = ish;
+        int bvk_cell_id = jsh / nbas;
+        int jsh_cell0 = jsh - nbas * bvk_cell_id;
         double Lx = supmol_img_coords[latsum_idx*3+0];
         double Ly = supmol_img_coords[latsum_idx*3+1];
         double Lz = supmol_img_coords[latsum_idx*3+2];
-        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int expi = bas[ish_cell0*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
         int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double xi = env[ri+0] - Lx;
@@ -165,9 +167,10 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
         for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
 #pragma unroll
         for (int dm_j0 = 0; dm_j0 < nfj; dm_j0 += SLICE_SIZE_J) {
-            size_t nao = envs.ao_loc[bvk_nbas];
-            int i0 = envs.ao_loc[ish];
-            int j0 = envs.ao_loc[jsh];
+            uint32_t nao = envs.ao_loc[nbas];
+            int i0 = envs.ao_loc[ish_cell0];
+            int j0 = envs.ao_loc[jsh_cell0];
+            uint32_t ij_offset = bvk_cell_id * nao * nao + (dm_i0+i0) * nao + dm_j0+j0;
             double dm_cache[SLICE_SIZE_I * SLICE_SIZE_J];
             if (pair_id < shl_pair1) {
 #pragma unroll
@@ -176,7 +179,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
 #pragma unroll
                 for (int j = 0; j < SLICE_SIZE_J; ++j) {
                     if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                    dm_cache[i*SLICE_SIZE_J+j] = dm[(i0+dm_i0+i)*nao+j0+dm_j0+j];
+                    dm_cache[i*SLICE_SIZE_J+j] = dm[ij_offset + i*nao+j];
                 } }
             }
 

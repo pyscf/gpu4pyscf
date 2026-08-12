@@ -132,7 +132,8 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
         double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
         double cc = ci * cj;
         int ish_cell0 = ish;
-        int jsh_cell0 = jsh % nbas;
+        int bvk_cell_id = jsh / nbas;
+        int jsh_cell0 = jsh - nbas * bvk_cell_id;
         if (ish_cell0 == jsh_cell0) {
             cc *= .5;
         }
@@ -262,16 +263,17 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                 }
             }
 
-            size_t nao = envs.ao_loc[bvk_nbas];
-            int i0 = envs.ao_loc[ish];
-            int j0 = envs.ao_loc[jsh];
+            size_t nao = envs.ao_loc[nbas];
+            int i0 = envs.ao_loc[ish_cell0];
+            int j0 = envs.ao_loc[jsh_cell0];
+            size_t ij_offset = bvk_cell_id * nao * nao + (dm_i0+i0) * nao + dm_j0+j0;
 #pragma unroll
             for (int i = 0; i < SLICE_SIZE_I; ++i) {
                 if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
 #pragma unroll
             for (int j = 0; j < SLICE_SIZE_J; ++j) {
                 if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                atomicAdd(out + (i0+dm_i0+i)*nao+j0+dm_j0+j, vj_cache[i*SLICE_SIZE_J+j]);
+                atomicAdd(out + ij_offset + i*nao+j, vj_cache[i*SLICE_SIZE_J+j]);
             } }
         } }
     }
@@ -296,6 +298,7 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
     __shared__ int a_start, a_stop, a_center;
     __shared__ int b_start, b_stop;
     __shared__ int c_start, c_stop;
+    __shared__ uint32_t ij_offset;
     __shared__ double cc, exp_da_squared;
     __shared__ double xi, yi, zi;
     __shared__ double xj, yj, zj;
@@ -304,6 +307,7 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
 
     int *bas = envs.bas;
     double *env = envs.env;
+    int nbas = envs.nbas;
     int bvk_nbas = envs.bvk_ncells * envs.nbas;
 
     int64_t bas_ij = bas_ij_idx[pair_id];
@@ -312,17 +316,21 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
     int jL = jsh / bvk_nbas;
     jsh = jsh - bvk_nbas * jL;
     if (thread_id == 0) {
-        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ish_cell0 = ish;
+        int bvk_cell_id = jsh / nbas;
+        int jsh_cell0 = jsh - nbas * bvk_cell_id;
+        uint32_t nao = envs.ao_loc[nbas];
+        uint32_t i0 = envs.ao_loc[ish_cell0];
+        uint32_t j0 = envs.ao_loc[jsh_cell0];
+        ij_offset = bvk_cell_id * nao * nao + i0 * nao + j0;
+
         int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ai = env[expi];
-        aj = env[expj];
-        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
-        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        ai = env[bas[ish_cell0*BAS_SLOTS+PTR_EXP]];
+        aj = env[bas[jsh_cell0*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish_cell0*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh_cell0*BAS_SLOTS+PTR_COEFF]];
         cc = ci * cj;
-        int ish_cell0 = ish;
-        int jsh_cell0 = jsh % envs.nbas;
         if (ish_cell0 == jsh_cell0) {
             cc *= .5;
         }
@@ -509,9 +517,8 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
             }
         } }
 
-        size_t nao = envs.ao_loc[bvk_nbas];
-        int i0 = envs.ao_loc[ish];
-        int j0 = envs.ao_loc[jsh];
+        uint32_t nao = envs.ao_loc[nbas];
+        double *pout = out + ij_offset + dm_i0 * nao + dm_j0;
 #pragma unroll
         for (int i = 0; i < SLICE_SIZE_I; ++i) {
             if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
@@ -520,12 +527,13 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
                 if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                 double val = reduce(vj_cache[i*SLICE_SIZE_J+j], swap, thread_id);
                 if (thread_id == 0) {
-                    atomicAdd(out + (i0+dm_i0+i)*nao+j0+dm_j0+j, val);
+                    atomicAdd(pout + i*nao+j, val);
                 }
             }
         }
     } }
 }
+
 extern "C" {
 #define eval_mgga_mat_kernel_case(li, lj, slice_i, slice_j, orth) \
     case (li * LMAX1 + lj): \
@@ -568,7 +576,7 @@ int evaluate_mgga_mat(double *out, double *vxc, double *vtau, PBCIntEnvVars *env
         eval_mgga_mat_kernel_case(4,1,15, 3, 0);
         eval_mgga_mat_kernel_case(4,2,15, 3, 0);
         eval_mgga_mat_kernel_case(4,3, 8, 5, 0);
-        eval_mgga_mat_kernel_case(4,4, 15, 3, 0);
+        eval_mgga_mat_kernel_case(4,4,15, 3, 0);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -51,11 +51,12 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
     __shared__ double gx[NGV_PER_BLOCK*3*2*LMAX1*LMAX1];
     __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)];
     __shared__ int mesh_start[3];
-    __shared__ int i0, j0, ri, rj, nao;
+    __shared__ int ri, rj;
+    __shared__ uint32_t ij_offset;
     __shared__ double fac, ai, aj;
 
-    int ncells = envs.bvk_ncells;
     int *bas = envs.bas;
+    int nbas = envs.nbas;
     double *env = envs.env;
 
     int mesh_x = mesh_cum[1] - mesh_cum[0];
@@ -72,8 +73,6 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         mesh_start[0] = tile_x * NGV_PER_BLOCK;
         mesh_start[1] = tile_y * NGV_PER_BLOCK;
         mesh_start[2] = tile_z * NGV_PER_BLOCK;
-        int bvk_nbas = envs.nbas * ncells;
-        nao = envs.ao_loc[bvk_nbas];
     }
 
     double density_R[DENSITY_WIDTH];
@@ -94,22 +93,24 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         int li = bas[ish*BAS_SLOTS+ANG_OF];
         int lj = bas[jsh*BAS_SLOTS+ANG_OF];
         if (thread_id == 0) {
-            int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-            int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
             int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
             int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
-            ai = env[expi];
-            aj = env[expj];
+            ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+            aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
             double aij = ai + aj;
             ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
             rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            i0 = envs.ao_loc[ish];
-            j0 = envs.ao_loc[jsh];
             fac = OVERLAP_FAC * env[ci] * env[cj] / (aij * sqrt(aij)) * factor;
-            int jsh_cell0 = jsh % envs.nbas;
-            if (ish == jsh_cell0) {
+            int ish_cell0 = ish;
+            int bvk_cell_id = jsh / nbas;
+            int jsh_cell0 = jsh - nbas * bvk_cell_id;
+            if (ish_cell0 == jsh_cell0) {
                 fac *= .5;
             }
+            int i0 = envs.ao_loc[ish_cell0];
+            int j0 = envs.ao_loc[jsh_cell0];
+            uint32_t nao = envs.ao_loc[nbas];
+            ij_offset = bvk_cell_id * nao * nao + i0 * nao + j0;
         }
 
         constexpr int stride_i = NGV_PER_BLOCK * 6;
@@ -209,6 +210,7 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
             int nfj = c_nf[lj];
             int idx_i = lex_xyz_offset(li);
             int idx_j = lex_xyz_offset(lj);
+            uint32_t nao = envs.ao_loc[nbas];
             for (int i = 0; i < nfi; ++i) {
             for (int j = 0; j < nfj; ++j) {
                 int ix = _c_cartesian_lexical_xyz[idx_i+i*3+0];
@@ -220,7 +222,7 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
                 int addrx = ix*stride_i + jx*stride_j;
                 int addry = iy*stride_i + jy*stride_j + NGV_PER_BLOCK*2 + y_in_tile;
                 int addrz = iz*stride_i + jz*stride_j + NGV_PER_BLOCK*4 + z_in_tile;
-                double dm_fac = dm[(i0+i)*nao+j0+j] * fac;
+                double dm_fac = dm[ij_offset + i*nao+j] * fac;
                 double *gxR = gx;
                 double *gxI = gxR + NGV_PER_BLOCK;
                 double yR = gxR[addry];

@@ -60,7 +60,7 @@ LMAX = 4
 
 _kernel_registery = {}
 
-def _aft_eval_density(ni, dm_sc, with_tau=False):
+def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
     cell = ni.cell
     bvkcell = ni.bvkcell
 
@@ -68,7 +68,7 @@ def _aft_eval_density(ni, dm_sc, with_tau=False):
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
     b = cell.reciprocal_vectors()
 
-    nkpts = len(ni.bvkmesh_Ls)
+    nkpts = len(kpts) if kpts is not None else np.prod(ni.kmesh)
     weight = 1./nkpts
 
     rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
@@ -146,7 +146,7 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
 
     nao = cell.nao
     nkpts = len(ni.bvkmesh_Ls)
-    vxc_mat = ndarray((nao, nkpts, nao), dtype=np.float64, buffer=out)
+    vxc_mat = ndarray((nkpts, nao, nao), dtype=np.float64, buffer=out)
     vxc_mat.fill(0.)
 
     for bucket in ni.aft_buckets:
@@ -186,10 +186,10 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
     vxc_mat *= weight
     return vxc_mat
 
-def _eval_density(ni, dm_sc, with_tau=False):
+def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
     cell = ni.cell
     if ni.aft_buckets is not None:
-        rhoG, tauG = _aft_eval_density(ni, dm_sc, with_tau)
+        rhoG, tauG = _aft_eval_density(ni, dm_sc, kpts, with_tau)
     else:
         rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
         tauG = None
@@ -198,7 +198,7 @@ def _eval_density(ni, dm_sc, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
+    nkpts = len(kpts) if kpts is not None else np.prod(ni.kmesh)
 
     work = cp.empty_like(rhoG)
     if not with_tau:
@@ -264,7 +264,7 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
     else:
         nkpts = len(ni.bvkmesh_Ls)
         nao = cell.nao
-        vxc_mat = ndarray((nao, nkpts, nao), dtype=np.float64, buffer=out)
+        vxc_mat = ndarray((nkpts, nao, nao), dtype=np.float64, buffer=out)
         vxc_mat.fill(0.)
 
     a = cell.lattice_vectors()
@@ -947,31 +947,50 @@ def _vxc_to_reciprocal_space(vxc, vxcG, Gv_bases=None, work=None):
     else:
         return vxcG
 
-def _real_dm_in_bvkcell(ni, dm_kpts, kpts, hermi=1):
+def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1):
     cell = ni.cell
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
-    dms = dms.reshape(n_dm*nkpts, nao, nao)
 
-    dms = cell.apply_C_mat_CT(dms)
-    if hermi == 1:
-        dms *= 2
-    else:
-        #Only the tril part is processed by the integral code
-        dms = transpose_sum(dms)
-    nao = dms.shape[-1]
-    dms = dms.reshape(n_dm, nkpts, nao, nao)
+    if hermi != 1:
+        # the integral kernel only processes tril part of orbital-pairs.
+        # Due to the symmetry in integrals, the triu contributions can be folded
+        # into the tril part.
+        dms = transpose_sum(dms.reshape(n_dm*nkpts,nao,nao), inplace=False)
+        dms = dms.reshape(n_dm, nkpts, nao, nao)
 
     if nkpts == 1:
         dm_sc = dms
     else:
         #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
         expLk = fft_matrix(ni.kmesh)
-        dm_sc = contract('nkpq,Lk->nqLp', dms, expLk)
+        dm_sc = contract('nkpq,Lk->nLqp', dms, expLk)
         assert absmax(dm_sc.imag) < cell.precision*5e2
-        dm_sc = cp.asarray(dm_sc.real, order='C')
+    dm_sc = cp.asarray(dm_sc.real, order='C')
+
+    dm_sc = cell.apply_C_mat_CT(dm_sc.reshape(-1,nao,nao))
+
+    if hermi == 1:
+        dm_sc *= 2
+
+    nao = dm_sc.shape[-1]
+    dm_sc = dm_sc.reshape(n_dm, -1, nao, nao)
     return dm_sc
+
+def _inverse_wannier_transform_fock(ni, veff, kpts):
+    veff = ni.cell.apply_CT_mat_C(veff)
+
+    nkpts = len(kpts) if kpts is not None else np.prod(ni.kmesh)
+    if nkpts != 1:
+        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        expLk = fft_matrix(ni.kmesh)
+        expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
+        veff = contract('Lpq,Lkz->kpqz', veff, expLkz)
+        veff = veff.view(np.complex128)[:,:,:,0]
+
+    veff = transpose_sum(veff)
+    return veff
 
 def get_rho(ni, dm_kpts, kpts=None):
     '''Density in real space
@@ -995,7 +1014,7 @@ def get_rho(ni, dm_kpts, kpts=None):
         ni.build(kmesh, 'LDA')
     assert len(dm_kpts) == np.prod(ni.kmesh)
 
-    dm_sc = _real_dm_in_bvkcell(ni, dm_kpts, kpts)
+    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts)
     n_dm, nkpts, nao = dm_sc.shape[:3]
     assert n_dm == 1
     dm_sc = dm_sc[0]
@@ -1007,32 +1026,20 @@ def get_rho(ni, dm_kpts, kpts=None):
     return rhoR
 
 def get_nuc(ni, kpts=None):
+    cell = ni.cell
     is_single_kpt = kpts is not None and kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
         kpts = kpts.reshape(-1, 3)
 
-    kmesh = k2gamma.kpts_to_kmesh(ni.cell, kpts)
+    kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
     if ni.bvkcell is None or any(ni.kmesh != kmesh):
         ni.build(kmesh, 'LDA') # change to MGGA?
 
-    cell = ni.cell
-    mesh = ni.mesh
-    vneG = eval_nucG(cell, mesh)
+    vneG = eval_nucG(cell, ni.mesh)
     vne = _eval_xc_mat(ni, vneG)
-
-    nkpts = np.prod(ni.kmesh)
-    if nkpts != 1:
-        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        expLk = fft_matrix(ni.kmesh)
-        expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
-        vne = contract('pLq,Lkz->kpqz', vne, expLkz)
-        vne = vne.view(np.complex128)[:,:,:,0]
-
-    vne = cell.apply_CT_mat_C(vne)
-    vne = transpose_sum(vne)
-
+    vne = _inverse_wannier_transform_fock(ni, vne, kpts)
     if is_single_kpt:
         vne = vne[0]
     return vne
@@ -1143,7 +1150,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.bvkcell is None or any(ni.kmesh != kmesh):
         ni.build(kmesh, xctype)
 
-    dm_sc = _real_dm_in_bvkcell(ni, dm_kpts, kpts, hermi)
+    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi)
     assert len(dm_sc) == 1
     dm_sc = dm_sc[0]
 
@@ -1214,23 +1221,14 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
                 xc_for_fock, coulomb_on_g_mesh, Gv_bases, work=rhoG)
         coulomb_on_g_mesh = rhoG = None
 
-    nkpts = np.prod(ni.kmesh)
     if kpts_band is not None:
         raise NotImplementedError
         ni1 = ni.copy().reset().build(kmesh=kpts_band)
         veff = _eval_xc_mat(ni1, xc_for_fock)
+        veff = _inverse_wannier_transform_fock(ni1, veff, kpts)
     else:
         veff = _eval_xc_mat(ni, xc_for_fock, out=dm_sc)
-
-    if nkpts != 1:
-        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        expLk = fft_matrix(ni.kmesh)
-        expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
-        veff = contract('pLq,Lkz->kpqz', veff, expLkz)
-        veff = veff.view(np.complex128)[:,:,:,0]
-
-    veff = cell.apply_CT_mat_C(veff)
-    veff = transpose_sum(veff)
+        veff = _inverse_wannier_transform_fock(ni, veff, kpts)
 
     veff = _format_jks(veff, dm_kpts, kpts_band, kpts)
     veff = tag_array(veff, ecoul=ecoul, exc=xc_energy_sum)
@@ -1281,7 +1279,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.bvkcell is None or any(ni.kmesh != kmesh):
         ni.build(kmesh, xctype)
 
-    dm_sc = _real_dm_in_bvkcell(ni, dm_kpts, kpts, hermi)
+    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi)
     assert len(dm_sc) == 2
 
     cell = ni.cell
@@ -1291,6 +1289,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
+    n_electrons = []
     density = cp.empty((2, nvar, *mesh))
     rhoG_sf = None
     for s in range(2):
@@ -1301,6 +1300,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         else:
             rhoG_sf += rhoG
 
+        n_electrons.append(rhoG[0,0,0].real.get())
+
         if xctype == 'LDA':
             density[s,0] = ifft_in_place(rhoG.reshape(mesh)).real
         elif xctype == 'GGA':
@@ -1309,8 +1310,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             _density_to_real_space(rhoG, Gv_bases, tauG, out=density[s])
 
         tauG = None # release memory
-
-    n_electrons = float(rhoG_sf[0,0,0].real.get())
+    n_electrons = np.array(n_electrons)
 
     density = density.reshape(2,nvar,ngrids)
     density = cp.asarray(density, dtype=np.float64, order='C')
@@ -1380,19 +1380,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         _eval_xc_mat(ni, vxc, out=veff[1], work=xc_for_fock[0])
         vxc = coulomb_b = xc_for_fock = None
 
-    nkpts = np.prod(ni.kmesh)
-    if nkpts != 1:
-        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        expLk = fft_matrix(ni.kmesh)
-        expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
-        veff = contract('spLq,Lkz->skpqz', veff, expLkz)
-        veff = veff.view(np.complex128)[:,:,:,:,0]
-
-    nao = veff.shape[-1]
-    veff = cell.apply_CT_mat_C(veff.reshape(2*nkpts,nao,nao))
-    veff = transpose_sum(veff)
-    nao = veff.shape[-1]
-    veff = veff.reshape(2,nkpts,nao,nao)
+    veff = cp.stack([
+        _inverse_wannier_transform_fock(ni, veff[0], kpts),
+        _inverse_wannier_transform_fock(ni, veff[1], kpts)])
 
     veff = _format_jks(veff, dm_kpts, kpts_band, kpts)
     veff = tag_array(veff, ecoul=ecoul, exc=xc_energy_sum)
