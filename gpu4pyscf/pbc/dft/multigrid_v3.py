@@ -19,7 +19,7 @@ import numpy as np
 import cupy as cp
 import cupyx.scipy.fft as fft
 from pyscf import lib
-from pyscf.gto import ANG_OF, PTR_EXP, PTR_COEFF, gto_norm
+from pyscf.gto import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, PTR_COEFF, gto_norm
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.pbc import super_cell
@@ -46,11 +46,15 @@ LMAX = 4
 _kernel_registery = {}
 
 def _aft_eval_density(ni, dm_sc, with_tau=False):
+    cell = ni.cell
     bvkcell = ni.bvkcell
 
     a = bvkcell.lattice_vectors()
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
-    b = bvkcell.reciprocal_vectors()
+    b = cell.reciprocal_vectors()
+
+    nkpts = len(ni.bvkmesh_Ls)
+    weight = 1./nkpts
 
     rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
     kern = libmgrid.orth_contract_aopair_dm
@@ -70,7 +74,7 @@ def _aft_eval_density(ni, dm_sc, with_tau=False):
 
         # To reduce the overhead of atomicAdd, process multiple pairs for each
         # cuda block.
-        pairs_per_block = 60
+        pairs_per_block = 100
         shl_pair_offsets = bucket['shl_pair_offsets']
         offsets = []
         for p0, p1 in zip(shl_pair_offsets[:-1], shl_pair_offsets[1:]):
@@ -98,7 +102,9 @@ def _aft_eval_density(ni, dm_sc, with_tau=False):
             ctypes.cast(L_bases.data.ptr, ctypes.c_void_p),
             ctypes.cast(mesh_cum.data.ptr, ctypes.c_void_p),
             ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
-            mesh.ctypes, ctypes.c_int(nbatches_shl_pair))
+            (ctypes.c_int*3)(*mesh),
+            ctypes.c_int(nbatches_shl_pair),
+            ctypes.c_double(weight))
         if err != 0:
             raise RuntimeError('contract_orth_aopair_dm kernel failed')
         _takebak_4d(rhoG, (rhoR, rhoI), mesh)
@@ -111,7 +117,7 @@ def _aft_eval_xc_matrix(ni, vxcG):
     bvkcell = ni.bvkcell
 
     a = bvkcell.lattice_vectors()
-    b = bvkcell.reciprocal_vectors()
+    b = cell.reciprocal_vectors()
 
     if isinstance(vxcG, cp.ndarray):
         vrhoG = vxcG.reshape(ni.mesh)
@@ -176,7 +182,7 @@ def _eval_density(ni, dm_sc, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = np.prod(ni.kmesh)
+    nkpts = len(ni.bvkmesh_Ls)
 
     work = cp.empty_like(rhoG)
     if not with_tau:
@@ -207,7 +213,7 @@ def _eval_density(ni, dm_sc, with_tau=False):
                 in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
             if len(dressed_bas_ij_idx) == 0: continue
             ntiles = len(grid_tile_idx)
-            tiles_per_block = min(60, max(1, ntiles // 10000))
+            tiles_per_block = min(100, max(1, ntiles // 10000))
             err = kern(
                 ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
                 ctypes.cast(tauR.data.ptr, ctypes.c_void_p),
@@ -285,7 +291,7 @@ def _eval_xc_mat(ni, vxcG):
                     in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
                 if len(dressed_bas_ij_idx) == 0: continue
                 ntiles = len(grid_tile_idx)
-                tiles_per_block = min(60, max(1, ntiles // 10000))
+                tiles_per_block = min(100, max(1, ntiles // 10000))
                 err = kern(
                     ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
                     ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
@@ -421,8 +427,15 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, precision,
     bvkcell = ni.bvkcell
     a = cell.lattice_vectors()
     mesh = ke_to_mesh(a, init_ke)
+
     ke_cutoff = ni.ke_cutoff
-    ke_max = min(ke_max, ke_cutoff)
+    mesh_max = np.asarray(ni.mesh, dtype=np.int32)
+    if ke_max < ke_cutoff:
+        mesh_final = ke_to_mesh(a, ke_max)
+        mesh_final = np.where(mesh_final < mesh_max, mesh_final, mesh_max)
+    else:
+        ke_max = ke_cutoff
+        mesh_final = mesh_max
 
     ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
     nimgs = np.asarray(bvkcell.nimgs, dtype=np.int32)
@@ -432,8 +445,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, precision,
     ke_lower, ke_upper = 0, init_ke
     while ke_lower < ke_max:
         if ke_upper >= ke_max:
-            mesh_upper = ke_to_mesh(a, ke_max)
-            mesh = np.where(mesh < mesh_upper, mesh, mesh_upper)
+            mesh = mesh_final
 
         filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
         if len(filtered_pairs) > 0:
@@ -468,7 +480,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
     a = cell.lattice_vectors()
     mesh = ke_to_mesh(a, init_ke)
     ke_max = ni.ke_cutoff
-    mesh_max = ni.mesh
+    mesh_final = ni.mesh
 
     ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
 
@@ -494,7 +506,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
         ke_upper = mesh_to_ke(a, mesh).min()
         if ke_upper >= ke_max:
             mesh = ke_to_mesh(a, ke_max)
-            mesh = np.where(mesh_max < mesh, mesh_max, mesh)
+            mesh = np.where(mesh_final < mesh, mesh_final, mesh)
 
         idx = cp.where((ke_lower < pair_ke) & (pair_ke <= ke_upper))[0]
         if len(idx) > 0:
@@ -732,6 +744,8 @@ def _takebak_4d(out, a, mesh):
     counts = 1
     if out.ndim == 4:
         counts, out_shape = out_shape[0], out_shape[1:]
+    assert all(x <= y for x, y in zip(mesh, out_shape)), \
+            'folding frequency down unsupported'
     err = libmgrid.fft_takebak(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
@@ -915,6 +929,53 @@ def _vxc_to_reciprocal_space(vxc, vxcG, Gv_bases=None, work=None):
     else:
         return vxcG
 
+def get_rho(ni, dm_kpts, kpts=None):
+    '''Density in real space
+
+    Args:
+        ni:
+            MultiGridNumInt instance
+        dm:
+            density matrix at a single k-point or density matrices for k-sampling
+
+    Kwargs:
+        kpts: (N, 3) ndarray
+            k points. If not specified, gamma point is assumed
+    '''
+    cell = ni.cell
+    mesh = ni.mesh
+
+    if ni.bvkcell is None:
+        kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
+        ni.build(kmesh, 'LDA')
+    assert len(dm_kpts) == np.prod(ni.kmesh)
+
+    cell = ni.cell
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dms = _format_dms(dm_kpts, kpts)
+    n_dm, nkpts, nao = dms.shape[:3]
+    assert n_dm == 1
+    dms = dms[0]
+
+    dms = cell.apply_C_mat_CT(dms)
+    dms *= 2
+
+    if nkpts == 1:
+        dm_sc = dms
+    else:
+        #expLk = fft_matrix(kmesh)
+        expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        dm_sc, dms = contract('kpq,Lk->qLp', dm_sc, expLk), None
+        assert absmax(dms.imag) < cell.precision*5e2
+        dm_sc = cp.asarray(dm_sc.real, order='C')
+
+    rhoG = _eval_density(ni, dm_sc)[0]
+
+    rhoR = ifft_in_place(rhoG.reshape(mesh)).real.ravel()
+    ngrids = np.prod(mesh)
+    rhoR *= ngrids / cell.vol
+    return rhoR
+
 def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
 
@@ -977,7 +1038,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         ni.build(kmesh, xctype)
 
     cell = ni.cell
-    log = logger.new_logger(cell, verbose)
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
@@ -985,16 +1045,19 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     dms = dms[0]
 
     dms = cell.apply_C_mat_CT(dms)
-    #Only the tril part is processed by the integral code
-    dms = transpose_sum(dms)
+    if hermi == 1:
+        dms *= 2
+    else:
+        #Only the tril part is processed by the integral code
+        dms = transpose_sum(dms)
 
-    #expLk = fft_matrix(kmesh)
     if nkpts == 1:
         dm_sc = dms
     else:
+        #expLk = fft_matrix(kmesh)
         expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        dm_sc, dms = contract('kpq,Lk->qLp', dm_sc, expLk), None
-        assert absmax(dms.imag) < cell.precision*5e2
+        dm_sc, dms = contract('kpq,Lk->qLp', dms, expLk), None
+        assert absmax(dm_sc.imag) < cell.precision*5e2
         dm_sc = cp.asarray(dm_sc.real, order='C')
 
     mesh = ni.mesh
@@ -1076,6 +1139,30 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     t0 = log.timer_debug1("xc matrix", *t0)
     return n_electrons, xc_energy_sum, veff
 
+def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
+           kpts=None, kpts_band=None, with_j=False, verbose=None):
+    '''Compute the XC energy and UKS XC matrix at sampled k-points.
+    multigrid version of function pbc.dft.numint.nr_rks.
+
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
+            Density matrix at each k-point.
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        kpts_band : ``(3,)`` ndarray or ``(*,3)`` ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+        with_j : bool
+            Whether to add the Coulomb matrix into the XC matrix.
+
+    Returns:
+        exc : XC energy
+        nelec : number of electrons obtained from the numerical integration
+        veff : (nkpts, nao, nao) ndarray
+            or list of veff if the input dm_kpts is a list of DMs
+    '''
+    raise NotImplementedError
+
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     enable_aft = True
 
@@ -1106,6 +1193,8 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             bvkmesh_Ls = np.zeros((1, 3))
         else:
             bvkcell = super_cell(cell, kmesh, wrap_around=True)
+            # PTR_BAS_COORD was not initialized in the super_cell function
+            bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             bvkmesh_Ls = translation_vectors_for_kmesh(cell, kmesh, wrap_around=True)
         self.bvkcell = bvkcell
         self.bvkmesh_Ls = bvkmesh_Ls
@@ -1115,8 +1204,8 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
         log.debug1('ft_ao bvk_ncells=%d, nimgs=%d', bvk_ncells, nimgs)
-        _env = _scale_sp_ctr_coeff(cell)
-        ao_loc = cell.ao_loc
+        _env = _scale_sp_ctr_coeff(bvkcell)
+        ao_loc = bvkcell.ao_loc
         self.mg_envs = PBCIntEnvVars.new(
             cell.natm, cell.nbas, bvk_ncells, nimgs,
             bvkcell._atm, bvkcell._bas, _env, ao_loc, Ls)
@@ -1195,18 +1284,22 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         t0 = log.timer_debug1('Initialize buckets', *t0)
         return self
 
-    get_j = get_j_kpts
-
-    nr_rks = nr_rks
-
 #    get_nuc = get_nuc
 #    get_pp = get_pp
-#
-#    get_rho = get_rho
-#    nr_rks = nr_rks
-#    nr_uks = nr_uks
-#    nr_vxc = get_vxc = multigrid_v1.MultiGridNumInt.get_vxc
-#
+
+    get_j = get_j_kpts
+
+    get_rho = get_rho
+    nr_rks = nr_rks
+    nr_uks = nr_uks
+
+    def get_vxc(self, cell, grids, xc_code, dm_kpts, spin=0, hermi=1,
+                kpts=None, kpts_band=None, with_j=False, verbose=None):
+        fn = self.nr_rks if spin == 0 else self.nr_uks
+        return fn(cell, grids, xc_code, dm_kpts, spin, hermi=hermi,
+                  kpts=kpts, kpts_band=kpts_band, with_j=with_j, verbose=verbose)
+    nr_vxc = get_vxc
+
     eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 

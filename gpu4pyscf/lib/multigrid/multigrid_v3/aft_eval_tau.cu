@@ -36,7 +36,7 @@ __global__ static
 void orth_ft_tau_dm_kernel(double *densityR, double *densityI, double *tauR, double *tauI,
                            double *dm, PBCIntEnvVars envs, int *shl_pair_offsets,
                            int64_t *bas_ij_idx, double *G_bases, double *L_bases,
-                           int *mesh_cum, int *nimgs_cum, int ntiles)
+                           int *mesh_cum, int *nimgs_cum, int ntiles, double factor)
 {
     int thread_id = threadIdx.x;
     int x_id = thread_id / NGV_PER_BLOCK;
@@ -104,8 +104,9 @@ void orth_ft_tau_dm_kernel(double *densityR, double *densityI, double *tauR, dou
             rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
             i0 = envs.ao_loc[ish];
             j0 = envs.ao_loc[jsh];
-            fac = OVERLAP_FAC * env[ci] * env[cj] / (aij * sqrt(aij));
-            if (ish == jsh) {
+            fac = OVERLAP_FAC * env[ci] * env[cj] / (aij * sqrt(aij)) * factor;
+            int jsh_cell0 = jsh % envs.nbas;
+            if (ish == jsh_cell0) {
                 fac *= .5;
             }
         }
@@ -341,7 +342,7 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
                             PBCIntEnvVars *envs, int *shl_pair_offsets,
                             int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                             int *mesh_cum, int *nimgs_cum, int *mesh,
-                            int nbatches_shl_pair)
+                            int nbatches_shl_pair, double factor)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -352,7 +353,7 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     orth_ft_tau_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS>>>(
         densityR, densityI, tauR, tauI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
-        mesh_cum, nimgs_cum, ntiles);
+        mesh_cum, nimgs_cum, ntiles, factor);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_ft_tau_dm_kernel: %s\n", cudaGetErrorString(err));

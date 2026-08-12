@@ -40,7 +40,8 @@ __global__ static
 void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
                            PBCIntEnvVars envs, int *shl_pair_offsets,
                            int64_t *bas_ij_idx, double *G_bases, double *L_bases,
-                           int *mesh_cum, int *nimgs_cum, int ntiles)
+                           int *mesh_cum, int *nimgs_cum, int ntiles,
+                           double factor)
 {
     int thread_id = threadIdx.x;
     int x_id = thread_id / NGV_PER_BLOCK;
@@ -104,8 +105,9 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
             rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
             i0 = envs.ao_loc[ish];
             j0 = envs.ao_loc[jsh];
-            fac = OVERLAP_FAC * env[ci] * env[cj] / (aij * sqrt(aij));
-            if (ish == jsh) {
+            fac = OVERLAP_FAC * env[ci] * env[cj] / (aij * sqrt(aij)) * factor;
+            int jsh_cell0 = jsh % envs.nbas;
+            if (ish == jsh_cell0) {
                 fac *= .5;
             }
         }
@@ -256,8 +258,9 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
         for (int n = 0; n < DENSITY_WIDTH; ++n) {
             int x = Gx0 + n;
             if (x >= mesh_x) break;
-            atomicAdd(outR+(x*mesh_y+y)*mesh_z+z, density_R[n]);
-            atomicAdd(outI+(x*mesh_y+y)*mesh_z+z, density_I[n]);
+            int abc_idx = (x*mesh_y+y)*mesh_z+z;
+            atomicAdd(outR+abc_idx, density_R[n]);
+            atomicAdd(outI+abc_idx, density_I[n]);
         }
     }
 }
@@ -277,7 +280,7 @@ int orth_contract_aopair_dm(double *outR, double *outI,
                             PBCIntEnvVars *envs, int *shl_pair_offsets,
                             int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                             int *mesh_cum, int *nimgs_cum, int *mesh,
-                            int nbatches_shl_pair)
+                            int nbatches_shl_pair, double factor)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -288,7 +291,7 @@ int orth_contract_aopair_dm(double *outR, double *outI,
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     orth_aopair_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS>>>(
         outR, outI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
-        mesh_cum, nimgs_cum, ntiles);
+        mesh_cum, nimgs_cum, ntiles, factor);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_aopair_dm_kernel: %s\n", cudaGetErrorString(err));
