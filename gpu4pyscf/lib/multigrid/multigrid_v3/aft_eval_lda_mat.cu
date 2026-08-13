@@ -103,7 +103,7 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
 
         constexpr int stride_i = NGV_PER_BLOCK * 6;
         constexpr int stride_j = stride_i * LMAX1;
-        for (int n = thread_id; n < stride_j*(lj+2); n += THREADS) {
+        for (int n = thread_id; n < stride_j*(lj+1); n += THREADS) {
             gx[n] = 0;
         }
         __syncthreads();

@@ -128,12 +128,12 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
         if (gaussian_starting_exponent > 680.) {
             continue;
         }
-        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
-        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
-        double cc = ci * cj;
         int ish_cell0 = ish;
         int bvk_cell_id = jsh / nbas;
         int jsh_cell0 = jsh - nbas * bvk_cell_id;
+        double ci = env[bas[ish_cell0*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh_cell0*BAS_SLOTS+PTR_COEFF]];
+        double cc = ci * cj;
         if (ish_cell0 == jsh_cell0) {
             cc *= .5;
         }
@@ -161,13 +161,9 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
             }
 
             double x, y, z;
-            double recursion_factor_ab_pow_a = 1;
-            double recursion_factor_ac_pow_a = 1;
             double recursion_factor_bc_pow_b = 1;
 
             if constexpr (is_non_orthogonal) {
-                // recursion_factor_ab_pow_a = 1;
-                // recursion_factor_ac_pow_a = 1;
             } else {
                 x = start_position_x;
             }
@@ -183,7 +179,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                     y = start_position_y;
                 }
                 double gaussian_xy = gaussian_x;
-                double recursion_factor_b = recursion_factor_b_start * recursion_factor_ab_pow_a;
+                double recursion_factor_b = recursion_factor_b_start;
                 for (int b_index = 0; b_index < b_upper; b_index++,
                      gaussian_xy *= recursion_factor_b,
                      recursion_factor_b *= exp_db_squared) {
@@ -196,8 +192,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                         z = start_position_z;
                     }
                     double gaussian_xyz = gaussian_xy;
-                    double recursion_factor_c = recursion_factor_c_start *
-                            recursion_factor_ac_pow_a * recursion_factor_bc_pow_b;
+                    double recursion_factor_c = recursion_factor_c_start * recursion_factor_bc_pow_b;
                     for (int c_index = 0; c_index < c_upper; c_index++,
                          gaussian_xyz *= recursion_factor_c,
                          recursion_factor_c *= exp_dc_squared) {
@@ -256,8 +251,8 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                     }
                 }
                 if constexpr (is_non_orthogonal) {
-                    recursion_factor_ab_pow_a *= exp_dadb;
-                    recursion_factor_ac_pow_a *= exp_dadc;
+                    recursion_factor_b_start *= exp_dadb;
+                    recursion_factor_c_start *= exp_dadc;
                 } else {
                     x += c_dxyz_dabc[0];
                 }
@@ -266,14 +261,14 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
             size_t nao = envs.ao_loc[nbas];
             int i0 = envs.ao_loc[ish_cell0];
             int j0 = envs.ao_loc[jsh_cell0];
-            size_t ij_offset = bvk_cell_id * nao * nao + (dm_i0+i0) * nao + dm_j0+j0;
+            double *pout = out + bvk_cell_id * nao * nao + (dm_i0+i0) * nao + dm_j0+j0;
 #pragma unroll
             for (int i = 0; i < SLICE_SIZE_I; ++i) {
                 if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
 #pragma unroll
             for (int j = 0; j < SLICE_SIZE_J; ++j) {
                 if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                atomicAdd(out + ij_offset + i*nao+j, vj_cache[i*SLICE_SIZE_J+j]);
+                atomicAdd(pout + i*nao+j, vj_cache[i*SLICE_SIZE_J+j]);
             } }
         } }
     }
@@ -535,9 +530,9 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
 }
 
 extern "C" {
-#define eval_mgga_mat_kernel_case(li, lj, slice_i, slice_j, orth) \
+#define eval_mgga_mat_kernel_case(li, lj, slice_i, slice_j, non_orth) \
     case (li * LMAX1 + lj): \
-        eval_mgga_mat_kernel<li,lj,slice_i,slice_j,orth><<<block_grid, THREADS>>>( \
+        eval_mgga_mat_kernel<li,lj,slice_i,slice_j,non_orth><<<block_grid, THREADS>>>( \
             out, vxc, vtau, *envs, supmol_img_coords, shl_pair_offsets, dressed_bas_ij_idx, \
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
@@ -562,21 +557,21 @@ int evaluate_mgga_mat(double *out, double *vxc, double *vtau, PBCIntEnvVars *env
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
     switch (i_angular * LMAX1 + j_angular) {
-        eval_mgga_mat_kernel_case(0,0, 1, 1, 0);
-        eval_mgga_mat_kernel_case(1,0, 3, 1, 0);
-        eval_mgga_mat_kernel_case(1,1, 3, 3, 0);
-        eval_mgga_mat_kernel_case(2,0, 6, 1, 0);
-        eval_mgga_mat_kernel_case(2,1, 6, 3, 0);
-        eval_mgga_mat_kernel_case(2,2, 6, 6, 0);
-        eval_mgga_mat_kernel_case(3,0,10, 1, 0);
-        eval_mgga_mat_kernel_case(3,1,10, 3, 0);
-        eval_mgga_mat_kernel_case(3,2,10, 6, 0);
-        eval_mgga_mat_kernel_case(3,3, 5,10, 0);
-        eval_mgga_mat_kernel_case(4,0,15, 1, 0);
-        eval_mgga_mat_kernel_case(4,1,15, 3, 0);
-        eval_mgga_mat_kernel_case(4,2,15, 3, 0);
-        eval_mgga_mat_kernel_case(4,3, 8, 5, 0);
-        eval_mgga_mat_kernel_case(4,4,15, 3, 0);
+        eval_mgga_mat_kernel_case(0,0, 1, 1, 1);
+        eval_mgga_mat_kernel_case(1,0, 3, 1, 1);
+        eval_mgga_mat_kernel_case(1,1, 3, 3, 1);
+        eval_mgga_mat_kernel_case(2,0, 6, 1, 1);
+        eval_mgga_mat_kernel_case(2,1, 6, 3, 1);
+        eval_mgga_mat_kernel_case(2,2, 6, 6, 1);
+        eval_mgga_mat_kernel_case(3,0,10, 1, 1);
+        eval_mgga_mat_kernel_case(3,1,10, 3, 1);
+        eval_mgga_mat_kernel_case(3,2,10, 6, 1);
+        eval_mgga_mat_kernel_case(3,3, 5,10, 1);
+        eval_mgga_mat_kernel_case(4,0,15, 1, 1);
+        eval_mgga_mat_kernel_case(4,1,15, 3, 1);
+        eval_mgga_mat_kernel_case(4,2,15, 3, 1);
+        eval_mgga_mat_kernel_case(4,3, 8, 5, 1);
+        eval_mgga_mat_kernel_case(4,4,15, 3, 1);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

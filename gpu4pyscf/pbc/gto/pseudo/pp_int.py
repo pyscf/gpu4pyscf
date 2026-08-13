@@ -111,7 +111,7 @@ def _contract_ppnl_gpu(cell, fakecell, hl_blocks, ppnl_half, comp=1, kpts=None):
 
             ppnl_k += cp.einsum('imp,ij,jmq->pq', ilp, hl_gpu, ilp)
 
-        ppnl.append(ppnl_k.get())
+        ppnl.append(ppnl_k)
 
     if kpts is None or np.shape(kpts) == (3,):
         return ppnl[0]

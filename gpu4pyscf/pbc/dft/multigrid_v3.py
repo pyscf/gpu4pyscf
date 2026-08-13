@@ -70,7 +70,7 @@ def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
     b = cell.reciprocal_vectors()
 
-    nkpts = len(kpts) if kpts is not None else np.prod(ni.kmesh)
+    nkpts = len(ni.bvkmesh_Ls)
     weight = 1./nkpts
 
     rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
@@ -200,7 +200,7 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = len(kpts) if kpts is not None else np.prod(ni.kmesh)
+    nkpts = len(ni.bvkmesh_Ls)
 
     work = cp.empty_like(rhoG)
     if not with_tau:
@@ -441,8 +441,7 @@ def mesh_to_ke(a, mesh):
     ke_cutoff = Gmax**2 / 2
     return ke_cutoff.min()
 
-def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, precision,
-                          xctype, log):
+def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     cell = ni.cell
     bvkcell = ni.bvkcell
     a = cell.lattice_vectors()
@@ -464,9 +463,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, precision,
 
     ke_lower, ke_upper = 0, init_ke
     while ke_lower < ke_max:
-        if ke_upper >= ke_max:
-            mesh = mesh_final
-
+        mesh = np.where(mesh < mesh_final, mesh, mesh_final)
         filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
         if len(filtered_pairs) > 0:
             ish, jsh = divmod(filtered_pairs, NBAS_MAX)
@@ -502,16 +499,9 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
     ke_max = ni.ke_cutoff
     mesh_final = ni.mesh
 
-    ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
-
-    # a penalty to encounter for lattice sum
-    rad = cell.rcut / ni.bvkcell.vol**(1./3) + 1
-    surface = 4*np.pi * rad**2
-    lattice_sum_factor = surface
-    log.debug1('lattice_sum_factor for fft_buckets = %g', lattice_sum_factor)
-    precision /= lattice_sum_factor
-
     vol = cell.vol
+
+    ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
 
     supmol_bas_ij_idx = _bvk_pairs_to_supmol_pairs(
         ni, pair_idx, precision, xctype)
@@ -523,11 +513,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
 
     ke_lower, ke_upper = 0, init_ke
     while ke_lower < ke_max:
-        ke_upper = mesh_to_ke(a, mesh).min()
-        if ke_upper >= ke_max:
-            mesh = ke_to_mesh(a, ke_max)
-            mesh = np.where(mesh_final < mesh, mesh_final, mesh)
-
+        mesh = np.where(mesh < mesh_final, mesh, mesh_final)
         idx = cp.where((ke_lower < pair_ke) & (pair_ke <= ke_upper))[0]
         if len(idx) > 0:
             filtered_pairs = supmol_bas_ij_idx[idx]
@@ -577,7 +563,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
                       ke_upper, tuple(mesh), len(filtered_pairs), ao_val_threshold)
 
         mesh = (mesh * 1.2).astype(np.int32)
-        ke_lower = ke_upper
+        ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
     return buckets
 
 def _non_trivial_bvk_pairs(ni, precision):
@@ -894,7 +880,10 @@ def _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=None):
     '''
     Perform
         stack(ifft(rhoG), cp.einsum('g,gx->xg', rhoG, 1j*Gv), ifft(tauG)).real
-    with reduced memory footprint
+    with reduced memory footprint.
+
+    Note, this function will use tauG as workspace and the contents of tauG will
+    be destroyed
     '''
     assert rhoG.ndim == 3
     mesh = rhoG.shape
@@ -905,13 +894,14 @@ def _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=None):
     elif xctype == 'MGGA':
         nvar = 5
 
-    work = None
     out = ndarray((nvar, *mesh), dtype=np.float64, buffer=out)
     if xctype == 'MGGA':
         assert tauG is not None
         tauR = ifft_in_place(tauG.reshape(mesh))
         out[4] = tauR.real
         work = tauG
+    else:
+        work = ndarray(mesh, dtype=np.complex128, buffer=tauG)
 
     if xctype != 'LDA':
         Gx, Gy, Gz = Gv_bases
@@ -919,13 +909,14 @@ def _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=None):
             work = _apply_Gv_1j(rhoG, Gx[n], Gy[n], Gz[n], work)
             out[n+1] = ifft_in_place(work).real
 
-    out[0] = ifft_in_place(rhoG).real
-    return out
+    work[:] = rhoG
+    out[0] = ifft_in_place(work).real
+    return out.reshape(nvar, -1)
 
-def _vxc_to_reciprocal_space(vxc, vxcG, Gv_bases=None, work=None):
+def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
     '''
     Perform
-        fft(vxc[0]) + cp.einsum('xg,gx->g', fft(vxc[0]), -1j*Gv)
+        out += fft(vxc[0]) + cp.einsum('xg,gx->g', fft(vxc[0]), -1j*Gv)
     with reduced memory footprint
     '''
     assert vxc.ndim == 4
@@ -937,24 +928,25 @@ def _vxc_to_reciprocal_space(vxc, vxcG, Gv_bases=None, work=None):
     work.real = vxc[0].reshape(mesh)
     work.imag.fill(0.)
     fft_in_place(work)
-    vxcG += work
+    out += work
 
     if Gv_bases is not None:
         Gx, Gy, Gz = Gv_bases
         for n in range(3):
             work.real = vxc[n+1].reshape(mesh)
             work.imag.fill(0.)
-            _contract_Gv_1j(vxcG, fft_in_place(work), Gx[n], Gy[n], Gz[n])
+            _contract_Gv_1j(out, fft_in_place(work), Gx[n], Gy[n], Gz[n])
 
     if is_mgga:
         work.real = vxc[4].reshape(mesh)
         work.imag.fill(0.)
         vxcG_tau = fft_in_place(work)
-        return vxcG, vxcG_tau
+        return out, vxcG_tau
     else:
-        return vxcG
+        return out
 
 def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1):
+    assert kpts.ndim == 2
     cell = ni.cell
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -967,11 +959,14 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1):
         dms = transpose_sum(dms.reshape(n_dm*nkpts,nao,nao), inplace=False)
         dms = dms.reshape(n_dm, nkpts, nao, nao)
 
-    if nkpts == 1:
+    bvk_ncells = len(ni.bvkmesh_Ls)
+    if bvk_ncells == 1:
         dm_sc = dms
     else:
-        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        expLk = fft_matrix(ni.kmesh)
+        if bvk_ncells != nkpts:
+            expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        else:
+            expLk = fft_matrix(ni.kmesh)
         dm_sc = contract('nkpq,Lk->nLqp', dms, expLk)
         assert absmax(dm_sc.imag) < cell.precision*5e2
     dm_sc = cp.asarray(dm_sc.real, order='C')
@@ -988,11 +983,14 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1):
 def _inverse_wannier_transform_fock(ni, veff, kpts):
     veff = ni.cell.apply_CT_mat_C(veff)
 
-    nkpts = len(kpts) if kpts is not None else np.prod(ni.kmesh)
-    if nkpts != 1:
-        #expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        expLk = fft_matrix(ni.kmesh)
-        expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
+    bvk_ncells = len(ni.bvkmesh_Ls)
+    if bvk_ncells != 1:
+        if kpts is not None and len(kpts) != bvk_ncells:
+            expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        else:
+            expLk = fft_matrix(ni.kmesh)
+        nkpts = expLk.shape[1]
+        expLkz = expLk.view(np.float64).reshape(bvk_ncells, nkpts, 2)
         veff = contract('Lpq,Lkz->kpqz', veff, expLkz)
         veff = veff.view(np.complex128)[:,:,:,0]
 
@@ -1016,10 +1014,12 @@ def get_rho(ni, dm_kpts, kpts=None):
     cell = ni.cell
     mesh = ni.mesh
 
-    if ni.bvkcell is None:
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
-        ni.build(kmesh, 'LDA')
-    assert len(dm_kpts) == np.prod(ni.kmesh)
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+
+    ni._ensure_initialized(kpts, 'LDA')
 
     dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1)
     n_dm, nkpts, nao = dm_sc.shape[:3]
@@ -1040,9 +1040,7 @@ def get_nuc(ni, kpts=None):
     else:
         kpts = kpts.reshape(-1, 3)
 
-    kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
-    if ni.bvkcell is None or any(ni.kmesh != kmesh):
-        ni.build(kmesh, 'LDA') # change to MGGA?
+    ni._ensure_initialized(kpts, 'LDA')
 
     vneG = _eval_nucG(cell, ni.mesh)
     vne = _eval_xc_mat(ni, vneG)
@@ -1078,9 +1076,7 @@ def get_pp(ni, kpts=None):
     else:
         kpts = kpts.reshape(-1, 3)
 
-    kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
-    if ni.bvkcell is None or any(ni.kmesh != kmesh):
-        ni.build(kmesh, 'LDA') # change to MGGA?
+    ni._ensure_initialized(kpts, 'LDA')
 
     mesh = ni.mesh
     # Compute the vpplocG as
@@ -1092,7 +1088,7 @@ def get_pp(ni, kpts=None):
 
     vppnl = get_pp_nl_gpu(cell, kpts)
     if kpts is None or is_zero(kpts):
-        vpp += vppnl.real
+        vpp += vppnl[0].real
     else:
         vpp += vppnl
 
@@ -1121,7 +1117,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         or list of vj if the input dm_kpts is a list of DMs
     '''
     assert dm_kpts.ndim < 4
-    return nr_rks(ni, ni.cell, None, 'HF', dm_kpts,
+    return nr_rks(ni, ni.cell, None, 'HF', dm_kpts, hermi=hermi,
                   kpts=kpts, kpts_band=kpts_band, with_j=True)[2]
 
 def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
@@ -1159,9 +1155,11 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     else:
         raise NotImplementedError(f'XC functional {xc_code}')
 
-    kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
-    if ni.bvkcell is None or any(ni.kmesh != kmesh):
-        ni.build(kmesh, xctype)
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+    ni._ensure_initialized(kpts, xctype)
 
     dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi)
     assert len(dm_sc) == 1
@@ -1173,8 +1171,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
     rhoG, tauG = _eval_density(ni, dm_sc, with_tau=xctype=='MGGA')
-
-    rhoG = rhoG.reshape(mesh)
     n_electrons = float(rhoG[0,0,0].real.get())
 
     if xctype == 'HF':
@@ -1187,9 +1183,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_energy_sum = None
 
     else:
-        density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
-        density = density.reshape(nvar, ngrids)
-        density = cp.asarray(density, dtype=np.float64, order='C')
+        density = cp.empty((nvar, ngrids))
+        _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density)
         # *(1./weight) because rhoR is scaled by weight in _eval_density. If
         # computing rhoR with IFFT, the weight factor is not needed.
         weight = cell.vol / ngrids
@@ -1284,9 +1279,12 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         raise NotImplementedError(f'XC functional {xc_code}')
 
     assert kpts_band is None
-    kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
-    if ni.bvkcell is None or any(ni.kmesh != kmesh):
-        ni.build(kmesh, xctype)
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+
+    ni._ensure_initialized(kpts, xctype)
 
     dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi)
     assert len(dm_sc) == 2
@@ -1298,15 +1296,15 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
-    density = cp.empty((2, nvar, *mesh))
+    density = cp.empty((2, nvar, ngrids))
     rhoG, tauG = _eval_density(ni, dm_sc[0], with_tau=xctype=='MGGA')
-    _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
     n_electrons_a = rhoG[0,0,0].real.get()
+    _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
     rhoG_sf, tauG = rhoG, None
 
     rhoG, tauG = _eval_density(ni, dm_sc[1], with_tau=xctype=='MGGA')
-    _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[1])
     n_electrons_b = rhoG[0,0,0].real.get()
+    _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[1])
     rhoG_sf += rhoG
     # release tauG's memory, keep rhoG. rhoG will be used as the workspace for
     # _get_coulomb_on_g_mesh
@@ -1314,8 +1312,6 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     n_electrons = np.array([n_electrons_a, n_electrons_b])
 
-    density = density.reshape(2,nvar,ngrids)
-    density = cp.asarray(density, dtype=np.float64, order='C')
     # *(1./weight) because rhoR is scaled by weight in _eval_density. If
     # computing rhoR with IFFT, the weight factor is not needed.
     density *= 1./weight
@@ -1392,6 +1388,272 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     t0 = log.timer_debug1("xc matrix", *t0)
     return n_electrons, xc_energy_sum, veff
 
+#def get_veff_ip1(
+#    ni,
+#    xc_code,
+#    dm_kpts,
+#    hermi=1,
+#    kpts=None,
+#    with_j=True,
+#    with_pseudo_vloc_orbital_derivative=True,
+#    verbose=None,
+#):
+#    '''Computes the derivatives of the Exc along with additional contributions
+#    from the Coulomb and pseudopotential terms.
+#
+#    Note, the current return is the energy per cell scaled by the number of
+#    k-points. This should return the energy per cell directly and will be
+#    changed in future.
+#    '''
+#    if kpts is None:
+#        kpts = np.zeros((1, 3))
+#    else:
+#        kpts = kpts.reshape(-1, 3)
+#    log = logger.new_logger(ni, verbose)
+#    t0 = log.init_timer()
+#    cell = ni.cell
+#    dm_kpts = cp.asarray(dm_kpts, order="C")
+#    dms = _format_dms(dm_kpts, kpts)
+#    nset = dms.shape[0]
+#    dms = None
+#
+#    xc_type = ni._xc_type(xc_code)
+#    mesh = ni.mesh
+#    ngrids = np.prod(mesh)
+#    density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
+#
+#    Gv = get_Gv(cell, mesh)
+#    coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
+#    coulomb_on_g_mesh = cp.einsum(
+#        "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
+#    )
+#
+#    weight = cell.vol / ngrids
+#
+#    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+#    # computing rhoR with IFFT, the weight factor is not needed.
+#    density = (
+#        cp.asarray(
+#            ifft_in_place(density.reshape(nset, -1, *mesh)).real,
+#            order="C",
+#        ).reshape(nset, -1, ngrids)
+#        / weight
+#    )
+#
+#    if nset == 1: # RHF
+#        xc_for_fock = ni.eval_xc_eff(
+#            xc_code, density[0], deriv=1, xctype=xc_type, spin=0
+#        )[1]
+#    else: # UHF
+#        assert nset == 2
+#        xc_for_fock = ni.eval_xc_eff(
+#            xc_code, density, deriv=1, xctype=xc_type, spin=1
+#        )[1]
+#
+#    xc_for_fock = xc_for_fock.reshape(nset, -1, *mesh) * weight
+#    xc_for_fock = fft_in_place(xc_for_fock).reshape(nset, -1, ngrids)
+#
+#    if xc_type == "LDA" or xc_type == 'HF':
+#        pass
+#    elif xc_type == "GGA":
+#        xc_for_fock = (
+#            xc_for_fock[:, 0] - contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
+#        )
+#        xc_for_fock = xc_for_fock.reshape((nset, -1, ngrids))
+#    elif xc_type == "MGGA":
+#        xc_for_fock[:, 0] -= contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
+#        xc_for_fock = cp.concatenate([
+#            xc_for_fock[:, 0].reshape((nset, -1, ngrids)),
+#            xc_for_fock[:, 4].reshape((nset, -1, ngrids)),
+#        ], axis = 1)
+#    else:
+#        raise ValueError(f"Incorrect xc_type = {xc_type}")
+#
+#    if with_j:
+#        xc_for_fock[:, 0] += coulomb_on_g_mesh
+#
+#    if with_pseudo_vloc_orbital_derivative:
+#        if cell._pseudo:
+#            xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG(cell, mesh)
+#        else:
+#            xc_for_fock[:, 0] += multigrid_v1.eval_nucG(cell, mesh)
+#
+#    veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
+#        ni, xc_for_fock, dm_kpts, hermi, kpts, with_tau = (xc_type == "MGGA")
+#    )
+#
+#    t0 = log.timer("veff_gradient", *t0)
+#
+#    return veff_gradient
+#
+#def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+#    '''Strain derivatives for Coulomb and Exc with k-point samples
+#
+#    Kwargs:
+#        with_j : Whether to include the electron-electron Coulomb interactions
+#        with_nuc : Whether to include the electron-nuclear Coulomb interactions
+#    '''
+#    from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
+#    from gpu4pyscf.pbc.grad.rks_stress import (
+#        _finite_diff_cells,
+#        _get_weight_strain_derivatives)
+#    from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
+#
+#    cell = ni.cell
+#    if kpts is None:
+#        kpts = np.zeros((1, 3))
+#    else:
+#        kpts = kpts.reshape(-1, 3)
+#    dm_kpts = cp.asarray(dm_kpts, order='C')
+#
+#    mesh = ni.mesh
+#    grids = UniformGrids(cell)
+#    grids.mesh = mesh
+#
+#    xctype = ni._xc_type(xc_code)
+#    rho0 = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xctype)
+#    nset, nvar, ngrids = rho0.shape
+#    assert nset == 1
+#    assert ngrids == np.prod(mesh)
+#    rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(nvar, ngrids)
+#    rho0 *= ngrids / cell.vol
+#
+#    ni_copy = ni.copy()
+#    def update_pairs_info(cell1):
+#        r = asarray(cell1.atom_coords().ravel())
+#        atm = ni.sorted_gaussian_pairs[0]['atm']
+#        atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
+#        lattice_vectors = cell1.lattice_vectors()
+#        neighboring_images = asarray(gto.eval_gto.get_lattice_Ls(cell1))
+#        pairs = []
+#        for pair in ni.sorted_gaussian_pairs:
+#            pair = pair.copy()
+#            pairs.append(pair)
+#            env = pair['env'].copy()
+#            env[atom_coords_address] = r
+#            pair['env'] = env
+#            pair['is_non_orthogonal'] = 1
+#            pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None]
+#            pair['neighboring_images'] = neighboring_images
+#        ni_copy.cell = cell1
+#        ni_copy.sorted_gaussian_pairs = pairs
+#
+#    disp = 1e-4
+#    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+#    rho1 = cp.empty((3, 3, nvar, ngrids))
+#    for x in range(3):
+#        for y in range(3):
+#            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+#            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+#            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+#
+#            update_pairs_info(cell1)
+#            rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
+#            rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
+#            rho_plus *= ngrids / cell1.vol
+#
+#            update_pairs_info(cell2)
+#            rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
+#            rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
+#            rho_minus *= ngrids / cell2.vol
+#
+#            rho1[x,y] = (rho_plus - rho_minus).reshape(nvar, ngrids) / (disp * 2)
+#
+#    weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
+#    exc, vxc = ni.eval_xc_eff(xc_code, rho0, 1, xctype=xctype, spin=0)[:2]
+#    out  = cp.einsum('xyng,ng->xy', rho1, vxc).real.get() * weight_0
+#    out += cp.einsum('g,g->', rho0[0], exc.ravel()).real.get() * weight_1
+#
+#    out += _contract_coulomb_and_nuc(cell, mesh, dm_kpts, kpts, rho0[0],
+#                                     rho1[:,:,0], grids, with_j, with_nuc)
+#    return out
+#
+#def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+#    '''Strain derivatives for Coulomb and Exc with k-point samples
+#
+#    Kwargs:
+#        with_j : Whether to include the electron-electron Coulomb interactions
+#        with_nuc : Whether to include the electron-nuclear Coulomb interactions
+#    '''
+#    from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
+#    from gpu4pyscf.pbc.grad.rks_stress import (
+#        _finite_diff_cells,
+#        _get_weight_strain_derivatives)
+#    from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
+#
+#    cell = ni.cell
+#    if kpts is None:
+#        kpts = np.zeros((1, 3))
+#    else:
+#        kpts = kpts.reshape(-1, 3)
+#    dm_kpts = cp.asarray(dm_kpts, order='C')
+#    assert dm_kpts.ndim == 4
+#
+#    mesh = ni.mesh
+#    grids = UniformGrids(cell)
+#    grids.mesh = mesh
+#
+#    xctype = ni._xc_type(xc_code)
+#    rho0 = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xctype)
+#    nset, nvar, ngrids = rho0.shape
+#    assert nset == 2
+#    assert ngrids == np.prod(mesh)
+#    rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(2, nvar, ngrids)
+#    rho0 *= ngrids / cell.vol
+#
+#    ni_copy = ni.copy()
+#    def update_pairs_info(cell1):
+#        r = asarray(cell1.atom_coords().ravel())
+#        atm = ni.sorted_gaussian_pairs[0]['atm']
+#        atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
+#        lattice_vectors = cell1.lattice_vectors()
+#        neighboring_images = asarray(gto.eval_gto.get_lattice_Ls(cell1))
+#        pairs = []
+#        for pair in ni.sorted_gaussian_pairs:
+#            pair = pair.copy()
+#            pairs.append(pair)
+#            env = pair['env'].copy()
+#            env[atom_coords_address] = r
+#            pair['env'] = env
+#            pair['is_non_orthogonal'] = 1
+#            pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None]
+#            pair['neighboring_images'] = neighboring_images
+#        ni_copy.cell = cell1
+#        ni_copy.sorted_gaussian_pairs = pairs
+#
+#    disp = 1e-4
+#    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+#    rho1 = cp.empty((3, 3, 2, nvar, ngrids))
+#    for x in range(3):
+#        for y in range(3):
+#            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+#            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+#            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+#
+#            update_pairs_info(cell1)
+#            rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
+#            rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
+#            rho_plus *= ngrids / cell1.vol
+#
+#            update_pairs_info(cell2)
+#            rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
+#            rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
+#            rho_minus *= ngrids / cell2.vol
+#
+#            rho1[x,y] = (rho_plus - rho_minus).reshape(2, nvar, ngrids) / (disp * 2)
+#
+#    weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
+#    exc, vxc = ni.eval_xc_eff(xc_code, rho0, 1, xctype=xctype, spin=1)[:2]
+#    out = cp.einsum('xysng,sng->xy', rho1, vxc).real.get() * weight_0
+#    rho0_sf = rho0[:,0].sum(axis=0)
+#    rho1_sf = rho1[:,:,:,0].sum(axis=2)
+#    out += cp.einsum('g,g->', rho0_sf, exc.ravel()).real.get() * weight_1
+#
+#    dm_sf = dm_kpts[0] + dm_kpts[1]
+#    out += _contract_coulomb_and_nuc(cell, mesh, dm_sf, kpts, rho0_sf,
+#                                     rho1_sf, grids, with_j, with_nuc)
+#    return out
+
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     # Enable analytical Fourier transforms (AFT), which are typically more
     # efficient for small unit cells.
@@ -1414,6 +1676,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         self.supmol_img_coords = None
         self.aft_buckets = None
         self.fft_buckets = None
+        self.xctype = None
 
     def build(self, kmesh=None, xctype='MGGA'):
         log = logger.new_logger(self.cell)
@@ -1450,7 +1713,12 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         b = cell.reciprocal_vectors(norm_to=1)
         libmgrid.update_lattice_vectors(a.ctypes, b.ctypes)
 
-        precision = cell.precision
+        # a penalty to encounter for lattice sum
+        rad = cell.rcut / bvkcell.vol**(1./3) + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = surface
+        log.debug1('lattice_sum_factor = %g', lattice_sum_factor)
+        precision = cell.precision / lattice_sum_factor
         bas_ij_idx = _non_trivial_bvk_pairs(self, precision)
 
         # Initialize buckets
@@ -1471,12 +1739,12 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
                 self, bas_ij_idx, self.ke_cutoff, precision, xctype)
 
             aft_init_ke = mesh_to_ke(a, [16]*3)
+            # TODO: aft_final_ke based on system size
             aft_final_ke = aft_init_ke * 25
             log.debug1('aft initial/final ke_cutoff = %g, %g', aft_init_ke,
                        aft_final_ke)
             self.aft_buckets = _partition_ke_for_aft(
-                self, bas_ij_idx, aft_Ecut, aft_init_ke, aft_final_ke,
-                precision, xctype, log)
+                self, bas_ij_idx, aft_Ecut, aft_init_ke, aft_final_ke, xctype, log)
 
             # Filter shell pairs that are not handled by AFT. The remaining pairs
             # are handled by FFT.
@@ -1522,6 +1790,16 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         t0 = log.timer_debug1('Initialize buckets', *t0)
         return self
 
+    def _ensure_initialized(self, kpts, xctype):
+        kmesh = k2gamma.kpts_to_kmesh(self.cell, kpts)
+        if (self.bvkcell is None or
+            any(self.kmesh != kmesh) or
+            # LDA and GGA share the same initialization parameters.
+            # MGGA requires a little bit higher energy cutoff and rcut
+            (xctype == 'MGGA' and self.xctype != xctype)):
+            self.build(kmesh, xctype)
+        return self
+
     get_nuc = get_nuc
     get_pp = get_pp
 
@@ -1554,10 +1832,18 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         assert len(kpts) == nkpts
 
         xctype = self._xc_type(xc_code)
-        if xctype == 'HF':
+        if xctype == 'LDA':
+            nvar = 1
+        elif xctype == 'GGA':
+            nvar = 4
+        elif xctype == 'MGGA':
+            nvar = 5
+        elif xctype == 'HF':
             return cp.zeros_like(dms)
+        else:
+            raise NotImplementedError(f'XC functional {xc_code}')
 
-        assert xctype in ('LDA', 'GGA', 'MGGA')
+        self._ensure_initialized(kpts, xctype)
 
         if fxc is None:
             spin = 0
@@ -1567,6 +1853,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
 
         cell = self.cell
         mesh = self.mesh
+        ngrids = np.prod(mesh)
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
         dm_sc = _wannier_transform_dm(self, dms, kpts, hermi)
@@ -1574,7 +1861,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             rhoG, tauG = _eval_density(self, dm_sc[i_dm], with_tau=xctype=='MGGA')
             rho1 = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
 
-            wv = cp.einsum('xg,xyg->yg', rho1, fxc).reshape(-1, *mesh)
+            wv = cp.einsum('xg,xyg->yg', rho1, fxc).reshape(nvar, *mesh)
             rho1 = None
 
             if with_j:
@@ -1625,6 +1912,8 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         else:
             raise NotImplementedError(f'XC functional {xc_code}')
 
+        self._ensure_initialized(kpts, xctype)
+
         if fxc is None:
             spin = 1
             fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts, is_rhf=False)[2]
@@ -1633,15 +1922,15 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
 
         cell = self.cell
         mesh = self.mesh
+        ngrids = np.prod(mesh)
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
         dm_sc = _wannier_transform_dm(self, dms, kpts, hermi)
         for i_dm in range(n_dm):
-            rho1 = cp.empty((2, nvar, *mesh))
+            rho1 = cp.empty((2, nvar, ngrids))
             rhoG_sf = None
             for s in range(2):
                 rhoG, tauG = _eval_density(self, dm_sc[s,i_dm], with_tau=xctype=='MGGA')
-                rhoG = rhoG.reshape(mesh)
                 if rhoG_sf is None:
                     rhoG_sf = rhoG
                 else:
@@ -1677,8 +1966,21 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         return out.reshape(dms.shape)
 
     def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
-        if isinstance(kpts, KPoints):
-            raise NotImplementedError
+        if kpts is None:
+            kpts = np.zeros((1,3))
+        elif isinstance(kpts, KPoints):
+            kpts = kpts.kpts_ibz
+        assert kpts.ndim == 2
+
+        xctype = self._xc_type(xc_code)
+        if xctype == 'LDA':
+            nvar = 1
+        elif xctype == 'GGA':
+            nvar = 4
+        elif xctype == 'MGGA':
+            nvar = 5
+
+        self._ensure_initialized(kpts, xctype)
 
         dms = _format_dms(dm, kpts)
         if is_rhf is None:
@@ -1689,36 +1991,30 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             assert spin == 1
             assert len(dms) == 2
 
-        dm_sc = _wannier_transform_dm(self, dm, kpts, hermi=1)
-
-        xctype = self._xc_type(xc_code)
-        if xctype == 'LDA':
-            nvar = 1
-        elif xctype == 'GGA':
-            nvar = 4
-        elif xctype == 'MGGA':
-            nvar = 5
+        dm_sc = _wannier_transform_dm(self, dm, kpts)#, hermi=1)
 
         mesh = self.mesh
+        ngrids = np.prod(mesh)
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
         if is_rhf:
             rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
             if spin == 1:
-                density = cp.empty((2, nvar, *mesh))
+                density = cp.empty((2, nvar, ngrids))
                 _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
                 density[0] *= .5
                 density[1] = density[0]
             else:
                 density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
         else:
-            density = cp.empty((2, nvar, *mesh))
+            density = cp.empty((2, nvar, ngrids))
             rhoG, tauG = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
             _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
             rhoG, tauG = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
             _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[1])
         rhoG = tauG = None
 
+        density *= ngrids / cell.vol
         vxc, fxc = self.eval_xc_eff(xc_code, density, deriv=2, xctype=xctype,
                                     spin=spin, inplace=True)[1:3]
         return None, vxc, fxc

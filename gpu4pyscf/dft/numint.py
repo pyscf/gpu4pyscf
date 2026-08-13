@@ -2161,6 +2161,18 @@ class LibXCMixin:
     def rsh_coeff(sef, xc_code):
         return libxc_cpu.rsh_coeff(xc_code)
 
+    def is_hybrid_xc(self, xc_code):
+        if xc_code is None:
+            return False
+        if self.rsh_coeff(xc_code) != (0, 0, 0):
+            return True
+        if self.hybrid_coeff(xc_code) != 0:
+            return True
+        return False
+
+    def is_nlc(self, xc_code):
+        return self.libxc.is_nlc(xc_code)
+
     def _xc_type(self, xc_code):
         return libxc_cpu.xc_type(xc_code)
 

@@ -107,8 +107,7 @@ void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
 
 extern "C" {
 void update_lattice_vectors(double *lattice_vectors,
-                            double *reciprocal_lattice_vectors,
-                            double *reciprocal_norm)
+                            double *reciprocal_lattice_vectors)
 {
     cudaMemcpyToSymbol(c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
     cudaMemcpyToSymbol(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
