@@ -36,6 +36,7 @@ import cupy as cp
 import cupyx.scipy.fft as fft
 from pyscf import lib
 from pyscf.gto import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, PTR_COEFF, gto_norm
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.pbc import super_cell
@@ -889,7 +890,7 @@ void ''' + fn_name + r'''(double2* __restrict__ out, double2* __restrict__ rhoG,
            (out, rhoG, Gv_bases[0], Gv_bases[1], Gv_bases[2], nx, ny, nz))
     return out
 
-def _density_to_real_space(rhoG, Gv_bases, tauG=None, out=None):
+def _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=None):
     '''
     Perform
         stack(ifft(rhoG), cp.einsum('g,gx->xg', rhoG, 1j*Gv), ifft(tauG)).real
@@ -897,21 +898,26 @@ def _density_to_real_space(rhoG, Gv_bases, tauG=None, out=None):
     '''
     assert rhoG.ndim == 3
     mesh = rhoG.shape
-    nvar = 4
-    if tauG is not None:
+    if xctype == 'LDA':
+        nvar = 1
+    elif xctype == 'GGA':
+        nvar = 4
+    elif xctype == 'MGGA':
         nvar = 5
 
     work = None
     out = ndarray((nvar, *mesh), dtype=np.float64, buffer=out)
-    if tauG is not None:
+    if xctype == 'MGGA':
+        assert tauG is not None
         tauR = ifft_in_place(tauG.reshape(mesh))
         out[4] = tauR.real
         work = tauG
 
-    Gx, Gy, Gz = Gv_bases
-    for n in range(3):
-        work = _apply_Gv_1j(rhoG, Gx[n], Gy[n], Gz[n], work)
-        out[n+1] = ifft_in_place(work).real
+    if xctype != 'LDA':
+        Gx, Gy, Gz = Gv_bases
+        for n in range(3):
+            work = _apply_Gv_1j(rhoG, Gx[n], Gy[n], Gz[n], work)
+            out[n+1] = ifft_in_place(work).real
 
     out[0] = ifft_in_place(rhoG).real
     return out
@@ -1015,7 +1021,7 @@ def get_rho(ni, dm_kpts, kpts=None):
         ni.build(kmesh, 'LDA')
     assert len(dm_kpts) == np.prod(ni.kmesh)
 
-    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts)
+    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1)
     n_dm, nkpts, nao = dm_sc.shape[:3]
     assert n_dm == 1
     dm_sc = dm_sc[0]
@@ -1181,17 +1187,12 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_energy_sum = None
 
     else:
-        weight = cell.vol / ngrids
-        if xctype == 'LDA':
-            density = ifft_in_place(rhoG).real
-        elif xctype == 'GGA':
-            density = _density_to_real_space(rhoG, Gv_bases)
-        else: # MGGA
-            density = _density_to_real_space(rhoG, Gv_bases, tauG)
-        density = density.reshape(nvar,ngrids)
+        density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
+        density = density.reshape(nvar, ngrids)
         density = cp.asarray(density, dtype=np.float64, order='C')
         # *(1./weight) because rhoR is scaled by weight in _eval_density. If
         # computing rhoR with IFFT, the weight factor is not needed.
+        weight = cell.vol / ngrids
         density *= 1/weight
         t0 = log.timer_debug1("density", *t0)
 
@@ -1216,7 +1217,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             log.debug('Multigrid Coulomb energy %s', ecoul)
         else:
             ecoul = None
-            coulomb_on_g_mesh = cp.zeros_like(rhoG)
+            coulomb_on_g_mesh = ndarray(rhoG.shape, dtype=np.complex128, buffer=tauG)
+            coulomb_on_g_mesh.fill(0)
         tauG = None
 
         if xctype == "LDA":
@@ -1296,28 +1298,21 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
-    n_electrons = []
     density = cp.empty((2, nvar, *mesh))
-    rhoG_sf = None
-    for s in range(2):
-        rhoG, tauG = _eval_density(ni, dm_sc[s], with_tau=xctype=='MGGA')
-        rhoG = rhoG.reshape(mesh)
-        if rhoG_sf is None:
-            rhoG_sf = rhoG
-        else:
-            rhoG_sf += rhoG
+    rhoG, tauG = _eval_density(ni, dm_sc[0], with_tau=xctype=='MGGA')
+    _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
+    n_electrons_a = rhoG[0,0,0].real.get()
+    rhoG_sf, tauG = rhoG, None
 
-        n_electrons.append(rhoG[0,0,0].real.get())
+    rhoG, tauG = _eval_density(ni, dm_sc[1], with_tau=xctype=='MGGA')
+    _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[1])
+    n_electrons_b = rhoG[0,0,0].real.get()
+    rhoG_sf += rhoG
+    # release tauG's memory, keep rhoG. rhoG will be used as the workspace for
+    # _get_coulomb_on_g_mesh
+    tauG = None
 
-        if xctype == 'LDA':
-            density[s,0] = ifft_in_place(rhoG.reshape(mesh)).real
-        elif xctype == 'GGA':
-            _density_to_real_space(rhoG, Gv_bases, out=density[s])
-        else: # MGGA
-            _density_to_real_space(rhoG, Gv_bases, tauG, out=density[s])
-
-        tauG = None # release memory
-    n_electrons = np.array(n_electrons)
+    n_electrons = np.array([n_electrons_a, n_electrons_b])
 
     density = density.reshape(2,nvar,ngrids)
     density = cp.asarray(density, dtype=np.float64, order='C')
@@ -1352,8 +1347,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         coulomb_b[:] = coulomb_a
     else:
         ecoul = None
-        coulomb_a = cp.zeros_like(rhoG)
-        coulomb_b = cp.zeros_like(rhoG)
+        coulomb_a, coulomb_b = rhoG, rhoG_sf
+        coulomb_a.fill(0)
+        coulomb_b.fill(0)
     rhoG = rhoG_sf = None
 
     if kpts_band is not None:
@@ -1545,157 +1541,189 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 
-#    def nr_rks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
-#                   kpts=None, with_j=False):
-#        if kpts is None:
-#            kpts = np.zeros((1,3))
-#        elif isinstance(kpts, KPoints):
-#            kpts = kpts.kpts_ibz
-#
-#        assert kpts.ndim == 2
-#        assert dms.ndim == 4
-#        nset, nkpts, nao = dms.shape[:3]
-#        assert len(kpts) == nkpts
-#
-#        # The transition density matrices dm1 must be hermitian. The
-#        # evaluate_density_on_g_mesh function only supports real density.
-#        assert hermi == 1
-#        v_hermi = hermi
-#
-#        xctype = self._xc_type(xc_code)
-#        if xctype == 'HF':
-#            return cp.zeros_like(dms)
-#
-#        assert xctype in ('LDA', 'GGA', 'MGGA')
-#
-#        if fxc is None:
-#            spin = 0
-#            fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts, is_rhf=True)[2]
-#
-#        mesh = self.mesh
-#        Gv = get_Gv(cell, mesh)
-#        ngrids = len(Gv)
-#        rho1 = evaluate_density_on_g_mesh(self, dms, kpts, xctype)
-#        if with_j:
-#            coulG = pbc_tools.get_coulG(cell, Gv=Gv)
-#            coulomb_on_g_mesh = rho1[:,0] * coulG
-#        rho1 = ifft_in_place(rho1.reshape(-1, *mesh)).real.reshape(nset, -1, ngrids)
-#        wv = cp.einsum('nxg,xyg->nyg', rho1, fxc)
-#        wv = fft_in_place(wv.reshape(-1, *mesh)).reshape(wv.shape)
-#
-#        if with_j:
-#            wv[:,0] += coulomb_on_g_mesh
-#
-#        if 'GGA' in xctype:
-#            wv[:,0] -= contract('nxp,xp->np', wv[:,1:4], Gv.T) * 1j
-#            if xctype == 'GGA':
-#                wv = cp.asarray(wv[:,0], order='C')
-#            elif xctype == 'MGGA':
-#                wv = cp.asarray(wv[:,[0, 4]], order='C')
-#
-#        with_tau = (xctype == 'MGGA')
-#        vmat = convert_xc_on_g_mesh_to_fock(self, wv, v_hermi, kpts, with_tau=with_tau)
-#        return vmat.reshape(dms.shape)
-#
-#    def nr_rks_fxc_st(self, cell, grids, xc_code, dm0, dms, hermi=0, singlet=True,
-#                      fxc=None, kpts=None, with_j=False):
-#        if fxc is None:
-#            spin = 1
-#            fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
-#                                      is_rhf=True)[2]
-#        if singlet:
-#            fxc = fxc[0,:,0] + fxc[0,:,1]
-#        else:
-#            fxc = fxc[0,:,0] - fxc[0,:,1]
-#        return self.nr_rks_fxc(cell, grids, xc_code, dm0, dms, hermi, fxc, kpts, with_j)
-#
-#    def nr_uks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
-#                   kpts=None, with_j=False):
-#        if kpts is None:
-#            kpts = np.zeros((1,3))
-#        elif isinstance(kpts, KPoints):
-#            kpts = kpts.kpts_ibz
-#
-#        assert kpts.ndim == 2
-#        assert dms.ndim == 5
-#        nset, nkpts, nao = dms.shape[1:4]
-#        assert len(kpts) == nkpts
-#
-#        # The transition density matrices dm1 must be hermitian. The
-#        # evaluate_density_on_g_mesh function only supports real density.
-#        assert hermi == 1
-#        v_hermi = hermi
-#
-#        xctype = self._xc_type(xc_code)
-#        if xctype == 'HF':
-#            return cp.zeros_like(dms)
-#
-#        assert xctype in ('LDA', 'GGA', 'MGGA')
-#
-#        if fxc is None:
-#            spin = 1
-#            fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts, is_rhf=False)[2]
-#
-#        mesh = self.mesh
-#        Gv = get_Gv(cell, mesh)
-#        ngrids = len(Gv)
-#        rho1 = evaluate_density_on_g_mesh(self, dms.reshape(-1,nkpts,nao,nao), kpts, xctype)
-#        if with_j:
-#            coulG = pbc_tools.get_coulG(cell, Gv=Gv)
-#            coulomb_on_g_mesh = rho1[:,0].reshape(2, nset, ngrids).sum(axis=0) * coulG
-#        rho1 = ifft_in_place(rho1.reshape(-1, *mesh)).real.reshape(2, nset, -1, ngrids)
-#        wv = cp.einsum('anxg,axbyg->bnyg', rho1, fxc)
-#        wv = fft_in_place(wv.reshape(-1, *mesh)).reshape(wv.shape)
-#
-#        if with_j:
-#            wv[:,:,0] += coulomb_on_g_mesh
-#
-#        if 'GGA' in xctype:
-#            wv[:,:,0] -= contract('anxp,xp->anp', wv[:,:,1:4], Gv.T) * 1j
-#            if xctype == 'GGA':
-#                wv = cp.asarray(wv[:,:,0], order='C')
-#            elif xctype == 'MGGA':
-#                wv = cp.asarray(wv[:,:,[0, 4]], order='C')
-#
-#        wv = wv.reshape(2*nset, -1, ngrids)
-#
-#        with_tau = (xctype == 'MGGA')
-#        vmat = convert_xc_on_g_mesh_to_fock(self, wv, v_hermi, kpts, with_tau=with_tau)
-#        return vmat.reshape(dms.shape)
-#
-#    def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
-#        if isinstance(kpts, KPoints):
-#            raise NotImplementedError
-#
-#        dms = _format_dms(dm, kpts)
-#        if is_rhf is None:
-#            is_rhf = len(dms) == 1
-#        elif is_rhf:
-#            assert len(dms) == 1
-#        else:
-#            assert spin == 1
-#            assert len(dms) == 2
-#
-#        xctype = self._xc_type(xc_code)
-#        mesh = self.mesh
-#        ngrids = np.prod(mesh)
-#        rho = evaluate_density_on_g_mesh(self, dms, kpts, xctype)
-#        # Remove the grid weights. rho is scaled by the grid weights
-#        # (vol/ngrids) in evaluate_density_on_g_mesh
-#        rho *= ngrids / cell.vol
-#        rho = ifft_in_place(rho.reshape(-1, *mesh)).real.reshape(rho.shape)
-#
-#        if is_rhf:
-#            if spin == 1:
-#                rho *= .5
-#                rho = cp.repeat(rho, 2, axis=0)
-#            else:
-#                rho = rho[0]
-#
-#        vxc, fxc = self.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype, spin=spin)[1:3]
-#        return rho, vxc, fxc
-#
-#    cache_xc_kernel = NotImplemented
+    def nr_rks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
+                   kpts=None, with_j=False):
+        if kpts is None:
+            kpts = np.zeros((1,3))
+        elif isinstance(kpts, KPoints):
+            kpts = kpts.kpts_ibz
+
+        assert kpts.ndim == 2
+        assert dms.ndim == 4
+        n_dm, nkpts, nao = dms.shape[:3]
+        assert len(kpts) == nkpts
+
+        xctype = self._xc_type(xc_code)
+        if xctype == 'HF':
+            return cp.zeros_like(dms)
+
+        assert xctype in ('LDA', 'GGA', 'MGGA')
+
+        if fxc is None:
+            spin = 0
+            fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts, is_rhf=True)[2]
+
+        out = cp.empty_like(dms)
+
+        cell = self.cell
+        mesh = self.mesh
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+
+        dm_sc = _wannier_transform_dm(self, dms, kpts, hermi)
+        for i_dm in range(n_dm):
+            rhoG, tauG = _eval_density(self, dm_sc[i_dm], with_tau=xctype=='MGGA')
+            rho1 = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
+
+            wv = cp.einsum('xg,xyg->yg', rho1, fxc).reshape(-1, *mesh)
+            rho1 = None
+
+            if with_j:
+                coulomb = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=rhoG)
+            else:
+                coulomb = cp.zeros_like(rhoG)
+            wv = _vxc_to_reciprocal_space(wv, coulomb, work=tauG)
+
+            veff = _eval_xc_mat(self, wv, out=dm_sc[i_dm])
+            out[i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
+            rhoG = tauG = veff = wv = coulomb = None
+
+        return out.reshape(dms.shape)
+
+    def nr_rks_fxc_st(self, cell, grids, xc_code, dm0, dms, hermi=0, singlet=True,
+                      fxc=None, kpts=None, with_j=False):
+        if fxc is None:
+            spin = 1
+            fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
+                                        is_rhf=True)[2]
+        if singlet:
+            fxc = fxc[0,:,0] + fxc[0,:,1]
+        else:
+            fxc = fxc[0,:,0] - fxc[0,:,1]
+        return self.nr_rks_fxc(cell, grids, xc_code, dm0, dms, hermi, fxc, kpts, with_j)
+
+    def nr_uks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
+                   kpts=None, with_j=False):
+        if kpts is None:
+            kpts = np.zeros((1,3))
+        elif isinstance(kpts, KPoints):
+            kpts = kpts.kpts_ibz
+
+        assert kpts.ndim == 2
+        assert dms.ndim == 5
+        n_dm, nkpts, nao = dms.shape[1:4]
+        assert len(kpts) == nkpts
+
+        xctype = self._xc_type(xc_code)
+        if xctype == 'LDA':
+            nvar = 1
+        elif xctype == 'GGA':
+            nvar = 4
+        elif xctype == 'MGGA':
+            nvar = 5
+        elif xctype == 'HF':
+            return cp.zeros_like(dms)
+        else:
+            raise NotImplementedError(f'XC functional {xc_code}')
+
+        if fxc is None:
+            spin = 1
+            fxc = self.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts, is_rhf=False)[2]
+
+        out = cp.empty_like(dms)
+
+        cell = self.cell
+        mesh = self.mesh
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+
+        dm_sc = _wannier_transform_dm(self, dms, kpts, hermi)
+        for i_dm in range(n_dm):
+            rho1 = cp.empty((2, nvar, *mesh))
+            rhoG_sf = None
+            for s in range(2):
+                rhoG, tauG = _eval_density(self, dm_sc[s,i_dm], with_tau=xctype=='MGGA')
+                rhoG = rhoG.reshape(mesh)
+                if rhoG_sf is None:
+                    rhoG_sf = rhoG
+                else:
+                    rhoG_sf += rhoG
+                _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=rho1[s])
+                rhoG = tauG = None # release memory
+
+            wv = cp.einsum('axg,axbyg->byg', rho1, fxc).reshape(2, nvar, *mesh)
+            rho1 = None
+
+            if with_j:
+                coulomb_a = _get_coulomb_on_g_mesh(rhoG_sf, Gv_bases, out=rhoG_sf)
+                coulomb_b = coulomb_a.copy()
+            else:
+                coulomb_a = cp.zeros_like(rhoG_sf)
+                coulomb_b = cp.zeros_like(rhoG_sf)
+            rhoG_sf = None
+
+            if xctype == "LDA":
+                wv_a = _vxc_to_reciprocal_space(wv, coulomb_a)
+                wv_b = _vxc_to_reciprocal_space(wv, coulomb_b)
+            else:
+                wv_a = _vxc_to_reciprocal_space(wv, coulomb_a, Gv_bases)
+                wv_b = _vxc_to_reciprocal_space(wv, coulomb_b, Gv_bases)
+            coulomb_a = coulomb_b = wv = None
+
+            veff = _eval_xc_mat(self, wv_a, out=dm_sc[0,i_dm])
+            out[0,i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
+            veff = _eval_xc_mat(self, wv_b, out=dm_sc[1,i_dm])
+            out[1,i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
+            veff = wv_a = wv_b = None
+
+        return out.reshape(dms.shape)
+
+    def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
+        if isinstance(kpts, KPoints):
+            raise NotImplementedError
+
+        dms = _format_dms(dm, kpts)
+        if is_rhf is None:
+            is_rhf = len(dms) == 1
+        elif is_rhf:
+            assert len(dms) == 1
+        else:
+            assert spin == 1
+            assert len(dms) == 2
+
+        dm_sc = _wannier_transform_dm(self, dm, kpts, hermi=1)
+
+        xctype = self._xc_type(xc_code)
+        if xctype == 'LDA':
+            nvar = 1
+        elif xctype == 'GGA':
+            nvar = 4
+        elif xctype == 'MGGA':
+            nvar = 5
+
+        mesh = self.mesh
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+
+        if is_rhf:
+            rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
+            if spin == 1:
+                density = cp.empty((2, nvar, *mesh))
+                _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
+                density[0] *= .5
+                density[1] = density[0]
+            else:
+                density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
+        else:
+            density = cp.empty((2, nvar, *mesh))
+            rhoG, tauG = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
+            _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
+            rhoG, tauG = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
+            _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[1])
+        rhoG = tauG = None
+
+        vxc, fxc = self.eval_xc_eff(xc_code, density, deriv=2, xctype=xctype,
+                                    spin=spin, inplace=True)[1:3]
+        return None, vxc, fxc
+
+    cache_xc_kernel = NotImplemented
 
     to_cpu = NotImplemented
     to_gpu = NotImplemented
