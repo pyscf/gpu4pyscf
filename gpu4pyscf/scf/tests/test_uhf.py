@@ -86,6 +86,16 @@ def tearDownModule():
     del mol, mol1
 
 class KnownValues(unittest.TestCase):
+    def test_get_occ_zero_beta_electrons(self):
+        mol_h = pyscf.M(atom='H 0 0 0', basis='6-31g', spin=1)
+        mf = scf.UHF(mol_h)
+        mf.verbose = pyscf.lib.logger.INFO
+        mo_energy = cupy.asarray([[-0.5, 0.2], [-0.4, 0.3]])
+
+        mo_occ = mf.get_occ(mo_energy)
+
+        self.assertTrue(cupy.array_equal(mo_occ, cupy.asarray([[1, 0], [0, 0]])))
+
     def test_get_jk(self):
         np.random.seed(1)
         nao = mol.nao
