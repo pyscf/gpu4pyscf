@@ -1644,7 +1644,6 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # To reduce the memory usage, we reuse the xc_for_fock name.
     # Now xc_for_fock represents xc on G space
     xc_for_fock *= weight
-    print(lib.fp(xc_for_fock.get()))
     xc_for_fock = fft_in_place(xc_for_fock.reshape(-1, *mesh)).reshape(nset, -1, ngrids)
 
     log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)

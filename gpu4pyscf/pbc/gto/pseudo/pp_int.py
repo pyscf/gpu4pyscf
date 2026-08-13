@@ -154,4 +154,4 @@ def get_pp_nl_gpu(cell, kpts=None):
 
             ppnl[k] += cp.einsum('ilp,ij,jlq->pq', ilp.conj(), hl_gpu, ilp)
 
-    return ppnl.get()
+    return ppnl

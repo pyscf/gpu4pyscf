@@ -53,6 +53,7 @@ from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
+from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
 
 libmgrid = load_library('libmgrid_v3')
 NBAS_MAX = 16777216
@@ -1037,14 +1038,14 @@ def get_nuc(ni, kpts=None):
     if ni.bvkcell is None or any(ni.kmesh != kmesh):
         ni.build(kmesh, 'LDA') # change to MGGA?
 
-    vneG = eval_nucG(cell, ni.mesh)
+    vneG = _eval_nucG(cell, ni.mesh)
     vne = _eval_xc_mat(ni, vneG)
     vne = _inverse_wannier_transform_fock(ni, vne, kpts)
     if is_single_kpt:
         vne = vne[0]
     return vne
 
-def eval_nucG(cell, mesh):
+def _eval_nucG(cell, mesh):
     '''Nuclear attraction potential on Gv'''
     assert cell.dimension == 3
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
@@ -1058,36 +1059,42 @@ def eval_nucG(cell, mesh):
     return _get_coulomb_on_g_mesh(nuc_density, Gv_bases, out=nuc_density).ravel()
 
 def get_pp(ni, kpts=None):
-    """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
-#?    if ni.sorted_gaussian_pairs is None:
-#?        ni.build()
-#?    is_single_kpt = kpts is not None and kpts.ndim == 1
-#?    if kpts is None:
-#?        kpts = np.zeros((1, 3))
-#?    else:
-#?        kpts = kpts.reshape(-1, 3)
-#?    cell = ni.cell
-#?    log = logger.new_logger(cell)
-#?    t0 = log.init_timer()
-#?    mesh = ni.mesh
-#?    # Compute the vpplocG as
-#?    # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
-#?    vpplocG = multigrid_v1.eval_vpplocG(cell, mesh)
-#?    vpp = convert_xc_on_g_mesh_to_fock(ni, vpplocG, hermi=1, kpts=kpts)[0]
-#?    t1 = log.timer_debug1("vpploc", *t0)
-#?
-#?    vppnl = get_pp_nl_gpu(cell, kpts)
-#?    for k, kpt in enumerate(kpts):
-#?        if is_single_kpt:
-#?            vpp[k] += cp.asarray(vppnl[k].real)
-#?        else:
-#?            vpp[k] += cp.asarray(vppnl[k])
-#?
-#?    if is_single_kpt:
-#?        vpp = vpp[0]
-#?    log.timer_debug1("vppnl", *t1)
-#?    log.timer("get_pp", *t0)
-#?    return vpp
+    """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
+    """
+    from gpu4pyscf.pbc.dft.multigrid import eval_vpplocG
+    cell = ni.cell
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+
+    kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
+    if ni.bvkcell is None or any(ni.kmesh != kmesh):
+        ni.build(kmesh, 'LDA') # change to MGGA?
+
+    mesh = ni.mesh
+    # Compute the vpplocG as
+    # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
+    vpplocG = eval_vpplocG(cell, mesh)
+    vpp = _eval_xc_mat(ni, vpplocG)
+    vpp = _inverse_wannier_transform_fock(ni, vpp, kpts)
+    t1 = log.timer_debug1("vpploc", *t0)
+
+    vppnl = get_pp_nl_gpu(cell, kpts)
+    if kpts is None or is_zero(kpts):
+        vpp += vppnl.real
+    else:
+        vpp += vppnl
+
+    if is_single_kpt:
+        vpp = vpp[0]
+    log.timer_debug1("vppnl", *t1)
+    log.timer("get_pp", *t0)
+    return vpp
 
 def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
