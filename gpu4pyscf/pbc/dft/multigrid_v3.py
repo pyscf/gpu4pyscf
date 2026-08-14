@@ -921,24 +921,23 @@ def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
     '''
     assert vxc.ndim == 4
     mesh = vxc.shape[1:]
-    is_mgga = len(vxc) == 5
 
     work = ndarray(mesh, dtype=np.complex128, buffer=work)
 
-    work.real = vxc[0].reshape(mesh)
+    work.real = vxc[0]
     work.imag.fill(0.)
     fft_in_place(work)
     out += work
 
-    if Gv_bases is not None:
+    if len(vxc) >= 4: # GGA or MGGA
         Gx, Gy, Gz = Gv_bases
         for n in range(3):
-            work.real = vxc[n+1].reshape(mesh)
+            work.real = vxc[n+1]
             work.imag.fill(0.)
             _contract_Gv_1j(out, fft_in_place(work), Gx[n], Gy[n], Gz[n])
 
-    if is_mgga:
-        work.real = vxc[4].reshape(mesh)
+    if len(vxc) == 5: # MGGA
+        work.real = vxc[4]
         work.imag.fill(0.)
         vxcG_tau = fft_in_place(work)
         return out, vxcG_tau
@@ -956,8 +955,8 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1):
         # the integral kernel only processes tril part of orbital-pairs.
         # Due to the symmetry in integrals, the triu contributions can be folded
         # into the tril part.
-        dms = transpose_sum(dms.reshape(n_dm*nkpts,nao,nao), inplace=False)
-        dms = dms.reshape(n_dm, nkpts, nao, nao)
+        dms = cp.array(dms, copy=True).reshape(n_dm*nkpts,nao,nao)
+        dms = transpose_sum(dms).reshape(n_dm, nkpts, nao, nao)
 
     bvk_ncells = len(ni.bvkmesh_Ls)
     if bvk_ncells == 1:
@@ -1216,13 +1215,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             coulomb_on_g_mesh.fill(0)
         tauG = None
 
-        if xctype == "LDA":
-            # Now xc_for_fock represents xc on G space
-            xc_for_fock = _vxc_to_reciprocal_space(
-                xc_for_fock, coulomb_on_g_mesh, work=rhoG)
-        else: # GGA or MGGA
-            xc_for_fock = _vxc_to_reciprocal_space(
-                xc_for_fock, coulomb_on_g_mesh, Gv_bases, work=rhoG)
+        # Now xc_for_fock represents xc on G space
+        xc_for_fock = _vxc_to_reciprocal_space(
+            xc_for_fock, coulomb_on_g_mesh, Gv_bases, work=rhoG)
         coulomb_on_g_mesh = rhoG = None
 
     if kpts_band is not None:
@@ -1868,7 +1863,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
                 coulomb = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=rhoG)
             else:
                 coulomb = cp.zeros_like(rhoG)
-            wv = _vxc_to_reciprocal_space(wv, coulomb, work=tauG)
+            wv = _vxc_to_reciprocal_space(wv, coulomb, Gv_bases, work=tauG)
 
             veff = _eval_xc_mat(self, wv, out=dm_sc[i_dm])
             out[i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
@@ -1925,12 +1920,12 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         ngrids = np.prod(mesh)
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
-        dm_sc = _wannier_transform_dm(self, dms, kpts, hermi)
         for i_dm in range(n_dm):
+            dm_sc = _wannier_transform_dm(self, dms[:,i_dm], kpts, hermi)
             rho1 = cp.empty((2, nvar, ngrids))
             rhoG_sf = None
             for s in range(2):
-                rhoG, tauG = _eval_density(self, dm_sc[s,i_dm], with_tau=xctype=='MGGA')
+                rhoG, tauG = _eval_density(self, dm_sc[s], with_tau=xctype=='MGGA')
                 if rhoG_sf is None:
                     rhoG_sf = rhoG
                 else:
@@ -1949,17 +1944,13 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
                 coulomb_b = cp.zeros_like(rhoG_sf)
             rhoG_sf = None
 
-            if xctype == "LDA":
-                wv_a = _vxc_to_reciprocal_space(wv, coulomb_a)
-                wv_b = _vxc_to_reciprocal_space(wv, coulomb_b)
-            else:
-                wv_a = _vxc_to_reciprocal_space(wv, coulomb_a, Gv_bases)
-                wv_b = _vxc_to_reciprocal_space(wv, coulomb_b, Gv_bases)
+            wv_a = _vxc_to_reciprocal_space(wv[0], coulomb_a, Gv_bases)
+            wv_b = _vxc_to_reciprocal_space(wv[1], coulomb_b, Gv_bases)
             coulomb_a = coulomb_b = wv = None
 
-            veff = _eval_xc_mat(self, wv_a, out=dm_sc[0,i_dm])
+            veff = _eval_xc_mat(self, wv_a, out=dm_sc[0])
             out[0,i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
-            veff = _eval_xc_mat(self, wv_b, out=dm_sc[1,i_dm])
+            veff = _eval_xc_mat(self, wv_b, out=dm_sc[1])
             out[1,i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
             veff = wv_a = wv_b = None
 
@@ -1991,7 +1982,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             assert spin == 1
             assert len(dms) == 2
 
-        dm_sc = _wannier_transform_dm(self, dm, kpts)#, hermi=1)
+        dm_sc = _wannier_transform_dm(self, dm, kpts, hermi=1)
 
         mesh = self.mesh
         ngrids = np.prod(mesh)

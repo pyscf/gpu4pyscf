@@ -510,10 +510,10 @@ static void _cart_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
             gtoz[8 ] += (az * rz + 2 * ce) * rx * ry * rz;
             gtoz[9 ] += (az * rz + 3 * ce) * rx * rz * rz;
             gtoz[10] += az * ry * ry * ry * ry;
-            gtoz[11] += (az * ry * rz +     ce) * ry * ry;
-            gtoz[12] += (az * ry * rz + 2 * ce) * ry * rz;
-            gtoz[13] += (az * ry * rz + 3 * ce) * rz * rz;
-            gtoz[14] += (az * rz * rz + 4 * ce) * rz * rz;
+            gtoz[11] += (az * rz +     ce) * ry * ry * ry;
+            gtoz[12] += (az * rz + 2 * ce) * ry * ry * rz;
+            gtoz[13] += (az * rz + 3 * ce) * ry * rz * rz;
+            gtoz[14] += (az * rz + 4 * ce) * rz * rz * rz;
         } }
     }
     int *ao_loc = envs.ao_loc;
@@ -960,10 +960,10 @@ static void _sph_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
             gto[53] += (az * rz + 2 * ce) * rx * ry * rz;
             gto[54] += (az * rz + 3 * ce) * rx * rz * rz;
             gto[55] += az * ry * ry * ry * ry;
-            gto[56] += (az * ry * rz +     ce) * ry * ry;
-            gto[57] += (az * ry * rz + 2 * ce) * ry * rz;
-            gto[58] += (az * ry * rz + 3 * ce) * rz * rz;
-            gto[59] += (az * rz * rz + 4 * ce) * rz * rz;
+            gto[56] += (az * rz +     ce) * ry * ry * ry;
+            gto[57] += (az * rz + 2 * ce) * ry * ry * rz;
+            gto[58] += (az * rz + 3 * ce) * ry * rz * rz;
+            gto[59] += (az * rz + 4 * ce) * rz * rz * rz;
         } }
     }
     int *ao_loc = envs.ao_loc;
