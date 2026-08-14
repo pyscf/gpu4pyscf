@@ -31,18 +31,18 @@ def test_int1e_ovlp():
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
     pcell = cell.copy(False)
-    pcell.precision = 1e-14
+    pcell.precision = 1e-15
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
 
     dat = int1e.int1e_ovlp(cell).get()
-    assert abs(dat - ref[0]).max() < 1e-12
+    assert abs(dat - ref[0]).max() < 1e-13
 
     dat = int1e.int1e_ovlp(cell, kpts, kmesh).get()
-    assert abs(dat - ref).max() < 1e-12
+    assert abs(dat - ref).max() < 1e-13
 
     dat = int1e.int1e_ovlp(cell, kpts).get()
-    assert abs(dat - ref).max() < 1e-12
+    assert abs(dat - ref).max() < 1e-13
 
     cell = pyscf.M(
         atom='''C1  1.3    .2       .3
@@ -103,7 +103,7 @@ def test_int1e_ipovlp():
     pcell = cell.copy(False)
     pcell.precision = 1e-14
     pcell.build(0, 0)
-    ref = pcell.pbc_intor('int1e_ipovlp', hermi=0, kpts=kpts)
+    ref = np.asarray(pcell.pbc_intor('int1e_ipovlp', hermi=0, kpts=kpts))
 
     dat = int1e.int1e_ipovlp(cell).get()
     assert abs(dat - ref[0]).max() < 1e-8
@@ -134,7 +134,7 @@ def test_int1e_ipkin():
     pcell = cell.copy(False)
     pcell.precision = 1e-14
     pcell.build(0, 0)
-    ref = pcell.pbc_intor('int1e_ipkin', hermi=0, kpts=kpts)
+    ref = np.asarray(pcell.pbc_intor('int1e_ipkin', hermi=0, kpts=kpts))
 
     dat = int1e.int1e_ipkin(cell).get()
     assert abs(dat - ref[0]).max() < 1e-8
@@ -289,3 +289,73 @@ def test_kin_stress_tensor():
     ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
     dat = int1e.kin_strain_deriv(cell, dm, kpts)
     assert abs(dat - ref).max() < 5e-7
+
+def test_int1e_r2_origi():
+    a = np.eye(3) * 5.
+    np.random.seed(5)
+    a += np.random.rand(3, 3) - .5
+    cell = pyscf.M(
+        atom='He 1 1 1; He 2 1.5 2.4; He 3 3.5 0.2',
+        basis=[[0, [.5, 1]],
+               [1, [1.5, 1], [.5, 1]],
+               [2, [.8, 1]],
+               [3, [.7, 1]]
+              ], a=a, unit='Bohr')
+    dat = int1e.int1e_r2_origi(cell)
+    ref = cell.pbc_intor('int1e_r2_origi', comp=1)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+    mol = cell.to_mol()
+    dat = int1e.int1e_r2_origi(mol)
+    ref = mol.intor('int1e_r2_origi', comp=1)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+def test_int1e_r4_origi():
+    a = np.eye(3) * 5.
+    np.random.seed(5)
+    a += np.random.rand(3, 3) - .5
+    cell = pyscf.M(
+        atom='He 1 1 1; He 2 1.5 2.4; He 3 3.5 0.2',
+        basis=[[0, [.5, 1]],
+               [1, [1.5, 1], [.5, 1]],
+               [2, [.8, 1]],
+               [3, [.7, 1]]
+              ], a=a, unit='Bohr', precision=1e-10)
+    dat = int1e.int1e_r4_origi(cell)
+    ref = cell.pbc_intor('int1e_r4_origi', comp=1)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+def test_int1e_r2_origi_ip2():
+    a = np.eye(3) * 5.
+    np.random.seed(5)
+    a += np.random.rand(3, 3) - .5
+    cell = pyscf.M(
+        atom='He 1 1 1; He 2 1.5 2.4; He 3 3.5 0.2',
+        basis=[[0, [.5, 1]],
+               [1, [1.5, 1], [.5, 1]],
+               [2, [.8, 1]],
+               [3, [.7, 1]]
+              ], a=a, unit='Bohr')
+    dat = int1e.int1e_r2_origi_ip2(cell)
+    ref = cell.pbc_intor('int1e_r2_origi_ip2', comp=3)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+    mol = cell.to_mol()
+    dat = int1e.int1e_r2_origi_ip2(mol)
+    ref = mol.intor('int1e_r2_origi_ip2', comp=3)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+def test_int1e_r4_origi_ip2():
+    a = np.eye(3) * 5.
+    np.random.seed(5)
+    a += np.random.rand(3, 3) - .5
+    cell = pyscf.M(
+        atom='He 1 1 1; He 2 1.5 2.4; He 3 3.5 0.2',
+        basis=[[0, [.5, 1]],
+               [1, [1.5, 1], [.5, 1]],
+               [2, [.8, 1]],
+               [3, [.7, 1]]
+              ], a=a, unit='Bohr', precision=1e-10)
+    dat = int1e.int1e_r4_origi_ip2(cell)
+    ref = cell.pbc_intor('int1e_r4_origi_ip2', comp=3)
+    assert abs(dat.get() - ref).max() < 1e-10
