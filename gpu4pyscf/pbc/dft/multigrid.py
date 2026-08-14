@@ -1409,8 +1409,10 @@ class MGridEnvVars(ctypes.Structure):
         ('lattice_params', ctypes.c_void_p),
     ]
 
+class MultiGridNumIntBase(lib.StreamObject, numint.LibXCMixin):
+    pass
 
-class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
+class MultiGridNumInt(MultiGridNumIntBase):
     def __init__(self, cell):
         self.mesh = cell.mesh
         self.reset(cell)

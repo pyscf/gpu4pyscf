@@ -30,7 +30,7 @@ from gpu4pyscf.pbc.scf import khf
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.dft import rks
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.pbc.dft import multigrid
 
 def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
              kpts=None, kpts_band=None):
@@ -47,7 +47,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     nkpts = len(kpts)
     weight = 1. / nkpts
 
-    if isinstance(ni, (multigrid_v2.MultiGridNumInt, multigrid.MultiGridNumInt)):
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
         n, exc, vxc = ni.nr_rks(
@@ -240,8 +240,7 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
         dm0 = None
 
         with_j = (singlet is None or singlet) and hermi != 2
-        j_in_xc = isinstance(ni, (multigrid_v2.MultiGridNumInt,
-                                  multigrid.MultiGridNumInt))
+        j_in_xc = isinstance(ni, multigrid.MultiGridNumIntBase)
 
         def vind(dm1, kshift=0):
             assert kshift == 0

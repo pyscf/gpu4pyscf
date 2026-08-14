@@ -23,8 +23,7 @@ from pyscf.pbc.gto.pseudo import pp_int
 import gpu4pyscf.grad.uhf as mol_uhf
 import gpu4pyscf.pbc.grad.rhf as rhf
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.dft import multigrid_v2
-import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
+from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.gto import int1e
@@ -48,7 +47,7 @@ class Gradients(rhf.GradientsBase):
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
 
         ni = mf._numint
-        j_in_xc = isinstance(ni, multigrid_v2.MultiGridNumInt)
+        j_in_xc = isinstance(ni, multigrid.MultiGridNumIntBase)
         de = 0
         xc = getattr(mf, 'xc', 'HF')
         if xc.upper() == 'HF':
@@ -59,7 +58,7 @@ class Gradients(rhf.GradientsBase):
             j_factor = 1
 
         if j_in_xc:
-            de += multigrid_v2.get_veff_ip1(
+            de += ni_TO_FIX.get_veff_ip1(
                 ni, xc, dm, with_j=j_in_xc,
                 with_pseudo_vloc_orbital_derivative=True).get()
             j_factor = 0
@@ -97,8 +96,8 @@ class Gradients(rhf.GradientsBase):
         de = self.energy_ee(dm0)
 
         ni = mf._numint
-        if isinstance(ni, multigrid_v2.MultiGridNumInt):
-            rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0_sf)
+        if isinstance(ni, multigrid.MultiGridNumIntBase):
+            rhoG = multigrid_v3_TO_FIX.evaluate_density_on_g_mesh(ni, dm0_sf)
             rhoG = rhoG[0,0]
             if cell._pseudo:
                 de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()

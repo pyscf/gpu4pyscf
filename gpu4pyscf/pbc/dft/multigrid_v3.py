@@ -55,6 +55,7 @@ from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+from gpu4pyscf.pbc.dft.multigrid import MultiGridNumIntBase
 
 libmgrid = load_library('libmgrid_v3')
 NBAS_MAX = 16777216
@@ -63,7 +64,7 @@ LMAX = 4
 _kernel_registery = {}
 
 def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
-    cell = ni.cell
+    cell = ni.sorted_cell
     bvkcell = ni.bvkcell
 
     a = bvkcell.lattice_vectors()
@@ -130,7 +131,7 @@ def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
     return rhoG, tauG
 
 def _aft_eval_xc_matrix(ni, vxcG, out=None):
-    cell = ni.cell
+    cell = ni.sorted_cell
     bvkcell = ni.bvkcell
 
     a = bvkcell.lattice_vectors()
@@ -189,7 +190,7 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
     return vxc_mat
 
 def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
-    cell = ni.cell
+    cell = ni.sorted_cell
     if ni.aft_buckets is not None:
         rhoG, tauG = _aft_eval_density(ni, dm_sc, kpts, with_tau)
     else:
@@ -260,7 +261,7 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
 def _eval_xc_mat(ni, vxcG, out=None, work=None):
     '''Note, contents of vxcG will be destroyed in this function
     '''
-    cell = ni.cell
+    cell = ni.sorted_cell
     if ni.aft_buckets is not None:
         vxc_mat = _aft_eval_xc_matrix(ni, vxcG, out)
     else:
@@ -367,7 +368,7 @@ def _get_L_bases(nimgs, a):
 def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     '''Estimate the FFT energy cutoff and the spread of each orbital pair
     in real space'''
-    cell = ni.cell
+    cell = ni.sorted_cell
     # Some orbitals may require high Ecut, sometimes higher than ni.ke_cutoff.
     # Use ke_max to limit the highest Ecut. This ensures that these orbital
     # pairs are included in the last bucket in _partition_ke_for_fft.
@@ -442,7 +443,7 @@ def mesh_to_ke(a, mesh):
     return ke_cutoff.min()
 
 def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
-    cell = ni.cell
+    cell = ni.sorted_cell
     bvkcell = ni.bvkcell
     a = cell.lattice_vectors()
     mesh = ke_to_mesh(a, init_ke)
@@ -491,7 +492,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     return buckets
 
 def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
-    cell = ni.cell
+    cell = ni.sorted_cell
     bvkcell = ni.bvkcell
 
     a = cell.lattice_vectors()
@@ -568,7 +569,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
 
 def _non_trivial_bvk_pairs(ni, precision):
     '''Search non-negligible pairs for <cell0|bvk-cell> overlaps'''
-    cell = ni.cell
+    cell = ni.sorted_cell
     bvkcell = ni.bvkcell
     if isinstance(cell, SortedCell):
         a = bvkcell.lattice_vectors()
@@ -946,7 +947,7 @@ def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
 
 def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1):
     assert kpts.ndim == 2
-    cell = ni.cell
+    cell = ni.sorted_cell
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
@@ -980,7 +981,7 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1):
     return dm_sc
 
 def _inverse_wannier_transform_fock(ni, veff, kpts):
-    veff = ni.cell.apply_CT_mat_C(veff)
+    veff = ni.sorted_cell.apply_CT_mat_C(veff)
 
     bvk_ncells = len(ni.bvkmesh_Ls)
     if bvk_ncells != 1:
@@ -1176,7 +1177,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         assert with_j
         coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases)
         xc_for_fock = coulomb_on_g_mesh
-        ecoul = .5 * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
+        ecoul = (.5 / vol) * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
         log.debug('Multigrid Coulomb energy %s', ecoul)
         rhoG = coulomb_on_g_mesh = None
         xc_energy_sum = None
@@ -1186,7 +1187,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density)
         # *(1./weight) because rhoR is scaled by weight in _eval_density. If
         # computing rhoR with IFFT, the weight factor is not needed.
-        weight = cell.vol / ngrids
+        vol = cell.vol
+        weight = vol / ngrids
         density *= 1/weight
         t0 = log.timer_debug1("density", *t0)
 
@@ -1207,7 +1209,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
         if with_j:
             coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=tauG)
-            ecoul = .5 * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
+            ecoul = (.5 / vol) * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
             log.debug('Multigrid Coulomb energy %s', ecoul)
         else:
             ecoul = None
@@ -1287,7 +1289,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     cell = ni.cell
     mesh = ni.mesh
     ngrids = np.prod(mesh)
-    weight = cell.vol / ngrids
+    vol = cell.vol
+    weight = vol / ngrids
 
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
@@ -1330,7 +1333,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     if with_j:
         coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG_sf, Gv_bases, out=rhoG)
-        ecoul = .5 * float(_conj_dot(rhoG_sf.ravel(), coulomb_on_g_mesh.ravel()).get())
+        ecoul = (.5 / vol) * float(_conj_dot(rhoG_sf.ravel(), coulomb_on_g_mesh.ravel()).get())
         log.debug('Multigrid Coulomb energy %s', ecoul)
 
         coulomb_a = coulomb_on_g_mesh
@@ -1383,23 +1386,24 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     t0 = log.timer_debug1("xc matrix", *t0)
     return n_electrons, xc_energy_sum, veff
 
-#def get_veff_ip1(
-#    ni,
-#    xc_code,
-#    dm_kpts,
-#    hermi=1,
-#    kpts=None,
-#    with_j=True,
-#    with_pseudo_vloc_orbital_derivative=True,
-#    verbose=None,
-#):
-#    '''Computes the derivatives of the Exc along with additional contributions
-#    from the Coulomb and pseudopotential terms.
-#
-#    Note, the current return is the energy per cell scaled by the number of
-#    k-points. This should return the energy per cell directly and will be
-#    changed in future.
-#    '''
+def get_veff_ip1(
+    ni,
+    xc_code,
+    dm_kpts,
+    hermi=1,
+    kpts=None,
+    with_j=True,
+    with_pseudo_vloc_orbital_derivative=True,
+    verbose=None,
+):
+    '''Computes the derivatives of the Exc along with additional contributions
+    from the Coulomb and pseudopotential terms.
+
+    Note, the current return is the energy per cell scaled by the number of
+    k-points. This should return the energy per cell directly and will be
+    changed in future.
+    '''
+    raise
 #    if kpts is None:
 #        kpts = np.zeros((1, 3))
 #    else:
@@ -1480,14 +1484,14 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 #    t0 = log.timer("veff_gradient", *t0)
 #
 #    return veff_gradient
-#
-#def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
-#    '''Strain derivatives for Coulomb and Exc with k-point samples
-#
-#    Kwargs:
-#        with_j : Whether to include the electron-electron Coulomb interactions
-#        with_nuc : Whether to include the electron-nuclear Coulomb interactions
-#    '''
+
+def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+    '''Strain derivatives for Coulomb and Exc with k-point samples
+
+    Kwargs:
+        with_j : Whether to include the electron-electron Coulomb interactions
+        with_nuc : Whether to include the electron-nuclear Coulomb interactions
+    '''
 #    from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 #    from gpu4pyscf.pbc.grad.rks_stress import (
 #        _finite_diff_cells,
@@ -1562,14 +1566,14 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 #    out += _contract_coulomb_and_nuc(cell, mesh, dm_kpts, kpts, rho0[0],
 #                                     rho1[:,:,0], grids, with_j, with_nuc)
 #    return out
-#
-#def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
-#    '''Strain derivatives for Coulomb and Exc with k-point samples
-#
-#    Kwargs:
-#        with_j : Whether to include the electron-electron Coulomb interactions
-#        with_nuc : Whether to include the electron-nuclear Coulomb interactions
-#    '''
+
+def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+    '''Strain derivatives for Coulomb and Exc with k-point samples
+
+    Kwargs:
+        with_j : Whether to include the electron-electron Coulomb interactions
+        with_nuc : Whether to include the electron-nuclear Coulomb interactions
+    '''
 #    from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 #    from gpu4pyscf.pbc.grad.rks_stress import (
 #        _finite_diff_cells,
@@ -1649,7 +1653,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 #                                     rho1_sf, grids, with_j, with_nuc)
 #    return out
 
-class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
+class MultiGridNumInt(MultiGridNumIntBase):
     # Enable analytical Fourier transforms (AFT), which are typically more
     # efficient for small unit cells.
     enable_aft = True
@@ -1676,7 +1680,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     def build(self, kmesh=None, xctype='MGGA'):
         log = logger.new_logger(self.cell)
         t0 = log.init_timer()
-        cell = self.cell = SortedGTO.from_cell(
+        cell = self.sorted_cell = SortedGTO.from_cell(
             self.cell, decontract=True, diffuse_cutoff=1e200)
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
 

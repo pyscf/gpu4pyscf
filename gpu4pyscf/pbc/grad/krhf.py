@@ -36,7 +36,7 @@ from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, jk_energy_per_atom
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.pbc.dft import multigrid
 
 __all__ = ['Gradients']
 
@@ -74,10 +74,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     if isinstance(ni, multigrid.MultiGridNumInt):
         raise NotImplementedError(
             "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
-            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
-    elif isinstance(ni, multigrid_v2.MultiGridNumInt):
-        # Attention: The orbital derivative of vpploc term is in multigrid_v2.get_veff_ip1() function.
-        rho_g = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0, kpts)
+            "Please use the default KNumInt or multigrid.MultiGridNumInt instead.")
+    elif isinstance(ni, multigrid.MultiGridNumIntBase):
+        # Attention: The orbital derivative of vpploc term is in multigrid.get_veff_ip1() function.
+        rho_g = multigrid_v3_TO_FIX.evaluate_density_on_g_mesh(ni, dm0, kpts)
         rho_g = rho_g[0,0]
         if cell._pseudo:
             dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
@@ -271,10 +271,10 @@ class Gradients(GradientsBase):
         # When J is evaluated using mf.j_engine or mf.rsjk, it is identical to
         # the J from MultiGridNumInt. The contribution from J matrix can be
         # efficiently evaluated using the MultiGridNumInt integrator.
-        j_in_xc = ni is not None and isinstance(ni, multigrid_v2.MultiGridNumInt)
+        j_in_xc = ni is not None and isinstance(ni, multigrid.MultiGridNumIntBase)
         if j_in_xc:
             j_factor = 0
-            de = multigrid_v2.get_veff_ip1(
+            de = ni_TO_FIX.get_veff_ip1(
                 ni, 'HF', dm, kpts=kpts, with_j=j_in_xc,
                 with_pseudo_vloc_orbital_derivative=True).get()
             de /= len(kpts)

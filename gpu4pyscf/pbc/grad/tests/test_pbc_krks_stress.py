@@ -26,7 +26,7 @@ from gpu4pyscf.pbc.grad import krks_stress, krks
 from gpu4pyscf.pbc.grad.krks_stress import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.pbc.dft.multigrid_v3 import _rks_exc_strain_deriv, MultiGridNumInt
 from gpu4pyscf.lib.multi_gpu import num_devices
 import pytest
 

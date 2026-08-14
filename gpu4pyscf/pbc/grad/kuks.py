@@ -25,7 +25,7 @@ from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.pbc.dft import multigrid
 
 __all__ = ['Gradients']
 
@@ -45,16 +45,16 @@ def energy_ee(ks_grad, dm, kpts):
     if isinstance(ni, multigrid.MultiGridNumInt):
         raise NotImplementedError(
             "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
-            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
+            "Please use the default KNumInt or multigrid_v3.MultiGridNumInt instead.")
 
-    if isinstance(ni, multigrid_v2.MultiGridNumInt):
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
         if kpts is None:
             nkpts = 1
         else:
             nkpts = len(kpts)
-        exc = multigrid_v2.get_veff_ip1(
+        exc = ni_TO_FIX.get_veff_ip1(
             ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
-        # exc of multigrid_v2 is the full response of dE/dX. However,
+        # exc of multigrid is the full response of dE/dX. However,
         # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
         exc /= nkpts
         j_factor = 0

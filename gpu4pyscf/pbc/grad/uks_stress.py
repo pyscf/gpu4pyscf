@@ -23,7 +23,7 @@ from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
-from gpu4pyscf.pbc.dft.multigrid_v2 import _uks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.pbc.dft.multigrid_v3 import _uks_exc_strain_deriv, MultiGridNumInt
 from gpu4pyscf.pbc.grad import uks as uks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt

@@ -1964,7 +1964,7 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
                                      rho1_sf, grids, with_j, with_nuc)
     return out
 
-class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
+class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def __init__(self, cell):
         self.cell = cell
         self.mesh = cell.mesh

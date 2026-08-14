@@ -56,7 +56,8 @@ from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.pbc.dft.numint import KNumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
-from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.pbc.dft.multigrid_v3 import _rks_exc_strain_deriv
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv
@@ -104,7 +105,7 @@ def get_veff(mf_grad, cell, dm, kpts, with_j=False, with_nuc=False):
         with_j = False
 
     # TODO: with_nuc should be disabled for all-electron calculations
-    if isinstance(ni, MultiGridNumInt):
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
         sigma = _rks_exc_strain_deriv(ni, mf.xc, dm, kpts, with_j, with_nuc)
     elif isinstance(ni, KNumInt):
         sigma = get_vxc(mf_grad, cell, dm, kpts, with_j, with_nuc)
