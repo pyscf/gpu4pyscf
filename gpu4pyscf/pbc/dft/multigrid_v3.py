@@ -55,7 +55,7 @@ from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
-from gpu4pyscf.pbc.dft.multigrid import MultiGridNumIntBase
+from gpu4pyscf.pbc.dft import multigrid
 
 libmgrid = load_library('libmgrid_v3')
 NBAS_MAX = 16777216
@@ -1049,7 +1049,7 @@ def get_nuc(ni, kpts=None):
         vne = vne[0]
     return vne
 
-def _eval_nucG(cell, mesh):
+def _eval_nucG(cell, mesh, out=None):
     '''Nuclear attraction potential on Gv'''
     assert cell.dimension == 3
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
@@ -1059,13 +1059,14 @@ def _eval_nucG(cell, mesh):
     SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
     SIx *= cp.asarray(-cell.atom_charges())[:,None]
     rho_xy = SIx[:,:,None] * SIy[:,None,:]
-    nuc_density = contract('qxy,qz->xyz', rho_xy, SIz)
+    mesh = [x.shape[1] for x in Gv_bases]
+    out = ndarray(mesh, dtype=np.complex128, buffer=out)
+    nuc_density = contract('qxy,qz->xyz', rho_xy, SIz, out=out)
     return _get_coulomb_on_g_mesh(nuc_density, Gv_bases, out=nuc_density).ravel()
 
 def get_pp(ni, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
     """
-    from gpu4pyscf.pbc.dft.multigrid import eval_vpplocG
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -1081,7 +1082,7 @@ def get_pp(ni, kpts=None):
     mesh = ni.mesh
     # Compute the vpplocG as
     # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
-    vpplocG = eval_vpplocG(cell, mesh)
+    vpplocG = multigrid.eval_vpplocG(cell, mesh)
     vpp = _eval_xc_mat(ni, vpplocG)
     vpp = _inverse_wannier_transform_fock(ni, vpp, kpts)
     t1 = log.timer_debug1("vpploc", *t0)
@@ -1168,6 +1169,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     cell = ni.cell
     mesh = ni.mesh
     ngrids = np.prod(mesh)
+    vol = cell.vol
+    weight = vol / ngrids
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
     rhoG, tauG = _eval_density(ni, dm_sc, with_tau=xctype=='MGGA')
@@ -1187,8 +1190,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density)
         # *(1./weight) because rhoR is scaled by weight in _eval_density. If
         # computing rhoR with IFFT, the weight factor is not needed.
-        vol = cell.vol
-        weight = vol / ngrids
         density *= 1/weight
         t0 = log.timer_debug1("density", *t0)
 
@@ -1403,87 +1404,76 @@ def get_veff_ip1(
     k-points. This should return the energy per cell directly and will be
     changed in future.
     '''
-    raise
-#    if kpts is None:
-#        kpts = np.zeros((1, 3))
-#    else:
-#        kpts = kpts.reshape(-1, 3)
-#    log = logger.new_logger(ni, verbose)
-#    t0 = log.init_timer()
-#    cell = ni.cell
-#    dm_kpts = cp.asarray(dm_kpts, order="C")
-#    dms = _format_dms(dm_kpts, kpts)
-#    nset = dms.shape[0]
-#    dms = None
-#
-#    xc_type = ni._xc_type(xc_code)
-#    mesh = ni.mesh
-#    ngrids = np.prod(mesh)
-#    density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
-#
-#    Gv = get_Gv(cell, mesh)
-#    coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
-#    coulomb_on_g_mesh = cp.einsum(
-#        "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
-#    )
-#
-#    weight = cell.vol / ngrids
-#
-#    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
-#    # computing rhoR with IFFT, the weight factor is not needed.
-#    density = (
-#        cp.asarray(
-#            ifft_in_place(density.reshape(nset, -1, *mesh)).real,
-#            order="C",
-#        ).reshape(nset, -1, ngrids)
-#        / weight
-#    )
-#
-#    if nset == 1: # RHF
-#        xc_for_fock = ni.eval_xc_eff(
-#            xc_code, density[0], deriv=1, xctype=xc_type, spin=0
-#        )[1]
-#    else: # UHF
-#        assert nset == 2
-#        xc_for_fock = ni.eval_xc_eff(
-#            xc_code, density, deriv=1, xctype=xc_type, spin=1
-#        )[1]
-#
-#    xc_for_fock = xc_for_fock.reshape(nset, -1, *mesh) * weight
-#    xc_for_fock = fft_in_place(xc_for_fock).reshape(nset, -1, ngrids)
-#
-#    if xc_type == "LDA" or xc_type == 'HF':
-#        pass
-#    elif xc_type == "GGA":
-#        xc_for_fock = (
-#            xc_for_fock[:, 0] - contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
-#        )
-#        xc_for_fock = xc_for_fock.reshape((nset, -1, ngrids))
-#    elif xc_type == "MGGA":
-#        xc_for_fock[:, 0] -= contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
-#        xc_for_fock = cp.concatenate([
-#            xc_for_fock[:, 0].reshape((nset, -1, ngrids)),
-#            xc_for_fock[:, 4].reshape((nset, -1, ngrids)),
-#        ], axis = 1)
-#    else:
-#        raise ValueError(f"Incorrect xc_type = {xc_type}")
-#
-#    if with_j:
-#        xc_for_fock[:, 0] += coulomb_on_g_mesh
-#
-#    if with_pseudo_vloc_orbital_derivative:
-#        if cell._pseudo:
-#            xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG(cell, mesh)
-#        else:
-#            xc_for_fock[:, 0] += multigrid_v1.eval_nucG(cell, mesh)
-#
-#    veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
-#        ni, xc_for_fock, dm_kpts, hermi, kpts, with_tau = (xc_type == "MGGA")
-#    )
-#
-#    t0 = log.timer("veff_gradient", *t0)
-#
-#    return veff_gradient
+    cell = ni.cell
+    log = logger.new_logger(cell, verbose)
+    t0 = log.init_timer()
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+
+    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi)
+    n_dm = len(dm)
+
+    xc_type = ni._xc_type(xc_code)
+    mesh = ni.mesh
+    ngrids = np.prod(mesh)
+    weight = cell.vol / ngrids
+
+    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+
+    if n_dm == 1: # RHF
+        rhoG, tauG = _eval_density(ni, dm_sc, with_tau=xctype=='MGGA')
+        density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
+        spin = 0
+
+    else: # UHF
+        density = cp.empty((2, nvar, ngrids))
+        rhoG, tauG = _eval_density(ni, dm_sc[0], with_tau=xctype=='MGGA')
+        tauG = None
+        _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
+        rhoGb, tauG = _eval_density(ni, dm_sc[1], with_tau=xctype=='MGGA')
+        rhoG += rhoGb
+        _density_to_real_space(rhoGb, tauG, Gv_bases, xctype, out=density[1])
+        rhoGb = None
+        spin = 1
+
+    if with_j:
+        coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=rhoG)
+    else:
+        coulomb_on_g_mesh = rhoG
+        coulomb_on_g_mesh.fill(0.)
+    rhoG = None
+
+    if with_pseudo_vloc_orbital_derivative:
+        if cell._pseudo:
+            coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh, out=tauG)
+        else:
+            coulomb_on_g_mesh += _eval_nucG(cell, mesh, rhoG, out=tauG)
+    tauG = None
+
+    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+    # computing rhoR with IFFT, the weight factor is not needed.
+    density *= 1/weight
+    xc_for_fock = ni.eval_xc_eff(
+        xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)[1]
+    xc_for_fock *= weight
+    xc_for_fock = xc_for_fock.reshape(n_dm, nvar, *mesh)
+
+    if n_dm == 1: # RHF
+        vxc = _vxc_to_reciprocal_space(xc_for_fock, coulomb_on_g_mesh, Gv_bases)
+        gradient = convert_xc_on_g_mesh_to_fock_gradient(ni, vxc, dm_sc)
+    else:
+        vxc_a, coulomb_on_g_mesh = coulomb_on_g_mesh, None
+        vxc_b = vxc_a.copy()
+        vxc_a = _vxc_to_reciprocal_space(xc_for_fock[0], vxc_a, Gv_bases)
+        gradient = _eval_xc_gradient(ni, vxc_a, dm_sc[0])
+        vxc_a = coulomb_a = None
+        vxc_b = _vxc_to_reciprocal_space(xc_for_fock[1], vxc_b, Gv_bases)
+        gradient += _eval_xc_gradient(ni, vxc_b, dm_sc[1])
+
+    t0 = log.timer("vxc", *t0)
+    return gradient
 
 def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
     '''Strain derivatives for Coulomb and Exc with k-point samples
@@ -1653,7 +1643,7 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
 #                                     rho1_sf, grids, with_j, with_nuc)
 #    return out
 
-class MultiGridNumInt(MultiGridNumIntBase):
+class MultiGridNumInt(multigrid.MultiGridNumIntBase):
     # Enable analytical Fourier transforms (AFT), which are typically more
     # efficient for small unit cells.
     enable_aft = True

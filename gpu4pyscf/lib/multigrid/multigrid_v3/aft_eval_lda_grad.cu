@@ -41,11 +41,12 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
-                         PBCIntEnvVars envs, int64_t *bas_ij_idx,
-                         double *G_bases, double *L_bases,
-                         int *mesh_cum, int *nimgs_cum,
-                         int npair, int ntiles_x, int ntiles_y, int ntiles_z)
+void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
+                          PBCIntEnvVars envs, int64_t *bas_ij_idx,
+                          double *G_bases, double *L_bases,
+                          int *mesh_cum, int *nimgs_cum,
+                          int npair, int ntiles_x, int ntiles_y, int ntiles_z,
+                          double factor)
 {
     int thread_id = threadIdx.x;
     int x_id = thread_id / NGV_PER_BLOCK;
@@ -55,10 +56,10 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
     if (thread_id == 0) {
         tile_batch = blockIdx.x / npair;
     }
-    __shared__ double gx[NGV_PER_BLOCK*3*2*LMAX1*LMAX1];
-    __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)];
+    __shared__ double gx[NGV_PER_BLOCK*3*2*(LMAX+2)*LMAX1];
+    __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+2)];
     __shared__ int mesh_start[3];
-    __shared__ double vjR[NCART_MAX*NCART_MAX * WARPS];
+    __shared__ double dm_cache[NCART_MAX*NCART_MAX];
     __shared__ int ri, rj, li, lj;
     __shared__ double ai, aj;
 
@@ -83,9 +84,31 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
 
     int nfi = c_nf[li];
     int nfj = c_nf[lj];
-    for (int n = thread_id; n < nfi * nfj * WARPS; n += THREADS) {
-        vjR[n] = 0.;
+    for (int n = thread_id; n < nfi * nfj; n += THREADS) {
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double aij = ai + aj;
+        double fac = OVERLAP_FAC * env[ci] * env[cj] / (aij * sqrt(aij)) * factor;
+        int ish_cell0 = ish;
+        int bvk_cell_id = jsh / nbas;
+        int jsh_cell0 = jsh - nbas * bvk_cell_id;
+        if (ish_cell0 == jsh_cell0) {
+            fac *= .5;
+        }
+        uint32_t nao = envs.ao_loc[nbas];
+        int i0 = envs.ao_loc[ish_cell0];
+        int j0 = envs.ao_loc[jsh_cell0];
+        int i = n * c_div_nf[lj];
+        int j = n - nfj * i;
+        dm_cache[n] = dm[bvk_cell_id*nao*nao + (i0+i)*nao + j0+j] * fac;
     }
+
+    double v_ix = 0;
+    double v_iy = 0;
+    double v_iz = 0;
+    double v_jx = 0;
+    double v_jy = 0;
+    double v_jz = 0;
 
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int tile0 = tile_batch * TILES_PER_BATCH;
@@ -103,7 +126,7 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
         }
 
         constexpr int stride_i = NGV_PER_BLOCK * 6;
-        constexpr int stride_j = stride_i * LMAX1;
+        constexpr int stride_j = stride_i * (LMAX+2);
         for (int n = thread_id; n < stride_j*(lj+1); n += THREADS) {
             gx[n] = 0;
         }
@@ -126,7 +149,7 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
                 double xjxi = env[rj+x_id] + Lx - xi;
                 double theta_rr = theta_ij * xjxi * xjxi + .5*a2 * kx * kx;
                 if (theta_rr > REMOTE_THRESHOLD) continue;
-                vrr_hrr(gx, swap, addrR, li, lj, stride_j, a2, xjxi, aj_aij, xi,
+                vrr_hrr(gx, swap, addrR, li+1, lj, stride_j, a2, xjxi, aj_aij, xi,
                         kx, theta_rr);
             }
         }
@@ -136,9 +159,9 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
         int z_in_tile = Gv_id;
         int y = mesh_start[1] + y_in_tile;
         int z = mesh_start[2] + z_in_tile;
-        double vG_R[DENSITY_WIDTH];
-        double vG_I[DENSITY_WIDTH];
         if (y < mesh_y && z < mesh_z) {
+            double vG_R[DENSITY_WIDTH];
+            double vG_I[DENSITY_WIDTH];
 #pragma unroll
             for (int n = 0; n < DENSITY_WIDTH; ++n) {
                 int x = mesh_start[0] + n;
@@ -148,16 +171,16 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
                 vG_R[n] = val.x;
                 vG_I[n] = val.y;
             }
-        }
 
-        int nfi = c_nf[li];
-        int nfj = c_nf[lj];
-        int idx_i = lex_xyz_offset(li);
-        int idx_j = lex_xyz_offset(lj);
-        for (int i = 0; i < nfi; ++i) {
-        for (int j = 0; j < nfj; ++j) {
-            double s = 0;
-            if (y < mesh_y && z < mesh_z) {
+            double ai2 = ai * -2;
+            double ky = G_bases[mesh_cum[1] + y];
+            double kz = G_bases[mesh_cum[2] + z];
+            int nfi = c_nf[li];
+            int nfj = c_nf[lj];
+            int idx_i = lex_xyz_offset(li);
+            int idx_j = lex_xyz_offset(lj);
+            for (int i = 0; i < nfi; ++i) {
+            for (int j = 0; j < nfj; ++j) {
                 int ix = _c_cartesian_lexical_xyz[idx_i+i*3+0];
                 int iy = _c_cartesian_lexical_xyz[idx_i+i*3+1];
                 int iz = _c_cartesian_lexical_xyz[idx_i+i*3+2];
@@ -167,75 +190,91 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
                 int addrx = ix*stride_i + jx*stride_j;
                 int addry = iy*stride_i + jy*stride_j + NGV_PER_BLOCK*2 + y_in_tile;
                 int addrz = iz*stride_i + jz*stride_j + NGV_PER_BLOCK*4 + z_in_tile;
+                double dm_fac = dm_cache[i*nfj+j];
                 double *gxR = gx;
                 double *gxI = gxR + NGV_PER_BLOCK;
                 double yR = gxR[addry];
                 double yI = gxI[addry];
-                double zR = gxR[addrz];
-                double zI = gxI[addrz];
+                double zR = gxR[addrz] * dm_fac;
+                double zI = gxI[addrz] * dm_fac;
+                double f1yR, f1yI;
+                double f1zR, f1zI;
+                dI_gx(gxR, addry, stride_i, iy, ai2, f1yR, f1yI);
+                dI_gx(gxR, addry, stride_i, iz, ai2, f1zR, f1zI);
+                f1zR *= dm_fac;
+                f1zI *= dm_fac;
                 double yzR, yzI;
+                double YzR, YzI;
+                double yZR, yZI;
                 multiply(yR, yI, zR, zI, yzR, yzI);
+                multiply(f1yR, f1yI, zR, zI, YzR, YzI);
+                multiply(yR, yI, f1zR, f1zI, yZR, yZI);
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
                     int x = n;
-                    if (mesh_start[0] + x >= mesh_x) break;
-                    double xR = gxR[addrx+x];
-                    double xI = gxI[addrx+x];
+                    int x_in_Gv_base = mesh_start[0] + x;
+                    if (x_in_Gv_base >= mesh_x) break;
+                    int addr = addrx + x;
+                    double xR = gxR[addr];
+                    double xI = gxI[addr];
                     double xyzR, xyzI;
                     multiply(xR, xI, yzR, yzI, xyzR, xyzI);
-                    s += xyzR * vG_R[n] - xyzI * vG_I[n];
+                    double gout0I = xyzR * vG_I[n] + xyzI * vG_R[n];
+
+                    multiply(xR, xI, YzR, YzI, xyzR, xyzI);
+                    double gouty = xyzR * vG_R[n] - xyzI * vG_I[n];
+                    v_iy += gouty;
+                    v_jy -= gout0I * ky + gouty;
+
+                    multiply(xR, xI, yZR, yZI, xyzR, xyzI);
+                    double goutz = xyzR * vG_R[n] - xyzI * vG_I[n];
+                    v_iz += goutz;
+                    v_jz -= gout0I * kz + goutz;
+
+                    double f1xR, f1xI;
+                    dI_gx(gxR, addr, stride_i, ix, ai2, f1xR, f1xI);
+                    multiply(f1xR, f1xI, yzR, yzI, xyzR, xyzI);
+                    double goutx = xyzR * vG_R[n] - xyzI * vG_I[n];
+                    v_ix += goutx;
+                    // (\nabla i|j) + (i|\nabla j) + -iG*(ij,G) = 0
+                    double kx = G_bases[mesh_cum[0] + x_in_Gv_base];
+                    v_jx -= gout0I * kx + goutx;
                 }
-            }
-            for (int offset = 16; offset > 0; offset >>= 1) {
-                s += __shfl_down_sync(0xffffffff, s, offset);
-            }
-            int lane = thread_id % WARP_SIZE;
-            int warp = thread_id / WARP_SIZE;
-            if (lane == 0) {
-                vjR[warp + WARPS*(i*nfj+j)] += s;
-            }
-        } }
+            } }
+        }
     }
 
     __syncthreads();
-    for (int n = thread_id; n < nfi * nfj; n += THREADS) {
-        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
-        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double aij = ai + aj;
-        double fac = OVERLAP_FAC * env[ci] * env[cj] / (aij * sqrt(aij));
-        int ish_cell0 = ish;
-        int bvk_cell_id = jsh / nbas;
-        int jsh_cell0 = jsh - nbas * bvk_cell_id;
-        if (ish_cell0 == jsh_cell0) {
-            fac *= .5;
-        }
-        uint32_t nao = envs.ao_loc[nbas];
-        int i0 = envs.ao_loc[ish_cell0];
-        int j0 = envs.ao_loc[jsh_cell0];
-        int i = n * c_div_nf[lj];
-        int j = n - nfj * i;
-        double s = 0;
-        for (int m = 0; m < WARPS; m++) {
-            s += vjR[n*WARPS+m];
-        }
-        atomicAdd(out + bvk_cell_id*nao*nao + (i0+i)*nao + j0+j, s * fac);
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        v_ix += __shfl_down_sync(0xffffffff, v_ix, offset);
+        v_iy += __shfl_down_sync(0xffffffff, v_iy, offset);
+        v_iz += __shfl_down_sync(0xffffffff, v_iz, offset);
+        v_jx += __shfl_down_sync(0xffffffff, v_jx, offset);
+        v_jy += __shfl_down_sync(0xffffffff, v_jy, offset);
+        v_jz += __shfl_down_sync(0xffffffff, v_jz, offset);
+    }
+    int lane = thread_id % WARP_SIZE;
+    int ish_cell0 = ish;
+    int bvk_cell_id = jsh / nbas;
+    int jsh_cell0 = jsh - nbas * bvk_cell_id;
+    int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
+    int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
+    if (lane == 0) {
+        atomicAdd(out+ia*3+0, v_ix);
+        atomicAdd(out+ia*3+1, v_iy);
+        atomicAdd(out+ia*3+2, v_iz);
+        atomicAdd(out+ja*3+0, v_jx);
+        atomicAdd(out+ja*3+1, v_jy);
+        atomicAdd(out+ja*3+2, v_jz);
     }
 }
 
-//__global__ static
-//void monoclinic_aopair_coulG_kernel(double *out, double *coulG_R, double *coulG_I,
-//                                    PBCIntEnvVars *envs,
-//                                    int *shl_pair_offsets, int64_t *bas_ij_idx,
-//                                    double *G_bases, int *mesh_cum, int *nimgs_cum,
-//                                    int *mesh, int nbatches_shl_pair)
-//{
-//}
-
 extern "C" {
-int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeholder,
-                     PBCIntEnvVars *envs, int64_t *bas_ij_idx,
-                     double *G_bases, double *L_bases, int *mesh_cum,
-                     int *nimgs_cum, int *mesh, int npair)
+int orth_aft_lda_grad(double *out, double *dm,
+                      cuDoubleComplex *vxcG, cuDoubleComplex *placeholder,
+                      PBCIntEnvVars *envs, int64_t *bas_ij_idx,
+                      double *G_bases, double *L_bases, int *mesh_cum,
+                      int *nimgs_cum, int *mesh, int npair, double factor)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -245,12 +284,12 @@ int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeh
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
-    orth_lda_mat_kernel<<<ntile_batch*npair, THREADS>>>(
-        out, vxcG, *envs, bas_ij_idx, G_bases, L_bases,
-        mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
+    orth_lda_grad_kernel<<<ntile_batch*npair, THREADS>>>(
+        out, dm, vxcG, *envs, bas_ij_idx, G_bases, L_bases,
+        mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z, factor);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in orth_lda_mat_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in orth_lda_grad_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

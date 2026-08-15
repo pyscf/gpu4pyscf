@@ -24,6 +24,7 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
 #include "utils.cuh"
+#include "aft_recursion.cuh"
 
 #define THREADS         256
 #define NGV_PER_BLOCK   16
@@ -130,75 +131,15 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
             if (_Gv_id < mesh_cum[x_id+1]) {
                 kx = G_bases[_Gv_id];
             }
-            int lij = li + lj;
             int addrR = x_id * NGV_PER_BLOCK*2 + Gv_id;
-            int addrI = addrR + NGV_PER_BLOCK;
             for (int img = nimgs_cum[x_id]; img < nimgs_cum[x_id+1]; ++img) {
                 double Lx = L_bases[img];
                 double xi = env[ri+x_id];
                 double xjxi = env[rj+x_id] + Lx - xi;
                 double theta_rr = theta_ij * xjxi * xjxi + .5*a2 * kx * kx;
                 if (theta_rr > REMOTE_THRESHOLD) continue;
-                double xpa = xjxi * aj_aij;
-                double xij = xpa + xi;
-                double kR = kx * xij;
-                double s0xR, s1xR, s2xR;
-                double s0xI, s1xI, s2xI;
-                sincos(-kR, &s0xI, &s0xR);
-                double Kab = exp(-theta_rr);
-                s0xR *= Kab;
-                s0xI *= Kab;
-                swap[addrR] = s0xR;
-                swap[addrI] = s0xI;
-                gx[addrR] += s0xR;
-                gx[addrI] += s0xI;
-                if (lij > 0) {
-                    double RpaR = xpa;
-                    double RpaI = -a2 * kx;
-                    s1xR = RpaR * s0xR - RpaI * s0xI;
-                    s1xI = RpaR * s0xI + RpaI * s0xR;
-                    swap[addrR+stride_i] = s1xR;
-                    swap[addrI+stride_i] = s1xI;
-                    if (0 < li) {
-                        gx[addrR+stride_i] += s1xR;
-                        gx[addrI+stride_i] += s1xI;
-                    }
-                    for (int i = 2; i <= lij; i++) {
-                        double ia2 = (i-1) * a2;
-                        s2xR = ia2 * s0xR + RpaR * s1xR - RpaI * s1xI;
-                        s2xI = ia2 * s0xI + RpaR * s1xI + RpaI * s1xR;
-                        swap[addrR+i*stride_i] = s2xR;
-                        swap[addrI+i*stride_i] = s2xI;
-                        if (i <= li) {
-                            gx[addrR+i*stride_i] += s2xR;
-                            gx[addrI+i*stride_i] += s2xI;
-                        }
-                        s0xR = s1xR;
-                        s0xI = s1xI;
-                        s1xR = s2xR;
-                        s1xI = s2xI;
-                    }
-                }
-                for (int j = 1; j <= lj; ++j) {
-                    int i = lij - j;
-                    s1xR = swap[addrR+(i+1)*stride_i];
-                    s1xI = swap[addrI+(i+1)*stride_i];
-                    for (; i >= 0; --i) {
-                        s0xR = swap[addrR+i*stride_i];
-                        s0xI = swap[addrI+i*stride_i];
-                        s2xR = s1xR - xjxi * s0xR;
-                        s2xI = s1xI - xjxi * s0xI;
-                        swap[addrR+i*stride_i] = s2xR;
-                        swap[addrI+i*stride_i] = s2xI;
-                        if (i <= li) {
-                            int ij = i * stride_i + j * stride_j;
-                            gx[addrR+ij] += s2xR;
-                            gx[addrI+ij] += s2xI;
-                        }
-                        s1xR = s0xR;
-                        s1xI = s0xI;
-                    }
-                }
+                vrr_hrr(gx, swap, addrR, li, lj, stride_j, a2, xjxi, aj_aij, xi,
+                        kx, theta_rr);
             }
         }
 

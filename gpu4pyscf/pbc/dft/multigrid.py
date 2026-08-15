@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
-    dist_matrix, batched_vec_norm2)
+    dist_matrix, ndarray)
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
@@ -854,7 +854,7 @@ def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charg
 
     return vlocG
 
-def eval_vpplocG(cell, mesh):
+def eval_vpplocG(cell, mesh, out=None):
     '''PRB, 58, 3641 Eq (5)
     '''
     assert cell.dimension == 3
@@ -867,7 +867,8 @@ def eval_vpplocG(cell, mesh):
     charges = cell.atom_charges()
 
     ngrids = np.prod(mesh)
-    vlocG = cp.zeros(ngrids, dtype=np.complex128)
+    vlocG = ndarray(ngrids, dtype=np.complex128, buffer=out)
+    vlocG.fill(0)
     vlocG0 = 0
 
     for ia in range(cell.natm):

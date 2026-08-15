@@ -24,6 +24,7 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
 #include "utils.cuh"
+#include "aft_recursion.cuh"
 
 #define WARP_SIZE       32
 #define WARPS           8
@@ -34,73 +35,6 @@
 #define REMOTE_THRESHOLD 50
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
-
-template <int LI, int LJ> __forceinline__ __device__
-void vrr_hrr(double *gx, int addrR, int stride_j, double a2, double xjxi,
-             double RpaR, double RpaI, double g00R, double g00I)
-{
-    constexpr int stride_i = NGV_PER_BLOCK * 6;
-    int addrI = addrR + NGV_PER_BLOCK;
-    double swapR[LI+LJ+1];
-    double swapI[LI+LJ+1];
-    double s0xR, s1xR, s2xR;
-    double s0xI, s1xI, s2xI;
-    s0xR = g00R;
-    s0xI = g00I;
-    swapR[0] = s0xR;
-    swapI[0] = s0xI;
-    gx[addrR] += s0xR;
-    gx[addrI] += s0xI;
-    constexpr int lij = LI + LJ;
-    if (lij > 0) {
-        s1xR = RpaR * s0xR - RpaI * s0xI;
-        s1xI = RpaR * s0xI + RpaI * s0xR;
-        swapR[1] = s1xR;
-        swapI[1] = s1xI;
-        if (0 < LI) {
-            gx[addrR+stride_i] += s1xR;
-            gx[addrI+stride_i] += s1xI;
-        }
-#pragma unroll
-        for (int i = 2; i <= lij; i++) {
-            double ia2 = (i-1) * a2;
-            s2xR = ia2 * s0xR + RpaR * s1xR - RpaI * s1xI;
-            s2xI = ia2 * s0xI + RpaR * s1xI + RpaI * s1xR;
-            swapR[i] = s2xR;
-            swapI[i] = s2xI;
-            if (i <= LI) {
-                gx[addrR+i*stride_i] += s2xR;
-                gx[addrI+i*stride_i] += s2xI;
-            }
-            s0xR = s1xR;
-            s0xI = s1xI;
-            s1xR = s2xR;
-            s1xI = s2xI;
-        }
-    }
-#pragma unroll
-    for (int j = 1; j <= LJ; ++j) {
-        int i = lij - j;
-        s1xR = swapR[i+1];
-        s1xI = swapI[i+1];
-#pragma unroll
-        for (; i >= 0; --i) {
-            s0xR = swapR[i];
-            s0xI = swapI[i];
-            s2xR = s1xR - xjxi * s0xR;
-            s2xI = s1xI - xjxi * s0xI;
-            swapR[i] = s2xR;
-            swapI[i] = s2xI;
-            if (i <= LI) {
-                int ij = i * stride_i + j * stride_j;
-                gx[addrR+ij] += s2xR;
-                gx[addrI+ij] += s2xI;
-            }
-            s1xR = s0xR;
-            s1xI = s0xI;
-        }
-    }
-}
 
 __global__ static
 void orth_mgga_mat_kernel(double *out, cuDoubleComplex *vrhoG,
@@ -271,45 +205,13 @@ void orth_mgga_mat_kernel(double *out, cuDoubleComplex *vrhoG,
 
                 double ai2 = ai * -2;
                 double aj2 = aj * -2;
-                double f3yR = ai2 * gxR[addry+stride_i+stride_j];
-                double f3yI = ai2 * gxR[addry+stride_i+stride_j+NGV_PER_BLOCK];
-                if (iy > 0) {
-                    f3yR += iy * gxR[addry-stride_i+stride_j];
-                    f3yI += iy * gxR[addry-stride_i+stride_j+NGV_PER_BLOCK];
-                }
-                f3yR *= aj2;
-                f3yI *= aj2;
-                if (jy > 0) {
-                    double fyR = ai2 * gxR[addry+stride_i-stride_j];
-                    double fyI = ai2 * gxR[addry+stride_i-stride_j+NGV_PER_BLOCK];
-                    if (iy > 0) {
-                        fyR += iy * gxR[addry-stride_i-stride_j];
-                        fyI += iy * gxR[addry-stride_i-stride_j+NGV_PER_BLOCK];
-                    }
-                    f3yR += jy * fyR;
-                    f3yI += jy * fyI;
-                }
+                double f3yR, f3yI;
+                dIdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, f3yR, f3yI);
                 double YZR, YZI;
                 multiply(f3yR, f3yI, zR, zI, YZR, YZI);
 
-                double f3zR = ai2 * gxR[addrz+stride_i+stride_j];
-                double f3zI = ai2 * gxR[addrz+stride_i+stride_j+NGV_PER_BLOCK];
-                if (iz > 0) {
-                    f3zR += iz * gxR[addrz-stride_i+stride_j];
-                    f3zI += iz * gxR[addrz-stride_i+stride_j+NGV_PER_BLOCK];
-                }
-                f3zR *= aj2;
-                f3zI *= aj2;
-                if (jz > 0) {
-                    double fzR = ai2 * gxR[addrz+stride_i-stride_j];
-                    double fzI = ai2 * gxR[addrz+stride_i-stride_j+NGV_PER_BLOCK];
-                    if (iz > 0) {
-                        fzR += iz * gxR[addrz-stride_i-stride_j];
-                        fzI += iz * gxR[addrz-stride_i-stride_j+NGV_PER_BLOCK];
-                    }
-                    f3zR += jz * fzR;
-                    f3zI += jz * fzI;
-                }
+                double f3zR, f3zI;
+                dIdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, f3zR, f3zI);
                 double tmpR, tmpI;
                 multiply(yR, yI, f3zR, f3zI, tmpR, tmpI);
                 YZR += tmpR;
@@ -319,24 +221,8 @@ void orth_mgga_mat_kernel(double *out, cuDoubleComplex *vrhoG,
                     int x = n;
                     if (mesh_start[0] + x >= mesh_x) break;
                     int addr = addrx + x;
-                    double f3xR = ai2 * gxR[addr+stride_i+stride_j];
-                    double f3xI = ai2 * gxR[addr+stride_i+stride_j+NGV_PER_BLOCK];
-                    if (ix > 0) {
-                        f3xR += ix * gxR[addr-stride_i+stride_j];
-                        f3xI += ix * gxR[addr-stride_i+stride_j+NGV_PER_BLOCK];
-                    }
-                    f3xR *= aj2;
-                    f3xI *= aj2;
-                    if (jx > 0) {
-                        double fxR = ai2 * gxR[addr+stride_i-stride_j];
-                        double fxI = ai2 * gxR[addr+stride_i-stride_j+NGV_PER_BLOCK];
-                        if (ix > 0) {
-                            fxR += ix * gxR[addr-stride_i-stride_j];
-                            fxI += ix * gxR[addr-stride_i-stride_j+NGV_PER_BLOCK];
-                        }
-                        f3xR += jx * fxR;
-                        f3xI += jx * fxI;
-                    }
+                    double f3xR, f3xI;
+                    dIdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, f3xR, f3xI);
                     double xyzR, xyzI;
                     multiply(f3xR, f3xI, yzR, yzI, xyzR, xyzI);
 
