@@ -196,45 +196,45 @@ void orth_mgga_mat_kernel(double *out, cuDoubleComplex *vrhoG,
                 int addrz = iz*stride_i + jz*stride_j + NGV_PER_BLOCK*4 + z_in_tile;
                 double *gxR = gx;
                 double *gxI = gxR + NGV_PER_BLOCK;
-                double yR = gxR[addry];
-                double yI = gxI[addry];
-                double zR = gxR[addrz];
-                double zI = gxI[addrz];
-                double yzR, yzI;
-                multiply(yR, yI, zR, zI, yzR, yzI);
+                double yR0 = gxR[addry];
+                double yI0 = gxI[addry];
+                double zR0 = gxR[addrz];
+                double zI0 = gxI[addrz];
+                double yzR00, yzI00;
+                multiply(yR0, yI0, zR0, zI0, yzR00, yzI00);
 
                 double ai2 = ai * -2;
                 double aj2 = aj * -2;
-                double f3yR, f3yI;
-                dIdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, f3yR, f3yI);
-                double YZR, YZI;
-                multiply(f3yR, f3yI, zR, zI, YZR, YZI);
+                double yR3, yI3;
+                dIdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, yR3, yI3);
+                double yzR33, yzI33;
+                multiply(yR3, yI3, zR0, zI0, yzR33, yzI33);
 
-                double f3zR, f3zI;
-                dIdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, f3zR, f3zI);
+                double zR3, zI3;
+                dIdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, zR3, zI3);
                 double tmpR, tmpI;
-                multiply(yR, yI, f3zR, f3zI, tmpR, tmpI);
-                YZR += tmpR;
-                YZI += tmpI;
+                multiply(yR0, yI0, zR3, zI3, tmpR, tmpI);
+                yzR33 += tmpR;
+                yzI33 += tmpI;
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
                     int x = n;
                     if (mesh_start[0] + x >= mesh_x) break;
                     int addr = addrx + x;
-                    double f3xR, f3xI;
-                    dIdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, f3xR, f3xI);
+                    double xR3, xI3;
+                    dIdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, xR3, xI3);
                     double xyzR, xyzI;
-                    multiply(f3xR, f3xI, yzR, yzI, xyzR, xyzI);
+                    multiply(xR3, xI3, yzR00, yzI00, xyzR, xyzI);
 
-                    double xR = gxR[addr];
-                    double xI = gxI[addr];
+                    double xR0 = gxR[addr];
+                    double xI0 = gxI[addr];
                     double tmpR, tmpI;
-                    multiply(xR, xI, YZR, YZI, tmpR, tmpI);
+                    multiply(xR0, xI0, yzR33, yzI33, tmpR, tmpI);
                     xyzR += tmpR;
                     xyzI += tmpI;
                     s += xyzR * vtau_R[n] - xyzI * vtau_I[n];
 
-                    multiply(xR, xI, yzR, yzI, xyzR, xyzI);
+                    multiply(xR0, xI0, yzR00, yzI00, xyzR, xyzI);
                     s += xyzR * vrho_R[n] - xyzI * vrho_I[n];
                 }
             }

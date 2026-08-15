@@ -36,6 +36,17 @@
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
 
+__device__ __forceinline__
+void mul_add(double aR, double aI, double bR, double bI,
+             double cR, double cI, double dR, double dI,
+             double &outR, double &outI)
+{
+    outR = aR * bR - aI * bI;
+    outI = aR * bI + aI * bR;
+    outR += cR * dR - cI * dI;
+    outI += cR * dI + cI * dR;
+}
+
 __global__ static
 void orth_mgga_grad_kernel(double *out, double *dm,
                            cuDoubleComplex *vrhoG, cuDoubleComplex *vtauG,
@@ -219,71 +230,42 @@ void orth_mgga_grad_kernel(double *out, double *dm,
                 double dm_fac = dm_cache[i*nfj+j];
                 double *gxR = gx;
                 double *gxI = gxR + NGV_PER_BLOCK;
-                double yR = gxR[addry];
-                double yI = gxI[addry];
-                double zR = gxR[addrz];
-                double zI = gxI[addrz];
-                // yz_0 =  f0y * f0z 
-                // yz_2 =  f2y * f0z + f0y * f2z
+                double yR0 = gxR[addry];
+                double yI0 = gxI[addry];
+                double zR0 = gxR[addrz] * dm_fac;
+                double zI0 = gxI[addrz] * dm_fac;
+                // yz_00 = f0y * f0z 
+                // yz_20 = f2y * f0z + f0y * f2z
                 // yz_10 = f1y * f0z 
                 // yz_12 = f3y * f0z + f1y * f2z
                 // yz_01 = f0y * f1z 
                 // yz_21 = f0y * f3z + f2y * f1z
                 double yzR00, yzI00;
-                multiply(yR, yI, zR, zI, yzR00, yzI00);
+                multiply(yR0, yI0, zR0, zI0, yzR00, yzI00);
 
                 double ai2 = ai * -2;
                 double aj2 = aj * -2;
-                double f1yR, f1yI;
-                dI_gx(gxR, addry, stride_i, iy, ai2, f1yR, f1yI);
-                double yzR10, yzI10;
-                multiply(f1yR, f1yI, zR, zI, yzR10, yzI10);
+                double yR1, yI1; dI_gx(gxR, addry, stride_i, iy, ai2, yR1, yI1);
+                double zR1, zI1; dI_gx(gxR, addry, stride_i, iz, ai2, zR1, zI1);
+                zR1 *= dm_fac;
+                zI1 *= dm_fac;
 
-                double f1zR, f1zI;
-                dI_gx(gxR, addry, stride_i, iz, ai2, f1zR, f1zI);
-                double yzR01, yzI01;
-                multiply(yR, yI, f1zR, f1zI, yzR01, yzI01);
+                double yzR10, yzI10; multiply(yR1, yI1, zR0, zI0, yzR10, yzI10);
+                double yzR01, yzI01; multiply(yR0, yI0, zR1, zI1, yzR01, yzI01);
 
-                double f2yR, f2yI;
-                dIdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, f2yR, f2yI);
-                double yzR20, yzI20;
-                multiply(f2yR, f2yI, zR, zI, yzR20, yzI20);
-                double yzR21, yzI21;
-                multiply(f2yR, f2yI, f1zR, f1zI, yzR21, yzI21);
+                double yR2, yI2; dIdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, yR2, yI2);
+                double zR2, zI2; dIdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, zR2, zI2);
+                zR2 *= dm_fac;
+                zI2 *= dm_fac;
 
-                double f2zR, f2zI;
-                dIdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, f2zR, f2zI);
-                double tmpR, tmpI;
-                multiply(yR, yI, f2zR, f2zI, tmpR, tmpI);
-                yzR20 += tmpR;
-                yzI20 += tmpI;
-                double yzR12, yzI12;
-                multiply(f1yR, f1yI, f2zR, f2zI, yzR12, yzI12);
+                double yR3, yI3; d2IdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, yR3, yI3);
+                double zR3, zI3; d2IdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, zR3, zI3);
+                zR3 *= dm_fac;
+                zI3 *= dm_fac;
 
-                double f3yR, f3yI;
-                d2IdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, f3yR, f3yI);
-                multiply(f3yR, f3yI, zR, zI, tmpR, tmpI);
-                yzR21 += tmpR;
-                yzI21 += tmpI;
-
-                double f3zR, f3zI;
-                d2IdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, f3zR, f3zI);
-                multiply(yR, yI, f3zR, f3zI, tmpR, tmpI);
-                yzR12 += tmpR;
-                yzI12 += tmpI;
-
-                yzR00 *= dm_fac;
-                yzR20 *= dm_fac;
-                yzR01 *= dm_fac;
-                yzR10 *= dm_fac;
-                yzR21 *= dm_fac;
-                yzR12 *= dm_fac;
-                yzI00 *= dm_fac;
-                yzI20 *= dm_fac;
-                yzI01 *= dm_fac;
-                yzI10 *= dm_fac;
-                yzI21 *= dm_fac;
-                yzI12 *= dm_fac;
+                double yzR20, yzI20; mul_add(yR2, yI2, zR0, zI0, yR0, yI0, zR2, zI2, yzR20, yzI20);
+                double yzR21, yzI21; mul_add(yR2, yI2, zR1, zI1, yR3, yI3, zR0, zI0, yzR21, yzI21);
+                double yzR12, yzI12; mul_add(yR1, yI1, zR2, zI2, yR0, yI0, zR3, zI3, yzR12, yzI12);
 
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
@@ -295,53 +277,38 @@ void orth_mgga_grad_kernel(double *out, double *dm,
                     // goutx = f3x * f0y * f0z + f1x * f2y * f0z + f1x * f0y * f2z;
                     // gouty = f2x * f1y * f0z + f0x * f3y * f0z + f0x * f1y * f2z;
                     // goutz = f2x * f0y * f1z + f0x * f2y * f1z + f0x * f0y * f3z;
-                    double xR = gxR[addr];
-                    double xI = gxI[addr];
-                    double xyzR, xyzI, tmpR, tmpI;
-                    multiply(xR, xI, yzR20, yzI20, xyzR, xyzI);
-                    double f2xR, f2xI;
-                    dIdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, f2xR, f2xI);
-                    multiply(f2xR, f2xI, yzR00, yzI00, tmpR, tmpI);
-                    xyzR += tmpR;
-                    xyzI += tmpI;
+                    double xR0 = gxR[addr];
+                    double xI0 = gxI[addr];
+                    double xyzR, xyzI;
+                    double xR2, xI2; dIdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, xR2, xI2);
+                    mul_add(xR0, xI0, yzR20, yzI20, xR2, xI2, yzR00, yzI00, xyzR, xyzI);
                     double gout0I = xyzR * vtau_I[n] + xyzI * vtau_R[n];
-                    multiply(xR, xI, yzR00, yzI00, xyzR, xyzI);
+                    multiply(xR0, xI0, yzR00, yzI00, xyzR, xyzI);
                     gout0I += xyzR * vrho_I[n] + xyzI * vrho_R[n];
 
-                    multiply(f2xR, f2xI, yzR10, yzI10, xyzR, xyzI);
-                    multiply(xR, xI, yzR12, yzI12, tmpR, tmpI);
-                    xyzR += tmpR;
-                    xyzI += tmpI;
-                    double gouty = xyzR * vtau_R[n] - xyzI * vtau_I[n];
-                    multiply(xR, xI, yzR10, yzI10, xyzR, xyzI);
-                    gouty += xyzR * vrho_R[n] - xyzI * vrho_I[n];
-                    v_iy += gouty;
-                    v_jy -= gout0I * ky + gouty;
+                    mul_add(xR2, xI2, yzR10, yzI10, xR0, xI0, yzR12, yzI12, xyzR, xyzI);
+                    double goutyR = xyzR * vtau_R[n] - xyzI * vtau_I[n];
+                    multiply(xR0, xI0, yzR10, yzI10, xyzR, xyzI);
+                    goutyR += xyzR * vrho_R[n] - xyzI * vrho_I[n];
+                    v_iy += goutyR;
+                    v_jy -= gout0I * ky + goutyR;
 
-                    multiply(f2xR, f2xI, yzR01, yzI01, xyzR, xyzI);
-                    multiply(xR, xI, yzR21, yzI21, tmpR, tmpI);
-                    xyzR += tmpR;
-                    xyzI += tmpI;
-                    double goutz = xyzR * vtau_R[n] - xyzI * vtau_I[n];
-                    multiply(xR, xI, yzR01, yzI01, xyzR, xyzI);
-                    goutz += xyzR * vrho_R[n] - xyzI * vrho_I[n];
-                    v_iz += goutz;
-                    v_jz -= gout0I * kz + goutz;
+                    mul_add(xR2, xI2, yzR01, yzI01, xR0, xI0, yzR21, yzI21, xyzR, xyzI);
+                    double goutzR = xyzR * vtau_R[n] - xyzI * vtau_I[n];
+                    multiply(xR0, xI0, yzR01, yzI01, xyzR, xyzI);
+                    goutzR += xyzR * vrho_R[n] - xyzI * vrho_I[n];
+                    v_iz += goutzR;
+                    v_jz -= gout0I * kz + goutzR;
 
-                    double f1xR, f1xI;
-                    dI_gx(gxR, addr, stride_i, ix, ai2, f1xR, f1xI);
-                    multiply(f1xR, f1xI, yzR00, yzI00, xyzR, xyzI);
-                    double goutx = xyzR * vrho_R[n] - xyzI * vrho_I[n];
-                    multiply(f1xR, f1xI, yzR20, yzI20, xyzR, xyzI);
-                    double f3xR, f3xI;
-                    d2IdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, f3xR, f3xI);
-                    multiply(f3xR, f3xI, yzR00, yzI00, tmpR, tmpI);
-                    xyzR += tmpR;
-                    xyzI += tmpI;
-                    goutx += xyzR * vtau_R[n] - xyzI * vtau_I[n];
-                    v_ix += goutx;
+                    double xR1, xI1; dI_gx(gxR, addr, stride_i, ix, ai2, xR1, xI1);
+                    multiply(xR1, xI1, yzR00, yzI00, xyzR, xyzI);
+                    double goutxR = xyzR * vrho_R[n] - xyzI * vrho_I[n];
+                    double xR3, xI3; d2IdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, xR3, xI3);
+                    mul_add(xR1, xI1, yzR20, yzI20, xR3, xI3, yzR00, yzI00, xyzR, xyzI);
+                    goutxR += xyzR * vtau_R[n] - xyzI * vtau_I[n];
+                    v_ix += goutxR;
                     double kx = G_bases[mesh_cum[0] + x_in_Gv_base];
-                    v_jx -= gout0I * kx + goutx;
+                    v_jx -= gout0I * kx + goutxR;
                 }
             } }
         }

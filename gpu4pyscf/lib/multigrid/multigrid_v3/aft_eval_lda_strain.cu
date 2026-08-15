@@ -36,17 +36,13 @@
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
 
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128) static
-#else
 __global__ static
-#endif
-void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
-                          PBCIntEnvVars envs, int64_t *bas_ij_idx,
-                          double *G_bases, double *L_bases,
-                          int *mesh_cum, int *nimgs_cum,
-                          int npair, int ntiles_x, int ntiles_y, int ntiles_z,
-                          double factor)
+void orth_lda_strain_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
+                            PBCIntEnvVars envs, int64_t *bas_ij_idx,
+                            double *G_bases, double *L_bases,
+                            int *mesh_cum, int *nimgs_cum,
+                            int npair, int ntiles_x, int ntiles_y, int ntiles_z,
+                            double factor)
 {
     int thread_id = threadIdx.x;
     int x_id = thread_id / NGV_PER_BLOCK;
@@ -56,10 +52,8 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
     if (thread_id == 0) {
         tile_batch = blockIdx.x / npair;
     }
-    __shared__ double gx[NGV_PER_BLOCK*3*2*(LMAX+2)*LMAX1];
-    __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+2)];
+    extern __shared__ double shared_memory[];
     __shared__ int mesh_start[3];
-    __shared__ double dm_cache[NCART_MAX*NCART_MAX];
     __shared__ int ri, rj, li, lj;
     __shared__ double ai, aj;
 
@@ -81,6 +75,11 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
         rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
     }
     __syncthreads();
+    double *gx = shared_memory;
+    // Xgx = xjxi * gx
+    double *Xgx = gx + NGV_PER_BLOCK*3*2*(li+1)*(lj+1);
+    double *swap = shared_memory + NGV_PER_BLOCK*3*2*(li+1)*(lj+1) * 2;
+    double *dm_cache = swap + NGV_PER_BLOCK*3*2*(li+lj+2);
 
     int nfi = c_nf[li];
     int nfj = c_nf[lj];
@@ -103,12 +102,15 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
         dm_cache[n] = dm[bvk_cell_id*nao*nao + (i0+i)*nao + j0+j] * fac;
     }
 
-    double v_ix = 0;
-    double v_iy = 0;
-    double v_iz = 0;
-    double v_jx = 0;
-    double v_jy = 0;
-    double v_jz = 0;
+    double sigma_xx = 0;
+    double sigma_xy = 0;
+    double sigma_xz = 0;
+    double sigma_yx = 0;
+    double sigma_yy = 0;
+    double sigma_yz = 0;
+    double sigma_zx = 0;
+    double sigma_zy = 0;
+    double sigma_zz = 0;
 
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int tile0 = tile_batch * TILES_PER_BATCH;
@@ -126,9 +128,10 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
         }
 
         constexpr int stride_i = NGV_PER_BLOCK * 6;
-        constexpr int stride_j = stride_i * (LMAX+2);
+        int stride_j = stride_i * (li + 2);
         for (int n = thread_id; n < stride_j*(lj+1); n += THREADS) {
             gx[n] = 0;
+            Xgx[n] = 0;
         }
         __syncthreads();
 
@@ -149,8 +152,73 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
                 double xjxi = env[rj+x_id] + Lx - xi;
                 double theta_rr = theta_ij * xjxi * xjxi + .5*a2 * kx * kx;
                 if (theta_rr > REMOTE_THRESHOLD) continue;
-                vrr_hrr(gx, swap, addrR, li+1, lj, stride_j, a2, xjxi, aj_aij, xi,
-                        kx, theta_rr);
+                int addrI = addrR + NGV_PER_BLOCK;
+                int lij = li + lj + 1;
+                double xpa = xjxi * aj_aij;
+                double xij = xpa + xi;
+                double kR = kx * xij;
+                double s0xR, s1xR, s2xR;
+                double s0xI, s1xI, s2xI;
+                sincos(-kR, &s0xI, &s0xR);
+                double Kab = exp(-theta_rr);
+                s0xR *= Kab;
+                s0xI *= Kab;
+                swap[addrR] = s0xR;
+                swap[addrI] = s0xI;
+                gx[addrR] += s0xR;
+                gx[addrI] += s0xI;
+                Xgx[addrR] += xjxi * s0xR;
+                Xgx[addrI] += xjxi * s0xI;
+                double RpaR = xpa;
+                double RpaI = -a2 * kx;
+                s1xR = RpaR * s0xR - RpaI * s0xI;
+                s1xI = RpaR * s0xI + RpaI * s0xR;
+                swap[addrR+stride_i] = s1xR;
+                swap[addrI+stride_i] = s1xI;
+                gx[addrR+stride_i] += s1xR;
+                gx[addrI+stride_i] += s1xI;
+                Xgx[addrR+stride_i] += xjxi * s1xR;
+                Xgx[addrI+stride_i] += xjxi * s1xI;
+                for (int i = 2; i <= lij; i++) {
+                    double ia2 = (i-1) * a2;
+                    s2xR = ia2 * s0xR + RpaR * s1xR - RpaI * s1xI;
+                    s2xI = ia2 * s0xI + RpaR * s1xI + RpaI * s1xR;
+                    swap[addrR+i*stride_i] = s2xR;
+                    swap[addrI+i*stride_i] = s2xI;
+                    if (i <= li+1) {
+                        int i_ = i * stride_i;
+                        gx[addrR+i_] += s2xR;
+                        gx[addrI+i_] += s2xI;
+                        Xgx[addrR+i_] += xjxi * s2xR;
+                        Xgx[addrI+i_] += xjxi * s2xI;
+                    }
+                    s0xR = s1xR;
+                    s0xI = s1xI;
+                    s1xR = s2xR;
+                    s1xI = s2xI;
+                }
+                for (int j = 1; j <= lj; ++j) {
+                    int i = lij - j;
+                    s1xR = swap[addrR+(i+1)*stride_i];
+                    s1xI = swap[addrI+(i+1)*stride_i];
+                    for (; i >= 0; --i) {
+                        s0xR = swap[addrR+i*stride_i];
+                        s0xI = swap[addrI+i*stride_i];
+                        s2xR = s1xR - xjxi * s0xR;
+                        s2xI = s1xI - xjxi * s0xI;
+                        swap[addrR+i*stride_i] = s2xR;
+                        swap[addrI+i*stride_i] = s2xI;
+                        if (i <= li+1) {
+                            int ij = i * stride_i + j * stride_j;
+                            gx[addrR+ij] += s2xR;
+                            gx[addrI+ij] += s2xI;
+                            Xgx[addrR+ij] += xjxi * s2xR;
+                            Xgx[addrI+ij] += xjxi * s2xI;
+                        }
+                        s1xR = s0xR;
+                        s1xI = s0xI;
+                    }
+                }
             }
         }
         __syncthreads();
@@ -173,8 +241,6 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
             }
 
             double ai2 = ai * -2;
-            double ky = G_bases[mesh_cum[1] + y];
-            double kz = G_bases[mesh_cum[2] + z];
             int nfi = c_nf[li];
             int nfj = c_nf[lj];
             int idx_i = lex_xyz_offset(li);
@@ -197,13 +263,30 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
                 double yI0 = gxI[addry];
                 double zR0 = gxR[addrz] * dm_fac;
                 double zI0 = gxI[addrz] * dm_fac;
+                double YR0 = Xgx[addry              ];
+                double YI0 = Xgx[addry+NGV_PER_BLOCK];
+                double ZR0 = Xgx[addrz              ] * dm_fac;
+                double ZI0 = Xgx[addrz+NGV_PER_BLOCK] * dm_fac;
+
                 double yR1, yI1; dI_gx(gxR, addry, stride_i, iy, ai2, yR1, yI1);
+                double YR1, YI1; dI_gx(Xgx, addry, stride_i, iy, ai2, YR1, YI1);
                 double zR1, zI1; dI_gx(gxR, addry, stride_i, iz, ai2, zR1, zI1);
+                double ZR1, ZI1; dI_gx(Xgx, addry, stride_i, iz, ai2, ZR1, ZI1);
                 zR1 *= dm_fac;
                 zI1 *= dm_fac;
+                ZR1 *= dm_fac;
+                ZI1 *= dm_fac;
+
                 double yzR00, yzI00; multiply(yR0, yI0, zR0, zI0, yzR00, yzI00);
+                double YzR00, YzI00; multiply(YR0, YI0, zR0, zI0, YzR00, YzI00);
+                double yZR00, yZI00; multiply(yR0, yI0, ZR0, ZI0, yZR00, yZI00);
                 double yzR10, yzI10; multiply(yR1, yI1, zR0, zI0, yzR10, yzI10);
+                double YzR10, YzI10; multiply(YR1, YI1, zR0, zI0, YzR10, YzI10);
+                double yZR10, yZI10; multiply(yR1, yI1, ZR0, ZI0, yZR10, yZI10);
                 double yzR01, yzI01; multiply(yR0, yI0, zR1, zI1, yzR01, yzI01);
+                double YzR01, YzI01; multiply(YR0, YI0, zR1, zI1, YzR01, YzI01);
+                double yZR01, yZI01; multiply(yR0, yI0, ZR1, ZI1, yZR01, yZI01);
+
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
                     int x = n;
@@ -212,27 +295,23 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
                     int addr = addrx + x;
                     double xR0 = gxR[addr];
                     double xI0 = gxI[addr];
-                    double xyzR, xyzI;
-                    multiply(xR0, xI0, yzR00, yzI00, xyzR, xyzI);
-                    double gout0I = xyzR * vG_I[n] + xyzI * vG_R[n];
-
-                    multiply(xR0, xI0, yzR10, yzI10, xyzR, xyzI);
-                    double goutyR = xyzR * vG_R[n] - xyzI * vG_I[n];
-                    v_iy += goutyR;
-                    v_jy -= gout0I * ky + goutyR;
-
-                    multiply(xR0, xI0, yzR01, yzI01, xyzR, xyzI);
-                    double goutzR = xyzR * vG_R[n] - xyzI * vG_I[n];
-                    v_iz += goutzR;
-                    v_jz -= gout0I * kz + goutzR;
-
+                    double XR0 = Xgx[addr              ];
+                    double XI0 = Xgx[addr+NGV_PER_BLOCK];
                     double xR1, xI1; dI_gx(gxR, addr, stride_i, ix, ai2, xR1, xI1);
-                    multiply(xR1, xI1, yzR00, yzI00, xyzR, xyzI);
-                    double goutxR = xyzR * vG_R[n] - xyzI * vG_I[n];
-                    v_ix += goutxR;
-                    // (\nabla i|j) + (i|\nabla j) + -iG*(ij,G) = 0
-                    double kx = G_bases[mesh_cum[0] + x_in_Gv_base];
-                    v_jx -= gout0I * kx + goutxR;
+                    double XR1, XI1; dI_gx(Xgx, addr, stride_i, ix, ai2, XR1, XI1);
+
+                    double xyzR, xyzI;
+                    multiply(XR1, XI1, yzR00, yzI00, xyzR, xyzI); sigma_xx -= xyzR * vG_R[n] - xyzI * vG_I[n];
+                    multiply(xR1, xI1, YzR00, YzI00, xyzR, xyzI); sigma_xy -= xyzR * vG_R[n] - xyzI * vG_I[n];
+                    multiply(xR1, xI1, yZR00, yZI00, xyzR, xyzI); sigma_xz -= xyzR * vG_R[n] - xyzI * vG_I[n];
+
+                    multiply(XR0, XI0, yzR10, yzI10, xyzR, xyzI); sigma_yx -= xyzR * vG_R[n] - xyzI * vG_I[n];
+                    multiply(xR0, xI0, YzR10, YzI10, xyzR, xyzI); sigma_yy -= xyzR * vG_R[n] - xyzI * vG_I[n];
+                    multiply(xR0, xI0, yZR10, yZI10, xyzR, xyzI); sigma_yz -= xyzR * vG_R[n] - xyzI * vG_I[n];
+
+                    multiply(XR0, XI0, yzR01, yzI01, xyzR, xyzI); sigma_zx -= xyzR * vG_R[n] - xyzI * vG_I[n];
+                    multiply(xR0, xI0, YzR01, YzI01, xyzR, xyzI); sigma_zy -= xyzR * vG_R[n] - xyzI * vG_I[n];
+                    multiply(xR0, xI0, yZR01, yZI01, xyzR, xyzI); sigma_zz -= xyzR * vG_R[n] - xyzI * vG_I[n];
                 }
             } }
         }
@@ -240,35 +319,36 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
 
     __syncthreads();
     for (int offset = 16; offset > 0; offset >>= 1) {
-        v_ix += __shfl_down_sync(0xffffffff, v_ix, offset);
-        v_iy += __shfl_down_sync(0xffffffff, v_iy, offset);
-        v_iz += __shfl_down_sync(0xffffffff, v_iz, offset);
-        v_jx += __shfl_down_sync(0xffffffff, v_jx, offset);
-        v_jy += __shfl_down_sync(0xffffffff, v_jy, offset);
-        v_jz += __shfl_down_sync(0xffffffff, v_jz, offset);
+        sigma_xx += __shfl_down_sync(0xffffffff, sigma_xx, offset);
+        sigma_xy += __shfl_down_sync(0xffffffff, sigma_xy, offset);
+        sigma_xz += __shfl_down_sync(0xffffffff, sigma_xz, offset);
+        sigma_yx += __shfl_down_sync(0xffffffff, sigma_yx, offset);
+        sigma_yy += __shfl_down_sync(0xffffffff, sigma_yy, offset);
+        sigma_yz += __shfl_down_sync(0xffffffff, sigma_yz, offset);
+        sigma_zx += __shfl_down_sync(0xffffffff, sigma_zx, offset);
+        sigma_zy += __shfl_down_sync(0xffffffff, sigma_zy, offset);
+        sigma_zz += __shfl_down_sync(0xffffffff, sigma_zz, offset);
     }
     int lane = thread_id % WARP_SIZE;
-    int ish_cell0 = ish;
-    int bvk_cell_id = jsh / nbas;
-    int jsh_cell0 = jsh - nbas * bvk_cell_id;
-    int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
-    int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
     if (lane == 0) {
-        atomicAdd(out+ia*3+0, v_ix);
-        atomicAdd(out+ia*3+1, v_iy);
-        atomicAdd(out+ia*3+2, v_iz);
-        atomicAdd(out+ja*3+0, v_jx);
-        atomicAdd(out+ja*3+1, v_jy);
-        atomicAdd(out+ja*3+2, v_jz);
+        atomicAdd(out+0, sigma_xx);
+        atomicAdd(out+1, sigma_xy);
+        atomicAdd(out+2, sigma_xz);
+        atomicAdd(out+3, sigma_yx);
+        atomicAdd(out+4, sigma_yy);
+        atomicAdd(out+5, sigma_yz);
+        atomicAdd(out+6, sigma_zx);
+        atomicAdd(out+7, sigma_zy);
+        atomicAdd(out+8, sigma_zz);
     }
 }
 
 extern "C" {
-int orth_aft_lda_grad(double *out, double *dm,
-                      cuDoubleComplex *vxcG, cuDoubleComplex *placeholder,
-                      PBCIntEnvVars *envs, int64_t *bas_ij_idx,
-                      double *G_bases, double *L_bases, int *mesh_cum,
-                      int *nimgs_cum, int *mesh, int npair, double factor)
+int orth_aft_lda_strain(double *out, double *dm,
+                        cuDoubleComplex *vxcG, cuDoubleComplex *placeholder,
+                        PBCIntEnvVars *envs, int shm_size, int64_t *bas_ij_idx,
+                        double *G_bases, double *L_bases, int *mesh_cum,
+                        int *nimgs_cum, int *mesh, int npair, double factor)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -278,12 +358,12 @@ int orth_aft_lda_grad(double *out, double *dm,
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
-    orth_lda_grad_kernel<<<ntile_batch*npair, THREADS>>>(
+    orth_lda_strain_kernel<<<ntile_batch*npair, THREADS, shm_size>>>(
         out, dm, vxcG, *envs, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z, factor);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in orth_lda_grad_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in orth_lda_strain_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

@@ -406,8 +406,8 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
                     if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
                     double s = v * i_cartesian[i];
 #pragma unroll
-                for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                         vj_cache[i*SLICE_SIZE_J+j] += s * j_cartesian[j];
                     }
                 }

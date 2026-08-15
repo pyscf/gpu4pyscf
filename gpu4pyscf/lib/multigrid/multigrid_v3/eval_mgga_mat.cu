@@ -440,8 +440,8 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
                     double s2 = tau_fac * i_gradient[i+nfi];
                     double s3 = tau_fac * i_gradient[i+nfi*2];
 #pragma unroll
-                for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
                         vj_cache[i*SLICE_SIZE_J+j] += s0 * j_cartesian[j];
                         vj_cache[i*SLICE_SIZE_J+j] += s1 * j_gradient[j];
                         vj_cache[i*SLICE_SIZE_J+j] += s2 * j_gradient[j+nfj];
