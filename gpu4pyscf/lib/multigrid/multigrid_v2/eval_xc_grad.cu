@@ -88,6 +88,10 @@ int evaluate_xc_gradient_driver(
             vectors_to_neighboring_images, n_images,
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
+      } else {
+        fprintf(stderr,
+                "evaluate_xc_gradient_driver: n_channels > 2 not supported");
+        return 1;
       }
     }
   } else {
