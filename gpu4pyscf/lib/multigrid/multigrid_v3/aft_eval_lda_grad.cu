@@ -198,7 +198,7 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
                 double zR0 = gxR[addrz] * dm_fac;
                 double zI0 = gxI[addrz] * dm_fac;
                 double yR1, yI1; dI_gx(gxR, addry, stride_i, iy, ai2, yR1, yI1);
-                double zR1, zI1; dI_gx(gxR, addry, stride_i, iz, ai2, zR1, zI1);
+                double zR1, zI1; dI_gx(gxR, addrz, stride_i, iz, ai2, zR1, zI1);
                 zR1 *= dm_fac;
                 zI1 *= dm_fac;
                 double yzR00, yzI00; multiply(yR0, yI0, zR0, zI0, yzR00, yzI00);

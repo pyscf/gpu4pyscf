@@ -175,17 +175,18 @@ void eval_lda_grad_kernel(double *out, double *dm,
                 if (fabs(gaussian_xyz) < negligible) break;
 
                 double v = vxc_weights[abc_idx] * gaussian_xyz;
-                double i_cartesian[nfi];
-                double i_gradient[3*nfi];
-                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai);
-                rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient      , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient+nfi  , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
+                double i_deriv0[nfi];
+                double i_deriv1[3*nfi];
+                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
+                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
+                rename_registers(i_deriv0      , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_deriv1      , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_deriv1+nfi  , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_deriv1+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
 
-                double j_cartesian[nfj];
-                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                double j_deriv0[nfj];
+                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
+                rename_registers(j_deriv0      , dm_j0, nfj, SLICE_SIZE_J);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
@@ -196,22 +197,21 @@ void eval_lda_grad_kernel(double *out, double *dm,
 #pragma unroll
                     for (int j = 0; j < SLICE_SIZE_J; ++j) {
                         if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                        s += dm_cache[i*nfj+j] * j_cartesian[j];
+                        s += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s * i_gradient[i      ];
-                    rhoy += s * i_gradient[i+nfi  ];
-                    rhoz += s * i_gradient[i+nfi*2];
+                    rhox += s * i_deriv1[i      ];
+                    rhoy += s * i_deriv1[i+nfi  ];
+                    rhoz += s * i_deriv1[i+nfi*2];
                 }
                 v_ix -= rhox * v;
                 v_ix -= rhoy * v;
                 v_ix -= rhoz * v;
 
-                double j_gradient[3*nfj];
-                gto_deriv1<LJ>(j_gradient, j_cartesian, x - xj, y - yj, z - zj, aj);
-                rename_registers(j_cartesian, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_gradient      , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_gradient+nfj  , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_gradient+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
+                double j_deriv1[3*nfj];
+                gto_deriv1<LJ>(j_deriv1, j_deriv0, x - xj, y - yj, z - zj, aj);
+                rename_registers(j_deriv1      , dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_deriv1+nfj  , dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_deriv1+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
                 rhox = 0;
                 rhoy = 0;
                 rhoz = 0;
@@ -222,11 +222,11 @@ void eval_lda_grad_kernel(double *out, double *dm,
 #pragma unroll
                     for (int i = 0; i < SLICE_SIZE_I; ++i) {
                         if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
-                        s += dm_cache[i*nfj+j] * i_cartesian[i];
+                        s += dm_cache[i*nfj+j] * i_deriv0[i];
                     }
-                    rhox += s * j_gradient[j      ];
-                    rhoy += s * j_gradient[j+nfi  ];
-                    rhoz += s * j_gradient[j+nfi*2];
+                    rhox += s * j_deriv1[j      ];
+                    rhoy += s * j_deriv1[j+nfi  ];
+                    rhoz += s * j_deriv1[j+nfi*2];
                 }
                 v_jx -= rhox * v;
                 v_jy -= rhoy * v;
@@ -259,17 +259,18 @@ void eval_lda_grad_kernel(double *out, double *dm,
                     abc_idx += mesh_abc;
                 }
                 double v = vxc_weights[abc_idx] * gaussian_xyz;
-                double i_cartesian[nfi];
-                double i_gradient[3*nfi];
-                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai);
-                rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient      , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient+nfi  , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
+                double i_deriv0[nfi];
+                double i_deriv1[3*nfi];
+                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
+                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
+                rename_registers(i_deriv0, dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_deriv1      , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_deriv1+nfi  , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_deriv1+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
 
-                double j_cartesian[nfj];
-                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                double j_deriv0[nfj];
+                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
+                rename_registers(j_deriv0      , dm_j0, nfj, SLICE_SIZE_J);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
@@ -280,22 +281,21 @@ void eval_lda_grad_kernel(double *out, double *dm,
 #pragma unroll
                     for (int j = 0; j < SLICE_SIZE_J; ++j) {
                         if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                        s += dm_cache[i*nfj+j] * j_cartesian[j];
+                        s += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s * i_gradient[i      ];
-                    rhoy += s * i_gradient[i+nfi  ];
-                    rhoz += s * i_gradient[i+nfi*2];
+                    rhox += s * i_deriv1[i      ];
+                    rhoy += s * i_deriv1[i+nfi  ];
+                    rhoz += s * i_deriv1[i+nfi*2];
                 }
                 v_ix -= rhox * v;
                 v_ix -= rhoy * v;
                 v_ix -= rhoz * v;
 
-                double j_gradient[3*nfj];
-                gto_deriv1<LJ>(j_gradient, j_cartesian, x - xj, y - yj, z - zj, aj);
-                rename_registers(j_cartesian, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_gradient      , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_gradient+nfj  , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_gradient+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
+                double j_deriv1[3*nfj];
+                gto_deriv1<LJ>(j_deriv1, j_deriv0, x - xj, y - yj, z - zj, aj);
+                rename_registers(j_deriv1      , dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_deriv1+nfj  , dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_deriv1+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
                 rhox = 0;
                 rhoy = 0;
                 rhoz = 0;
@@ -306,11 +306,11 @@ void eval_lda_grad_kernel(double *out, double *dm,
 #pragma unroll
                     for (int i = 0; i < SLICE_SIZE_I; ++i) {
                         if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
-                        s += dm_cache[i*nfj+j] * i_cartesian[i];
+                        s += dm_cache[i*nfj+j] * i_deriv0[i];
                     }
-                    rhox += s * j_gradient[j      ];
-                    rhoy += s * j_gradient[j+nfi  ];
-                    rhoz += s * j_gradient[j+nfi*2];
+                    rhox += s * j_deriv1[j      ];
+                    rhoy += s * j_deriv1[j+nfi  ];
+                    rhoz += s * j_deriv1[j+nfi*2];
                 }
                 v_jx -= rhox * v;
                 v_jy -= rhoy * v;

@@ -205,9 +205,9 @@ void orth_mgga_grad_kernel(double *out, double *dm,
                 cuDoubleComplex val = vrhoG[addr];
                 vrho_R[n] = val.x;
                 vrho_I[n] = val.y;
-                val = vtauG[addr];
-                vtau_R[n] = val.x / 2;
-                vtau_I[n] = val.y / 2;
+                cuDoubleComplex val1 = vtauG[addr];
+                vtau_R[n] = val1.x / 2;
+                vtau_I[n] = val1.y / 2;
             }
 
             double ky = G_bases[mesh_cum[1] + y];
@@ -246,7 +246,7 @@ void orth_mgga_grad_kernel(double *out, double *dm,
                 double ai2 = ai * -2;
                 double aj2 = aj * -2;
                 double yR1, yI1; dI_gx(gxR, addry, stride_i, iy, ai2, yR1, yI1);
-                double zR1, zI1; dI_gx(gxR, addry, stride_i, iz, ai2, zR1, zI1);
+                double zR1, zI1; dI_gx(gxR, addrz, stride_i, iz, ai2, zR1, zI1);
                 zR1 *= dm_fac;
                 zI1 *= dm_fac;
 
@@ -257,13 +257,12 @@ void orth_mgga_grad_kernel(double *out, double *dm,
                 double zR2, zI2; dIdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, zR2, zI2);
                 zR2 *= dm_fac;
                 zI2 *= dm_fac;
+                double yzR20, yzI20; mul_add(yR2, yI2, zR0, zI0, yR0, yI0, zR2, zI2, yzR20, yzI20);
 
                 double yR3, yI3; d2IdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, yR3, yI3);
                 double zR3, zI3; d2IdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, zR3, zI3);
                 zR3 *= dm_fac;
                 zI3 *= dm_fac;
-
-                double yzR20, yzI20; mul_add(yR2, yI2, zR0, zI0, yR0, yI0, zR2, zI2, yzR20, yzI20);
                 double yzR21, yzI21; mul_add(yR2, yI2, zR1, zI1, yR3, yI3, zR0, zI0, yzR21, yzI21);
                 double yzR12, yzI12; mul_add(yR1, yI1, zR2, zI2, yR0, yI0, zR3, zI3, yzR12, yzI12);
 
@@ -280,23 +279,23 @@ void orth_mgga_grad_kernel(double *out, double *dm,
                     double xR0 = gxR[addr];
                     double xI0 = gxI[addr];
                     double xyzR, xyzI;
+                    multiply(xR0, xI0, yzR00, yzI00, xyzR, xyzI);
+                    double gout0I = xyzR * vrho_I[n] + xyzI * vrho_R[n];
                     double xR2, xI2; dIdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, xR2, xI2);
                     mul_add(xR0, xI0, yzR20, yzI20, xR2, xI2, yzR00, yzI00, xyzR, xyzI);
-                    double gout0I = xyzR * vtau_I[n] + xyzI * vtau_R[n];
-                    multiply(xR0, xI0, yzR00, yzI00, xyzR, xyzI);
-                    gout0I += xyzR * vrho_I[n] + xyzI * vrho_R[n];
+                    gout0I += xyzR * vtau_I[n] + xyzI * vtau_R[n];
 
-                    mul_add(xR2, xI2, yzR10, yzI10, xR0, xI0, yzR12, yzI12, xyzR, xyzI);
-                    double goutyR = xyzR * vtau_R[n] - xyzI * vtau_I[n];
                     multiply(xR0, xI0, yzR10, yzI10, xyzR, xyzI);
-                    goutyR += xyzR * vrho_R[n] - xyzI * vrho_I[n];
+                    double goutyR = xyzR * vrho_R[n] - xyzI * vrho_I[n];
+                    mul_add(xR2, xI2, yzR10, yzI10, xR0, xI0, yzR12, yzI12, xyzR, xyzI);
+                    goutyR += xyzR * vtau_R[n] - xyzI * vtau_I[n];
                     v_iy += goutyR;
                     v_jy -= gout0I * ky + goutyR;
 
-                    mul_add(xR2, xI2, yzR01, yzI01, xR0, xI0, yzR21, yzI21, xyzR, xyzI);
-                    double goutzR = xyzR * vtau_R[n] - xyzI * vtau_I[n];
                     multiply(xR0, xI0, yzR01, yzI01, xyzR, xyzI);
-                    goutzR += xyzR * vrho_R[n] - xyzI * vrho_I[n];
+                    double goutzR = xyzR * vrho_R[n] - xyzI * vrho_I[n];
+                    mul_add(xR2, xI2, yzR01, yzI01, xR0, xI0, yzR21, yzI21, xyzR, xyzI);
+                    goutzR += xyzR * vtau_R[n] - xyzI * vtau_I[n];
                     v_iz += goutzR;
                     v_jz -= gout0I * kz + goutzR;
 

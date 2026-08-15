@@ -198,6 +198,8 @@ void dIdJ_gx(double *gx, int addr, int stride_i, int li,
     outI = li2 * gx[addr+NGV_PER_BLOCK];
     outR += ai2 * gx[addr+stride_i*2];
     outI += ai2 * gx[addr+stride_i*2+NGV_PER_BLOCK];
+    outR *= ai2;
+    outI *= ai2;
     if (li > 1) {
         int lili = li * (li-1);
         outR += lili * gx[addr-stride_i*2];
@@ -220,25 +222,27 @@ void d2IdJ_gx(double *gx, int addr, int stride_i, int stride_j, int li, int lj,
               double ai2, double aj2, double &outR, double &outI)
 {
     int li2 = li * 2 + 1;
+    int lili = li * (li-1);
     outR = li2 * gx[addr+stride_j];
     outI = li2 * gx[addr+stride_j+NGV_PER_BLOCK];
     outR += ai2 * gx[addr+stride_i*2+stride_j];
     outI += ai2 * gx[addr+stride_i*2+stride_j+NGV_PER_BLOCK];
+    outR *= ai2;
+    outI *= ai2;
     if (li > 1) {
-        int lili = li * (li-1);
         outR += lili * gx[addr-stride_i*2+stride_j];
         outI += lili * gx[addr-stride_i*2+stride_j+NGV_PER_BLOCK];
     }
     outR *= aj2;
     outI *= aj2;
     if (lj > 0) {
-        int li2 = li * 2 + 1;
         double f1R = li2 * gx[addr-stride_j];
         double f1I = li2 * gx[addr-stride_j+NGV_PER_BLOCK];
         f1R += ai2 * gx[addr+stride_i*2-stride_j];
         f1I += ai2 * gx[addr+stride_i*2-stride_j+NGV_PER_BLOCK];
+        f1R *= ai2;
+        f1I *= ai2;
         if (li > 1) {
-            int lili = li * (li-1);
             f1R += lili * gx[addr-stride_i*2-stride_j];
             f1I += lili * gx[addr-stride_i*2-stride_j+NGV_PER_BLOCK];
         }

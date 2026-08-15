@@ -189,6 +189,126 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
     vxc_mat *= weight
     return vxc_mat
 
+def _aft_eval_gradient(ni, dm_sc, vxcG):
+    cell = ni.sorted_cell
+    bvkcell = ni.bvkcell
+
+    a = bvkcell.lattice_vectors()
+    b = cell.reciprocal_vectors()
+
+    if isinstance(vxcG, cp.ndarray):
+        vrhoG = vxcG.reshape(ni.mesh)
+        vtauG = None
+        kern = libmgrid.orth_aft_lda_grad
+    else:
+        vrhoG, vtauG = vxcG
+        vrhoG = vrhoG.reshape(ni.mesh)
+        vtauG = vtauG.reshape(ni.mesh)
+        kern = libmgrid.orth_aft_mgga_grad
+
+    # See get_Gv_weights
+    weight = abs(np.linalg.det(b)) / (2*np.pi)**3
+
+    nkpts = len(ni.bvkmesh_Ls)
+    weight /= nkpts
+
+    gradient = cp.zeros((cell.natm, 3))
+
+    for bucket in ni.aft_buckets:
+        mesh = bucket['mesh']
+        mesh_cum = cp.array(np.append(0, np.cumsum(mesh)), dtype=np.int32)
+        nimgs = bucket['nimgs']
+        nimgs_cum = cp.array(np.append(0, np.cumsum(nimgs*2+1)), dtype=np.int32)
+        # In real space formula, VxcG in reciprocal space is first IFFT to real
+        # space. Here, AFT integrals for -G are identical to the inverse FT.
+        Gx, Gy, Gz = _get_Gv_bases(mesh, b)
+        G_bases = -cp.hstack([Gx[0], Gy[1], Gz[2]])
+        L_bases = _get_L_bases(nimgs, a)
+
+        bas_ij_idx = bucket['bas_ij_idx']
+
+        sub_vrhoG = _take_4d(vrhoG, mesh)
+        sub_vtauG = sub_vrhoG
+        if vtauG is not None:
+            sub_vtauG = _take_4d(vtauG, mesh)
+        err = kern(
+            ctypes.cast(gradient.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sub_vrhoG.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sub_vtauG.data.ptr, ctypes.c_void_p),
+            ctypes.byref(ni.mg_envs),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(G_bases.data.ptr, ctypes.c_void_p),
+            ctypes.cast(L_bases.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mesh_cum.data.ptr, ctypes.c_void_p),
+            ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
+            (ctypes.c_int*3)(*mesh),
+            ctypes.c_int(len(bas_ij_idx)),
+            ctypes.c_double(weight))
+        if err != 0:
+            raise RuntimeError('contract_orth_aopair_coulG kernel failed')
+    return gradient
+
+def _aft_eval_strain_deriv(ni, dm_sc, vxcG):
+    cell = ni.sorted_cell
+    bvkcell = ni.bvkcell
+
+    a = bvkcell.lattice_vectors()
+    b = cell.reciprocal_vectors()
+
+    if isinstance(vxcG, cp.ndarray):
+        vrhoG = vxcG.reshape(ni.mesh)
+        vtauG = None
+        kern = libmgrid.orth_aft_lda_strain
+    else:
+        vrhoG, vtauG = vxcG
+        vrhoG = vrhoG.reshape(ni.mesh)
+        vtauG = vtauG.reshape(ni.mesh)
+        kern = libmgrid.orth_aft_mgga_strain
+
+    # See get_Gv_weights
+    weight = abs(np.linalg.det(b)) / (2*np.pi)**3
+
+    nkpts = len(ni.bvkmesh_Ls)
+    weight /= nkpts
+
+    sigma = cp.zeros((3, 3))
+
+    for bucket in ni.aft_buckets:
+        mesh = bucket['mesh']
+        mesh_cum = cp.array(np.append(0, np.cumsum(mesh)), dtype=np.int32)
+        nimgs = bucket['nimgs']
+        nimgs_cum = cp.array(np.append(0, np.cumsum(nimgs*2+1)), dtype=np.int32)
+        # In real space formula, VxcG in reciprocal space is first IFFT to real
+        # space. Here, AFT integrals for -G are identical to the inverse FT.
+        Gx, Gy, Gz = _get_Gv_bases(mesh, b)
+        G_bases = -cp.hstack([Gx[0], Gy[1], Gz[2]])
+        L_bases = _get_L_bases(nimgs, a)
+
+        bas_ij_idx = bucket['bas_ij_idx']
+
+        sub_vrhoG = _take_4d(vrhoG, mesh)
+        sub_vtauG = sub_vrhoG
+        if vtauG is not None:
+            sub_vtauG = _take_4d(vtauG, mesh)
+        err = kern(
+            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sub_vrhoG.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sub_vtauG.data.ptr, ctypes.c_void_p),
+            ctypes.byref(ni.mg_envs),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(G_bases.data.ptr, ctypes.c_void_p),
+            ctypes.cast(L_bases.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mesh_cum.data.ptr, ctypes.c_void_p),
+            ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
+            (ctypes.c_int*3)(*mesh),
+            ctypes.c_int(len(bas_ij_idx)),
+            ctypes.c_double(weight))
+        if err != 0:
+            raise RuntimeError('contract_orth_aopair_coulG kernel failed')
+    return sigma
+
 def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
     cell = ni.sorted_cell
     if ni.aft_buckets is not None:
@@ -232,7 +352,7 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
                 in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
             if len(dressed_bas_ij_idx) == 0: continue
             ntiles = len(grid_tile_idx)
-            tiles_per_block = min(100, max(1, ntiles // 10000))
+            tiles_per_block = min(100, max(1, ntiles // 1000))
             err = kern(
                 ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
                 ctypes.cast(tauR.data.ptr, ctypes.c_void_p),
@@ -252,6 +372,7 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
+        cp.cuda.get_current_stream().synchronize()
         _takebak_4d(rhoG, fft_in_place(rhoR).reshape(mesh), mesh)
         if with_tau:
             _takebak_4d(tauG, fft_in_place(tauR).reshape(mesh), mesh)
@@ -276,15 +397,13 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
         vrhoG = vxcG.reshape(ni.mesh)
         vtauG = None
         work = ndarray((3,vrhoG.size), dtype=np.float64, buffer=work)
-        kern = libmgrid.evaluate_lda_mat
-        kern1 = libmgrid.evaluate_lda_mat_v2
+        kern = libmgrid.evaluate_lda_mat_v2
     else:
         vrhoG, vtauG = vxcG
         vrhoG = vrhoG.reshape(ni.mesh)
         vtauG = vtauG.reshape(ni.mesh)
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
-        kern = libmgrid.evaluate_mgga_mat
-        kern1 = libmgrid.evaluate_mgga_mat_v2
+        kern = libmgrid.evaluate_mgga_mat_v2
 
     mg_envs = ni.mg_envs
 
@@ -307,50 +426,241 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
             sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
             sub_vtauR[:] = ifft_in_place(sub_vtauG).real
 
-        if 0:
-            for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
-                    in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
-                if len(dressed_bas_ij_idx) == 0: continue
-                ntiles = len(grid_tile_idx)
-                tiles_per_block = min(100, max(1, ntiles // 10000))
-                err = kern(
-                    ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
-                    ctypes.byref(mg_envs),
-                    dxyz_dabc.ctypes,
-                    ctypes.cast(ni.supmol_img_coords.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(li), ctypes.c_int(lj),
-                    ctypes.c_int(tiles_per_block),
-                    ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dressed_bas_ij_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(len(grid_tile_idx)),
-                    (ctypes.c_int*3)(*mesh),
-                    ctypes.c_double(bucket['negligible']))
-                if err != 0:
-                    raise RuntimeError('evaluate_xc_mat kernel failed')
-        else:
-            for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
-                    bucket['lij_patterns'], bucket['bas_ij_cache'],
-                    bucket['grid_ranges_cache']):
-                if len(bas_ij_idx) == 0: continue
-                err = kern1(
-                    ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
-                    ctypes.byref(mg_envs),
-                    dxyz_dabc.ctypes,
-                    ctypes.c_int(li),
-                    ctypes.c_int(lj),
-                    ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
-                    (ctypes.c_int*3)(*mesh),
-                    ctypes.c_int(len(bas_ij_idx)),
-                    ctypes.c_double(bucket['negligible']))
-                if err != 0:
-                    raise RuntimeError('evaluate_xc_mat kernel failed')
+        for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
+                bucket['lij_patterns'], bucket['bas_ij_cache'],
+                bucket['grid_ranges_cache']):
+            if len(bas_ij_idx) == 0: continue
+            err = kern(
+                ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
+                ctypes.byref(mg_envs),
+                dxyz_dabc.ctypes,
+                ctypes.c_int(li),
+                ctypes.c_int(lj),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
+                (ctypes.c_int*3)(*mesh),
+                ctypes.c_int(len(bas_ij_idx)),
+                ctypes.c_double(bucket['negligible']))
+            if err != 0:
+                raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
+
+def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
+    '''Note, contents of vxcG will be destroyed in this function
+    '''
+    cell = ni.sorted_cell
+    if ni.aft_buckets is not None:
+        vxc_mat = _aft_eval_xc_matrix(ni, vxcG, out)
+    else:
+        nkpts = len(ni.bvkmesh_Ls)
+        nao = cell.nao
+        vxc_mat = ndarray((nkpts, nao, nao), dtype=np.float64, buffer=out)
+        vxc_mat.fill(0.)
+
+    a = cell.lattice_vectors()
+
+    if isinstance(vxcG, cp.ndarray):
+        vrhoG = vxcG.reshape(ni.mesh)
+        vtauG = None
+        work = ndarray((3,vrhoG.size), dtype=np.float64, buffer=work)
+        kern = libmgrid.evaluate_lda_mat
+    else:
+        vrhoG, vtauG = vxcG
+        vrhoG = vrhoG.reshape(ni.mesh)
+        vtauG = vtauG.reshape(ni.mesh)
+        work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
+        kern = libmgrid.evaluate_mgga_mat
+
+    mg_envs = ni.mg_envs
+
+    fft_buckets = ni.fft_buckets or []
+    for bucket in fft_buckets:
+        mesh = bucket['mesh']
+
+        dxyz_dabc = a / mesh[:,None]
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+
+        # _take_4d does not always make a copy. In the last bucket, the contents
+        # of vrhoG will be overwritten by ifft_in_place
+        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
+        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
+        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
+        sub_vtauR = sub_vrhoR # placeholder
+
+        if vtauG is not None:
+            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
+            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
+            sub_vtauR[:] = ifft_in_place(sub_vtauG).real
+
+        for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
+                in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
+            if len(dressed_bas_ij_idx) == 0: continue
+            ntiles = len(grid_tile_idx)
+            tiles_per_block = min(100, max(1, ntiles // 10000))
+            err = kern(
+                ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
+                ctypes.byref(mg_envs),
+                dxyz_dabc.ctypes,
+                ctypes.cast(ni.supmol_img_coords.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(li), ctypes.c_int(lj),
+                ctypes.c_int(tiles_per_block),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dressed_bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(grid_tile_idx)),
+                (ctypes.c_int*3)(*mesh),
+                ctypes.c_double(bucket['negligible']))
+            if err != 0:
+                raise RuntimeError('evaluate_xc_mat kernel failed')
+    return vxc_mat
+
+def _eval_gradient(ni, dm_sc, vxcG, work=None):
+    '''Note, contents of vxcG will be destroyed in this function
+    '''
+    cell = ni.sorted_cell
+    if ni.aft_buckets is not None:
+        gradient = _aft_eval_gradient(ni, dm_sc, vxcG)
+    else:
+        gradient = cp.zeros((cell.natm, 3))
+
+    a = cell.lattice_vectors()
+    vol = np.linalg.det(a)
+    nkpts = len(ni.bvkmesh_Ls)
+
+    if isinstance(vxcG, cp.ndarray):
+        vrhoG = vxcG.reshape(ni.mesh)
+        vtauG = None
+        work = ndarray((3,vrhoG.size), dtype=np.float64, buffer=work)
+        kern = libmgrid.evaluate_lda_grad
+    else:
+        vrhoG, vtauG = vxcG
+        vrhoG = vrhoG.reshape(ni.mesh)
+        vtauG = vtauG.reshape(ni.mesh)
+        work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
+        kern = libmgrid.evaluate_mgga_grad
+
+    mg_envs = ni.mg_envs
+
+    fft_buckets = ni.fft_buckets or []
+    for bucket in fft_buckets:
+        mesh = bucket['mesh']
+        ngrids = np.prod(mesh)
+
+        weight = 1. / nkpts
+
+        dxyz_dabc = a / mesh[:,None]
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+
+        # _take_4d does not always make a copy. In the last bucket, the contents
+        # of vrhoG will be overwritten by ifft_in_place
+        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
+        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
+        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
+        sub_vtauR = sub_vrhoR # placeholder
+
+        if vtauG is not None:
+            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
+            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
+            sub_vtauR[:] = ifft_in_place(sub_vtauG).real
+
+        for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
+                bucket['lij_patterns'], bucket['bas_ij_cache'],
+                bucket['grid_ranges_cache']):
+            if len(bas_ij_idx) == 0: continue
+            err = kern(
+                ctypes.cast(gradient.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
+                ctypes.byref(mg_envs),
+                dxyz_dabc.ctypes,
+                ctypes.c_int(li),
+                ctypes.c_int(lj),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
+                (ctypes.c_int*3)(*mesh),
+                ctypes.c_int(len(bas_ij_idx)),
+                ctypes.c_double(weight),
+                ctypes.c_double(bucket['negligible']))
+            if err != 0:
+                raise RuntimeError('evaluate_xc_mat kernel failed')
+    return gradient
+
+def _eval_strain_deriv(ni, dm_sc, vxcG, work=None):
+    '''Note, contents of vxcG will be destroyed in this function
+    '''
+    cell = ni.sorted_cell
+    if ni.aft_buckets is not None:
+        sigma = _aft_eval_strain_deriv(ni, dm_sc, vxcG)
+    else:
+        sigma = cp.zeros((3, 3))
+
+    a = cell.lattice_vectors()
+    vol = np.linalg.det(a)
+    nkpts = len(ni.bvkmesh_Ls)
+
+    if isinstance(vxcG, cp.ndarray):
+        vrhoG = vxcG.reshape(ni.mesh)
+        vtauG = None
+        work = ndarray((3,vrhoG.size), dtype=np.float64, buffer=work)
+        kern = libmgrid.evaluate_lda_strain
+    else:
+        vrhoG, vtauG = vxcG
+        vrhoG = vrhoG.reshape(ni.mesh)
+        vtauG = vtauG.reshape(ni.mesh)
+        work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
+        kern = libmgrid.evaluate_mgga_strain
+
+    mg_envs = ni.mg_envs
+
+    fft_buckets = ni.fft_buckets or []
+    for bucket in fft_buckets:
+        mesh = bucket['mesh']
+        ngrids = np.prod(mesh)
+
+        weight = vol / ngrids / nkpts
+
+        dxyz_dabc = a / mesh[:,None]
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+
+        # _take_4d does not always make a copy. In the last bucket, the contents
+        # of vrhoG will be overwritten by ifft_in_place
+        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
+        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
+        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
+        sub_vtauR = sub_vrhoR # placeholder
+
+        if vtauG is not None:
+            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
+            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
+            sub_vtauR[:] = ifft_in_place(sub_vtauG).real
+
+        for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
+                bucket['lij_patterns'], bucket['bas_ij_cache'],
+                bucket['grid_ranges_cache']):
+            if len(bas_ij_idx) == 0: continue
+            err = kern(
+                ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
+                ctypes.byref(mg_envs),
+                dxyz_dabc.ctypes,
+                ctypes.c_int(li),
+                ctypes.c_int(lj),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
+                (ctypes.c_int*3)(*mesh),
+                ctypes.c_int(len(bas_ij_idx)),
+                ctypes.c_double(weight),
+                ctypes.c_double(bucket['negligible']))
+            if err != 0:
+                raise RuntimeError('evaluate_xc_mat kernel failed')
+    return sigma
 
 def _get_Gv_bases(mesh, b):
     Gx = cp.array(np.fft.fftfreq(mesh[0], 1./mesh[0]) * b[0,:,None])
@@ -653,7 +963,7 @@ def _cache_grid_range_to_tiles(fft_buckets, cell):
             raw_tiles = grid_range[:,:,1] - grid_range[:,:,0]
             raw_tiles *= tiles_per_cell[:,None]
             raw_tiles = cp.ceil(raw_tiles)
-            raw_tiles += 1 # penalty for rounding on the boundary
+            raw_tiles += 2 # penalty for rounding on the boundary
             n = (raw_tiles[0] * raw_tiles[1] * raw_tiles[2]).sum().get()
             buf_size = max(buf_size, int(n))
 
@@ -877,6 +1187,17 @@ void ''' + fn_name + r'''(double2* __restrict__ out, double2* __restrict__ rhoG,
            (out, rhoG, Gv_bases[0], Gv_bases[1], Gv_bases[2], nx, ny, nz))
     return out
 
+def _xc_var_length(xctype):
+    if xctype == 'LDA' or xctype == 'HF':
+        nvar = 1
+    elif xctype == 'GGA':
+        nvar = 4
+    elif xctype == 'MGGA':
+        nvar = 5
+    else:
+        raise RuntimeError(f'{xctype} not supported')
+    return nvar
+
 def _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=None):
     '''
     Perform
@@ -888,13 +1209,8 @@ def _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=None):
     '''
     assert rhoG.ndim == 3
     mesh = rhoG.shape
-    if xctype == 'LDA':
-        nvar = 1
-    elif xctype == 'GGA':
-        nvar = 4
-    elif xctype == 'MGGA':
-        nvar = 5
 
+    nvar = _xc_var_length(xctype)
     out = ndarray((nvar, *mesh), dtype=np.float64, buffer=out)
     if xctype == 'MGGA':
         assert tauG is not None
@@ -945,8 +1261,14 @@ def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
     else:
         return out
 
-def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1):
-    assert kpts.ndim == 2
+def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA'):
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+
+    ni._ensure_initialized(kpts, xctype)
+
     cell = ni.sorted_cell
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -1013,13 +1335,6 @@ def get_rho(ni, dm_kpts, kpts=None):
     assert dm_kpts.ndim < 4
     cell = ni.cell
     mesh = ni.mesh
-
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
-
-    ni._ensure_initialized(kpts, 'LDA')
 
     dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1)
     n_dm, nkpts, nao = dm_sc.shape[:3]
@@ -1147,22 +1462,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     t0 = log.init_timer()
 
     xctype = ni._xc_type(xc_code)
-    if xctype == 'LDA' or xctype == 'HF':
-        nvar = 1
-    elif xctype == 'GGA':
-        nvar = 4
-    elif xctype == 'MGGA':
-        nvar = 5
-    else:
-        raise NotImplementedError(f'XC functional {xc_code}')
+    nvar = _xc_var_length(xctype)
 
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
-    ni._ensure_initialized(kpts, xctype)
-
-    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi)
+    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi, xctype)
     assert len(dm_sc) == 1
     dm_sc = dm_sc[0]
 
@@ -1259,32 +1561,22 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
+    assert kpts_band is None
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
     xctype = ni._xc_type(xc_code)
-    if xctype == 'LDA':
-        nvar = 1
-    elif xctype == 'GGA':
-        nvar = 4
-    elif xctype == 'MGGA':
-        nvar = 5
-    elif xctype == 'HF':
-        vj = ni.get_j(dm_kpts[0]+dm_kpts[1], hermi, kpts, kpts_band)
-        veff = cp.stack([vj, vj])
-        return lib.tag_array(veff, ecoul=vj.ecoul, exc=0)
-    else:
-        raise NotImplementedError(f'XC functional {xc_code}')
+    nvar = _xc_var_length(xctype)
+    if xctype == 'HF':
+        if with_j:
+            vj = ni.get_j(dm_kpts[0]+dm_kpts[1], hermi, kpts, kpts_band)
+            veff = cp.stack([vj, vj])
+            return lib.tag_array(veff, ecoul=vj.ecoul, exc=0)
+        else:
+            veff = cp.zeros_like(dm_kpts)
+            return lib.tag_array(veff, ecoul=0, exc=0)
 
-    assert kpts_band is None
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
-
-    ni._ensure_initialized(kpts, xctype)
-
-    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi)
+    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi, xctype)
     assert len(dm_sc) == 2
 
     cell = ni.cell
@@ -1397,251 +1689,11 @@ def get_veff_ip1(
     with_pseudo_vloc_orbital_derivative=True,
     verbose=None,
 ):
-    '''Computes the derivatives of the Exc along with additional contributions
-    from the Coulomb and pseudopotential terms.
-
-    Note, the current return is the energy per cell scaled by the number of
-    k-points. This should return the energy per cell directly and will be
-    changed in future.
-    '''
-    cell = ni.cell
-    log = logger.new_logger(cell, verbose)
-    t0 = log.init_timer()
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
-
-    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi)
-    n_dm = len(dm)
-
-    xc_type = ni._xc_type(xc_code)
-    mesh = ni.mesh
-    ngrids = np.prod(mesh)
-    weight = cell.vol / ngrids
-
-    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-
-    if n_dm == 1: # RHF
-        rhoG, tauG = _eval_density(ni, dm_sc, with_tau=xctype=='MGGA')
-        density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
-        spin = 0
-
-    else: # UHF
-        density = cp.empty((2, nvar, ngrids))
-        rhoG, tauG = _eval_density(ni, dm_sc[0], with_tau=xctype=='MGGA')
-        tauG = None
-        _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
-        rhoGb, tauG = _eval_density(ni, dm_sc[1], with_tau=xctype=='MGGA')
-        rhoG += rhoGb
-        _density_to_real_space(rhoGb, tauG, Gv_bases, xctype, out=density[1])
-        rhoGb = None
-        spin = 1
-
-    if with_j:
-        coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=rhoG)
-    else:
-        coulomb_on_g_mesh = rhoG
-        coulomb_on_g_mesh.fill(0.)
-    rhoG = None
-
-    if with_pseudo_vloc_orbital_derivative:
-        if cell._pseudo:
-            coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh, out=tauG)
-        else:
-            coulomb_on_g_mesh += _eval_nucG(cell, mesh, rhoG, out=tauG)
-    tauG = None
-
-    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
-    # computing rhoR with IFFT, the weight factor is not needed.
-    density *= 1/weight
-    xc_for_fock = ni.eval_xc_eff(
-        xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)[1]
-    xc_for_fock *= weight
-    xc_for_fock = xc_for_fock.reshape(n_dm, nvar, *mesh)
-
-    if n_dm == 1: # RHF
-        vxc = _vxc_to_reciprocal_space(xc_for_fock, coulomb_on_g_mesh, Gv_bases)
-        gradient = convert_xc_on_g_mesh_to_fock_gradient(ni, vxc, dm_sc)
-    else:
-        vxc_a, coulomb_on_g_mesh = coulomb_on_g_mesh, None
-        vxc_b = vxc_a.copy()
-        vxc_a = _vxc_to_reciprocal_space(xc_for_fock[0], vxc_a, Gv_bases)
-        gradient = _eval_xc_gradient(ni, vxc_a, dm_sc[0])
-        vxc_a = coulomb_a = None
-        vxc_b = _vxc_to_reciprocal_space(xc_for_fock[1], vxc_b, Gv_bases)
-        gradient += _eval_xc_gradient(ni, vxc_b, dm_sc[1])
-
-    t0 = log.timer("vxc", *t0)
-    return gradient
-
-def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
-    '''Strain derivatives for Coulomb and Exc with k-point samples
-
-    Kwargs:
-        with_j : Whether to include the electron-electron Coulomb interactions
-        with_nuc : Whether to include the electron-nuclear Coulomb interactions
-    '''
-#    from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-#    from gpu4pyscf.pbc.grad.rks_stress import (
-#        _finite_diff_cells,
-#        _get_weight_strain_derivatives)
-#    from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
-#
-#    cell = ni.cell
-#    if kpts is None:
-#        kpts = np.zeros((1, 3))
-#    else:
-#        kpts = kpts.reshape(-1, 3)
-#    dm_kpts = cp.asarray(dm_kpts, order='C')
-#
-#    mesh = ni.mesh
-#    grids = UniformGrids(cell)
-#    grids.mesh = mesh
-#
-#    xctype = ni._xc_type(xc_code)
-#    rho0 = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xctype)
-#    nset, nvar, ngrids = rho0.shape
-#    assert nset == 1
-#    assert ngrids == np.prod(mesh)
-#    rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(nvar, ngrids)
-#    rho0 *= ngrids / cell.vol
-#
-#    ni_copy = ni.copy()
-#    def update_pairs_info(cell1):
-#        r = asarray(cell1.atom_coords().ravel())
-#        atm = ni.sorted_gaussian_pairs[0]['atm']
-#        atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
-#        lattice_vectors = cell1.lattice_vectors()
-#        neighboring_images = asarray(gto.eval_gto.get_lattice_Ls(cell1))
-#        pairs = []
-#        for pair in ni.sorted_gaussian_pairs:
-#            pair = pair.copy()
-#            pairs.append(pair)
-#            env = pair['env'].copy()
-#            env[atom_coords_address] = r
-#            pair['env'] = env
-#            pair['is_non_orthogonal'] = 1
-#            pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None]
-#            pair['neighboring_images'] = neighboring_images
-#        ni_copy.cell = cell1
-#        ni_copy.sorted_gaussian_pairs = pairs
-#
-#    disp = 1e-4
-#    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-#    rho1 = cp.empty((3, 3, nvar, ngrids))
-#    for x in range(3):
-#        for y in range(3):
-#            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-#            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-#            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-#
-#            update_pairs_info(cell1)
-#            rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
-#            rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
-#            rho_plus *= ngrids / cell1.vol
-#
-#            update_pairs_info(cell2)
-#            rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
-#            rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
-#            rho_minus *= ngrids / cell2.vol
-#
-#            rho1[x,y] = (rho_plus - rho_minus).reshape(nvar, ngrids) / (disp * 2)
-#
-#    weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
-#    exc, vxc = ni.eval_xc_eff(xc_code, rho0, 1, xctype=xctype, spin=0)[:2]
-#    out  = cp.einsum('xyng,ng->xy', rho1, vxc).real.get() * weight_0
-#    out += cp.einsum('g,g->', rho0[0], exc.ravel()).real.get() * weight_1
-#
-#    out += _contract_coulomb_and_nuc(cell, mesh, dm_kpts, kpts, rho0[0],
-#                                     rho1[:,:,0], grids, with_j, with_nuc)
-#    return out
-
-def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
-    '''Strain derivatives for Coulomb and Exc with k-point samples
-
-    Kwargs:
-        with_j : Whether to include the electron-electron Coulomb interactions
-        with_nuc : Whether to include the electron-nuclear Coulomb interactions
-    '''
-#    from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-#    from gpu4pyscf.pbc.grad.rks_stress import (
-#        _finite_diff_cells,
-#        _get_weight_strain_derivatives)
-#    from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
-#
-#    cell = ni.cell
-#    if kpts is None:
-#        kpts = np.zeros((1, 3))
-#    else:
-#        kpts = kpts.reshape(-1, 3)
-#    dm_kpts = cp.asarray(dm_kpts, order='C')
-#    assert dm_kpts.ndim == 4
-#
-#    mesh = ni.mesh
-#    grids = UniformGrids(cell)
-#    grids.mesh = mesh
-#
-#    xctype = ni._xc_type(xc_code)
-#    rho0 = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xctype)
-#    nset, nvar, ngrids = rho0.shape
-#    assert nset == 2
-#    assert ngrids == np.prod(mesh)
-#    rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(2, nvar, ngrids)
-#    rho0 *= ngrids / cell.vol
-#
-#    ni_copy = ni.copy()
-#    def update_pairs_info(cell1):
-#        r = asarray(cell1.atom_coords().ravel())
-#        atm = ni.sorted_gaussian_pairs[0]['atm']
-#        atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
-#        lattice_vectors = cell1.lattice_vectors()
-#        neighboring_images = asarray(gto.eval_gto.get_lattice_Ls(cell1))
-#        pairs = []
-#        for pair in ni.sorted_gaussian_pairs:
-#            pair = pair.copy()
-#            pairs.append(pair)
-#            env = pair['env'].copy()
-#            env[atom_coords_address] = r
-#            pair['env'] = env
-#            pair['is_non_orthogonal'] = 1
-#            pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None]
-#            pair['neighboring_images'] = neighboring_images
-#        ni_copy.cell = cell1
-#        ni_copy.sorted_gaussian_pairs = pairs
-#
-#    disp = 1e-4
-#    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-#    rho1 = cp.empty((3, 3, 2, nvar, ngrids))
-#    for x in range(3):
-#        for y in range(3):
-#            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-#            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-#            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-#
-#            update_pairs_info(cell1)
-#            rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
-#            rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
-#            rho_plus *= ngrids / cell1.vol
-#
-#            update_pairs_info(cell2)
-#            rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
-#            rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
-#            rho_minus *= ngrids / cell2.vol
-#
-#            rho1[x,y] = (rho_plus - rho_minus).reshape(2, nvar, ngrids) / (disp * 2)
-#
-#    weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
-#    exc, vxc = ni.eval_xc_eff(xc_code, rho0, 1, xctype=xctype, spin=1)[:2]
-#    out = cp.einsum('xysng,sng->xy', rho1, vxc).real.get() * weight_0
-#    rho0_sf = rho0[:,0].sum(axis=0)
-#    rho1_sf = rho1[:,:,:,0].sum(axis=2)
-#    out += cp.einsum('g,g->', rho0_sf, exc.ravel()).real.get() * weight_1
-#
-#    dm_sf = dm_kpts[0] + dm_kpts[1]
-#    out += _contract_coulomb_and_nuc(cell, mesh, dm_sf, kpts, rho0_sf,
-#                                     rho1_sf, grids, with_j, with_nuc)
-#    return out
+    raise DeprecationWarning
+    nkpts = len(kpts) if kpts is not None else 1
+    grad = ni.energy_gradient(xc_code, dm_kpts, kpts, with_j,
+                              with_pseudo_vloc_orbital_derivative)
+    return grad / nkpts
 
 class MultiGridNumInt(multigrid.MultiGridNumIntBase):
     # Enable analytical Fourier transforms (AFT), which are typically more
@@ -1810,29 +1862,17 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
     def nr_rks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
                    kpts=None, with_j=False):
-        if kpts is None:
-            kpts = np.zeros((1,3))
-        elif isinstance(kpts, KPoints):
+        if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
+        assert kpts is None or kpts.ndim == 2
 
-        assert kpts.ndim == 2
         assert dms.ndim == 4
         n_dm, nkpts, nao = dms.shape[:3]
-        assert len(kpts) == nkpts
 
         xctype = self._xc_type(xc_code)
-        if xctype == 'LDA':
-            nvar = 1
-        elif xctype == 'GGA':
-            nvar = 4
-        elif xctype == 'MGGA':
-            nvar = 5
-        elif xctype == 'HF':
+        nvar = _xc_var_length(xctype)
+        if xctype == 'HF':
             return cp.zeros_like(dms)
-        else:
-            raise NotImplementedError(f'XC functional {xc_code}')
-
-        self._ensure_initialized(kpts, xctype)
 
         if fxc is None:
             spin = 0
@@ -1842,12 +1882,11 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
         cell = self.cell
         mesh = self.mesh
-        ngrids = np.prod(mesh)
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
-        dm_sc = _wannier_transform_dm(self, dms, kpts, hermi)
         for i_dm in range(n_dm):
-            rhoG, tauG = _eval_density(self, dm_sc[i_dm], with_tau=xctype=='MGGA')
+            dm_sc = _wannier_transform_dm(self, dms[i_dm], kpts, hermi, xctype)
+            rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
             rho1 = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
 
             wv = cp.einsum('xg,xyg->yg', rho1, fxc).reshape(nvar, *mesh)
@@ -1859,7 +1898,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
                 coulomb = cp.zeros_like(rhoG)
             wv = _vxc_to_reciprocal_space(wv, coulomb, Gv_bases, work=tauG)
 
-            veff = _eval_xc_mat(self, wv, out=dm_sc[i_dm])
+            veff = _eval_xc_mat(self, wv, out=dm_sc)
             out[i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
             rhoG = tauG = veff = wv = coulomb = None
 
@@ -1879,29 +1918,17 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
     def nr_uks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
                    kpts=None, with_j=False):
-        if kpts is None:
-            kpts = np.zeros((1,3))
-        elif isinstance(kpts, KPoints):
+        if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
+        assert kpts is None or kpts.ndim == 2
 
-        assert kpts.ndim == 2
         assert dms.ndim == 5
         n_dm, nkpts, nao = dms.shape[1:4]
-        assert len(kpts) == nkpts
 
         xctype = self._xc_type(xc_code)
-        if xctype == 'LDA':
-            nvar = 1
-        elif xctype == 'GGA':
-            nvar = 4
-        elif xctype == 'MGGA':
-            nvar = 5
-        elif xctype == 'HF':
+        nvar = _xc_var_length(xctype)
+        if xctype == 'HF':
             return cp.zeros_like(dms)
-        else:
-            raise NotImplementedError(f'XC functional {xc_code}')
-
-        self._ensure_initialized(kpts, xctype)
 
         if fxc is None:
             spin = 1
@@ -1915,7 +1942,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
         for i_dm in range(n_dm):
-            dm_sc = _wannier_transform_dm(self, dms[:,i_dm], kpts, hermi)
+            dm_sc = _wannier_transform_dm(self, dms[:,i_dm], kpts, hermi, xctype)
             rho1 = cp.empty((2, nvar, ngrids))
             rhoG_sf = None
             for s in range(2):
@@ -1951,32 +1978,22 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         return out.reshape(dms.shape)
 
     def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
-        if kpts is None:
-            kpts = np.zeros((1,3))
-        elif isinstance(kpts, KPoints):
+        if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-        assert kpts.ndim == 2
+        assert kpts is None or kpts.ndim == 2
 
-        xctype = self._xc_type(xc_code)
-        if xctype == 'LDA':
-            nvar = 1
-        elif xctype == 'GGA':
-            nvar = 4
-        elif xctype == 'MGGA':
-            nvar = 5
-
-        self._ensure_initialized(kpts, xctype)
-
-        dms = _format_dms(dm, kpts)
         if is_rhf is None:
-            is_rhf = len(dms) == 1
+            is_rhf = len(dm) == 1
         elif is_rhf:
-            assert len(dms) == 1
+            assert len(dm) == 1
         else:
             assert spin == 1
-            assert len(dms) == 2
+            assert len(dm) == 2
 
-        dm_sc = _wannier_transform_dm(self, dm, kpts, hermi=1)
+        xctype = self._xc_type(xc_code)
+        nvar = _xc_var_length(xctype)
+
+        dm_sc = _wannier_transform_dm(self, dm, kpts, 1, xctype)
 
         mesh = self.mesh
         ngrids = np.prod(mesh)
@@ -2005,6 +2022,188 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         return None, vxc, fxc
 
     cache_xc_kernel = NotImplemented
+
+    def energy_gradient(self, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+        '''Computes the derivatives of the Exc along with additional contributions
+        from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        cell = self.cell
+        log = logger.new_logger(cell)
+        t0 = log.init_timer()
+
+        xctype = self._xc_type(xc_code)
+        nvar = _xc_var_length(xctype)
+
+        dm_sc = _wannier_transform_dm(self, dm_kpts, kpts, 1, xctype)
+        n_dm = len(dm_sc)
+
+        xctype = self._xc_type(xc_code)
+        mesh = self.mesh
+        ngrids = np.prod(mesh)
+        weight = cell.vol / ngrids
+
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+
+        if n_dm == 1: # RHF
+            rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
+            density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
+            spin = 0
+
+        else: # UHF
+            density = cp.empty((2, nvar, ngrids))
+            rhoG, tauG = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
+            tauG = None
+            _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
+            rhoGb, tauG = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
+            rhoG += rhoGb
+            _density_to_real_space(rhoGb, tauG, Gv_bases, xctype, out=density[1])
+            rhoGb = None
+            spin = 1
+
+        if with_j:
+            coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=rhoG)
+        else:
+            coulomb_on_g_mesh = rhoG
+            coulomb_on_g_mesh.fill(0.)
+        rhoG = None
+
+        if with_nuc:
+            if cell._pseudo:
+                coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh, out=tauG)
+            else:
+                coulomb_on_g_mesh += _eval_nucG(cell, mesh, rhoG, out=tauG)
+        tauG = None
+
+        # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+        # computing rhoR with IFFT, the weight factor is not needed.
+        density *= 1/weight
+        vxc = self.eval_xc_eff(
+            xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)[1]
+        vxc *= weight
+        vxc = vxc.reshape(n_dm, nvar, *mesh)
+
+        if n_dm == 1: # RHF
+            vxc = _vxc_to_reciprocal_space(vxc[0], coulomb_on_g_mesh, Gv_bases)
+            gradient = _eval_gradient(self, dm_sc, vxc)
+        else:
+            vxc_a, coulomb_on_g_mesh = coulomb_on_g_mesh, None
+            vxc_b = vxc_a.copy()
+            vxc_a = _vxc_to_reciprocal_space(vxc[0], vxc_a, Gv_bases)
+            gradient = _eval_gradient(self, dm_sc[0], vxc_a)
+            vxc_a = None
+            vxc_b = _vxc_to_reciprocal_space(vxc[1], vxc_b, Gv_bases)
+            gradient += _eval_gradient(self, dm_sc[1], vxc_b)
+
+        t0 = log.timer("xc", *t0)
+        return gradient
+
+    def strain_deriv(self, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+        '''Strain derivatives for Coulomb and Exc with k-point samples
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
+        from gpu4pyscf.pbc.grad.rks_stress import (
+            _finite_diff_cells,
+            _get_weight_strain_derivatives)
+        from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
+
+        cell = self.cell
+        log = logger.new_logger(cell)
+        t0 = log.init_timer()
+
+        xctype = self._xc_type(xc_code)
+        nvar = _xc_var_length(xctype)
+
+        dm_sc = _wannier_transform_dm(self, dm_kpts, kpts, 1, xctype)
+        n_dm = len(dm_sc)
+
+        mesh = self.mesh
+        ngrids = np.prod(mesh)
+        weight = cell.vol / ngrids
+
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+
+        if n_dm == 1: # RHF
+            rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
+            density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
+            spin = 0
+
+            rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
+            rho_sf[:] = density[0].real
+
+        else: # UHF
+            density = cp.empty((2, nvar, ngrids))
+            rhoG, tauG = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
+            tauG = None
+            _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
+            rhoGb, tauG = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
+            rhoG += rhoGb
+            _density_to_real_space(rhoGb, tauG, Gv_bases, xctype, out=density[1])
+            rhoGb = None
+            spin = 1
+
+            rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
+            rho_sf[:] = density[0].real
+            rho_sf[:] += density[1].real
+
+        # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+        # computing rhoR with IFFT, the weight factor is not needed.
+        density *= 1/weight
+        exc, vxc = self.eval_xc_eff(
+            xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)
+        vxc *= weight
+        vxc = vxc.reshape(n_dm, nvar, *mesh)
+
+        xc_energy_sum = float(rho_sf.dot(exc.ravel()).get()) * weight
+        density = exc = rho_sf = None
+
+        if with_j:
+            coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=rhoG)
+        else:
+            coulomb_on_g_mesh = rhoG
+            coulomb_on_g_mesh.fill(0.)
+        rhoG = None
+
+        if with_nuc:
+            if cell._pseudo:
+                coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh, out=tauG)
+            else:
+                coulomb_on_g_mesh += _eval_nucG(cell, mesh, rhoG, out=tauG)
+        tauG = None
+
+        if n_dm == 1: # RHF
+            vxc = _vxc_to_reciprocal_space(vxc, coulomb_on_g_mesh, Gv_bases)
+            sigma = _eval_gradient(self, dm_sc, vxc)
+        else:
+            vxc_a, coulomb_on_g_mesh = coulomb_on_g_mesh, None
+            vxc_b = vxc_a.copy()
+            vxc_a = _vxc_to_reciprocal_space(vxc[0], vxc_a, Gv_bases)
+            sigma = _eval_gradient(self, dm_sc[0], vxc_a)
+            vxc_a = None
+            vxc_b = _vxc_to_reciprocal_space(vxc[1], vxc_b, Gv_bases)
+            sigma += _eval_gradient(self, dm_sc[1], vxc_b)
+
+        t0 = log.timer("xc", *t0)
+
+        grids = None
+        weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
+        sigma += xc_energy_sum * weight_1
+        #?sigma += _contract_coulomb_and_nuc(cell, mesh, dm_kpts, kpts, rho0[0],
+        #?                                 rho1[:,:,0], grids, with_j, with_nuc)
+        return sigma
 
     to_cpu = NotImplemented
     to_gpu = NotImplemented
