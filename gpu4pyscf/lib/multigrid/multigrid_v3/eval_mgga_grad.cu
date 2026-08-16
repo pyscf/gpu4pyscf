@@ -127,6 +127,7 @@ void eval_mgga_grad_kernel(double *out, double *dm,
         int j = n - nfj * i;
         dm_cache[n] = dm[bvk_cell_id*nao*nao + (i0+i)*nao + j0+j] * factor;
     }
+    __syncthreads();
 
     constexpr int XX = 0;
     constexpr int XY = 1;
@@ -188,33 +189,23 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 double i_deriv1[3*nfi];
                 gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
                 gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
-                rename_registers(i_deriv0      , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv1      , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv1+nfi  , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv1+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
 
                 double j_deriv0[nfj];
                 double j_deriv1[3*nfj];
                 gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
                 gto_deriv1<LJ>(j_deriv1, j_deriv0, x - xj, y - yj, z - zj, aj);
-                rename_registers(j_deriv0      , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv1      , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv1+nfj  , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv1+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
 #pragma unroll
-                for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                     double s0 = 0;
 #pragma unroll
-                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                         s0 += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s0 * i_deriv1[i+nfi*0];
-                    rhoy += s0 * i_deriv1[i+nfi*1];
+                    rhox += s0 * i_deriv1[i      ];
+                    rhoy += s0 * i_deriv1[i+nfi  ];
                     rhoz += s0 * i_deriv1[i+nfi*2];
                 }
                 v_ix -= rhox * rho_fac;
@@ -224,16 +215,14 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 rhoy = 0;
                 rhoz = 0;
 #pragma unroll
-                for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                     double s0 = 0;
 #pragma unroll
-                    for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                        if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
-                        s0 += dm_cache[i*nfj+j] * i_deriv0[j];
+                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
+                        s0 += dm_cache[i*nfj+j] * i_deriv0[i];
                     }
-                    rhox += s0 * j_deriv1[j+nfj*0];
-                    rhoy += s0 * j_deriv1[j+nfj*1];
+                    rhox += s0 * j_deriv1[j      ];
+                    rhoy += s0 * j_deriv1[j+nfj  ];
                     rhoz += s0 * j_deriv1[j+nfj*2];
                 }
                 v_jx -= rhox * rho_fac;
@@ -243,27 +232,19 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
                 double i_deriv2[6*nfi];
                 gto_deriv2<LI>(i_deriv2, x - xi, y - yi, z - zi, ai);
-                rename_registers(i_deriv2+nfi*0, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*1, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*3, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*4, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*5, dm_i0, nfi, SLICE_SIZE_I);
                 double taux = 0;
                 double tauy = 0;
                 double tauz = 0;
 #pragma unroll
-                for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                     double sx = 0;
                     double sy = 0;
                     double sz = 0;
 #pragma unroll
-                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                         double dm_fac = dm_cache[i*nfj+j];
-                        sx += dm_fac * j_deriv1[j];
-                        sy += dm_fac * j_deriv1[j+nfj];
+                        sx += dm_fac * j_deriv1[j      ];
+                        sy += dm_fac * j_deriv1[j+nfj  ];
                         sz += dm_fac * j_deriv1[j+nfj*2];
                     }
                     taux += sx * i_deriv2[i+nfi*XX];
@@ -282,28 +263,20 @@ void eval_mgga_grad_kernel(double *out, double *dm,
 
                 double j_deriv2[6*nfj];
                 gto_deriv2<LJ>(j_deriv2, x - xj, y - yj, z - zj, aj);
-                rename_registers(j_deriv2+nfj*0, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*1, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*3, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*4, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*5, dm_j0, nfj, SLICE_SIZE_J);
                 taux = 0;
                 tauy = 0;
                 tauz = 0;
 #pragma unroll
-                for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                     double sx = 0;
                     double sy = 0;
                     double sz = 0;
 #pragma unroll
-                    for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                        if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                         double dm_fac = dm_cache[i*nfj+j];
-                        sx += dm_fac * i_deriv1[j];
-                        sy += dm_fac * i_deriv1[j+nfj];
-                        sz += dm_fac * i_deriv1[j+nfj*2];
+                        sx += dm_fac * i_deriv1[i      ];
+                        sy += dm_fac * i_deriv1[i+nfi  ];
+                        sz += dm_fac * i_deriv1[i+nfi*2];
                     }
                     taux += sx * j_deriv2[j+nfj*XX];
                     tauy += sx * j_deriv2[j+nfj*XY];
@@ -350,33 +323,23 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 double i_deriv1[3*nfi];
                 gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
                 gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
-                rename_registers(i_deriv0      , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv1      , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv1+nfi  , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv1+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
 
                 double j_deriv0[nfj];
                 double j_deriv1[3*nfj];
                 gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
                 gto_deriv1<LJ>(j_deriv1, j_deriv0, x - xj, y - yj, z - zj, aj);
-                rename_registers(j_deriv0      , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv1      , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv1+nfj  , dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv1+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
 #pragma unroll
-                for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                     double s0 = 0;
 #pragma unroll
-                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                         s0 += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s0 * i_deriv1[i+nfi*0];
-                    rhoy += s0 * i_deriv1[i+nfi*1];
+                    rhox += s0 * i_deriv1[i      ];
+                    rhoy += s0 * i_deriv1[i+nfi  ];
                     rhoz += s0 * i_deriv1[i+nfi*2];
                 }
                 v_ix -= rhox * rho_fac;
@@ -387,16 +350,14 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 rhoy = 0;
                 rhoz = 0;
 #pragma unroll
-                for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                     double s0 = 0;
 #pragma unroll
-                    for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                        if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                         s0 += dm_cache[i*nfj+j] * i_deriv0[i];
                     }
-                    rhox += s0 * j_deriv1[j+nfj*0];
-                    rhoy += s0 * j_deriv1[j+nfj*1];
+                    rhox += s0 * j_deriv1[j      ];
+                    rhoy += s0 * j_deriv1[j+nfj  ];
                     rhoz += s0 * j_deriv1[j+nfj*2];
                 }
                 v_jx -= rhox * rho_fac;
@@ -406,27 +367,19 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
                 double i_deriv2[6*nfi];
                 gto_deriv2<LI>(i_deriv2, x - xi, y - yi, z - zi, ai);
-                rename_registers(i_deriv2+nfi*0, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*1, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*3, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*4, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_deriv2+nfi*5, dm_i0, nfi, SLICE_SIZE_I);
                 double taux = 0;
                 double tauy = 0;
                 double tauz = 0;
 #pragma unroll
-                for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                     double sx = 0;
                     double sy = 0;
                     double sz = 0;
 #pragma unroll
-                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                         double dm_fac = dm_cache[i*nfj+j];
-                        sx += dm_fac * j_deriv1[j];
-                        sy += dm_fac * j_deriv1[j+nfj];
+                        sx += dm_fac * j_deriv1[j      ];
+                        sy += dm_fac * j_deriv1[j+nfj  ];
                         sz += dm_fac * j_deriv1[j+nfj*2];
                     }
                     taux += sx * i_deriv2[i+nfi*XX];
@@ -445,27 +398,19 @@ void eval_mgga_grad_kernel(double *out, double *dm,
 
                 double j_deriv2[6*nfj];
                 gto_deriv2<LJ>(j_deriv2, x - xj, y - yj, z - zj, aj);
-                rename_registers(j_deriv2+nfj*0, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*1, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*3, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*4, dm_j0, nfj, SLICE_SIZE_J);
-                rename_registers(j_deriv2+nfj*5, dm_j0, nfj, SLICE_SIZE_J);
                 taux = 0;
                 tauy = 0;
                 tauz = 0;
 #pragma unroll
-                for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                     double sx = 0;
                     double sy = 0;
                     double sz = 0;
 #pragma unroll
-                    for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                        if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                         double dm_fac = dm_cache[i*nfj+j];
-                        sx += dm_fac * i_deriv1[i];
-                        sy += dm_fac * i_deriv1[i+nfi];
+                        sx += dm_fac * i_deriv1[i      ];
+                        sy += dm_fac * i_deriv1[i+nfi  ];
                         sz += dm_fac * i_deriv1[i+nfi*2];
                     }
                     taux += sx * j_deriv2[j+nfj*XX];

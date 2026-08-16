@@ -24,18 +24,14 @@
 #include "cartesian.cuh"
 #include "utils.cuh"
 
-#define TILE            4
-#define WARP_SIZE       32
-#define THREADS         64
-
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
-void eval_lda_grad_kernel(double *out, double *dm,
-                          double *vxc_weights, PBCIntEnvVars envs,
-                          int64_t *bas_ij_idx, float2 *grid_frac_ranges,
-                          double da_squared, double db_squared, double dc_squared,
-                          int mesh_a, int mesh_b, int mesh_c, int npairs,
-                          double factor, double negligible)
+void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_weights,
+                         PBCIntEnvVars envs,
+                         int64_t *bas_ij_idx, float2 *grid_frac_ranges,
+                         double da_squared, double db_squared, double dc_squared,
+                         int mesh_a, int mesh_b, int mesh_c, int npairs,
+                         double negligible)
 {
     constexpr int tile = 16;
     int tx = threadIdx.x;
@@ -43,17 +39,15 @@ void eval_lda_grad_kernel(double *out, double *dm,
     int thread_id = ty * tile + tx;
     int pair_id = blockIdx.x;
 
-    constexpr int nfi = (LI + 1) * (LI + 2) / 2;
-    constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
-
     __shared__ int a_start, a_stop, a_center;
     __shared__ int b_start, b_stop;
     __shared__ int c_start, c_stop;
+    __shared__ uint32_t ij_offset;
     __shared__ double cc, exp_da_squared;
     __shared__ double xi, yi, zi;
     __shared__ double xj, yj, zj;
     __shared__ double xij, yij, zij, ai, aj, aij, theta_rr;
-    __shared__ double dm_cache[nfi*nfj];
+    __shared__ double swap[8];
 
     int *bas = envs.bas;
     double *env = envs.env;
@@ -69,6 +63,11 @@ void eval_lda_grad_kernel(double *out, double *dm,
         int ish_cell0 = ish;
         int bvk_cell_id = jsh / nbas;
         int jsh_cell0 = jsh - nbas * bvk_cell_id;
+        uint32_t nao = envs.ao_loc[nbas];
+        uint32_t i0 = envs.ao_loc[ish_cell0];
+        uint32_t j0 = envs.ao_loc[jsh_cell0];
+        ij_offset = bvk_cell_id * nao * nao + i0 * nao + j0;
+
         int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         ai = env[bas[ish_cell0*BAS_SLOTS+PTR_EXP]];
@@ -116,30 +115,18 @@ void eval_lda_grad_kernel(double *out, double *dm,
     }
     __syncthreads();
 
-    for (int n = thread_id; n < nfi * nfj; n += THREADS) {
-        int ish_cell0 = ish;
-        int bvk_cell_id = jsh / nbas;
-        int jsh_cell0 = jsh - nbas * bvk_cell_id;
-        uint32_t nao = envs.ao_loc[nbas];
-        int i0 = envs.ao_loc[ish_cell0];
-        int j0 = envs.ao_loc[jsh_cell0];
-        int i = n * c_div_nf[LJ];
-        int j = n - nfj * i;
-        dm_cache[n] = dm[bvk_cell_id*nao*nao + (i0+i)*nao + j0+j] * factor;
-    }
-    __syncthreads();
-
-    double v_ix = 0;
-    double v_iy = 0;
-    double v_iz = 0;
-    double v_jx = 0;
-    double v_jy = 0;
-    double v_jz = 0;
+    constexpr int nfi = (LI + 1) * (LI + 2) / 2;
+    constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
 
 #pragma unroll
     for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
 #pragma unroll
     for (int dm_j0 = 0; dm_j0 < nfj; dm_j0 += SLICE_SIZE_J) {
+        double vj_cache[SLICE_SIZE_I * SLICE_SIZE_J];
+#pragma unroll
+        for (int n = 0; n < SLICE_SIZE_I*SLICE_SIZE_J; ++n) {
+            vj_cache[n] = 0;
+        }
 
         for (int b_index = b_start+ty; b_index <= b_stop; b_index += tile) {
         for (int c_index = c_start+tx; c_index <= c_stop; c_index += tile) {
@@ -175,52 +162,41 @@ void eval_lda_grad_kernel(double *out, double *dm,
                  recursion_factor_a *= exp_da_squared) {
                 if (fabs(gaussian_xyz) < negligible) break;
 
-                double v = vxc_weights[abc_idx] * gaussian_xyz;
-                double i_deriv0[nfi];
-                double i_deriv1[3*nfi];
-                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
+                double rho_fac = vrho_weights[abc_idx] * gaussian_xyz;
+                double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
+                double i_cartesian[nfi];
+                double i_gradient[3*nfi];
+                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
+                gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai);
+                rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_gradient      , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_gradient+nfi  , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_gradient+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
 
-                double j_deriv0[nfj];
-                double j_deriv1[3*nfj];
-                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
-                gto_deriv1<LJ>(j_deriv1, j_deriv0, x - xj, y - yj, z - zj, aj);
-                double rhox = 0;
-                double rhoy = 0;
-                double rhoz = 0;
+                double j_cartesian[nfj];
+                double j_gradient[3*nfj];
+                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                gto_deriv1<LJ>(j_gradient, j_cartesian, x - xj, y - yj, z - zj, aj);
+                rename_registers(j_cartesian, dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_gradient      , dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_gradient+nfj  , dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_gradient+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
 #pragma unroll
-                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                    double s = 0;
+                for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                    if (SLICE_SIZE_I < nfi && dm_i0 + i >= nfi) break;
+                    double s0 = rho_fac * i_cartesian[i];
+                    double s1 = tau_fac * i_gradient[i];
+                    double s2 = tau_fac * i_gradient[i+nfi];
+                    double s3 = tau_fac * i_gradient[i+nfi*2];
 #pragma unroll
-                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                        s += dm_cache[i*nfj+j] * j_deriv0[j];
+                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                        if (SLICE_SIZE_J < nfj && dm_j0 + j >= nfj) break;
+                        vj_cache[i*SLICE_SIZE_J+j] += s0 * j_cartesian[j];
+                        vj_cache[i*SLICE_SIZE_J+j] += s1 * j_gradient[j];
+                        vj_cache[i*SLICE_SIZE_J+j] += s2 * j_gradient[j+nfj];
+                        vj_cache[i*SLICE_SIZE_J+j] += s3 * j_gradient[j+nfj*2];
                     }
-                    rhox += s * i_deriv1[i      ];
-                    rhoy += s * i_deriv1[i+nfi  ];
-                    rhoz += s * i_deriv1[i+nfi*2];
                 }
-                v_ix -= rhox * v;
-                v_iy -= rhoy * v;
-                v_iz -= rhoz * v;
-
-                rhox = 0;
-                rhoy = 0;
-                rhoz = 0;
-#pragma unroll
-                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                    double s = 0;
-#pragma unroll
-                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                        s += dm_cache[i*nfj+j] * i_deriv0[i];
-                    }
-                    rhox += s * j_deriv1[j      ];
-                    rhoy += s * j_deriv1[j+nfj  ];
-                    rhoz += s * j_deriv1[j+nfj*2];
-                }
-                v_jx -= rhox * v;
-                v_jy -= rhoy * v;
-                v_jz -= rhoz * v;
-
                 x += c_dxyz_dabc[0];
                 y += c_dxyz_dabc[1];
                 z += c_dxyz_dabc[2];
@@ -247,94 +223,74 @@ void eval_lda_grad_kernel(double *out, double *dm,
                 if (abc_idx < 0) {
                     abc_idx += mesh_abc;
                 }
-                double v = vxc_weights[abc_idx] * gaussian_xyz;
-                double i_deriv0[nfi];
-                double i_deriv1[3*nfi];
-                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
+                double rho_fac = vrho_weights[abc_idx] * gaussian_xyz;
+                double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
+                double i_cartesian[nfi];
+                double i_gradient[3*nfi];
+                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
+                gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai);
+                rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_gradient      , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_gradient+nfi  , dm_i0, nfi, SLICE_SIZE_I);
+                rename_registers(i_gradient+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
 
-                double j_deriv0[nfj];
-                double j_deriv1[3*nfj];
-                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
-                gto_deriv1<LJ>(j_deriv1, j_deriv0, x - xj, y - yj, z - zj, aj);
-                double rhox = 0;
-                double rhoy = 0;
-                double rhoz = 0;
+                double j_cartesian[nfj];
+                double j_gradient[3*nfj];
+                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                gto_deriv1<LJ>(j_gradient, j_cartesian, x - xj, y - yj, z - zj, aj);
+                rename_registers(j_cartesian, dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_gradient      , dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_gradient+nfj  , dm_j0, nfj, SLICE_SIZE_J);
+                rename_registers(j_gradient+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
 #pragma unroll
-                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                    double s = 0;
+                for (int i = 0; i < SLICE_SIZE_I; ++i) {
+                    if (SLICE_SIZE_I < nfi && dm_i0 + i >= nfi) break;
+                    double s0 = rho_fac * i_cartesian[i];
+                    double s1 = tau_fac * i_gradient[i];
+                    double s2 = tau_fac * i_gradient[i+nfi];
+                    double s3 = tau_fac * i_gradient[i+nfi*2];
 #pragma unroll
-                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                        s += dm_cache[i*nfj+j] * j_deriv0[j];
+                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                        if (SLICE_SIZE_J < nfj && dm_j0 + j >= nfj) break;
+                        vj_cache[i*SLICE_SIZE_J+j] += s0 * j_cartesian[j];
+                        vj_cache[i*SLICE_SIZE_J+j] += s1 * j_gradient[j];
+                        vj_cache[i*SLICE_SIZE_J+j] += s2 * j_gradient[j+nfj];
+                        vj_cache[i*SLICE_SIZE_J+j] += s3 * j_gradient[j+nfj*2];
                     }
-                    rhox += s * i_deriv1[i      ];
-                    rhoy += s * i_deriv1[i+nfi  ];
-                    rhoz += s * i_deriv1[i+nfi*2];
                 }
-                v_ix -= rhox * v;
-                v_iy -= rhoy * v;
-                v_iz -= rhoz * v;
-
-                rhox = 0;
-                rhoy = 0;
-                rhoz = 0;
-#pragma unroll
-                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                    double s = 0;
-#pragma unroll
-                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                        s += dm_cache[i*nfj+j] * i_deriv0[i];
-                    }
-                    rhox += s * j_deriv1[j      ];
-                    rhoy += s * j_deriv1[j+nfj  ];
-                    rhoz += s * j_deriv1[j+nfj*2];
-                }
-                v_jx -= rhox * v;
-                v_jy -= rhoy * v;
-                v_jz -= rhoz * v;
             }
         } }
-    } }
 
-    __syncthreads();
-    for (int offset = 16; offset > 0; offset >>= 1) {
-        v_ix += __shfl_down_sync(0xffffffff, v_ix, offset);
-        v_iy += __shfl_down_sync(0xffffffff, v_iy, offset);
-        v_iz += __shfl_down_sync(0xffffffff, v_iz, offset);
-        v_jx += __shfl_down_sync(0xffffffff, v_jx, offset);
-        v_jy += __shfl_down_sync(0xffffffff, v_jy, offset);
-        v_jz += __shfl_down_sync(0xffffffff, v_jz, offset);
-    }
-    int lane = thread_id % WARP_SIZE;
-    int ish_cell0 = ish;
-    int bvk_cell_id = jsh / nbas;
-    int jsh_cell0 = jsh - nbas * bvk_cell_id;
-    int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
-    int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
-    if (lane == 0) {
-        atomicAdd(out+ia*3+0, v_ix);
-        atomicAdd(out+ia*3+1, v_iy);
-        atomicAdd(out+ia*3+2, v_iz);
-        atomicAdd(out+ja*3+0, v_jx);
-        atomicAdd(out+ja*3+1, v_jy);
-        atomicAdd(out+ja*3+2, v_jz);
-    }
+        uint32_t nao = envs.ao_loc[nbas];
+        double *pout = out + ij_offset + dm_i0 * nao + dm_j0;
+#pragma unroll
+        for (int i = 0; i < SLICE_SIZE_I; ++i) {
+            if (SLICE_SIZE_I < nfi && dm_i0 + i >= nfi) break;
+#pragma unroll
+            for (int j = 0; j < SLICE_SIZE_J; ++j) {
+                if (SLICE_SIZE_J < nfj && dm_j0 + j >= nfj) break;
+                double val = reduce(vj_cache[i*SLICE_SIZE_J+j], swap, thread_id);
+                if (thread_id == 0) {
+                    atomicAdd(pout + i*nao+j, val);
+                }
+            }
+        }
+    } }
 }
 
 extern "C" {
-#define eval_lda_grad_kernel_case(li, lj, slice_i, slice_j) \
+#define eval_mgga_mat_kernel_v2_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
-        eval_lda_grad_kernel<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
-            out, dm, vxc, *envs, bas_ij_idx, grid_frac_ranges, \
+        eval_mgga_mat_kernel_v2<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
+            out, vxc, tau, *envs, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
-            factor, negligible); \
+            negligible); \
     break
 
-int evaluate_lda_grad(double *out, double *dm,
-                      double *vxc, double *placeholder, PBCIntEnvVars *envs,
-                      double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
-                      float2 *grid_frac_ranges, int *mesh, int npairs,
-                      double factor, double negligible)
+int evaluate_mgga_mat_v2(double *out, double *vxc, double *tau, PBCIntEnvVars *envs,
+                     double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
+                     float2 *grid_frac_ranges, int *mesh, int npairs,
+                     double negligible)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
@@ -344,25 +300,25 @@ int evaluate_lda_grad(double *out, double *dm,
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
     dim3 threads(16, 16);
     switch (li * LMAX1 + lj) {
-        eval_lda_grad_kernel_case(0,0, 1, 1);
-        eval_lda_grad_kernel_case(1,0, 3, 1);
-        eval_lda_grad_kernel_case(1,1, 3, 3);
-        eval_lda_grad_kernel_case(2,0, 6, 1);
-        eval_lda_grad_kernel_case(2,1, 6, 3);
-        eval_lda_grad_kernel_case(2,2, 6, 6);
-        eval_lda_grad_kernel_case(3,0,10, 1);
-        eval_lda_grad_kernel_case(3,1,10, 3);
-        eval_lda_grad_kernel_case(3,2,10, 6);
-        eval_lda_grad_kernel_case(3,3,10, 5);
-        eval_lda_grad_kernel_case(4,0,15, 1);
-        eval_lda_grad_kernel_case(4,1,15, 3);
-        eval_lda_grad_kernel_case(4,2,15, 3);
-        eval_lda_grad_kernel_case(4,3, 8, 5);
-        eval_lda_grad_kernel_case(4,4,15, 3);
+        eval_mgga_mat_kernel_v2_case(0,0, 1, 1);
+        eval_mgga_mat_kernel_v2_case(1,0, 3, 1);
+        eval_mgga_mat_kernel_v2_case(1,1, 3, 3);
+        eval_mgga_mat_kernel_v2_case(2,0, 6, 1);
+        eval_mgga_mat_kernel_v2_case(2,1, 6, 3);
+        eval_mgga_mat_kernel_v2_case(2,2, 6, 6);
+        eval_mgga_mat_kernel_v2_case(3,0,10, 1);
+        eval_mgga_mat_kernel_v2_case(3,1,10, 3);
+        eval_mgga_mat_kernel_v2_case(3,2,10, 6);
+        eval_mgga_mat_kernel_v2_case(3,3,10, 5);
+        eval_mgga_mat_kernel_v2_case(4,0,15, 1);
+        eval_mgga_mat_kernel_v2_case(4,1,15, 3);
+        eval_mgga_mat_kernel_v2_case(4,2,15, 3);
+        eval_mgga_mat_kernel_v2_case(4,3, 8, 5);
+        eval_mgga_mat_kernel_v2_case(4,4,15, 3);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in eval_lda_mat_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in eval_mgga_mat_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

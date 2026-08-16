@@ -249,7 +249,7 @@ def _aft_eval_gradient(ni, dm_sc, vxcG):
             raise RuntimeError('contract_orth_aopair_coulG kernel failed')
     return gradient
 
-def _aft_eval_strain_deriv(ni, dm_sc, vxcG):
+def _aft_eval_strain(ni, dm_sc, vxcG):
     cell = ni.sorted_cell
     bvkcell = ni.bvkcell
 
@@ -528,7 +528,6 @@ def _eval_gradient(ni, dm_sc, vxcG, work=None):
         gradient = cp.zeros((cell.natm, 3))
 
     a = cell.lattice_vectors()
-    vol = np.linalg.det(a)
     nkpts = len(ni.bvkmesh_Ls)
 
     if isinstance(vxcG, cp.ndarray):
@@ -548,7 +547,6 @@ def _eval_gradient(ni, dm_sc, vxcG, work=None):
     fft_buckets = ni.fft_buckets or []
     for bucket in fft_buckets:
         mesh = bucket['mesh']
-        ngrids = np.prod(mesh)
 
         weight = 1. / nkpts
 
@@ -590,12 +588,12 @@ def _eval_gradient(ni, dm_sc, vxcG, work=None):
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return gradient
 
-def _eval_strain_deriv(ni, dm_sc, vxcG, work=None):
+def _eval_strain(ni, dm_sc, vxcG, work=None):
     '''Note, contents of vxcG will be destroyed in this function
     '''
     cell = ni.sorted_cell
     if ni.aft_buckets is not None:
-        sigma = _aft_eval_strain_deriv(ni, dm_sc, vxcG)
+        sigma = _aft_eval_strain(ni, dm_sc, vxcG)
     else:
         sigma = cp.zeros((3, 3))
 
@@ -2044,7 +2042,6 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         dm_sc = _wannier_transform_dm(self, dm_kpts, kpts, 1, xctype)
         n_dm = len(dm_sc)
 
-        xctype = self._xc_type(xc_code)
         mesh = self.mesh
         ngrids = np.prod(mesh)
         weight = cell.vol / ngrids
@@ -2104,7 +2101,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         t0 = log.timer("xc", *t0)
         return gradient
 
-    def strain_deriv(self, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+    def strain(self, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
         '''Strain derivatives for Coulomb and Exc with k-point samples
 
         Kwargs:
@@ -2116,8 +2113,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         '''
         from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
         from gpu4pyscf.pbc.grad.rks_stress import (
-            _finite_diff_cells,
-            _get_weight_strain_derivatives)
+            _get_coulG_strain_derivatives)
         from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
 
         cell = self.cell
@@ -2132,7 +2128,9 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
         mesh = self.mesh
         ngrids = np.prod(mesh)
-        weight = cell.vol / ngrids
+        vol = cell.vol
+        weight_0 = vol / ngrids
+        weight_1 = np.eye(3) * weight_0
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
@@ -2159,50 +2157,50 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             rho_sf[:] = density[0].real
             rho_sf[:] += density[1].real
 
-        # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
-        # computing rhoR with IFFT, the weight factor is not needed.
-        density *= 1/weight
+        density *= 1/weight_0
         exc, vxc = self.eval_xc_eff(
             xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)
-        vxc *= weight
+        vxc *= weight_0
         vxc = vxc.reshape(n_dm, nvar, *mesh)
 
-        xc_energy_sum = float(rho_sf.dot(exc.ravel()).get()) * weight
+        xc_energy_sum = float(rho_sf.dot(exc.ravel()).get()) * weight_0
+        sigma = xc_energy_sum * weight_1
         density = exc = rho_sf = None
 
         if with_j:
-            coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=rhoG)
+            coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases, out=tauG)
         else:
-            coulomb_on_g_mesh = rhoG
+            coulomb_on_g_mesh = tauG
             coulomb_on_g_mesh.fill(0.)
-        rhoG = None
 
         if with_nuc:
             if cell._pseudo:
-                coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh, out=tauG)
+                coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh)
             else:
-                coulomb_on_g_mesh += _eval_nucG(cell, mesh, rhoG, out=tauG)
-        tauG = None
+                coulomb_on_g_mesh += _eval_nucG(cell, mesh, rhoG)
+
+        ecoul = (.5 / vol) * float(_conj_dot(rhoG.ravel(), coulomb_on_g_mesh.ravel()).get())
+        sigma += ecoul * weight_1
+
+        Gv = cp.asarray(cell.get_Gv())
+        coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
+        sigma += cp.einsum('xyg,g->xy', coulG_1, rhoG.conj()*rhoG).real.get() * (weight_0/ngrids)
+
+        rhoG = tauG = None
 
         if n_dm == 1: # RHF
-            vxc = _vxc_to_reciprocal_space(vxc, coulomb_on_g_mesh, Gv_bases)
-            sigma = _eval_gradient(self, dm_sc, vxc)
+            vxc = _vxc_to_reciprocal_space(vxc[0], coulomb_on_g_mesh, Gv_bases)
+            sigma += _eval_strain(self, dm_sc, vxc)
         else:
             vxc_a, coulomb_on_g_mesh = coulomb_on_g_mesh, None
             vxc_b = vxc_a.copy()
             vxc_a = _vxc_to_reciprocal_space(vxc[0], vxc_a, Gv_bases)
-            sigma = _eval_gradient(self, dm_sc[0], vxc_a)
+            sigma += _eval_strain(self, dm_sc[0], vxc_a)
             vxc_a = None
             vxc_b = _vxc_to_reciprocal_space(vxc[1], vxc_b, Gv_bases)
-            sigma += _eval_gradient(self, dm_sc[1], vxc_b)
+            sigma += _eval_strain(self, dm_sc[1], vxc_b)
 
         t0 = log.timer("xc", *t0)
-
-        grids = None
-        weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
-        sigma += xc_energy_sum * weight_1
-        #?sigma += _contract_coulomb_and_nuc(cell, mesh, dm_kpts, kpts, rho0[0],
-        #?                                 rho1[:,:,0], grids, with_j, with_nuc)
         return sigma
 
     to_cpu = NotImplemented

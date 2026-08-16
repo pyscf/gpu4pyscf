@@ -218,21 +218,21 @@ void orth_lda_grad_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
 
                     multiply(xR0, xI0, yzR10, yzI10, xyzR, xyzI);
                     double goutyR = xyzR * vG_R[n] - xyzI * vG_I[n];
-                    v_iy += goutyR;
-                    v_jy -= gout0I * ky + goutyR;
+                    v_iy -= goutyR;
+                    v_jy += gout0I * ky + goutyR;
 
                     multiply(xR0, xI0, yzR01, yzI01, xyzR, xyzI);
                     double goutzR = xyzR * vG_R[n] - xyzI * vG_I[n];
-                    v_iz += goutzR;
-                    v_jz -= gout0I * kz + goutzR;
+                    v_iz -= goutzR;
+                    v_jz += gout0I * kz + goutzR;
 
                     double xR1, xI1; dI_gx(gxR, addr, stride_i, ix, ai2, xR1, xI1);
                     multiply(xR1, xI1, yzR00, yzI00, xyzR, xyzI);
                     double goutxR = xyzR * vG_R[n] - xyzI * vG_I[n];
-                    v_ix += goutxR;
+                    v_ix -= goutxR;
                     // (\nabla i|j) + (i|\nabla j) + -iG*(ij,G) = 0
                     double kx = G_bases[mesh_cum[0] + x_in_Gv_base];
-                    v_jx -= gout0I * kx + goutxR;
+                    v_jx += gout0I * kx + goutxR;
                 }
             } }
         }

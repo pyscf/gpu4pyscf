@@ -269,28 +269,28 @@ void orth_mgga_strain_kernel(double *out, double *dm,
                 int addrz = iz*stride_i + jz*stride_j + NGV_PER_BLOCK*4 + z_in_tile;
                 double dm_fac = dm_cache[i*nfj+j];
                 double *gxR = gx;
-                double *gxI = gxR + NGV_PER_BLOCK;
-                double yR0 = gxR[addry];
-                double yI0 = gxI[addry];
-                double zR0 = gxR[addrz] * dm_fac;
-                double zI0 = gxI[addrz] * dm_fac;
+                double yR0 = gxR[addry              ];
+                double yI0 = gxR[addry+NGV_PER_BLOCK];
+                double zR0 = gxR[addrz              ] * dm_fac;
+                double zI0 = gxR[addrz+NGV_PER_BLOCK] * dm_fac;
                 double YR0 = Xgx[addry              ];
                 double YI0 = Xgx[addry+NGV_PER_BLOCK];
                 double ZR0 = Xgx[addrz              ] * dm_fac;
                 double ZI0 = Xgx[addrz+NGV_PER_BLOCK] * dm_fac;
-                double yzR00, yzI00; multiply(yR0, yI0, zR0, zI0, yzR00, yzI00);
-                double YzR00, YzI00; multiply(YR0, YI0, zR0, zI0, YzR00, YzI00);
-                double yZR00, yZI00; multiply(yR0, yI0, ZR0, ZI0, yZR00, yZI00);
 
                 double ai2 = ai * -2;
                 double yR1, yI1; dI_gx(gxR, addry, stride_i, iy, ai2, yR1, yI1);
-                double YR1, YI1; dI_gx(Xgx, addry, stride_i, iy, ai2, YR1, YI1);
                 double zR1, zI1; dI_gx(gxR, addrz, stride_i, iz, ai2, zR1, zI1);
-                double ZR1, ZI1; dI_gx(Xgx, addrz, stride_i, iz, ai2, ZR1, ZI1);
                 zR1 *= dm_fac;
                 zI1 *= dm_fac;
+                double YR1, YI1; dI_gx(Xgx, addry, stride_i, iy, ai2, YR1, YI1);
+                double ZR1, ZI1; dI_gx(Xgx, addrz, stride_i, iz, ai2, ZR1, ZI1);
                 ZR1 *= dm_fac;
                 ZI1 *= dm_fac;
+
+                double yzR00, yzI00; multiply(yR0, yI0, zR0, zI0, yzR00, yzI00);
+                double YzR00, YzI00; multiply(YR0, YI0, zR0, zI0, YzR00, YzI00);
+                double yZR00, yZI00; multiply(yR0, yI0, ZR0, ZI0, yZR00, yZI00);
                 double yzR10, yzI10; multiply(yR1, yI1, zR0, zI0, yzR10, yzI10);
                 double YzR10, YzI10; multiply(YR1, YI1, zR0, zI0, YzR10, YzI10);
                 double yZR10, yZI10; multiply(yR1, yI1, ZR0, ZI0, yZR10, yZI10);
@@ -303,8 +303,8 @@ void orth_mgga_strain_kernel(double *out, double *dm,
                     int x_in_Gv_base = mesh_start[0] + x;
                     if (x_in_Gv_base >= mesh_x) break;
                     int addr = addrx + x;
-                    double xR0 = gxR[addr];
-                    double xI0 = gxI[addr];
+                    double xR0 = gxR[addr              ];
+                    double xI0 = gxR[addr+NGV_PER_BLOCK];
                     double XR0 = Xgx[addr              ];
                     double XI0 = Xgx[addr+NGV_PER_BLOCK];
                     double xR1, xI1; dI_gx(gxR, addr, stride_i, ix, ai2, xR1, xI1);
@@ -344,11 +344,10 @@ void orth_mgga_strain_kernel(double *out, double *dm,
 //                int addrz = iz*stride_i + jz*stride_j + NGV_PER_BLOCK*4 + z_in_tile;
 //                double dm_fac = dm_cache[i*nfj+j];
 //                double *gxR = gx;
-//                double *gxI = gxR + NGV_PER_BLOCK;
-//                double yR0 = gxR[addry];
-//                double yI0 = gxI[addry];
-//                double zR0 = gxR[addrz] * dm_fac;
-//                double zI0 = gxI[addrz] * dm_fac;
+//                double yR0 = gxR[addry              ];
+//                double yI0 = gxR[addry+NGV_PER_BLOCK];
+//                double zR0 = gxR[addrz              ] * dm_fac;
+//                double zI0 = gxR[addrz+NGV_PER_BLOCK] * dm_fac;
 //                double YR0 = Xgx[addry              ];
 //                double YI0 = Xgx[addry+NGV_PER_BLOCK];
 //                double ZR0 = Xgx[addrz              ] * dm_fac;
@@ -397,25 +396,25 @@ void orth_mgga_strain_kernel(double *out, double *dm,
 //                double zR3, zI3; d2IdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, zR3, zI3);
 //                zR3 *= dm_fac;
 //                zI3 *= dm_fac;
-//                double yzR21, yzI21; mul_add(yR2, yI2, zR1, zI1,  yR3, yI3, zR0, zI0, yzR21, yzI21);
-//                double yzR12, yzI12; mul_add(yR1, yI1, zR2, zI2,  yR0, yI0, zR3, zI3, yzR12, yzI12);
+//                double yzR12, yzI12; mul_add(yR1, yI1, zR2, zI2,  yR3, yI3, zR0, zI0, yzR12, yzI12);
+//                double yzR21, yzI21; mul_add(yR2, yI2, zR1, zI1,  yR0, yI0, zR3, zI3, yzR21, yzI21);
 //
 //                double YR3, YI3; d2IdJ_gx(Xgx, addry, stride_i, stride_j, iy, jy, ai2, aj2, YR3, YI3);
 //                double ZR3, ZI3; d2IdJ_gx(Xgx, addrz, stride_i, stride_j, iz, jz, ai2, aj2, ZR3, ZI3);
 //                ZR3 *= dm_fac;
 //                ZI3 *= dm_fac;
-//                double YzR21, YzI21; mul_add(YR2, YI2, zR1, zI1,  YR3, YI3, zR0, zI0, YzR21, YzI21);
-//                double yZR21, yZI21; mul_add(yR2, yI2, ZR1, ZI1,  yR3, yI3, ZR0, ZI0, yZR21, yZI21);
-//                double YzR12, YzI12; mul_add(YR1, YI1, zR2, zI2,  YR0, YI0, zR3, zI3, YzR12, YzI12);
-//                double yZR12, yZI12; mul_add(yR1, yI1, ZR2, ZI2,  yR0, yI0, ZR3, ZI3, yZR12, yZI12);
+//                double YzR12, YzI12; mul_add(YR1, YI1, zR2, zI2,  YR3, YI3, zR0, zI0, YzR12, YzI12);
+//                double yZR12, yZI12; mul_add(yR1, yI1, ZR2, ZI2,  yR3, yI3, ZR0, ZI0, yZR12, yZI12);
+//                double YzR21, YzI21; mul_add(YR2, YI2, zR1, zI1,  YR0, YI0, zR3, zI3, YzR21, YzI21);
+//                double yZR21, yZI21; mul_add(yR2, yI2, ZR1, ZI1,  yR0, yI0, ZR3, ZI3, yZR21, yZI21);
 //#pragma unroll
 //                for (int n = 0; n < DENSITY_WIDTH; ++n) {
 //                    int x = n;
 //                    int x_in_Gv_base = mesh_start[0] + x;
 //                    if (x_in_Gv_base >= mesh_x) break;
 //                    int addr = addrx + x;
-//                    double xR0 = gxR[addr];
-//                    double xI0 = gxI[addr];
+//                    double xR0 = gxR[addr              ];
+//                    double xI0 = gxR[addr+NGV_PER_BLOCK];
 //                    double XR0 = Xgx[addr              ];
 //                    double XI0 = Xgx[addr+NGV_PER_BLOCK];
 //                    double xR2, xI2; dIdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, xR2, xI2);
@@ -450,11 +449,10 @@ void orth_mgga_strain_kernel(double *out, double *dm,
                 int addrz = iz*stride_i + jz*stride_j + NGV_PER_BLOCK*4 + z_in_tile;
                 double dm_fac = dm_cache[i*nfj+j];
                 double *gxR = gx;
-                double *gxI = gxR + NGV_PER_BLOCK;
-                double yR0 = gxR[addry];
-                double yI0 = gxI[addry];
-                double zR0 = gxR[addrz] * dm_fac;
-                double zI0 = gxI[addrz] * dm_fac;
+                double yR0 = gxR[addry              ];
+                double yI0 = gxR[addry+NGV_PER_BLOCK];
+                double zR0 = gxR[addrz              ] * dm_fac;
+                double zI0 = gxR[addrz+NGV_PER_BLOCK] * dm_fac;
                 double yzR00, yzI00; multiply(yR0, yI0, zR0, zI0, yzR00, yzI00);
 
                 double ai2 = ai * -2;
@@ -479,12 +477,11 @@ void orth_mgga_strain_kernel(double *out, double *dm,
                 double yzR20, yzI20; mul_add(yR2, yI2, zR0, zI0,  yR0, yI0, zR2, zI2, yzR20, yzI20);
 
                 double yR3, yI3; d2IdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, yR3, yI3);
-                double yzR21, yzI21; mul_add(yR2, yI2, zR1, zI1,  yR3, yI3, zR0, zI0, yzR21, yzI21);
-
                 double zR3, zI3; d2IdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, zR3, zI3);
                 zR3 *= dm_fac;
                 zI3 *= dm_fac;
-                double yzR12, yzI12; mul_add(yR1, yI1, zR2, zI2,  yR0, yI0, zR3, zI3, yzR12, yzI12);
+                double yzR12, yzI12; mul_add(yR1, yI1, zR2, zI2,  yR3, yI3, zR0, zI0, yzR12, yzI12);
+                double yzR21, yzI21; mul_add(yR2, yI2, zR1, zI1,  yR0, yI0, zR3, zI3, yzR21, yzI21);
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
                     int x = n;
@@ -516,11 +513,10 @@ void orth_mgga_strain_kernel(double *out, double *dm,
                 int addrz = iz*stride_i + jz*stride_j + NGV_PER_BLOCK*4 + z_in_tile;
                 double dm_fac = dm_cache[i*nfj+j];
                 double *gxR = gx;
-                double *gxI = gxR + NGV_PER_BLOCK;
-                double yR0 = gxR[addry];
-                double yI0 = gxI[addry];
-                double zR0 = gxR[addrz] * dm_fac;
-                double zI0 = gxI[addrz] * dm_fac;
+                double yR0 = gxR[addry              ];
+                double yI0 = gxR[addry+NGV_PER_BLOCK];
+                double zR0 = gxR[addrz              ] * dm_fac;
+                double zI0 = gxR[addrz+NGV_PER_BLOCK] * dm_fac;
                 double YR0 = Xgx[addry              ];
                 double YI0 = Xgx[addry+NGV_PER_BLOCK];
                 double ZR0 = Xgx[addrz              ] * dm_fac;
@@ -557,8 +553,8 @@ void orth_mgga_strain_kernel(double *out, double *dm,
 
                 double yR3, yI3; d2IdJ_gx(gxR, addry, stride_i, stride_j, iy, jy, ai2, aj2, yR3, yI3);
                 double YR3, YI3; d2IdJ_gx(Xgx, addry, stride_i, stride_j, iy, jy, ai2, aj2, YR3, YI3);
-                double YzR21, YzI21; mul_add(YR2, YI2, zR1, zI1,  YR3, YI3, zR0, zI0, YzR21, YzI21);
-                double yZR21, yZI21; mul_add(yR2, yI2, ZR1, ZI1,  yR3, yI3, ZR0, ZI0, yZR21, yZI21);
+                double YzR12, YzI12; mul_add(YR1, YI1, zR2, zI2,  YR3, YI3, zR0, zI0, YzR12, YzI12);
+                double yZR12, yZI12; mul_add(yR1, yI1, ZR2, ZI2,  yR3, yI3, ZR0, ZI0, yZR12, yZI12);
 
                 double zR3, zI3; d2IdJ_gx(gxR, addrz, stride_i, stride_j, iz, jz, ai2, aj2, zR3, zI3);
                 zR3 *= dm_fac;
@@ -566,8 +562,8 @@ void orth_mgga_strain_kernel(double *out, double *dm,
                 double ZR3, ZI3; d2IdJ_gx(Xgx, addrz, stride_i, stride_j, iz, jz, ai2, aj2, ZR3, ZI3);
                 ZR3 *= dm_fac;
                 ZI3 *= dm_fac;
-                double YzR12, YzI12; mul_add(YR1, YI1, zR2, zI2,  YR0, YI0, zR3, zI3, YzR12, YzI12);
-                double yZR12, yZI12; mul_add(yR1, yI1, ZR2, ZI2,  yR0, yI0, ZR3, ZI3, yZR12, yZI12);
+                double YzR21, YzI21; mul_add(YR2, YI2, zR1, zI1,  YR0, YI0, zR3, zI3, YzR21, YzI21);
+                double yZR21, yZI21; mul_add(yR2, yI2, ZR1, ZI1,  yR0, yI0, ZR3, ZI3, yZR21, yZI21);
 
 #pragma unroll
                 for (int n = 0; n < DENSITY_WIDTH; ++n) {
@@ -575,8 +571,8 @@ void orth_mgga_strain_kernel(double *out, double *dm,
                     int x_in_Gv_base = mesh_start[0] + x;
                     if (x_in_Gv_base >= mesh_x) break;
                     int addr = addrx + x;
-                    double xR0 = gxR[addr];
-                    double xI0 = gxI[addr];
+                    double xR0 = gxR[addr              ];
+                    double xI0 = gxR[addr+NGV_PER_BLOCK];
                     double xR2, xI2; dIdJ_gx(gxR, addr, stride_i, stride_j, ix, jx, ai2, aj2, xR2, xI2);
                     double xyzR, xyzI;
                     mul_add(xR2, xI2, YzR10, YzI10, xR0, xI0, YzR12, YzI12, xyzR, xyzI); sigma_xy -= xyzR * vG_R[n] - xyzI * vG_I[n];

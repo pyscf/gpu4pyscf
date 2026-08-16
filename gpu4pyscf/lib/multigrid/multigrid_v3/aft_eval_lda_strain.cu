@@ -269,11 +269,11 @@ void orth_lda_strain_kernel(double *out, double *dm, cuDoubleComplex *vxcG,
                 double ZI0 = Xgx[addrz+NGV_PER_BLOCK] * dm_fac;
 
                 double yR1, yI1; dI_gx(gxR, addry, stride_i, iy, ai2, yR1, yI1);
-                double YR1, YI1; dI_gx(Xgx, addry, stride_i, iy, ai2, YR1, YI1);
                 double zR1, zI1; dI_gx(gxR, addrz, stride_i, iz, ai2, zR1, zI1);
-                double ZR1, ZI1; dI_gx(Xgx, addrz, stride_i, iz, ai2, ZR1, ZI1);
                 zR1 *= dm_fac;
                 zI1 *= dm_fac;
+                double YR1, YI1; dI_gx(Xgx, addry, stride_i, iy, ai2, YR1, YI1);
+                double ZR1, ZI1; dI_gx(Xgx, addrz, stride_i, iz, ai2, ZR1, ZI1);
                 ZR1 *= dm_fac;
                 ZI1 *= dm_fac;
 

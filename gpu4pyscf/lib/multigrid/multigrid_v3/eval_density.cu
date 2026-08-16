@@ -184,18 +184,22 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
             if (pair_id < shl_pair1) {
 #pragma unroll
                 for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                    if (SLICE_SIZE_I < nfi && dm_i0 + i >= nfi) break;
 #pragma unroll
                 for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                    if (SLICE_SIZE_J < nfj && dm_j0 + j >= nfj) break;
                     dm_cache[i*SLICE_SIZE_J+j] = dm[ij_offset + i*nao+j];
                 } }
             }
 
             double x, y, z;
+            double recursion_factor_ab_pow_a = 1;
+            double recursion_factor_ac_pow_a = 1;
             double recursion_factor_bc_pow_b = 1;
 
             if constexpr (is_non_orthogonal) {
+                // recursion_factor_ab_pow_a = 1;
+                // recursion_factor_ac_pow_a = 1;
             } else {
                 x = start_position_x;
             }
@@ -211,7 +215,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                     y = start_position_y;
                 }
                 double gaussian_xy = gaussian_x;
-                double recursion_factor_b = recursion_factor_b_start;
+                double recursion_factor_b = recursion_factor_b_start * recursion_factor_ab_pow_a;
                 for (int b_index = 0; b_index < b_upper; b_index++,
                      gaussian_xy *= recursion_factor_b,
                      recursion_factor_b *= exp_db_squared) {
@@ -224,7 +228,8 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                         z = start_position_z;
                     }
                     double gaussian_xyz = gaussian_xy;
-                    double recursion_factor_c = recursion_factor_c_start * recursion_factor_bc_pow_b;
+                    double recursion_factor_c = recursion_factor_c_start *
+                            recursion_factor_ac_pow_a * recursion_factor_bc_pow_b;
                     for (int c_index = 0; c_index < c_upper; c_index++,
                          gaussian_xyz *= recursion_factor_c,
                          recursion_factor_c *= exp_dc_squared) {
@@ -240,11 +245,11 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                             rename_registers(j_cartesian, dm_j0, nfj, SLICE_SIZE_J);
 #pragma unroll
                             for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                                if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                                if (SLICE_SIZE_I < nfi && dm_i0 + i >= nfi) break;
                                 double s = 0;
 #pragma unroll
                                 for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                                    if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
+                                    if (SLICE_SIZE_J < nfj && dm_j0 + j >= nfj) break;
                                     s += dm_cache[i * SLICE_SIZE_J + j] * j_cartesian[j];
                                 }
                                 val += s * i_cartesian[i];
@@ -273,8 +278,8 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                     }
                 }
                 if constexpr (is_non_orthogonal) {
-                    recursion_factor_b_start *= exp_dadb;
-                    recursion_factor_c_start *= exp_dadc;
+                    recursion_factor_ab_pow_a *= exp_dadb;
+                    recursion_factor_ac_pow_a *= exp_dadc;
                 } else {
                     x += c_dxyz_dabc[0];
                 }

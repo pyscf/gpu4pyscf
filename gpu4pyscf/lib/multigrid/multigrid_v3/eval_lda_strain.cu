@@ -178,32 +178,26 @@ void eval_lda_strain_kernel(double *out, double *dm,
                  recursion_factor_a *= exp_da_squared) {
                 if (fabs(gaussian_xyz) < negligible) break;
 
-                double i_cartesian[nfi];
-                double i_gradient[3*nfi];
-                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai);
-                rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient      , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient+nfi  , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
+                double i_deriv0[nfi];
+                double i_deriv1[3*nfi];
+                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
+                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
 
-                double j_cartesian[nfj];
-                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                double j_deriv0[nfj];
+                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
 #pragma unroll
-                for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                     double s = 0;
 #pragma unroll
-                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                        s += dm_cache[i*nfj+j] * j_cartesian[j];
+                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
+                        s += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s * i_gradient[i      ];
-                    rhoy += s * i_gradient[i+nfi  ];
-                    rhoz += s * i_gradient[i+nfi*2];
+                    rhox += s * i_deriv1[i      ];
+                    rhoy += s * i_deriv1[i+nfi  ];
+                    rhoz += s * i_deriv1[i+nfi*2];
                 }
                 double v = vxc_weights[abc_idx] * gaussian_xyz;
                 rhox *= v;
@@ -245,32 +239,26 @@ void eval_lda_strain_kernel(double *out, double *dm,
                 if (abc_idx < 0) {
                     abc_idx += mesh_abc;
                 }
-                double i_cartesian[nfi];
-                double i_gradient[3*nfi];
-                gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai);
-                rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient      , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient+nfi  , dm_i0, nfi, SLICE_SIZE_I);
-                rename_registers(i_gradient+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
+                double i_deriv0[nfi];
+                double i_deriv1[3*nfi];
+                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
+                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
 
-                double j_cartesian[nfj];
-                gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
+                double j_deriv0[nfj];
+                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
 #pragma unroll
-                for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                    if (SLICE_SIZE_I < nfi && dm_i0 + i > nfi) break;
+                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                     double s = 0;
 #pragma unroll
-                    for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                        if (SLICE_SIZE_J < nfj && dm_j0 + j > nfj) break;
-                        s += dm_cache[i*nfj+j] * j_cartesian[j];
+                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
+                        s += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s * i_gradient[i      ];
-                    rhoy += s * i_gradient[i+nfi  ];
-                    rhoz += s * i_gradient[i+nfi*2];
+                    rhox += s * i_deriv1[i      ];
+                    rhoy += s * i_deriv1[i+nfi  ];
+                    rhoz += s * i_deriv1[i+nfi*2];
                 }
                 double v = vxc_weights[abc_idx] * gaussian_xyz;
                 rhox *= v;
