@@ -372,7 +372,6 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
-        cp.cuda.get_current_stream().synchronize()
         _takebak_4d(rhoG, fft_in_place(rhoR).reshape(mesh), mesh)
         if with_tau:
             _takebak_4d(tauG, fft_in_place(tauR).reshape(mesh), mesh)
@@ -793,7 +792,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
                 'shl_pair_offsets': shl_pair_offsets,
             })
             log.debug('Add aft bucket: ke=%g mesh=%s, shl_pairs=%d', ke_upper,
-                      tuple(mesh), len(filtered_pairs))
+                      mesh, len(filtered_pairs))
 
         mesh = (mesh * 0.75).astype(np.int32) * 2
         ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
@@ -858,7 +857,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
             #   - shl_pair_offsets:
             #     Partition the shell pairs in supmol_pair_idx by grid tile.
             weight = vol / np.prod(mesh)
-            ao_val_threshold = precision*1e-2 / (12.56*40**2 * weight)
+            ao_val_threshold = precision * 1e-3 / max(1., 12.56*40**2 * weight)
             buckets.append({
                 'ke_cutoff': ke_upper,
                 'mesh': np.asarray(mesh, dtype=np.int32),
@@ -869,7 +868,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
                 'negligible': ao_val_threshold
             })
             log.debug('Add fft bucket: ke=%g mesh=%s, shl_pairs=%d, ao_val_threshold=%g',
-                      ke_upper, tuple(mesh), len(filtered_pairs), ao_val_threshold)
+                      ke_upper, mesh, len(filtered_pairs), ao_val_threshold)
 
         mesh = (mesh * 1.2).astype(np.int32)
         ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
@@ -1081,7 +1080,41 @@ def _segment_offsets(label, dtype=np.int32):
 
 def _conj_dot(a, b):
     '''a.conj().dot(b).real'''
-    return a.view(np.float64).dot(b.view(np.float64))
+    fn_name = 'dot_two_vectors'
+    if fn_name not in _kernel_registery:
+        kernel_code = ('''\
+extern "C" __global__
+void dot_two_vectors_kernel(double *out, double* a, double* b, long long n) {
+    int tid = threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + tid;
+    int stride = gridDim.x * blockDim.x;
+    double sum = 0;
+    for (size_t i = idx; i < n; i += stride) sum += a[idx] * b[idx];
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        sum += __shfl_down_sync(0xffffffff, sum, offset);
+    }
+    __shared__ double[32]
+    int lane = thread_id % 32;
+    int warp = thread_id / 32;
+    if (lane == 0) swap[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            sum += __shfl_down_sync(0xffffffff, sum, offset);
+        }
+    }
+    if (tid == 0) atomicAdd(out, sum);
+}''')
+        _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
+
+    kernel = _kernel_registery[fn_name]
+    assert a.dtype == b.dtype and a.size == b.size
+    n = a.size
+    if a.dtype == np.complex128:
+        n *= 2
+    out = cp.empty(1)
+    kernel(((n + 1023) // 1024,), (1024,), (out, a, b, n))
+    return out.get()
 
 def _apply_Gv_1j(rhoG, Gx, Gy, Gz, out=None):
     '''einsum('g,g->g', rhoG, Gv[:,n]*1j), n is 0, 1 or 2'''
@@ -1698,10 +1731,9 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
     # efficient for small unit cells.
     enable_aft = True
 
-    # Mesh in the final bucket is likely bwlow the estimated cell.mesh.
+    # Mesh in the final bucket can be below the estimated cell.mesh.
     # Allow the overall mesh to be reduced to the one in the final bucket.
-    # This may introduce small errors.
-    allow_mesh_reduction = False
+    allow_mesh_reduction = True
 
     def __init__(self, cell):
         self.reset(cell)
@@ -1769,7 +1801,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         mesh = self.mesh
         self.ke_cutoff = max(0.1, mesh_to_ke(a, mesh).min())
 
-        if self.enable_aft and is_orth_lattice:
+        if self.enable_aft and is_orth_lattice and nimgs > 40:
             # Estimate Ecut for AFT integrals. These can be potentially handled by
             # aft_eval_* functions.
             # Use self.ke_cutoff to limit the highest Ecut. This ensures to handle
@@ -1778,10 +1810,11 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
                 self, bas_ij_idx, self.ke_cutoff, precision, xctype)
 
             aft_init_ke = mesh_to_ke(a, [16]*3)
-            # TODO: aft_final_ke based on system size
-            aft_final_ke = aft_init_ke * 25
-            log.debug1('aft initial/final ke_cutoff = %g, %g', aft_init_ke,
-                       aft_final_ke)
+            # aft_final_ke based on system size
+            final_ke_fac = nimgs / 35
+            aft_final_ke = aft_init_ke * final_ke_fac
+            log.debug1('aft init_ke_cutoff = %g, final_ke_cutoff = %g (%.2fx)',
+                       aft_init_ke, aft_final_ke, final_ke_fac)
             self.aft_buckets = _partition_ke_for_aft(
                 self, bas_ij_idx, aft_Ecut, aft_init_ke, aft_final_ke, xctype, log)
 
@@ -1817,7 +1850,12 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             # is insufficient
             cache_tile_idx = True
             if cache_tile_idx:
+                mem = get_avail_mem()
+                t1 = log.timer_debug1('generating orbital pairs', *t0)
                 _cache_grid_range_to_tiles(self.fft_buckets, cell)
+                log.timer_debug1('grid_tile_cache', *t1)
+                tile_cache_mem = mem - get_avail_mem()
+                log.debug1('grid_tile_cache memory usage = %.2f MB', tile_cache_mem*1e-6)
 
         if self.allow_mesh_reduction:
             mesh = self.mesh

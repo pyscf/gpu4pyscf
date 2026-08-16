@@ -166,7 +166,7 @@ void eval_mgga_strain_kernel(double *out, double *dm,
             double y_yij = y - yij;
             double z_zij = z - zij;
             double e = theta_rr + aij * distance_squared(x_xij, y_yij, z_zij);
-            if (e > 42.) continue; // ~1e-18
+            if (e > 50.) continue; // ~1e-22
             double gaussian_starting_point = exp(-e) * cc;
             double cross_term_a = c_dxyz_dabc[0] * x_xij + c_dxyz_dabc[1] * y_yij + c_dxyz_dabc[2] * z_zij;
             double recursion_factor_a_start = exp(-aij * (2 * cross_term_a + da_squared));

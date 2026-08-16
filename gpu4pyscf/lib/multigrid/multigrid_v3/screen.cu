@@ -169,8 +169,6 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *dressed_bas_ij,
     if (pair_id >= npairs) return;
 
     int64_t bas_ij = bas_ij_idx[pair_id];
-    int64_t bas_ij_stride = nbas * NBAS_MAX;
-
     float2 range = grid_frac_ranges[pair_id];
     float xfrac_lower = range.x;
     float xfrac_upper = range.y;
@@ -218,6 +216,7 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *dressed_bas_ij,
     // lattice sum spans over [-nimgs_x, nimgs_x], [-nimgs_y, nimgs_y], [-nimgs_z, nimgs_z], 
     // Add img_offset to avoid negative indexing
     int img_offset = nimgs_x * Ny * Nz + nimgs_y * Nz + nimgs_z;
+    int64_t Nbas = nbas;
     for (int x = rem_x_lower, img_x = img_x_lower; x < rem_x_upper || img_x < img_x_upper;) {
         for (int y = rem_y_lower, img_y = img_y_lower; y < rem_y_upper || img_y < img_y_upper;) {
             for (int z = rem_z_lower, img_z = img_z_lower; z < rem_z_upper || img_z < img_z_upper;) {
@@ -227,7 +226,7 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *dressed_bas_ij,
                 // dressed_bas_ij stores (latsum_idx*nbas+ish, jL*bvk_nbas+jsh).
                 // latsum_idx is the image index to reposition bra whereas jL is
                 // the image index relative to bra.
-                dressed_bas_ij[n] = latsum_idx * bas_ij_stride + bas_ij;
+                dressed_bas_ij[n] = latsum_idx * Nbas * NBAS_MAX + bas_ij;
                 grid_tile_idx[n] = (x * tiles_y + y) * tiles_z + z;
 
                 n++;

@@ -43,10 +43,11 @@ double reduce(double val, double *swap, int thread_id)
         swap[warp] = val;
     }
     __syncthreads();
-
-    val = (thread_id < 8) ? swap[lane] : 0.;
-    for (int offset = 4; offset > 0; offset >>= 1) {
-        val += __shfl_down_sync(0xffffffff, val, offset);
+    if (warp == 0) {
+        val = (thread_id < 8) ? swap[lane] : 0.;
+        for (int offset = 4; offset > 0; offset >>= 1) {
+            val += __shfl_down_sync(0xffffffff, val, offset);
+        }
     }
     return val;
 }
