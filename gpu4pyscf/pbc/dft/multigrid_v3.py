@@ -332,12 +332,12 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
         work1 = cp.empty_like(rhoG)
     mg_envs = ni.mg_envs
 
+    tile_info = None
     fft_buckets = ni.fft_buckets or []
-    if fft_buckets and 'grid_tile_cache' not in fft_buckets[0]:
-        fft_buckets = _cache_grid_range_to_tiles(fft_buckets, cell)
+    if fft_buckets and fft_buckets[0]['grid_tile_cache'] is None:
+        tile_info = _grid_range_to_tile_info_converter(fft_buckets, cell)
 
     for bucket in fft_buckets:
-        assert bucket['grid_tile_cache'] is not None
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
         weight = vol / ngrids / nkpts
@@ -351,9 +351,16 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
         if with_tau:
             tauR = ndarray(mesh, dtype=np.complex128, buffer=work1)
             tauR.fill(0)
-        for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
-                in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
-            if len(dressed_bas_ij_idx) == 0: continue
+
+        for n, (li, lj) in enumerate(bucket['lij_patterns']):
+            if tile_info is None:
+                grid_tile_idx, dressed_bas_ij, shl_pair_offsets = \
+                        bucket['grid_tile_cache'][n]
+            else:
+                grid_tile_idx, dressed_bas_ij, shl_pair_offsets = tile_info(
+                    bucket['bas_ij_cache'][n], bucket['grid_ranges_cache'][n], mesh)
+
+            if len(dressed_bas_ij) == 0: continue
             ntiles = len(grid_tile_idx)
             tiles_per_block = min(100, max(1, ntiles // 1000))
             err = kern(
@@ -366,7 +373,7 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
                 ctypes.c_int(li), ctypes.c_int(lj),
                 ctypes.c_int(tiles_per_block),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dressed_bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dressed_bas_ij.data.ptr, ctypes.c_void_p),
                 ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ntiles),
                 (ctypes.c_int*3)(*mesh),
@@ -497,9 +504,9 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
             sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
             sub_vtauR[:] = ifft_in_place(sub_vtauG).real
 
-        for ((li, lj), (grid_tile_idx, dressed_bas_ij_idx, shl_pair_offsets)) \
+        for ((li, lj), (grid_tile_idx, dressed_bas_ij, shl_pair_offsets)) \
                 in zip(bucket['lij_patterns'], bucket['grid_tile_cache']):
-            if len(dressed_bas_ij_idx) == 0: continue
+            if len(dressed_bas_ij) == 0: continue
             ntiles = len(grid_tile_idx)
             tiles_per_block = min(100, max(1, ntiles // 10000))
             err = kern(
@@ -512,7 +519,7 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
                 ctypes.c_int(li), ctypes.c_int(lj),
                 ctypes.c_int(tiles_per_block),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dressed_bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dressed_bas_ij.data.ptr, ctypes.c_void_p),
                 ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(grid_tile_idx)),
                 (ctypes.c_int*3)(*mesh),
@@ -955,7 +962,7 @@ def _aft_Ecut_estimation(ni, bas_ij_idx, ke_max, precision, xctype='LDA'):
         raise RuntimeError('Ecut kernel failed')
     return Ecut
 
-def _cache_grid_range_to_tiles(fft_buckets, cell):
+def _grid_range_to_tile_info_converter(fft_buckets, cell):
     buf_size = 0
     for bucket in fft_buckets:
         tiles_per_cell = cp.asarray((bucket['mesh']+3) / 4, dtype=np.float32)
@@ -975,17 +982,9 @@ def _cache_grid_range_to_tiles(fft_buckets, cell):
 
     nimgs = cell.nimgs
     nbas = cell.nbas
-    out_buckets = [bucket.copy() for bucket in fft_buckets]
-    for bucket in out_buckets:
-        bucket['grid_tile_cache'] = grid_tile_cache = []
-        mesh = bucket['mesh']
-        for bas_ij_idx, grid_range in zip(
-                bucket['bas_ij_cache'], bucket['grid_ranges_cache']):
-            grid_tile_idx, dressed_bas_ij, shl_pair_offsets = _group_pairs_in_tile(
-                bas_ij_idx, grid_range, nimgs, mesh, nbas, work, work1)
-            grid_tile_cache.append((
-                grid_tile_idx, dressed_bas_ij, shl_pair_offsets))
-    return out_buckets
+    def tile_info(bas_ij_idx, grid_range, mesh):
+        return _group_pairs_in_tile(bas_ij_idx, grid_range, nimgs, mesh, nbas, work, work1)
+    return tile_info
 
 def _group_pairs_in_tile(bas_ij_idx, grid_range, nimgs, mesh, nbas, work, work1):
     npairs = len(bas_ij_idx)
@@ -1218,7 +1217,7 @@ void ''' + fn_name + r'''(double *energy, double2* __restrict__ rhoG,
     workers = gpu_specs['multiProcessorCount']
     kernel((workers,), (1024,),
            (coul_energy, rhoG, Gv_bases[0], Gv_bases[1], Gv_bases[2], nx, ny, nz))
-    return coul_energy, rhoG
+    return coul_energy[0], rhoG
 
 def _xc_var_length(xctype):
     if xctype == 'LDA' or xctype == 'HF':
@@ -1847,11 +1846,18 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             Tz = np.arange(-nimgs[2], nimgs[2]+1, dtype=np.float64)
             self.supmol_img_coords = cp.asarray(lib.cartesian_prod([Tx, Ty, Tz]).dot(a))
 
-            # If memory is sufficient, cache shell-pairs indices for each grid tile
+            # If memory is sufficient, cache tile info for each bucket, including:
+            # effective tile indices, orbital pairs indices, and corresponding offsets
             if len(bas_ij_idx) < 4000000 or np.prod(mesh) < 300**3:
                 mem = get_avail_mem()
                 t1 = log.timer_debug1('generating orbital pairs', *t0)
-                self.fft_buckets = _cache_grid_range_to_tiles(self.fft_buckets, cell)
+                tile_info = _grid_range_to_tile_info_converter(self.fft_buckets, cell)
+                for bucket in self.fft_buckets:
+                    bucket['grid_tile_cache'] = [
+                        tile_info(bas_ij_idx, grid_range, bucket['mesh'])
+                        for bas_ij_idx, grid_range in zip(
+                            bucket['bas_ij_cache'], bucket['grid_ranges_cache'])
+                    ]
                 log.timer_debug1('grid_tile_cache', *t1)
                 tile_cache_mem = mem - get_avail_mem()
                 log.debug1('grid_tile_cache memory usage = %.2f MB', tile_cache_mem*1e-6)
@@ -2206,7 +2212,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         density = exc = rho_sf = None
 
         if with_j:
-            ecoul, coulomb_on_g_mesh = _get_coulomb_on_g_mesh(rhoG, Gv_bases)
+            ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases)
             ecoul = (.5 / vol) * ecoul
             sigma += ecoul * weight_1
         else:
