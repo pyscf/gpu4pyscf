@@ -456,6 +456,7 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
 
+# This version is slower than _eval_xc_mat in most scenarios
 def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
     '''Note, contents of vxcG will be destroyed in this function
     '''
@@ -806,6 +807,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
                       mesh, len(filtered_pairs))
 
         mesh = (mesh * 0.75).astype(np.int32) * 2
+        mesh[mesh < 8] = 8
         ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
     return buckets
 
@@ -882,6 +884,9 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
                       ke_upper, mesh, len(filtered_pairs), ao_val_threshold)
 
         mesh = (mesh * 1.2).astype(np.int32)
+        # For very small initial mesh, such as [2,2,2], mesh*1.2 may not
+        # increase the mesh, causing the loop stuck
+        mesh[mesh < 8] = 8
         ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
     return buckets
 
@@ -1733,7 +1738,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
     # Mesh in the final bucket can be below the estimated cell.mesh.
     # Allow the overall mesh to be reduced to the one in the final bucket.
-    allow_mesh_reduction = True
+    # This setting can potentially lead to more errors for small mesh.
+    allow_mesh_reduction = False
 
     def __init__(self, cell):
         self.reset(cell)
@@ -1784,6 +1790,11 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         b = cell.reciprocal_vectors(norm_to=1)
         libmgrid.update_lattice_vectors(a.ctypes, b.ctypes)
 
+        # Scaling factors for mesh grids, make the mesh resolution along each
+        # axis is proportional to the corresponding cell dimension.
+        b_norm = np.linalg.norm(b, axis=1)
+        mesh_scale = np.prod(b_norm)**(1./3) / b_norm
+
         # a penalty to encounter for lattice sum
         rad = cell.rcut / bvkcell.vol**(1./3) + 1
         surface = 4*np.pi * rad**2
@@ -1809,9 +1820,9 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             aft_Ecut = _aft_Ecut_estimation(
                 self, bas_ij_idx, self.ke_cutoff, precision, xctype)
 
-            aft_init_ke = mesh_to_ke(a, [16]*3)
+            aft_init_ke = mesh_to_ke(a, (16 * mesh_scale + 1e-4).astype(np.int32))
             # aft_final_ke based on system size
-            final_ke_fac = nimgs / 35
+            final_ke_fac = nimgs / 40
             aft_final_ke = aft_init_ke * final_ke_fac
             log.debug1('aft init_ke_cutoff = %g, final_ke_cutoff = %g (%.2fx)',
                        aft_init_ke, aft_final_ke, final_ke_fac)
@@ -1829,7 +1840,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
             fft_init_ke = aft_final_ke * 1.5
         else:
-            fft_init_ke = mesh_to_ke(a, [16]*3)
+            fft_init_ke = mesh_to_ke(a, (16 * mesh_scale + 1e-4).astype(np.int32))
         log.debug1('fft initial ke_cutoff = %g', fft_init_ke)
 
         if bas_ij_idx is not None and len(bas_ij_idx) > 0:
@@ -1848,7 +1859,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
             # If memory is sufficient, cache tile info for each bucket, including:
             # effective tile indices, orbital pairs indices, and corresponding offsets
-            if len(bas_ij_idx) < 4000000 or np.prod(mesh) < 300**3:
+            if len(bas_ij_idx) < 3000000 and np.prod(mesh) < 400**3:
                 mem = get_avail_mem()
                 t1 = log.timer_debug1('generating orbital pairs', *t0)
                 tile_info = _grid_range_to_tile_info_converter(self.fft_buckets, cell)

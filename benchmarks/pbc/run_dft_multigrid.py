@@ -139,6 +139,7 @@ for conf in configs:
                     kstring = 'x'.join([str(x) for x in kmesh])
                     confstr = f'{xc}-k{kstring}'
                     if 'supercell' in method:
+                        cupy.fft.config.get_plan_cache().clear()
                         ncopy = method['supercell']
                         scstring = 'x'.join([str(x) for x in ncopy])
                         confstr = f'{scstring}-{confstr}'
@@ -157,6 +158,7 @@ for conf in configs:
                     else:
                         kpts = cell.make_kpts(kmesh)
                         mf = cell.KRKS(xc=xc, kpts=kpts).to_gpu()
+                    cupy.get_default_memory_pool().free_all_blocks()
                     mf = mf.multigrid_numint()
                     mf.max_cycle = 20
                     mf.conv_tol = 1e-6
@@ -168,4 +170,3 @@ for conf in configs:
                         import traceback
                         traceback.print_stack()
                         traceback.print_exception(e)
-                    cupy.get_default_memory_pool().free_all_blocks()
