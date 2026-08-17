@@ -1163,6 +1163,72 @@ class KnownValues(unittest.TestCase):
 
         assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-5
 
+    def test_df_mo_hf_reconstruct_j3c_spherical(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        naux = mf.with_df.auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        ref_J, ref_K = mf.get_jk(dm = dm, hermi = 0)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 1e-10
+        assert cp.max(cp.abs(test_K - ref_K)) < 1e-10
+
+    def test_df_mo_hf_reconstruct_j3c_cartesian(self):
+        mol = self.mol_cart
+        auxbasis = self.auxbasis
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        naux = mf.with_df.auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        ref_J, ref_K = mf.get_jk(dm = dm, hermi = 0)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright)
+        assert test_j3c.shape[1:] == (nao, nao)
+        assert test_j3c.shape[0] < naux # Cuest uses spherical auxbasis, pyscf uses cartesian auxbasis
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 1e-1 # The different auxasis leads to very different J and K
+        assert cp.max(cp.abs(test_K - ref_K)) < 1e-1
+
+    def test_df_mo_pbe0_reconstruct_j3c_for_k(self):
+        raise
+
+    def test_df_mo_hse06_reconstruct_j3c_for_k(self):
+        raise
+
+    def test_df_mo_wb97x_reconstruct_j3c_for_k(self):
+        raise
+
     ### Gradient tests from here on
 
     def test_overlap_derivative_spherical(self):
