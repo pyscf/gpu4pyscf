@@ -1176,6 +1176,26 @@ class KnownValues(unittest.TestCase):
 
         ref_J, ref_K = mf.get_jk(dm = dm, hermi = 0)
 
+        mf.with_df.build()
+        _cderi = mf.with_df._cderi
+        _cderi = _cderi[0]
+        _cderi_idx = mf.with_df._cderi_idx
+        pair_addresses, diag_addrs = _cderi_idx
+        pair_address_i = pair_addresses // nao
+        pair_address_j = pair_addresses % nao
+
+        ref_j3c = cp.zeros((naux, nao, nao))
+
+        factors = cp.ones(pair_addresses.shape[0])
+        factors[diag_addrs] = 0.5
+
+        for i_pair in range(pair_addresses.shape[0]):
+            i = pair_address_i[i_pair]
+            j = pair_address_j[i_pair]
+            factor = factors[i_pair]
+            ref_j3c[:, i, j] += factor * _cderi[:, i_pair]
+            ref_j3c[:, j, i] += factor * _cderi[:, i_pair]
+
         mf = RHF(mol).density_fit(auxbasis = auxbasis)
         mf = apply_cuest_wrapper(mf)
 
@@ -1190,6 +1210,21 @@ class KnownValues(unittest.TestCase):
 
         assert cp.max(cp.abs(test_J - ref_J)) < 1e-10
         assert cp.max(cp.abs(test_K - ref_K)) < 1e-10
+
+        mo_i = cp.random.rand(nao, 3) * 2 - 1
+        mo_j = cp.random.rand(nao, 5) * 2 - 1
+        mo_k = cp.random.rand(nao, 7) * 2 - 1
+        mo_l = cp.random.rand(nao, 11) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-9
 
     def test_df_mo_hf_reconstruct_j3c_cartesian(self):
         mol = self.mol_cart
