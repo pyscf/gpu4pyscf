@@ -185,15 +185,21 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 if (fabs(gaussian_xyz) < negligible) break;
 
                 double rho_fac = vrho_weights[abc_idx] * gaussian_xyz;
+                double x_xi = x - xi;
+                double y_yi = y - yi;
+                double z_zi = z - zi;
                 double i_deriv0[nfi];
                 double i_deriv1[3*nfi];
-                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
+                gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
+                gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
 
+                double x_xj = x - xj;
+                double y_yj = y - yj;
+                double z_zj = z - zj;
                 double j_deriv0[nfj];
                 double j_deriv1[3*nfj];
-                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
-                gto_deriv1<LJ>(j_deriv1, j_deriv0, x - xj, y - yj, z - zj, aj);
+                gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
+                gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
@@ -231,7 +237,7 @@ void eval_mgga_grad_kernel(double *out, double *dm,
 
                 double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
                 double i_deriv2[6*nfi];
-                gto_deriv2<LI>(i_deriv2, x - xi, y - yi, z - zi, ai);
+                gto_deriv2<LI>(i_deriv2, x_xi, y_yi, z_zi, ai);
                 double taux = 0;
                 double tauy = 0;
                 double tauz = 0;
@@ -262,7 +268,7 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 v_iz -= tauz * tau_fac;
 
                 double j_deriv2[6*nfj];
-                gto_deriv2<LJ>(j_deriv2, x - xj, y - yj, z - zj, aj);
+                gto_deriv2<LJ>(j_deriv2, x_xj, y_yj, z_zj, aj);
                 taux = 0;
                 tauy = 0;
                 tauz = 0;
@@ -319,15 +325,21 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                     abc_idx += mesh_abc;
                 }
                 double rho_fac = vrho_weights[abc_idx] * gaussian_xyz;
+                double x_xi = x - xi;
+                double y_yi = y - yi;
+                double z_zi = z - zi;
                 double i_deriv0[nfi];
                 double i_deriv1[3*nfi];
-                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
+                gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
+                gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
 
+                double x_xj = x - xj;
+                double y_yj = y - yj;
+                double z_zj = z - zj;
                 double j_deriv0[nfj];
                 double j_deriv1[3*nfj];
-                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
-                gto_deriv1<LJ>(j_deriv1, j_deriv0, x - xj, y - yj, z - zj, aj);
+                gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
+                gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
@@ -366,7 +378,7 @@ void eval_mgga_grad_kernel(double *out, double *dm,
 
                 double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
                 double i_deriv2[6*nfi];
-                gto_deriv2<LI>(i_deriv2, x - xi, y - yi, z - zi, ai);
+                gto_deriv2<LI>(i_deriv2, x_xi, y_yi, z_zi, ai);
                 double taux = 0;
                 double tauy = 0;
                 double tauz = 0;
@@ -397,7 +409,7 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 v_iz -= tauz * tau_fac;
 
                 double j_deriv2[6*nfj];
-                gto_deriv2<LJ>(j_deriv2, x - xj, y - yj, z - zj, aj);
+                gto_deriv2<LJ>(j_deriv2, x_xj, y_yj, z_zj, aj);
                 taux = 0;
                 tauy = 0;
                 tauz = 0;

@@ -688,6 +688,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     '''Estimate the FFT energy cutoff and the spread of each orbital pair
     in real space'''
     cell = ni.sorted_cell
+    b = cell.reciprocal_vectors(norm_to=1)
     # Some orbitals may require high Ecut, sometimes higher than ni.ke_cutoff.
     # Use ke_max to limit the highest Ecut. This ensures that these orbital
     # pairs are included in the last bucket in _partition_ke_for_fft.
@@ -711,7 +712,8 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.c_int(npairs),
         ctypes.c_int(li_inc), ctypes.c_int(lj_inc),
-        ctypes.c_float(math.log(precision)))
+        ctypes.c_float(math.log(precision)),
+        ctypes.c_float(cell.precision))
     if err != 0:
         raise RuntimeError('grid range kernel failed')
     return pair_ke, grid_frac_ranges
@@ -720,7 +722,7 @@ def _estimate_fft_Ecut_per_shell(cell, precision):
     # To accurately describe the orbital in real space, the resolution for
     # real-space grid cannot be reduced, even a small normalized function is
     # associated with the orbital. The resolution is estimated in terms of the
-    # energy cutoff for regular orbital with standard normalization.
+    # energy cutoff for orbitals with standard normalization.
     ai = cell._env[cell._bas[:,PTR_EXP]]
     li = cell._bas[:,ANG_OF]
     ci = gto_norm(li, ai)
@@ -2077,7 +2079,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
     cache_xc_kernel = NotImplemented
 
-    def energy_gradient(self, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+    def energy_gradient(self, xc_code, dm_kpts, kpts=None, with_j=False,
+                        with_nuc=False):
         '''Computes the derivatives of the Exc along with additional contributions
         from the Coulomb and pseudopotential terms.
 
@@ -2157,7 +2160,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         t0 = log.timer("xc", *t0)
         return gradient
 
-    def strain(self, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
+    def energy_strain_gradient(self, xc_code, dm_kpts, kpts=None, with_j=False,
+                               with_nuc=False):
         '''Strain derivatives for Coulomb and Exc with k-point samples
 
         Kwargs:
@@ -2215,7 +2219,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
         density *= 1/weight_0
         exc, vxc = self.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)
+            xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)[:2]
         vxc *= weight_0
         vxc = vxc.reshape(n_dm, nvar, *mesh)
 
@@ -2223,6 +2227,10 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         density = exc = rho_sf = None
 
         if with_j:
+            Gv = cp.asarray(cell.get_Gv())
+            coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
+            sigma += cp.einsum('xyg,g->xy', coulG_1, rhoG.conj()*rhoG).real.get() * (weight_0/ngrids)
+
             ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases)
             ecoul = (.5 / vol) * ecoul
             sigma += ecoul * weight_1
@@ -2238,10 +2246,6 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
                 coulomb_on_g_mesh += _eval_nucG(cell, mesh, out=tauG)
 
         sigma = cp.asarray(sigma)
-
-        Gv = cp.asarray(cell.get_Gv())
-        coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
-        sigma += cp.einsum('xyg,g->xy', coulG_1, rhoG.conj()*rhoG).real.get() * (weight_0/ngrids)
 
         rhoG = tauG = None
 

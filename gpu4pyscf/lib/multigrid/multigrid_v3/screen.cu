@@ -55,7 +55,8 @@ __global__ static
 void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
                         float *Ecut_by_shell, PBCIntEnvVars envs,
                         int64_t *bas_ij_idx, int li_inc, int lj_inc,
-                        int npairs, float log_threshold)
+                        int npairs, float log_threshold,
+                        float undressed_threshold)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id >= npairs) return;
@@ -135,9 +136,13 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
     float yp_frac = xp * b10 + yp * b11 + zp * b12;
     float zp_frac = xp * b20 + yp * b21 + zp * b22;
 
-    float xcut_frac = x_cut * fabsf(b00) + y_cut * fabsf(b01) + z_cut * fabsf(b02);
-    float ycut_frac = x_cut * fabsf(b10) + y_cut * fabsf(b11) + z_cut * fabsf(b12);
-    float zcut_frac = x_cut * fabsf(b20) + y_cut * fabsf(b21) + z_cut * fabsf(b22);
+    float bnorm_0 = sqrtf(distance_squared(b00, b01, b02));
+    float bnorm_1 = sqrtf(distance_squared(b10, b11, b12));
+    float bnorm_2 = sqrtf(distance_squared(b20, b21, b22));
+
+    float xcut_frac = x_cut * bnorm_0;
+    float ycut_frac = y_cut * bnorm_1;
+    float zcut_frac = z_cut * bnorm_2;
 
     float2 *xfrac_range = grid_frac_ranges;
     float2 *yfrac_range = grid_frac_ranges + npairs;
@@ -154,7 +159,18 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
     } else {
         float ish_ke = Ecut_by_shell[ish];
         float jsh_ke = Ecut_by_shell[jsh % nbas];
-        pair_ke[pair_id] = max(ish_ke, jsh_ke);
+        float ke_two_centers = max(ish_ke, jsh_ke);
+        if (ri == rj) {
+            // finer resolution is required for orbitals located on the same center.
+            // Ecut ~= 2 * ke_two_centers
+            // (Ecut/2/aij)**((li+lj)/2) * exp(-Ecut/(2*aij)) ~ cell.threshold
+            float log_factor = (li+lj)*.5f * logf(ke_two_centers/aij) -
+                logf(undressed_threshold);
+            float ke_raw = log_factor * aij * 2;
+            pair_ke[pair_id] = max(ke_raw, ke_two_centers);
+        } else {
+            pair_ke[pair_id] = ke_two_centers;
+        }
     }
 }
 
@@ -213,7 +229,7 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *dressed_bas_ij,
     int n = atomicAdd(head, counts);
     int Ny = nimgs_y * 2 + 1;
     int Nz = nimgs_z * 2 + 1;
-    // lattice sum spans over [-nimgs_x, nimgs_x], [-nimgs_y, nimgs_y], [-nimgs_z, nimgs_z], 
+    // lattice sum spans over [-nimgs_x, nimgs_x], [-nimgs_y, nimgs_y], [-nimgs_z, nimgs_z],
     // Add img_offset to avoid negative indexing
     int img_offset = nimgs_x * Ny * Nz + nimgs_y * Nz + nimgs_z;
     int64_t Nbas = nbas;
@@ -476,12 +492,13 @@ extern "C" {
 int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
                               float *Ecut_by_shell, PBCIntEnvVars *envs,
                               int64_t *bas_ij_idx, int npairs,
-                              int li_inc, int lj_inc, float log_threshold)
+                              int li_inc, int lj_inc, float log_threshold,
+                              float undressed_threshold)
 {
     int batches = (npairs + THREADS-1) / THREADS;
     grid_ranges_kernel<<<batches, THREADS>>>(
         grid_frac_ranges, pair_ke, Ecut_by_shell, *envs, bas_ij_idx,
-        li_inc, lj_inc, npairs, log_threshold);
+        li_inc, lj_inc, npairs, log_threshold, undressed_threshold);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in gaussian_prod_grid_ranges: %s\n", cudaGetErrorString(err));
