@@ -310,7 +310,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ej_aux *= 2
         #ej_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
         dm_aux = auxvec[:,None] * auxvec
-        ej_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux)
+        ej_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
         ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
@@ -354,8 +354,6 @@ class Gradients(rhf_grad.Gradients):
         '''
         mf = self.base
         if dm is None: dm = mf.make_rdm1()
-        mol = mf.with_df.mol
-        auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory
         return _jk_energy_per_atom(
             mf.with_df.intopt, dm, j_factor, k_factor, hermi=hermi,

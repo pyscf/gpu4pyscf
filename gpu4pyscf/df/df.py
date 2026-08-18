@@ -121,8 +121,12 @@ class DF(lib.StreamObject):
         # Temporarily disable this feature for backward compatibility.
         assert lr_factor is None and sr_factor is None
 
-        return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k,
-                            omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
+        if lr_factor is not None or sr_factor is not None:
+            assert not with_j
+
+        with self.range_coulomb(omega) as dfobj:
+            return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k,
+                                omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
     def get_blksize(self, extra=0, nao=None, mem_fraction=0.3):
         '''

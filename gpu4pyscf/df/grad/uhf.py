@@ -234,8 +234,6 @@ class Gradients(uhf_grad.Gradients):
         '''
         mf = self.base
         if dm is None: dm = mf.make_rdm1()
-        mol = mf.with_df.mol
-        auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory
         return _jk_energy_per_atom(
             mf.with_df.intopt, dm, j_factor, k_factor, hermi=hermi,
