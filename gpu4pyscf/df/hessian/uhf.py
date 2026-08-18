@@ -78,7 +78,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
     batch_size = int(word_avail * 0.02) // nao_pair
     batch_size = max(largest_shell_nao, min(batch_size, naux))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega,
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
         omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
@@ -484,7 +484,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     batch_size = min(batch_size, max(largest_shell_nao, naux))
 
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega,
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
         omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
