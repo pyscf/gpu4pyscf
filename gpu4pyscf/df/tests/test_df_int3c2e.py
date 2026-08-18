@@ -377,6 +377,39 @@ def test_int2c2e():
     ref = mol.intor('int2c2e_ip1')
     assert abs(j2c.get() - ref).max() < 1e-11
 
+def test_int2c2e_rsh():
+    mol = pyscf.M(
+        atom='''C1   1.3   .2       .3
+                C2   .19   .1      1.1
+                C1   .5   -.1      0.2
+                C2   .04   .6       .5
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]],
+                       [5, [.6, 1.]],
+                       [6, [.6, 1.]],
+                      ]
+                     ),
+               'C2': 'ccpvtz'}
+    )
+    omega, lr_factor, sr_factor = 0.33, 0.2, 0.6
+    j2c = int3c2e_bdiv.int2c2e(mol, omega=omega, lr_factor=lr_factor,
+                               sr_factor=sr_factor)
+    with mol.with_range_coulomb(omega):
+        ref = mol.intor('int2c2e') * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += mol.intor('int2c2e') * sr_factor
+    assert abs(j2c.get() - ref).max() < 3e-11
+
+    j2c = int3c2e_bdiv.int2c2e_ip1(mol, omega=omega, lr_factor=lr_factor,
+                                   sr_factor=sr_factor)
+    with mol.with_range_coulomb(omega):
+        ref = mol.intor('int2c2e_ip1') * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += mol.intor('int2c2e_ip1') * sr_factor
+    assert abs(j2c.get() - ref).max() < 1e-11
+
 def test_int3c2e_rsh():
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3
@@ -466,6 +499,54 @@ C2   -.3    .2     -.7''',
     cderi = _unpack(cderi, row, col)
     dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
     assert abs(dat.get() - ref).max() < 1e-10
+
+def test_cholesky_eri_rsh():
+    mol = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''')
+    mf = mol.to_gpu().RHF().density_fit()
+    omega = 0.33
+    lr_factor = 0.65
+    sr_factor = 0.19
+
+    with mol.with_range_coulomb(omega):
+        ref = mol.intor('int2e', aosym='s4') * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += mol.intor('int2e', aosym='s4') * sr_factor
+
+    with_df = mf.with_df.build(omega=omega, lr_factor=lr_factor,
+                               sr_factor=sr_factor)
+    i, j = cp.tril_indices(mol.nao)
+    for cderi, _ in with_df.loop():
+        cderi = cderi[:,i,j]
+        out = cderi.T.dot(cderi)
+    assert abs(out.get()-ref).max() < .5e-4
+
+    with_df = mf.with_df.build(omega=0)
+    for cderi, _ in with_df.loop():
+        cderi = cderi[:,i,j]
+        out = cderi.T.dot(cderi) * sr_factor
+    with_df = mf.with_df.build(omega=omega)
+    for cderi, _ in with_df.loop():
+        cderi = cderi[:,i,j]
+        out += cderi.T.dot(cderi) * (lr_factor - sr_factor)
+    assert abs(out.get()-ref).max() < .5e-4
+
+    omega = 0.33
+    lr_factor = 0.3
+    sr_factor = 0.6
+    with mol.with_range_coulomb(omega):
+        ref = mol.intor('int2e', aosym='s4') * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += mol.intor('int2e', aosym='s4') * sr_factor
+
+    with_df = mf.with_df.build(omega=omega, lr_factor=lr_factor,
+                               sr_factor=sr_factor)
+    for cderi, _ in with_df.loop():
+        cderi = cderi[:,i,j]
+        out = cderi.T.dot(cderi)
+    assert abs(out.get()-ref).max() < 1e-4
 
 def test_general_contraction():
     from gpu4pyscf.gto.mole import SortedMole

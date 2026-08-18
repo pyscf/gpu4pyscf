@@ -362,14 +362,15 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
     return fx
 
 def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
-            hermi=1, with_j=True, with_k=True, omega=None):
+               hermi=1, with_j=True, with_k=True,
+               omega=None, lr_factor=None, sr_factor=None):
     ''' Compute J/K matrices in MO for multiple DMs
     Note, the MO coefficients (mo_coeff) should be transformed into the order
     corresponding to the sorted_mol
     '''
     assert hermi == 1
     mf = hessobj.base
-    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
     vj = vk = None
     if omega is None:
         omega = mol.omega

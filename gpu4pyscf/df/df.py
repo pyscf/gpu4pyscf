@@ -88,7 +88,9 @@ class DF(lib.StreamObject):
         from pyscf.df.df import DF
         return utils.to_cpu(self, out=DF(self.mol, auxbasis=self.auxbasis))
 
-    def build(self, direct_scf_tol=None, omega=None, build_cderi=True):
+    def build(self, *, direct_scf_tol=None,
+              omega=None, lr_factor=None, sr_factor=None,
+              build_cderi=True):
         mol = self.mol
         auxmol = self.auxmol
         log = logger.new_logger(mol, mol.verbose)
@@ -103,18 +105,24 @@ class DF(lib.StreamObject):
         intopt.build()
         if build_cderi:
             self._cderi, self._cderi_idx = _cholesky_eri(
-                intopt, omega=omega, use_gpu_memory=self.use_gpu_memory)
+                intopt, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor,
+                use_gpu_memory=self.use_gpu_memory)
             log.timer_debug1('cholesky_eri', *t0)
         return self
 
-    def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
-               direct_scf_tol=None, omega=None):
+    def get_jk(self, dm, hermi=1, with_j=True, with_k=True, direct_scf_tol=None,
+               omega=None, lr_factor=None, sr_factor=None):
         if not with_k and self._cderi is None:
+            assert omega is None or omega == 0
             return df_jk.get_j(self, dm, hermi), None
 
-        assert omega is None or omega >= 0
-        with self.range_coulomb(omega) as dfobj:
-            return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k, omega=omega)
+        # When lr_factor or sr_factor are specified, the DF cderi will be
+        # constructed using the aggregated Coulomb potential.
+        # Temporarily disable this feature for backward compatibility.
+        assert lr_factor is None and sr_factor is None
+
+        return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k,
+                            omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
     def get_blksize(self, extra=0, nao=None, mem_fraction=0.3):
         '''
@@ -446,7 +454,8 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
     return
 
-def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
+def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
+                  use_gpu_memory=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
     if intopt._int3c2e_envs is None:
         intopt.build()
@@ -470,7 +479,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
     eval_j3c, aux_sorting, ao_pair_offsets, _, clone_context = intopt.int3c2e_evaluator(
         ao_pair_batch_size=batch_size, reorder_aux=True,
         pair_batch_by_l=needs_recontraction, return_clone_context=True,
-        omega=omega)
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     cderi_batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
     batch_size = cderi_batch_size
     # * When the get_avail_mem() returns a small amount of memory, the actual
@@ -499,7 +508,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
         cderi_idx = (pair_addresses, diag_addrs)
 
-    aux_coef, tag = _decompose_j2c(auxmol, aux_sorting, omega)
+    aux_coef, tag = _decompose_j2c(auxmol, aux_sorting, omega, lr_factor, sr_factor)
     if num_devices > 1:
         # cupy cannot copy non-contiguous array aux_coef[:,aux0:aux1] between
         # devices. This slicing is a contiguous array in the F-order storage.
@@ -534,7 +543,8 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
-                    reorder_aux=True, clone_context=clone_context, omega=omega)[0]
+                    reorder_aux=True, clone_context=clone_context,
+                    omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[0]
 
             work = cp.empty(naux_sorted * batch_size)
             work2 = cp.empty(naux * batch_size)
@@ -577,7 +587,8 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
-                    reorder_aux=True, clone_context=clone_context, omega=omega)[0]
+                    reorder_aux=True, clone_context=clone_context,
+                    omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[0]
 
             out = cp.empty((cderi_npairs, aux1-aux0))
             work = cp.empty(naux_sorted * batch_size)
@@ -598,8 +609,10 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         cderi = multi_gpu.run(proc, non_blocking=True)
     return cderi, cderi_idx
 
-def _decompose_j2c(auxmol, aux_sorting=None, omega=None):
-    j2c = int3c2e_bdiv.int2c2e(auxmol, omega=omega)
+def _decompose_j2c(auxmol, aux_sorting=None,
+                   omega=None, lr_factor=None, sr_factor=None):
+    j2c = int3c2e_bdiv.int2c2e(auxmol, omega=omega, lr_factor=lr_factor,
+                               sr_factor=sr_factor)
 
     try:
         cd_low = cholesky(j2c)

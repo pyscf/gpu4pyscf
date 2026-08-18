@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 import ctypes
 import numpy as np
 import cupy as cp
@@ -22,6 +23,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df.grad.rhf import (
     _split_l_ctr_pattern, get_ao_pair_loc, libvhf_rys, Int3c2eOpt, int2c2e,
     int3c2e_scheme, _gen_metric_solver, _factorize_dm)
+from gpu4pyscf.df.int3c2e_bdiv import int2c2e_ip1_per_atom
 from gpu4pyscf.df import df
 from gpu4pyscf.tdscf import rhf as tdrhf
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
@@ -32,13 +34,13 @@ __all__ = ['Gradients']
 DM_BLOCK = 7
 
 def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
-                        verbose=None):
+                        verbose=None, omega=None, lr_factor=None, sr_factor=None):
     '''
     Computes the first-order derivatives of J/K contributions from multiple
     density matrices and adds up the results.
     '''
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if k_factor is None:
+        assert omega is None or omega == 0
         return _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi, verbose)
 
     mol = int3c2e_opt.mol
@@ -64,7 +66,8 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     mem_avail = mem_free - n_dm*naux*nocc**2*8 - n_dm*nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8))))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True)
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
@@ -96,7 +99,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     aux_coeff[aux_sorting] = tmp
     tmp = None
 
-    j2c = int2c2e(auxmol)
+    j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
     else:
@@ -206,7 +209,8 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     for i in range(n_dm):
         contract('rij,sji->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
     dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-    ejk_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+    ejk_aux -= cp.asarray(
+        int2c2e_ip1_per_atom(auxmol, dm_aux, omega, lr_factor, sr_factor))
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     dm_aux = None
 
@@ -218,7 +222,6 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
@@ -295,7 +298,8 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
     return ej
 
 def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
-                          sum_results=False, verbose=None):
+                          sum_results=False, verbose=None,
+                          omega=None, lr_factor=None, sr_factor=None):
     '''
     Computes a set of first-order derivatives of J/K contributions for each
     element (density matrix or a pair of density matrices) in dm_pairs.
@@ -327,6 +331,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
     assert j_factor is None or len(j_factor) == n_dm
     assert k_factor is None or len(k_factor) == n_dm
     if k_factor is None or all(x == 0 for x in k_factor):
+        assert omega is None or omega == 0
         return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor,
                                     sum_results, verbose)
 
@@ -365,15 +370,15 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
             j_factor_batch = j_factor[p0:p1]
         out.append(_jk_energies_by_dm_factors(
             int3c2e_opt, dm_factors[p0:p1], j_factor_batch, k_factor[p0:p1],
-            sum_results, verbose))
+            sum_results, verbose, omega, lr_factor, sr_factor))
     if sum_results:
         return sum(out)
     else:
         return np.vstack(out)
 
 def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
-                               sum_results, verbose):
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
+                               sum_results, verbose,
+                               omega=None, lr_factor=None, sr_factor=None):
     n_dm = len(dm_factors)
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
@@ -410,7 +415,8 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
         raise RuntimeError('Insufficient memory for storing intermediates')
     batch_size = min(naux, batch_size)
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True)
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.45/(nao*nao*2*8))//8*8))
@@ -450,7 +456,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
     aux_coeff[aux_sorting] = tmp
     tmp = None
 
-    j2c = int2c2e(auxmol)
+    j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
     else:
@@ -482,7 +488,8 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
         # needs to scale by *.5, applied at the end of this function
         dm_aux = transpose_sum(dm_aux, inplace=True)
         dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-        ejk_aux = -cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ejk_aux = -cp.asarray(
+            int2c2e_ip1_per_atom(auxmol, dm_aux, omega, lr_factor, sr_factor))
     else:
         dm_aux = cp.empty((naux, naux))
         ejk_aux = []
@@ -497,7 +504,8 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             # needs to scale by *.5, applied at the end of this function
             dm_aux = transpose_sum(dm_aux, inplace=True)
             dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-            ejk_aux.append(-int2c2e_ip1_per_atom(auxmol, dm_aux))
+            ejk_aux.append(
+                -int2c2e_ip1_per_atom(auxmol, dm_aux, omega, lr_factor, sr_factor))
         ejk_aux = cp.array(np.stack(ejk_aux))
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     auxvec1 = auxvec2 = dm_aux = None
@@ -603,7 +611,6 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor,
     Computes first-order derivatives of Coulomb energy for multiple sets of
     density matrix pairs.
     '''
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
@@ -736,11 +743,14 @@ class Gradients(tdrhf_grad.Gradients):
 
     def get_veff(self, mol, dm, j_factor=1, k_factor=1, omega=0,
                  hermi=0, verbose=None):
+        warnings.warn('Use jk_energy_per_atom method instead',
+                      DeprecationWarning, stacklevel=2)
         ejk = self.jk_energy_per_atom(
             dm, j_factor, k_factor, omega, hermi, verbose)
         return ejk * .5
 
-    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
+    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None,
+                           omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
         '''
         Computes the sum of first-order derivatives of J/K contributions for
@@ -759,10 +769,12 @@ class Gradients(tdrhf_grad.Gradients):
         Returns:
             An array of shape (Natm, 3).
         '''
-        return self.jk_energies_per_atom(dms, j_factor, k_factor, omega,
+        return self.jk_energies_per_atom(dms, j_factor, k_factor,
+                                         omega, lr_factor, sr_factor,
                                          sum_results=True, verbose=verbose)
 
-    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None, omega=0,
+    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None,
+                             omega=None, lr_factor=None, sr_factor=None,
                              hermi=0, sum_results=False, verbose=None):
         '''
         Computes a set of first-order derivatives of J/K contributions for each

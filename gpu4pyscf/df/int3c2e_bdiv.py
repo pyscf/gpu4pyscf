@@ -52,14 +52,15 @@ POOL_SIZE = 25600
 libvhf_rys.pair_recontraction_info.restype = ctypes.c_int
 libvhf_rys.recontract_ao_pair.restype = ctypes.c_int
 
-def aux_e2(mol, auxmol, omega=None):
+def aux_e2(mol, auxmol, omega=None, lr_factor=None, sr_factor=None):
     r'''
     3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
-        reorder_aux=True, cart=mol.cart, omega=omega)[:2]
+        reorder_aux=True, cart=mol.cart,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[:2]
     aux_coef = int3c2e_opt.aux_coeff
     aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
     aux_coef[aux_sorting] = tmp
@@ -75,7 +76,7 @@ def aux_e2(mol, auxmol, omega=None):
     out[rows,cols] = j3c
     return out
 
-def compressed_aux_e2(mol, auxmol, omega=None):
+def compressed_aux_e2(mol, auxmol, omega=None, lr_factor=None, sr_factor=None):
     r'''
     Returns compressed_int3c, rows, cols. The compressed_int3c stores the
     3-center integrals (ij|k) compressed on the orbital-pair dimensions.
@@ -85,7 +86,8 @@ def compressed_aux_e2(mol, auxmol, omega=None):
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
-        reorder_aux=True, cart=mol.cart, omega=omega)[:2]
+        reorder_aux=True, cart=mol.cart,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[:2]
     aux_coef = int3c2e_opt.auxmol.ctr_coeff
     aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
     aux_coef[aux_sorting] = tmp
@@ -650,15 +652,25 @@ def get_ao_pair_loc(uniq_l, bas_ij_cache, cart=True):
     ao_pair_loc = cp.hstack(ao_pair_loc, dtype=np.int32)
     return ao_pair_loc
 
-def int2c2e(mol, sort_output=True, omega=None):
+def int2c2e(mol, sort_output=True,
+            omega=None, lr_factor=None, sr_factor=None):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e
-    return int2c2e(mol, omega=omega)
+    return int2c2e(mol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
-def int2c2e_ip1(mol, sort_output=True, omega=None):
+def int2c2e_ip1(mol, sort_output=True,
+                omega=None, lr_factor=None, sr_factor=None):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1
-    return int2c2e_ip1(mol, sort_output=sort_output, omega=omega)
+    return int2c2e_ip1(mol, sort_output=sort_output,
+                       omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
+
+def int2c2e_ip1_per_atom(auxmol, dm, omega=None, lr_factor=None, sr_factor=None):
+    '''Computes the first-order derivatives of the Coulomb energy per atom for
+    the auxiliary basis set'''
+    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
+    return int2c2e_ip1_per_atom(
+        auxmol, dm, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
 def _create_pair_recontraction(mol, int3c2e_context):
     assert isinstance(mol, SortedMole)
@@ -761,10 +773,11 @@ def int3c2e_scheme_ipaux(omega=0, gout_width=None):
         short_range=omega<0, gout_width=gout_width, deriv=(0,0,1))
 
 def _int3c2e_ip1_evaluator(int3c2e_opt, scheme, batch_size,
-                           kern='fill_int3c2e_ip1', omega=None):
+                           kern='fill_int3c2e_ip1',
+                           omega=None, lr_factor=None, sr_factor=None):
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
-    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
     nsp_per_block, gout_stride, shm_size = scheme
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
     lmax = mol.uniq_l_ctr[:,0].max()

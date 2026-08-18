@@ -22,7 +22,8 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, cholesky, eigh, transpose_sum, get_avail_mem)
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df.int3c2e_bdiv import (
-    _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, int3c2e_scheme,
+    _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
+    int2c2e_ip1_per_atom, int3c2e_scheme,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df
 from gpu4pyscf.df.df_jk import factorize_dm, _DFHF
@@ -56,15 +57,16 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
     return j2c_solver
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
-                        auxbasis_response=True, verbose=None):
+                        auxbasis_response=True, verbose=None,
+                        omega=None, lr_factor=None, sr_factor=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
+        assert omega is None or omega == 0
         return _j_energy_per_atom(int3c2e_opt, dm, hermi, auxbasis_response,
                                   verbose) * j_factor
 
@@ -87,7 +89,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     mem_avail = mem_free - naux*nocc**2*8 - nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8))))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True)
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
@@ -118,7 +121,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     aux_coeff[aux_sorting] = tmp
     tmp = None
 
-    j2c = int2c2e(auxmol)
+    j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
     else:
@@ -226,7 +229,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
                               alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
         dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
         #ejk_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
-        ejk_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ejk_aux -= cp.asarray(
+            int2c2e_ip1_per_atom(auxmol, dm_aux, omega, lr_factor, sr_factor))
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk += ejk_aux
 
@@ -237,7 +241,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
@@ -307,7 +310,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ej_aux *= 2
         #ej_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
         dm_aux = auxvec[:,None] * auxvec
-        ej_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ej_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux)
         ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
@@ -342,7 +345,8 @@ class Gradients(rhf_grad.Gradients):
     def energy_ee(self, mol, dm):
         return self.jk_energy_per_atom(dm, hermi=1)
 
-    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1,
+                           omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
         '''
         Computes the first-order derivatives of the energy per atom for
@@ -353,11 +357,9 @@ class Gradients(rhf_grad.Gradients):
         mol = mf.with_df.mol
         auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory
-        with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
-            sorted_mol = SortedMole.from_mol(mol, decontract=True)
-            int3c2e_opt = Int3c2eOpt(sorted_mol, auxmol).build()
         return _jk_energy_per_atom(
-            int3c2e_opt, dm, j_factor, k_factor, hermi=hermi,
-            auxbasis_response=self.auxbasis_response, verbose=verbose)
+            mf.with_df.intopt, dm, j_factor, k_factor, hermi=hermi,
+            auxbasis_response=self.auxbasis_response, verbose=verbose,
+            omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
 Grad = Gradients

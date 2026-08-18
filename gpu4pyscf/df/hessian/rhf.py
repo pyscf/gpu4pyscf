@@ -43,8 +43,8 @@ from gpu4pyscf.lib import multi_gpu
 
 num_devices = multi_gpu.num_devices
 
-def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
-                        verbose=None):
+def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
+                        omega=None, lr_factor=None, sr_factor=None, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -57,7 +57,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
     dm_factor_l = _factorize_dm(mol, dm)
     nao, nocc = dm_factor_l.shape
@@ -88,7 +88,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     batch_size = int(word_avail * 0.02) // nao_pair
     batch_size = max(largest_shell_nao, min(batch_size, naux))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega)
+        aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
@@ -119,7 +120,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
     t0 = log.timer_debug1('contract dm', *t0)
 
-    metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, omega)
+    metric_w, metric_v = _factorize_j2c(
+        auxmol, aux_sorting, omega, lr_factor, sr_factor)
     metric_size = metric_v.shape[1]
     dm_oo = contract('uv,uij->vij', metric_v, j3c_oo)
     dm_oo /= metric_w[:,None,None]
@@ -249,10 +251,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
         # ...
         eval_ipaux = _int3c2e_ip1_evaluator(
             int3c2e_opt, int3c2e_scheme_ipaux(omega, 27), batch_size,
-            'fill_int3c2e_ipaux', omega)[0]
+            'fill_int3c2e_ipaux', omega, lr_factor, sr_factor)[0]
         eval_ip1 = _int3c2e_ip1_evaluator(
             int3c2e_opt, int3c2e_scheme_ip1(omega, 27), batch_size,
-            'fill_int3c2e_ip1', omega)[0]
+            'fill_int3c2e_ip1', omega, lr_factor, sr_factor)[0]
 
         if j_factor != 0:
             auxvec_ipauxp = cp.empty((3, naux))
@@ -300,7 +302,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
             t0 = log.timer_debug1('fill_int3c2e_ipaux', *t0)
 
             # note int2c2e_ip1 computs d/dr and d/dX = -d/dr
-            j2c_10 = int2c2e_ip1(auxmol, sort_output=False, omega=omega)
+            j2c_10 = int2c2e_ip1(auxmol, sort_output=False, omega=omega,
+                                 lr_factor=lr_factor, sr_factor=sr_factor)
             j2c_10 *= -1
             j2c_10, tmp = cp.empty_like(j2c_10), j2c_10
             j2c_10[:,_aux_sorting[:,None], _aux_sorting] = tmp
@@ -732,9 +735,9 @@ def _argsort_aux_by_atom(auxmol, aux_sorting=None):
     aux_slices = np.hstack([0, cum[:-1], cum]).reshape(2, -1).T
     return aux_idx, aux_slices
 
-def _factorize_j2c(auxmol, aux_sorting=None, omega=0):
+def _factorize_j2c(auxmol, aux_sorting=None, omega=None, lr_factor=None, sr_factor=None):
     original_auxmol = auxmol.mol
-    j2c = int2c2e(auxmol, omega=omega)
+    j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     w, v = cp.linalg.eigh(j2c)
     is_lr_coulomb = omega > 0
     if ((is_lr_coulomb or original_auxmol.cart) and
@@ -770,8 +773,8 @@ def _bas_atom_labels(mol, aux_sorting=None):
         atm_labels[cp.asnumpy(aux_sorting)] = tmp
     return atm_labels
 
-def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
-              verbose=None):
+def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
+              *, omega=None, lr_factor=None, sr_factor=None, verbose=None):
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
@@ -833,7 +836,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
 
     eval_j3c, aux_sorting, _, aux_offsets, clone_context = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True,
-        return_clone_context=True, omega=omega)
+        return_clone_context=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
@@ -867,16 +871,18 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
         _aux_sorting = aux_sorting
         if device_id > 0:
             _eval_j3c, _aux_sorting = int3c2e_opt.int3c2e_evaluator(
-                reorder_aux=True, clone_context=clone_context, omega=omega)[:2]
+                reorder_aux=True, clone_context=clone_context, omega=omega,
+                omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[:2]
 
-        metric_w, metric_v = _factorize_j2c(auxmol, _aux_sorting, omega)
+        metric_w, metric_v = _factorize_j2c(
+            auxmol, _aux_sorting, omega, lr_factor, sr_factor)
 
         eval_ip1 = _int3c2e_ip1_evaluator(
             int3c2e_opt, int3c2e_scheme_ip1(omega, 27), batch_size,
-            'fill_int3c2e_ip1', omega)[0]
+            'fill_int3c2e_ip1', omega, lr_factor, sr_factor)[0]
         eval_ipaux = _int3c2e_ip1_evaluator(
             int3c2e_opt, int3c2e_scheme_ipaux(omega, 27), batch_size,
-            'fill_int3c2e_ipaux', omega)[0]
+            'fill_int3c2e_ipaux', omega, lr_factor, sr_factor)[0]
 
         vhf_atm = cp.zeros((natm,3,nocc,nao))
         vhf1 = cp.zeros((3, nao, nao))
@@ -932,7 +938,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
             # (00|0)(1|0)(0|00)
             # int2c2e_ip1 computs d/dr. d/dX = -d/dr, the derivative of metric
             # introduces another -1. The overall factor is 1.
-            j2c_10 = int2c2e_ip1(auxmol, sort_output=False, omega=omega)
+            j2c_10 = int2c2e_ip1(auxmol, sort_output=False, omega=omega,
+                                 lr_factor=lr_factor, sr_factor=sr_factor)
 
             # The first AO indices in j2c_10 should be grouped by atoms; The second
             # indices are sorted to match the aux indices in dm_3c
@@ -1141,13 +1148,13 @@ def int3c2e_scheme_ip2(omega=0, gout_width=None):
     return int3c2e_scheme(
         short_range=omega<0, gout_width=gout_width, deriv=(1,1,0))
 
-def _int2c2e_ip2_per_atom(mol, dm, omega=0):
+def _int2c2e_ip2_per_atom(mol, dm, omega=None, lr_factor=None, sr_factor=None):
     '''Second order nuclear derivatives of 2c2e Coulomb integrals.
     '''
     from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt
     opt = Int2c2eOpt(mol)
     mol = opt.cell
-    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
     li = np.arange(L_AUX_MAX+1)[:,None]
     lj = np.arange(L_AUX_MAX+1)
     order = li + lj + 2

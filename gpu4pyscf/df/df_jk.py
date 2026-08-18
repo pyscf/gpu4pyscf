@@ -115,8 +115,8 @@ class _DFHF:
     def get_j(self, mol=None, dm=None, hermi=1, omega=None):
         return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega)[0]
 
-    def get_k(self, mol=None, dm=None, hermi=1, omega=None,
-              lr_factor=None, sr_factor=None):
+    def get_k(self, mol=None, dm=None, hermi=1,
+              omega=None, lr_factor=None, sr_factor=None):
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
         if sr_factor == 0:
             # Only LR
@@ -136,7 +136,7 @@ class _DFHF:
         return vk
 
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
-               omega=None):
+               omega=None, lr_factor=None, sr_factor=None):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
 
@@ -170,7 +170,8 @@ class _DFHF:
                     return vj, vk
 
                 if self.only_dfj:
-                    vk = hf.SCF.get_k(self, mol, dm, hermi, omega=omega)
+                    vk = hf.SCF.get_k(self, mol, dm, hermi, omega=omega,
+                                      lr_factor=lr_factor, sr_factor=sr_factor)
                     return vj, vk
 
                 if is_real:
@@ -201,7 +202,8 @@ class _DFHF:
                         ra.imag, ra.real,
                     ]).reshape(8,2, n_dm,nao,nocc).transpose(0,2,3,1,4).reshape(8*n_dm, nao, 2*nocc)
                 dm = tag_array(dm, factor_l=factor_l, factor_r=factor_r)
-                vk = self.with_df.get_jk(dm, hermi=0, with_j=False, omega=omega)[1]
+                vk = self.with_df.get_jk(dm, hermi=0, with_j=False, omega=omega,
+                                         lr_factor=lr_factor, sr_factor=sr_factor)[1]
                 return vj, vk
 
             return ghf._get_jk(self, mol, dm, hermi, with_j, with_k,
@@ -212,10 +214,12 @@ class _DFHF:
             if with_j:
                 vj = self.with_df.get_jk(mol, dm, hermi, with_k=False)[0]
             if with_k:
-                vk = hf.SCF.get_k(self, mol, dm, hermi, omega=omega)
+                vk = hf.SCF.get_k(self, mol, dm, hermi, omega=omega,
+                                  lr_factor=lr_factor, sr_factor=sr_factor)
         else:
             # Full DF mode (DF J + DF K)
-            vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k, omega=omega)
+            vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k, omega=omega,
+                                         lr_factor=lr_factor, sr_factor=sr_factor)
         return vj, vk
 
     def Gradients(self):
@@ -447,7 +451,8 @@ class _DFHF:
             obj.spin_samples = self.spin_samples
         return obj
 
-def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
+def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True,
+           omega=None, lr_factor=None, sr_factor=None):
     '''
     get jk with density fitting
     '''
@@ -455,7 +460,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True, omega=None):
     t1 = t0 = log.init_timer()
     if dfobj._cderi is None:
         log.debug('Build CDERI ...')
-        dfobj.build(omega=omega)
+        dfobj.build(omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
         t1 = log.timer_debug1('init jk', *t0)
 
     out_cupy = isinstance(dms, cp.ndarray)
