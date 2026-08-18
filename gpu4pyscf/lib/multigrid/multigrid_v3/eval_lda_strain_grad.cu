@@ -30,12 +30,12 @@
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
-void eval_mgga_grad_kernel(double *out, double *dm,
-                           double *vrho_weights, double *vtau_weights, PBCIntEnvVars envs,
-                           int64_t *bas_ij_idx, float2 *grid_frac_ranges,
-                           double da_squared, double db_squared, double dc_squared,
-                           int mesh_a, int mesh_b, int mesh_c, int npairs,
-                           double factor, double negligible)
+void eval_lda_grad_kernel(double *grad, double *sigma, double *dm,
+                          double *vxc_weights, PBCIntEnvVars envs,
+                          int64_t *bas_ij_idx, float2 *grid_frac_ranges,
+                          double da_squared, double db_squared, double dc_squared,
+                          int mesh_a, int mesh_b, int mesh_c, int npairs,
+                          double factor, double negligible)
 {
     constexpr int tile = 16;
     int tx = threadIdx.x;
@@ -53,6 +53,7 @@ void eval_mgga_grad_kernel(double *out, double *dm,
     __shared__ double xi, yi, zi;
     __shared__ double xj, yj, zj;
     __shared__ double xij, yij, zij, ai, aj, aij, theta_rr;
+    __shared__ double xjxi, yjyi, zjzi;
     __shared__ double dm_cache[nfi*nfj];
 
     int *bas = envs.bas;
@@ -87,9 +88,9 @@ void eval_mgga_grad_kernel(double *out, double *dm,
         xj = env[rj+0] + envs.img_coords[jL*3+0];
         yj = env[rj+1] + envs.img_coords[jL*3+1];
         zj = env[rj+2] + envs.img_coords[jL*3+2];
-        double xjxi = xj - xi;
-        double yjyi = yj - yi;
-        double zjzi = zj - zi;
+        xjxi = xj - xi;
+        yjyi = yj - yi;
+        zjzi = zj - zi;
         double rr = distance_squared(xjxi, yjyi, zjzi);
         xij = xjxi * aj_aij + xi;
         yij = yjyi * aj_aij + yi;
@@ -129,21 +130,22 @@ void eval_mgga_grad_kernel(double *out, double *dm,
     }
     __syncthreads();
 
-    constexpr int XX = 0;
-    constexpr int XY = 1;
-    constexpr int XZ = 2;
-    constexpr int YX = 1;
-    constexpr int YY = 3;
-    constexpr int YZ = 4;
-    constexpr int ZX = 2;
-    constexpr int ZY = 4;
-    constexpr int ZZ = 5;
     double grad_ix = 0;
     double grad_iy = 0;
     double grad_iz = 0;
     double grad_jx = 0;
     double grad_jy = 0;
     double grad_jz = 0;
+
+    double sigma_xx = 0;
+    double sigma_xy = 0;
+    double sigma_xz = 0;
+    double sigma_yx = 0;
+    double sigma_yy = 0;
+    double sigma_yz = 0;
+    double sigma_zx = 0;
+    double sigma_zy = 0;
+    double sigma_zz = 0;
 
 #pragma unroll
     for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
@@ -184,119 +186,85 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                  recursion_factor_a *= exp_da_squared) {
                 if (fabs(gaussian_xyz) < negligible) break;
 
-                double rho_fac = vrho_weights[abc_idx] * gaussian_xyz;
+                double v = vxc_weights[abc_idx] * gaussian_xyz;
+                double i_deriv0[nfi];
+                double i_deriv1[3*nfi];
                 double x_xi = x - xi;
                 double y_yi = y - yi;
                 double z_zi = z - zi;
-                double i_deriv0[nfi];
-                double i_deriv1[3*nfi];
                 gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
                 gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
 
+                double j_deriv0[nfj];
+                double j_deriv1[3*nfj];
                 double x_xj = x - xj;
                 double y_yj = y - yj;
                 double z_zj = z - zj;
-                double j_deriv0[nfj];
-                double j_deriv1[3*nfj];
                 gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
                 gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
-                double rhox = 0;
-                double rhoy = 0;
-                double rhoz = 0;
+                double rho_ix = 0;
+                double rho_iy = 0;
+                double rho_iz = 0;
 #pragma unroll
                 for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                    double s0 = 0;
+                    double s = 0;
 #pragma unroll
                     for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                        s0 += dm_cache[i*nfj+j] * j_deriv0[j];
+                        s += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s0 * i_deriv1[i      ];
-                    rhoy += s0 * i_deriv1[i+nfi  ];
-                    rhoz += s0 * i_deriv1[i+nfi*2];
+                    rho_ix += s * i_deriv1[i      ];
+                    rho_iy += s * i_deriv1[i+nfi  ];
+                    rho_iz += s * i_deriv1[i+nfi*2];
                 }
-                grad_ix -= rhox * rho_fac;
-                grad_iy -= rhoy * rho_fac;
-                grad_iz -= rhoz * rho_fac;
-                rhox = 0;
-                rhoy = 0;
-                rhoz = 0;
+                rho_ix *= v;
+                rho_iy *= v;
+                rho_iz *= v;
+                grad_ix -= rho_ix;
+                grad_iy -= rho_iy;
+                grad_iz -= rho_iz;
+
+                double rho_jx = 0;
+                double rho_jy = 0;
+                double rho_jz = 0;
 #pragma unroll
                 for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                    double s0 = 0;
+                    double s = 0;
 #pragma unroll
                     for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                        s0 += dm_cache[i*nfj+j] * i_deriv0[i];
+                        s += dm_cache[i*nfj+j] * i_deriv0[i];
                     }
-                    rhox += s0 * j_deriv1[j      ];
-                    rhoy += s0 * j_deriv1[j+nfj  ];
-                    rhoz += s0 * j_deriv1[j+nfj*2];
+                    rho_jx += s * j_deriv1[j      ];
+                    rho_jy += s * j_deriv1[j+nfj  ];
+                    rho_jz += s * j_deriv1[j+nfj*2];
                 }
-                grad_jx -= rhox * rho_fac;
-                grad_jy -= rhoy * rho_fac;
-                grad_jz -= rhoz * rho_fac;
-
-                double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
-                double i_deriv2[6*nfi];
-                gto_deriv2<LI>(i_deriv2, x_xi, y_yi, z_zi, ai);
-                double taux = 0;
-                double tauy = 0;
-                double tauz = 0;
-#pragma unroll
-                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                    double sx = 0;
-                    double sy = 0;
-                    double sz = 0;
-#pragma unroll
-                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                        double dm_fac = dm_cache[i*nfj+j];
-                        sx += dm_fac * j_deriv1[j      ];
-                        sy += dm_fac * j_deriv1[j+nfj  ];
-                        sz += dm_fac * j_deriv1[j+nfj*2];
-                    }
-                    taux += sx * i_deriv2[i+nfi*XX];
-                    tauy += sx * i_deriv2[i+nfi*XY];
-                    tauz += sx * i_deriv2[i+nfi*XZ];
-                    taux += sy * i_deriv2[i+nfi*YX];
-                    tauy += sy * i_deriv2[i+nfi*YY];
-                    tauz += sy * i_deriv2[i+nfi*YZ];
-                    taux += sz * i_deriv2[i+nfi*ZX];
-                    tauy += sz * i_deriv2[i+nfi*ZY];
-                    tauz += sz * i_deriv2[i+nfi*ZZ];
-                }
-                grad_ix -= taux * tau_fac;
-                grad_iy -= tauy * tau_fac;
-                grad_iz -= tauz * tau_fac;
-
-                double j_deriv2[6*nfj];
-                gto_deriv2<LJ>(j_deriv2, x_xj, y_yj, z_zj, aj);
-                taux = 0;
-                tauy = 0;
-                tauz = 0;
-#pragma unroll
-                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                    double sx = 0;
-                    double sy = 0;
-                    double sz = 0;
-#pragma unroll
-                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                        double dm_fac = dm_cache[i*nfj+j];
-                        sx += dm_fac * i_deriv1[i      ];
-                        sy += dm_fac * i_deriv1[i+nfi  ];
-                        sz += dm_fac * i_deriv1[i+nfi*2];
-                    }
-                    taux += sx * j_deriv2[j+nfj*XX];
-                    tauy += sx * j_deriv2[j+nfj*XY];
-                    tauz += sx * j_deriv2[j+nfj*XZ];
-                    taux += sy * j_deriv2[j+nfj*YX];
-                    tauy += sy * j_deriv2[j+nfj*YY];
-                    tauz += sy * j_deriv2[j+nfj*YZ];
-                    taux += sz * j_deriv2[j+nfj*ZX];
-                    tauy += sz * j_deriv2[j+nfj*ZY];
-                    tauz += sz * j_deriv2[j+nfj*ZZ];
-                }
-                grad_jx -= taux * tau_fac;
-                grad_jy -= tauy * tau_fac;
-                grad_jz -= tauz * tau_fac;
+                rho_jx *= v;
+                rho_jy *= v;
+                rho_jz *= v;
+                grad_jx -= rho_jx;
+                grad_jy -= rho_jy;
+                grad_jz -= rho_jz;
+                rho_ix += rho_jx;
+                rho_iy += rho_jy;
+                rho_iz += rho_jz;
+                // Grid-response contributions.
+                // Note that these grid coordinates are taken from the entire
+                // integration space, not restricted to the unit cell. In the
+                // NumInt implementation, numerical integration is performed
+                // only within the unit cell. In that case, only the grid
+                // response inside the unit cell contributes, yielding a simple
+                // term: sum_{r in unit cell} (\nabla rho) * Vxc * r.
+                // Although the expression below looks similar, it cannot be
+                // reused here because it is evaluated over a different
+                // integration domain.
+                sigma_xx += rho_ix * x;
+                sigma_xy += rho_ix * y;
+                sigma_xz += rho_ix * z;
+                sigma_yx += rho_iy * x;
+                sigma_yy += rho_iy * y;
+                sigma_yz += rho_iy * z;
+                sigma_zx += rho_iz * x;
+                sigma_zy += rho_iz * y;
+                sigma_zz += rho_iz * z;
 
                 x += c_dxyz_dabc[0];
                 y += c_dxyz_dabc[1];
@@ -324,125 +292,89 @@ void eval_mgga_grad_kernel(double *out, double *dm,
                 if (abc_idx < 0) {
                     abc_idx += mesh_abc;
                 }
-                double rho_fac = vrho_weights[abc_idx] * gaussian_xyz;
+                double v = vxc_weights[abc_idx] * gaussian_xyz;
+                double i_deriv0[nfi];
+                double i_deriv1[3*nfi];
                 double x_xi = x - xi;
                 double y_yi = y - yi;
                 double z_zi = z - zi;
-                double i_deriv0[nfi];
-                double i_deriv1[3*nfi];
                 gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
                 gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
 
+                double j_deriv0[nfj];
+                double j_deriv1[3*nfj];
                 double x_xj = x - xj;
                 double y_yj = y - yj;
                 double z_zj = z - zj;
-                double j_deriv0[nfj];
-                double j_deriv1[3*nfj];
                 gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
                 gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
-                double rhox = 0;
-                double rhoy = 0;
-                double rhoz = 0;
+                double rho_ix = 0;
+                double rho_iy = 0;
+                double rho_iz = 0;
 #pragma unroll
                 for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                    double s0 = 0;
+                    double s = 0;
 #pragma unroll
                     for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                        s0 += dm_cache[i*nfj+j] * j_deriv0[j];
+                        s += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s0 * i_deriv1[i      ];
-                    rhoy += s0 * i_deriv1[i+nfi  ];
-                    rhoz += s0 * i_deriv1[i+nfi*2];
+                    rho_ix += s * i_deriv1[i      ];
+                    rho_iy += s * i_deriv1[i+nfi  ];
+                    rho_iz += s * i_deriv1[i+nfi*2];
                 }
-                grad_ix -= rhox * rho_fac;
-                grad_iy -= rhoy * rho_fac;
-                grad_iz -= rhoz * rho_fac;
+                rho_ix *= v;
+                rho_iy *= v;
+                rho_iz *= v;
+                grad_ix -= rho_ix;
+                grad_iy -= rho_iy;
+                grad_iz -= rho_iz;
 
-                rhox = 0;
-                rhoy = 0;
-                rhoz = 0;
+                double rho_jx = 0;
+                double rho_jy = 0;
+                double rho_jz = 0;
 #pragma unroll
                 for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                    double s0 = 0;
+                    double s = 0;
 #pragma unroll
                     for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                        s0 += dm_cache[i*nfj+j] * i_deriv0[i];
+                        s += dm_cache[i*nfj+j] * i_deriv0[i];
                     }
-                    rhox += s0 * j_deriv1[j      ];
-                    rhoy += s0 * j_deriv1[j+nfj  ];
-                    rhoz += s0 * j_deriv1[j+nfj*2];
+                    rho_jx += s * j_deriv1[j      ];
+                    rho_jy += s * j_deriv1[j+nfj  ];
+                    rho_jz += s * j_deriv1[j+nfj*2];
                 }
-                grad_jx -= rhox * rho_fac;
-                grad_jy -= rhoy * rho_fac;
-                grad_jz -= rhoz * rho_fac;
-
-                double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
-                double i_deriv2[6*nfi];
-                gto_deriv2<LI>(i_deriv2, x_xi, y_yi, z_zi, ai);
-                double taux = 0;
-                double tauy = 0;
-                double tauz = 0;
-#pragma unroll
-                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                    double sx = 0;
-                    double sy = 0;
-                    double sz = 0;
-#pragma unroll
-                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                        double dm_fac = dm_cache[i*nfj+j];
-                        sx += dm_fac * j_deriv1[j      ];
-                        sy += dm_fac * j_deriv1[j+nfj  ];
-                        sz += dm_fac * j_deriv1[j+nfj*2];
-                    }
-                    taux += sx * i_deriv2[i+nfi*XX];
-                    tauy += sx * i_deriv2[i+nfi*XY];
-                    tauz += sx * i_deriv2[i+nfi*XZ];
-                    taux += sy * i_deriv2[i+nfi*YX];
-                    tauy += sy * i_deriv2[i+nfi*YY];
-                    tauz += sy * i_deriv2[i+nfi*YZ];
-                    taux += sz * i_deriv2[i+nfi*ZX];
-                    tauy += sz * i_deriv2[i+nfi*ZY];
-                    tauz += sz * i_deriv2[i+nfi*ZZ];
-                }
-                grad_ix -= taux * tau_fac;
-                grad_iy -= tauy * tau_fac;
-                grad_iz -= tauz * tau_fac;
-
-                double j_deriv2[6*nfj];
-                gto_deriv2<LJ>(j_deriv2, x_xj, y_yj, z_zj, aj);
-                taux = 0;
-                tauy = 0;
-                tauz = 0;
-#pragma unroll
-                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                    double sx = 0;
-                    double sy = 0;
-                    double sz = 0;
-#pragma unroll
-                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                        double dm_fac = dm_cache[i*nfj+j];
-                        sx += dm_fac * i_deriv1[i      ];
-                        sy += dm_fac * i_deriv1[i+nfi  ];
-                        sz += dm_fac * i_deriv1[i+nfi*2];
-                    }
-                    taux += sx * j_deriv2[j+nfj*XX];
-                    tauy += sx * j_deriv2[j+nfj*XY];
-                    tauz += sx * j_deriv2[j+nfj*XZ];
-                    taux += sy * j_deriv2[j+nfj*YX];
-                    tauy += sy * j_deriv2[j+nfj*YY];
-                    tauz += sy * j_deriv2[j+nfj*YZ];
-                    taux += sz * j_deriv2[j+nfj*ZX];
-                    tauy += sz * j_deriv2[j+nfj*ZY];
-                    tauz += sz * j_deriv2[j+nfj*ZZ];
-                }
-                grad_jx -= taux * tau_fac;
-                grad_jy -= tauy * tau_fac;
-                grad_jz -= tauz * tau_fac;
+                rho_jx *= v;
+                rho_jy *= v;
+                rho_jz *= v;
+                grad_jx -= rho_jx;
+                grad_jy -= rho_jy;
+                grad_jz -= rho_jz;
+                rho_ix += rho_jx;
+                rho_iy += rho_jy;
+                rho_iz += rho_jz;
+                sigma_xx += rho_ix * x;
+                sigma_xy += rho_ix * y;
+                sigma_xz += rho_ix * z;
+                sigma_yx += rho_iy * x;
+                sigma_yy += rho_iy * y;
+                sigma_yz += rho_iy * z;
+                sigma_zx += rho_iz * x;
+                sigma_zy += rho_iz * y;
+                sigma_zz += rho_iz * z;
             }
         } }
     } }
 
-    __syncthreads();
+    sigma_xx += grad_ix * xi + grad_jx * xj;
+    sigma_xy += grad_ix * yi + grad_jx * yj;
+    sigma_xz += grad_ix * zi + grad_jx * zj;
+    sigma_yx += grad_iy * xi + grad_jy * xj;
+    sigma_yy += grad_iy * yi + grad_jy * yj;
+    sigma_yz += grad_iy * zi + grad_jy * zj;
+    sigma_zx += grad_iz * xi + grad_jz * xj;
+    sigma_zy += grad_iz * yi + grad_jz * yj;
+    sigma_zz += grad_iz * zi + grad_jz * zj;
+
     for (int offset = 16; offset > 0; offset >>= 1) {
         grad_ix += __shfl_down_sync(0xffffffff, grad_ix, offset);
         grad_iy += __shfl_down_sync(0xffffffff, grad_iy, offset);
@@ -450,6 +382,15 @@ void eval_mgga_grad_kernel(double *out, double *dm,
         grad_jx += __shfl_down_sync(0xffffffff, grad_jx, offset);
         grad_jy += __shfl_down_sync(0xffffffff, grad_jy, offset);
         grad_jz += __shfl_down_sync(0xffffffff, grad_jz, offset);
+        sigma_xx += __shfl_down_sync(0xffffffff, sigma_xx, offset);
+        sigma_xy += __shfl_down_sync(0xffffffff, sigma_xy, offset);
+        sigma_xz += __shfl_down_sync(0xffffffff, sigma_xz, offset);
+        sigma_yx += __shfl_down_sync(0xffffffff, sigma_yx, offset);
+        sigma_yy += __shfl_down_sync(0xffffffff, sigma_yy, offset);
+        sigma_yz += __shfl_down_sync(0xffffffff, sigma_yz, offset);
+        sigma_zx += __shfl_down_sync(0xffffffff, sigma_zx, offset);
+        sigma_zy += __shfl_down_sync(0xffffffff, sigma_zy, offset);
+        sigma_zz += __shfl_down_sync(0xffffffff, sigma_zz, offset);
     }
     int lane = thread_id % WARP_SIZE;
     int ish_cell0 = ish;
@@ -458,29 +399,38 @@ void eval_mgga_grad_kernel(double *out, double *dm,
     int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
     int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
     if (lane == 0) {
-        atomicAdd(out+ia*3+0, grad_ix);
-        atomicAdd(out+ia*3+1, grad_iy);
-        atomicAdd(out+ia*3+2, grad_iz);
-        atomicAdd(out+ja*3+0, grad_jx);
-        atomicAdd(out+ja*3+1, grad_jy);
-        atomicAdd(out+ja*3+2, grad_jz);
+        atomicAdd(grad+ia*3+0, grad_ix);
+        atomicAdd(grad+ia*3+1, grad_iy);
+        atomicAdd(grad+ia*3+2, grad_iz);
+        atomicAdd(grad+ja*3+0, grad_jx);
+        atomicAdd(grad+ja*3+1, grad_jy);
+        atomicAdd(grad+ja*3+2, grad_jz);
+        atomicAdd(sigma+0, sigma_xx);
+        atomicAdd(sigma+1, sigma_xy);
+        atomicAdd(sigma+2, sigma_xz);
+        atomicAdd(sigma+3, sigma_yx);
+        atomicAdd(sigma+4, sigma_yy);
+        atomicAdd(sigma+5, sigma_yz);
+        atomicAdd(sigma+6, sigma_zx);
+        atomicAdd(sigma+7, sigma_zy);
+        atomicAdd(sigma+8, sigma_zz);
     }
 }
 
 extern "C" {
-#define eval_mgga_grad_kernel_case(li, lj, slice_i, slice_j) \
+#define eval_lda_grad_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
-        eval_mgga_grad_kernel<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
-            out, dm, vxc, tau, *envs, bas_ij_idx, grid_frac_ranges, \
+        eval_lda_grad_kernel<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
+            grad, sigma, dm, vxc, *envs, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
             factor, negligible); \
     break
 
-int evaluate_mgga_grad(double *out, double *dm,
-                       double *vxc, double *tau, PBCIntEnvVars *envs,
-                       double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
-                       float2 *grid_frac_ranges, int *mesh, int npairs,
-                       double factor, double negligible)
+int evaluate_lda_grad1(double *grad, double *sigma, double *dm,
+                      double *vxc, double *placeholder, PBCIntEnvVars *envs,
+                      double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
+                      float2 *grid_frac_ranges, int *mesh, int npairs,
+                      double factor, double negligible)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
@@ -490,21 +440,21 @@ int evaluate_mgga_grad(double *out, double *dm,
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
     dim3 threads(16, 16);
     switch (li * LMAX1 + lj) {
-        eval_mgga_grad_kernel_case(0,0, 1, 1);
-        eval_mgga_grad_kernel_case(1,0, 3, 1);
-        eval_mgga_grad_kernel_case(1,1, 3, 3);
-        eval_mgga_grad_kernel_case(2,0, 6, 1);
-        eval_mgga_grad_kernel_case(2,1, 6, 3);
-        eval_mgga_grad_kernel_case(2,2, 6, 3);
-        eval_mgga_grad_kernel_case(3,0,10, 1);
-        eval_mgga_grad_kernel_case(3,1, 5, 3);
-        eval_mgga_grad_kernel_case(3,2, 5, 3);
-        eval_mgga_grad_kernel_case(3,3, 5, 4);
-        eval_mgga_grad_kernel_case(4,0, 8, 1);
-        eval_mgga_grad_kernel_case(4,1, 5, 3);
-        eval_mgga_grad_kernel_case(4,2, 5, 3);
-        eval_mgga_grad_kernel_case(4,3, 5, 4);
-        eval_mgga_grad_kernel_case(4,4, 5, 4);
+        eval_lda_grad_kernel_case(0,0, 1, 1);
+        eval_lda_grad_kernel_case(1,0, 3, 1);
+        eval_lda_grad_kernel_case(1,1, 3, 3);
+        eval_lda_grad_kernel_case(2,0, 6, 1);
+        eval_lda_grad_kernel_case(2,1, 6, 3);
+        eval_lda_grad_kernel_case(2,2, 6, 6);
+        eval_lda_grad_kernel_case(3,0,10, 1);
+        eval_lda_grad_kernel_case(3,1,10, 3);
+        eval_lda_grad_kernel_case(3,2, 5, 6);
+        eval_lda_grad_kernel_case(3,3,10, 5);
+        eval_lda_grad_kernel_case(4,0,15, 1);
+        eval_lda_grad_kernel_case(4,1,15, 3);
+        eval_lda_grad_kernel_case(4,2, 8, 6);
+        eval_lda_grad_kernel_case(4,3, 8, 5);
+        eval_lda_grad_kernel_case(4,4, 8, 5);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

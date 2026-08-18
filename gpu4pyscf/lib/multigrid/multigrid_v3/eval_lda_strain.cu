@@ -128,6 +128,7 @@ void eval_lda_strain_kernel(double *out, double *dm,
         int j = n - nfj * i;
         dm_cache[n] = dm[bvk_cell_id*nao*nao + (i0+i)*nao + j0+j] * factor;
     }
+    __syncthreads();
 
     double sigma_xx = 0;
     double sigma_xy = 0;
@@ -178,13 +179,22 @@ void eval_lda_strain_kernel(double *out, double *dm,
                  recursion_factor_a *= exp_da_squared) {
                 if (fabs(gaussian_xyz) < negligible) break;
 
+                double v = vxc_weights[abc_idx] * gaussian_xyz;
                 double i_deriv0[nfi];
                 double i_deriv1[3*nfi];
-                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
+                double x_xi = x - xi;
+                double y_yi = y - yi;
+                double z_zi = z - zi;
+                gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
+                gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
 
                 double j_deriv0[nfj];
-                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
+                double j_deriv1[3*nfj];
+                double x_xj = x - xj;
+                double y_yj = y - yj;
+                double z_zj = z - zj;
+                gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
+                gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
@@ -199,19 +209,45 @@ void eval_lda_strain_kernel(double *out, double *dm,
                     rhoy += s * i_deriv1[i+nfi  ];
                     rhoz += s * i_deriv1[i+nfi*2];
                 }
-                double v = vxc_weights[abc_idx] * gaussian_xyz;
                 rhox *= v;
                 rhoy *= v;
                 rhoz *= v;
-                sigma_xx -= rhox * xjxi;
-                sigma_xy -= rhox * yjyi;
-                sigma_xz -= rhox * zjzi;
-                sigma_yx -= rhoy * xjxi;
-                sigma_yy -= rhoy * yjyi;
-                sigma_yz -= rhoy * zjzi;
-                sigma_zx -= rhoz * xjxi;
-                sigma_zy -= rhoz * yjyi;
-                sigma_zz -= rhoz * zjzi;
+                sigma_xx += rhox * x_xi;
+                sigma_xy += rhox * y_yi;
+                sigma_xz += rhox * z_zi;
+                sigma_yx += rhoy * x_xi;
+                sigma_yy += rhoy * y_yi;
+                sigma_yz += rhoy * z_zi;
+                sigma_zx += rhoz * x_xi;
+                sigma_zy += rhoz * y_yi;
+                sigma_zz += rhoz * z_zi;
+
+                rhox = 0;
+                rhoy = 0;
+                rhoz = 0;
+#pragma unroll
+                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
+                    double s = 0;
+#pragma unroll
+                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
+                        s += dm_cache[i*nfj+j] * i_deriv0[i];
+                    }
+                    rhox += s * j_deriv1[j      ];
+                    rhoy += s * j_deriv1[j+nfj  ];
+                    rhoz += s * j_deriv1[j+nfj*2];
+                }
+                rhox *= v;
+                rhoy *= v;
+                rhoz *= v;
+                sigma_xx += rhox * x_xj;
+                sigma_xy += rhox * y_yj;
+                sigma_xz += rhox * z_zj;
+                sigma_yx += rhoy * x_xj;
+                sigma_yy += rhoy * y_yj;
+                sigma_yz += rhoy * z_zj;
+                sigma_zx += rhoz * x_xj;
+                sigma_zy += rhoz * y_yj;
+                sigma_zz += rhoz * z_zj;
 
                 x += c_dxyz_dabc[0];
                 y += c_dxyz_dabc[1];
@@ -239,13 +275,22 @@ void eval_lda_strain_kernel(double *out, double *dm,
                 if (abc_idx < 0) {
                     abc_idx += mesh_abc;
                 }
+                double v = vxc_weights[abc_idx] * gaussian_xyz;
                 double i_deriv0[nfi];
                 double i_deriv1[3*nfi];
-                gto_cartesian<LI>(i_deriv0, x - xi, y - yi, z - zi);
-                gto_deriv1<LI>(i_deriv1, i_deriv0, x - xi, y - yi, z - zi, ai);
+                double x_xi = x - xi;
+                double y_yi = y - yi;
+                double z_zi = z - zi;
+                gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
+                gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
 
                 double j_deriv0[nfj];
-                gto_cartesian<LJ>(j_deriv0, x - xj, y - yj, z - zj);
+                double j_deriv1[3*nfj];
+                double x_xj = x - xj;
+                double y_yj = y - yj;
+                double z_zj = z - zj;
+                gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
+                gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
                 double rhox = 0;
                 double rhoy = 0;
                 double rhoz = 0;
@@ -260,19 +305,45 @@ void eval_lda_strain_kernel(double *out, double *dm,
                     rhoy += s * i_deriv1[i+nfi  ];
                     rhoz += s * i_deriv1[i+nfi*2];
                 }
-                double v = vxc_weights[abc_idx] * gaussian_xyz;
                 rhox *= v;
                 rhoy *= v;
                 rhoz *= v;
-                sigma_xx -= rhox * xjxi;
-                sigma_xy -= rhox * yjyi;
-                sigma_xz -= rhox * zjzi;
-                sigma_yx -= rhoy * xjxi;
-                sigma_yy -= rhoy * yjyi;
-                sigma_yz -= rhoy * zjzi;
-                sigma_zx -= rhoz * xjxi;
-                sigma_zy -= rhoz * yjyi;
-                sigma_zz -= rhoz * zjzi;
+                sigma_xx += rhox * x_xi;
+                sigma_xy += rhox * y_yi;
+                sigma_xz += rhox * z_zi;
+                sigma_yx += rhoy * x_xi;
+                sigma_yy += rhoy * y_yi;
+                sigma_yz += rhoy * z_zi;
+                sigma_zx += rhoz * x_xi;
+                sigma_zy += rhoz * y_yi;
+                sigma_zz += rhoz * z_zi;
+
+                rhox = 0;
+                rhoy = 0;
+                rhoz = 0;
+#pragma unroll
+                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
+                    double s = 0;
+#pragma unroll
+                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
+                        s += dm_cache[i*nfj+j] * i_deriv0[i];
+                    }
+                    rhox += s * j_deriv1[j      ];
+                    rhoy += s * j_deriv1[j+nfj  ];
+                    rhoz += s * j_deriv1[j+nfj*2];
+                }
+                rhox *= v;
+                rhoy *= v;
+                rhoz *= v;
+                sigma_xx += rhox * x_xj;
+                sigma_xy += rhox * y_yj;
+                sigma_xz += rhox * z_zj;
+                sigma_yx += rhoy * x_xj;
+                sigma_yy += rhoy * y_yj;
+                sigma_yz += rhoy * z_zj;
+                sigma_zx += rhoz * x_xj;
+                sigma_zy += rhoz * y_yj;
+                sigma_zz += rhoz * z_zj;
             }
         } }
     } }

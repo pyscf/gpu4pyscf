@@ -277,9 +277,9 @@ def _contract_coulomb_and_nuc(cell, mesh, dm, kpts, rho0, rho1, grids, with_j, w
     Gv = get_Gv(cell, mesh)
     coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
     rhoG = pbctools.fft(rho0, mesh)
+    weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
     out = 0
     if with_j:
-        weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
         vR = pbctools.ifft(rhoG * coulG_0, mesh)
         EJ = cp.einsum('xyg,g->xy', rho1, vR).real.get() * weight_0 * 2
         EJ += cp.einsum('g,g->', rho0, vR).real.get() * weight_1
@@ -294,7 +294,6 @@ def _contract_coulomb_and_nuc(cell, mesh, dm, kpts, rho0, rho1, grids, with_j, w
             Ene += cp.einsum('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
             Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm, kpts)
         else:
-            coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
             # SI corresponds to Fourier components of the fractional atomic
             # positions within the cell. It does not respond to the strain
             # transformation

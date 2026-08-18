@@ -30,12 +30,12 @@
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
-void eval_mgga_strain_kernel(double *out, double *dm,
-                             double *vrho_weights, double *vtau_weights, PBCIntEnvVars envs,
-                             int64_t *bas_ij_idx, float2 *grid_frac_ranges,
-                             double da_squared, double db_squared, double dc_squared,
-                             int mesh_a, int mesh_b, int mesh_c, int npairs,
-                             double factor, double negligible)
+void eval_mgga_grad_kernel(double *grad, double *sigma, double *dm,
+                           double *vrho_weights, double *vtau_weights, PBCIntEnvVars envs,
+                           int64_t *bas_ij_idx, float2 *grid_frac_ranges,
+                           double da_squared, double db_squared, double dc_squared,
+                           int mesh_a, int mesh_b, int mesh_c, int npairs,
+                           double factor, double negligible)
 {
     constexpr int tile = 16;
     int tx = threadIdx.x;
@@ -139,6 +139,12 @@ void eval_mgga_strain_kernel(double *out, double *dm,
     constexpr int ZX = 2;
     constexpr int ZY = 4;
     constexpr int ZZ = 5;
+    double grad_ix = 0;
+    double grad_iy = 0;
+    double grad_iz = 0;
+    double grad_jx = 0;
+    double grad_jy = 0;
+    double grad_jz = 0;
 
     double sigma_xx = 0;
     double sigma_xy = 0;
@@ -205,9 +211,9 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                 double j_deriv1[3*nfj];
                 gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
                 gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
-                double rhox = 0;
-                double rhoy = 0;
-                double rhoz = 0;
+                double rho_ix = 0;
+                double rho_iy = 0;
+                double rho_iz = 0;
 #pragma unroll
                 for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                     double s0 = 0;
@@ -215,26 +221,20 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                     for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                         s0 += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s0 * i_deriv1[i      ];
-                    rhoy += s0 * i_deriv1[i+nfi  ];
-                    rhoz += s0 * i_deriv1[i+nfi*2];
+                    rho_ix += s0 * i_deriv1[i      ];
+                    rho_iy += s0 * i_deriv1[i+nfi  ];
+                    rho_iz += s0 * i_deriv1[i+nfi*2];
                 }
-                rhox *= rho_fac;
-                rhoy *= rho_fac;
-                rhoz *= rho_fac;
-                sigma_xx += rhox * x_xi;
-                sigma_xy += rhox * y_yi;
-                sigma_xz += rhox * z_zi;
-                sigma_yx += rhoy * x_xi;
-                sigma_yy += rhoy * y_yi;
-                sigma_yz += rhoy * z_zi;
-                sigma_zx += rhoz * x_xi;
-                sigma_zy += rhoz * y_yi;
-                sigma_zz += rhoz * z_zi;
+                rho_ix *= rho_fac;
+                rho_iy *= rho_fac;
+                rho_iz *= rho_fac;
+                grad_ix -= rho_ix;
+                grad_iy -= rho_iy;
+                grad_iz -= rho_iz;
 
-                rhox = 0;
-                rhoy = 0;
-                rhoz = 0;
+                double rho_jx = 0;
+                double rho_jy = 0;
+                double rho_jz = 0;
 #pragma unroll
                 for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                     double s0 = 0;
@@ -242,22 +242,19 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                     for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                         s0 += dm_cache[i*nfj+j] * i_deriv0[i];
                     }
-                    rhox += s0 * j_deriv1[j      ];
-                    rhoy += s0 * j_deriv1[j+nfj  ];
-                    rhoz += s0 * j_deriv1[j+nfj*2];
+                    rho_jx += s0 * j_deriv1[j      ];
+                    rho_jy += s0 * j_deriv1[j+nfj  ];
+                    rho_jz += s0 * j_deriv1[j+nfj*2];
                 }
-                rhox *= rho_fac;
-                rhoy *= rho_fac;
-                rhoz *= rho_fac;
-                sigma_xx += rhox * x_xj;
-                sigma_xy += rhox * y_yj;
-                sigma_xz += rhox * z_zj;
-                sigma_yx += rhoy * x_xj;
-                sigma_yy += rhoy * y_yj;
-                sigma_yz += rhoy * z_zj;
-                sigma_zx += rhoz * x_xj;
-                sigma_zy += rhoz * y_yj;
-                sigma_zz += rhoz * z_zj;
+                rho_jx *= rho_fac;
+                rho_jy *= rho_fac;
+                rho_jz *= rho_fac;
+                grad_jx -= rho_jx;
+                grad_jy -= rho_jy;
+                grad_jz -= rho_jz;
+                rho_ix += rho_jx;
+                rho_iy += rho_jy;
+                rho_iz += rho_jz;
 
                 double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
                 double i_deriv2[6*nfi];
@@ -290,15 +287,12 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                 taux *= tau_fac;
                 tauy *= tau_fac;
                 tauz *= tau_fac;
-                sigma_xx += taux * x_xi;
-                sigma_xy += taux * y_yi;
-                sigma_xz += taux * z_zi;
-                sigma_yx += tauy * x_xi;
-                sigma_yy += tauy * y_yi;
-                sigma_yz += tauy * z_zi;
-                sigma_zx += tauz * x_xi;
-                sigma_zy += tauz * y_yi;
-                sigma_zz += tauz * z_zi;
+                grad_ix -= taux;
+                grad_iy -= tauy;
+                grad_iz -= tauz;
+                rho_ix += taux;
+                rho_iy += tauy;
+                rho_iz += tauz;
 
                 double j_deriv2[6*nfj];
                 gto_deriv2<LJ>(j_deriv2, x_xj, y_yj, z_zj, aj);
@@ -330,15 +324,21 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                 taux *= tau_fac;
                 tauy *= tau_fac;
                 tauz *= tau_fac;
-                sigma_xx += taux * x_xj;
-                sigma_xy += taux * y_yj;
-                sigma_xz += taux * z_zj;
-                sigma_yx += tauy * x_xj;
-                sigma_yy += tauy * y_yj;
-                sigma_yz += tauy * z_zj;
-                sigma_zx += tauz * x_xj;
-                sigma_zy += tauz * y_yj;
-                sigma_zz += tauz * z_zj;
+                grad_jx -= taux;
+                grad_jy -= tauy;
+                grad_jz -= tauz;
+                rho_ix += taux;
+                rho_iy += tauy;
+                rho_iz += tauz;
+                sigma_xx += rho_ix * x;
+                sigma_xy += rho_ix * y;
+                sigma_xz += rho_ix * z;
+                sigma_yx += rho_iy * x;
+                sigma_yy += rho_iy * y;
+                sigma_yz += rho_iy * z;
+                sigma_zx += rho_iz * x;
+                sigma_zy += rho_iz * y;
+                sigma_zz += rho_iz * z;
 
                 x += c_dxyz_dabc[0];
                 y += c_dxyz_dabc[1];
@@ -382,9 +382,9 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                 double j_deriv1[3*nfj];
                 gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
                 gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
-                double rhox = 0;
-                double rhoy = 0;
-                double rhoz = 0;
+                double rho_ix = 0;
+                double rho_iy = 0;
+                double rho_iz = 0;
 #pragma unroll
                 for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                     double s0 = 0;
@@ -392,26 +392,20 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                     for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                         s0 += dm_cache[i*nfj+j] * j_deriv0[j];
                     }
-                    rhox += s0 * i_deriv1[i      ];
-                    rhoy += s0 * i_deriv1[i+nfi  ];
-                    rhoz += s0 * i_deriv1[i+nfi*2];
+                    rho_ix += s0 * i_deriv1[i      ];
+                    rho_iy += s0 * i_deriv1[i+nfi  ];
+                    rho_iz += s0 * i_deriv1[i+nfi*2];
                 }
-                rhox *= rho_fac;
-                rhoy *= rho_fac;
-                rhoz *= rho_fac;
-                sigma_xx += rhox * x_xi;
-                sigma_xy += rhox * y_yi;
-                sigma_xz += rhox * z_zi;
-                sigma_yx += rhoy * x_xi;
-                sigma_yy += rhoy * y_yi;
-                sigma_yz += rhoy * z_zi;
-                sigma_zx += rhoz * x_xi;
-                sigma_zy += rhoz * y_yi;
-                sigma_zz += rhoz * z_zi;
+                rho_ix *= rho_fac;
+                rho_iy *= rho_fac;
+                rho_iz *= rho_fac;
+                grad_ix -= rho_ix;
+                grad_iy -= rho_iy;
+                grad_iz -= rho_iz;
 
-                rhox = 0;
-                rhoy = 0;
-                rhoz = 0;
+                double rho_jx = 0;
+                double rho_jy = 0;
+                double rho_jz = 0;
 #pragma unroll
                 for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
                     double s0 = 0;
@@ -419,22 +413,16 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                     for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
                         s0 += dm_cache[i*nfj+j] * i_deriv0[i];
                     }
-                    rhox += s0 * j_deriv1[j      ];
-                    rhoy += s0 * j_deriv1[j+nfj  ];
-                    rhoz += s0 * j_deriv1[j+nfj*2];
+                    rho_jx += s0 * j_deriv1[j      ];
+                    rho_jy += s0 * j_deriv1[j+nfj  ];
+                    rho_jz += s0 * j_deriv1[j+nfj*2];
                 }
-                rhox *= rho_fac;
-                rhoy *= rho_fac;
-                rhoz *= rho_fac;
-                sigma_xx += rhox * x_xj;
-                sigma_xy += rhox * y_yj;
-                sigma_xz += rhox * z_zj;
-                sigma_yx += rhoy * x_xj;
-                sigma_yy += rhoy * y_yj;
-                sigma_yz += rhoy * z_zj;
-                sigma_zx += rhoz * x_xj;
-                sigma_zy += rhoz * y_yj;
-                sigma_zz += rhoz * z_zj;
+                rho_jx *= rho_fac;
+                rho_jy *= rho_fac;
+                rho_jz *= rho_fac;
+                grad_jx -= rho_jx;
+                grad_jy -= rho_jy;
+                grad_jz -= rho_jz;
 
                 double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
                 double i_deriv2[6*nfi];
@@ -467,15 +455,12 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                 taux *= tau_fac;
                 tauy *= tau_fac;
                 tauz *= tau_fac;
-                sigma_xx += taux * x_xi;
-                sigma_xy += taux * y_yi;
-                sigma_xz += taux * z_zi;
-                sigma_yx += tauy * x_xi;
-                sigma_yy += tauy * y_yi;
-                sigma_yz += tauy * z_zi;
-                sigma_zx += tauz * x_xi;
-                sigma_zy += tauz * y_yi;
-                sigma_zz += tauz * z_zi;
+                grad_ix -= taux;
+                grad_iy -= tauy;
+                grad_iz -= tauz;
+                rho_ix += taux;
+                rho_iy += tauy;
+                rho_iz += tauz;
 
                 double j_deriv2[6*nfj];
                 gto_deriv2<LJ>(j_deriv2, x_xj, y_yj, z_zj, aj);
@@ -507,21 +492,42 @@ void eval_mgga_strain_kernel(double *out, double *dm,
                 taux *= tau_fac;
                 tauy *= tau_fac;
                 tauz *= tau_fac;
-                sigma_xx += taux * x_xj;
-                sigma_xy += taux * y_yj;
-                sigma_xz += taux * z_zj;
-                sigma_yx += tauy * x_xj;
-                sigma_yy += tauy * y_yj;
-                sigma_yz += tauy * z_zj;
-                sigma_zx += tauz * x_xj;
-                sigma_zy += tauz * y_yj;
-                sigma_zz += tauz * z_zj;
+                grad_jx -= taux;
+                grad_jy -= tauy;
+                grad_jz -= tauz;
+                rho_ix += taux;
+                rho_iy += tauy;
+                rho_iz += tauz;
+                sigma_xx += rho_ix * x;
+                sigma_xy += rho_ix * y;
+                sigma_xz += rho_ix * z;
+                sigma_yx += rho_iy * x;
+                sigma_yy += rho_iy * y;
+                sigma_yz += rho_iy * z;
+                sigma_zx += rho_iz * x;
+                sigma_zy += rho_iz * y;
+                sigma_zz += rho_iz * z;
             }
         } }
     } }
 
-    __syncthreads();
+    sigma_xx += grad_ix * xi + grad_jx * xj;
+    sigma_xy += grad_ix * yi + grad_jx * yj;
+    sigma_xz += grad_ix * zi + grad_jx * zj;
+    sigma_yx += grad_iy * xi + grad_jy * xj;
+    sigma_yy += grad_iy * yi + grad_jy * yj;
+    sigma_yz += grad_iy * zi + grad_jy * zj;
+    sigma_zx += grad_iz * xi + grad_jz * xj;
+    sigma_zy += grad_iz * yi + grad_jz * yj;
+    sigma_zz += grad_iz * zi + grad_jz * zj;
+
     for (int offset = 16; offset > 0; offset >>= 1) {
+        grad_ix += __shfl_down_sync(0xffffffff, grad_ix, offset);
+        grad_iy += __shfl_down_sync(0xffffffff, grad_iy, offset);
+        grad_iz += __shfl_down_sync(0xffffffff, grad_iz, offset);
+        grad_jx += __shfl_down_sync(0xffffffff, grad_jx, offset);
+        grad_jy += __shfl_down_sync(0xffffffff, grad_jy, offset);
+        grad_jz += __shfl_down_sync(0xffffffff, grad_jz, offset);
         sigma_xx += __shfl_down_sync(0xffffffff, sigma_xx, offset);
         sigma_xy += __shfl_down_sync(0xffffffff, sigma_xy, offset);
         sigma_xz += __shfl_down_sync(0xffffffff, sigma_xz, offset);
@@ -533,33 +539,44 @@ void eval_mgga_strain_kernel(double *out, double *dm,
         sigma_zz += __shfl_down_sync(0xffffffff, sigma_zz, offset);
     }
     int lane = thread_id % WARP_SIZE;
+    int ish_cell0 = ish;
+    int bvk_cell_id = jsh / nbas;
+    int jsh_cell0 = jsh - nbas * bvk_cell_id;
+    int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
+    int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
     if (lane == 0) {
-        atomicAdd(out+0, sigma_xx);
-        atomicAdd(out+1, sigma_xy);
-        atomicAdd(out+2, sigma_xz);
-        atomicAdd(out+3, sigma_yx);
-        atomicAdd(out+4, sigma_yy);
-        atomicAdd(out+5, sigma_yz);
-        atomicAdd(out+6, sigma_zx);
-        atomicAdd(out+7, sigma_zy);
-        atomicAdd(out+8, sigma_zz);
+        atomicAdd(grad+ia*3+0, grad_ix);
+        atomicAdd(grad+ia*3+1, grad_iy);
+        atomicAdd(grad+ia*3+2, grad_iz);
+        atomicAdd(grad+ja*3+0, grad_jx);
+        atomicAdd(grad+ja*3+1, grad_jy);
+        atomicAdd(grad+ja*3+2, grad_jz);
+        atomicAdd(sigma+0, sigma_xx);
+        atomicAdd(sigma+1, sigma_xy);
+        atomicAdd(sigma+2, sigma_xz);
+        atomicAdd(sigma+3, sigma_yx);
+        atomicAdd(sigma+4, sigma_yy);
+        atomicAdd(sigma+5, sigma_yz);
+        atomicAdd(sigma+6, sigma_zx);
+        atomicAdd(sigma+7, sigma_zy);
+        atomicAdd(sigma+8, sigma_zz);
     }
 }
 
 extern "C" {
-#define eval_mgga_strain_kernel_case(li, lj, slice_i, slice_j) \
+#define eval_mgga_grad_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
-        eval_mgga_strain_kernel<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
-            out, dm, vxc, tau, *envs, bas_ij_idx, grid_frac_ranges, \
+        eval_mgga_grad_kernel<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
+            grad, sigma, dm, vxc, tau, *envs, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
             factor, negligible); \
     break
 
-int evaluate_mgga_strain(double *out, double *dm,
-                         double *vxc, double *tau, PBCIntEnvVars *envs,
-                         double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
-                         float2 *grid_frac_ranges, int *mesh, int npairs,
-                         double factor, double negligible)
+int evaluate_mgga_grad1(double *grad, double *sigma, double *dm,
+                       double *vxc, double *tau, PBCIntEnvVars *envs,
+                       double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
+                       float2 *grid_frac_ranges, int *mesh, int npairs,
+                       double factor, double negligible)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];
@@ -569,21 +586,21 @@ int evaluate_mgga_strain(double *out, double *dm,
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
     dim3 threads(16, 16);
     switch (li * LMAX1 + lj) {
-        eval_mgga_strain_kernel_case(0,0, 1, 1);
-        eval_mgga_strain_kernel_case(1,0, 3, 1);
-        eval_mgga_strain_kernel_case(1,1, 3, 3);
-        eval_mgga_strain_kernel_case(2,0, 6, 1);
-        eval_mgga_strain_kernel_case(2,1, 6, 3);
-        eval_mgga_strain_kernel_case(2,2, 6, 3);
-        eval_mgga_strain_kernel_case(3,0,10, 1);
-        eval_mgga_strain_kernel_case(3,1, 5, 3);
-        eval_mgga_strain_kernel_case(3,2, 5, 3);
-        eval_mgga_strain_kernel_case(3,3, 5, 4);
-        eval_mgga_strain_kernel_case(4,0, 8, 1);
-        eval_mgga_strain_kernel_case(4,1, 5, 3);
-        eval_mgga_strain_kernel_case(4,2, 5, 3);
-        eval_mgga_strain_kernel_case(4,3, 5, 4);
-        eval_mgga_strain_kernel_case(4,4, 5, 4);
+        eval_mgga_grad_kernel_case(0,0, 1, 1);
+        eval_mgga_grad_kernel_case(1,0, 3, 1);
+        eval_mgga_grad_kernel_case(1,1, 3, 3);
+        eval_mgga_grad_kernel_case(2,0, 6, 1);
+        eval_mgga_grad_kernel_case(2,1, 6, 3);
+        eval_mgga_grad_kernel_case(2,2, 6, 3);
+        eval_mgga_grad_kernel_case(3,0,10, 1);
+        eval_mgga_grad_kernel_case(3,1, 5, 3);
+        eval_mgga_grad_kernel_case(3,2, 5, 3);
+        eval_mgga_grad_kernel_case(3,3, 5, 3);
+        eval_mgga_grad_kernel_case(4,0, 8, 1);
+        eval_mgga_grad_kernel_case(4,1, 5, 3);
+        eval_mgga_grad_kernel_case(4,2, 5, 3);
+        eval_mgga_grad_kernel_case(4,3, 3, 5);
+        eval_mgga_grad_kernel_case(4,4, 3, 5);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

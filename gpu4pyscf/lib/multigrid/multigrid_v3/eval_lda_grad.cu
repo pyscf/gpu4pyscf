@@ -129,12 +129,12 @@ void eval_lda_grad_kernel(double *out, double *dm,
     }
     __syncthreads();
 
-    double v_ix = 0;
-    double v_iy = 0;
-    double v_iz = 0;
-    double v_jx = 0;
-    double v_jy = 0;
-    double v_jz = 0;
+    double grad_ix = 0;
+    double grad_iy = 0;
+    double grad_iz = 0;
+    double grad_jx = 0;
+    double grad_jy = 0;
+    double grad_jz = 0;
 
 #pragma unroll
     for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
@@ -199,9 +199,9 @@ void eval_lda_grad_kernel(double *out, double *dm,
                     rhoy += s * i_deriv1[i+nfi  ];
                     rhoz += s * i_deriv1[i+nfi*2];
                 }
-                v_ix -= rhox * v;
-                v_iy -= rhoy * v;
-                v_iz -= rhoz * v;
+                grad_ix -= rhox * v;
+                grad_iy -= rhoy * v;
+                grad_iz -= rhoz * v;
 
                 rhox = 0;
                 rhoy = 0;
@@ -217,9 +217,9 @@ void eval_lda_grad_kernel(double *out, double *dm,
                     rhoy += s * j_deriv1[j+nfj  ];
                     rhoz += s * j_deriv1[j+nfj*2];
                 }
-                v_jx -= rhox * v;
-                v_jy -= rhoy * v;
-                v_jz -= rhoz * v;
+                grad_jx -= rhox * v;
+                grad_jy -= rhoy * v;
+                grad_jz -= rhoz * v;
 
                 x += c_dxyz_dabc[0];
                 y += c_dxyz_dabc[1];
@@ -271,9 +271,9 @@ void eval_lda_grad_kernel(double *out, double *dm,
                     rhoy += s * i_deriv1[i+nfi  ];
                     rhoz += s * i_deriv1[i+nfi*2];
                 }
-                v_ix -= rhox * v;
-                v_iy -= rhoy * v;
-                v_iz -= rhoz * v;
+                grad_ix -= rhox * v;
+                grad_iy -= rhoy * v;
+                grad_iz -= rhoz * v;
 
                 rhox = 0;
                 rhoy = 0;
@@ -289,21 +289,21 @@ void eval_lda_grad_kernel(double *out, double *dm,
                     rhoy += s * j_deriv1[j+nfj  ];
                     rhoz += s * j_deriv1[j+nfj*2];
                 }
-                v_jx -= rhox * v;
-                v_jy -= rhoy * v;
-                v_jz -= rhoz * v;
+                grad_jx -= rhox * v;
+                grad_jy -= rhoy * v;
+                grad_jz -= rhoz * v;
             }
         } }
     } }
 
     __syncthreads();
     for (int offset = 16; offset > 0; offset >>= 1) {
-        v_ix += __shfl_down_sync(0xffffffff, v_ix, offset);
-        v_iy += __shfl_down_sync(0xffffffff, v_iy, offset);
-        v_iz += __shfl_down_sync(0xffffffff, v_iz, offset);
-        v_jx += __shfl_down_sync(0xffffffff, v_jx, offset);
-        v_jy += __shfl_down_sync(0xffffffff, v_jy, offset);
-        v_jz += __shfl_down_sync(0xffffffff, v_jz, offset);
+        grad_ix += __shfl_down_sync(0xffffffff, grad_ix, offset);
+        grad_iy += __shfl_down_sync(0xffffffff, grad_iy, offset);
+        grad_iz += __shfl_down_sync(0xffffffff, grad_iz, offset);
+        grad_jx += __shfl_down_sync(0xffffffff, grad_jx, offset);
+        grad_jy += __shfl_down_sync(0xffffffff, grad_jy, offset);
+        grad_jz += __shfl_down_sync(0xffffffff, grad_jz, offset);
     }
     int lane = thread_id % WARP_SIZE;
     int ish_cell0 = ish;
@@ -312,12 +312,12 @@ void eval_lda_grad_kernel(double *out, double *dm,
     int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
     int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
     if (lane == 0) {
-        atomicAdd(out+ia*3+0, v_ix);
-        atomicAdd(out+ia*3+1, v_iy);
-        atomicAdd(out+ia*3+2, v_iz);
-        atomicAdd(out+ja*3+0, v_jx);
-        atomicAdd(out+ja*3+1, v_jy);
-        atomicAdd(out+ja*3+2, v_jz);
+        atomicAdd(out+ia*3+0, grad_ix);
+        atomicAdd(out+ia*3+1, grad_iy);
+        atomicAdd(out+ia*3+2, grad_iz);
+        atomicAdd(out+ja*3+0, grad_jx);
+        atomicAdd(out+ja*3+1, grad_jy);
+        atomicAdd(out+ja*3+2, grad_jz);
     }
 }
 

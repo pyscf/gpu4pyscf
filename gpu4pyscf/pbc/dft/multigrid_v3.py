@@ -53,6 +53,7 @@ from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.tools import k2gamma, get_coulG
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
+from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
@@ -185,8 +186,7 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
         if err != 0:
             raise RuntimeError('contract_orth_aopair_coulG kernel failed')
 
-    # See get_Gv_weights
-    weight = abs(np.linalg.det(b)) / (2*np.pi)**3
+    weight = abs(np.linalg.det(b)) / (2*np.pi)**3 # = get_Gv_weights
     vxc_mat *= weight
     return vxc_mat
 
@@ -207,8 +207,7 @@ def _aft_eval_gradient(ni, dm_sc, vxcG):
         vtauG = vtauG.reshape(ni.mesh)
         kern = libmgrid.orth_aft_mgga_grad
 
-    # See get_Gv_weights
-    weight = abs(np.linalg.det(b)) / (2*np.pi)**3
+    weight = abs(np.linalg.det(b)) / (2*np.pi)**3 # = get_Gv_weights
 
     nkpts = len(ni.bvkmesh_Ls)
     weight /= nkpts
@@ -250,66 +249,6 @@ def _aft_eval_gradient(ni, dm_sc, vxcG):
             raise RuntimeError('contract_orth_aopair_coulG kernel failed')
     return gradient
 
-def _aft_eval_strain(ni, dm_sc, vxcG):
-    cell = ni.sorted_cell
-    bvkcell = ni.bvkcell
-
-    a = bvkcell.lattice_vectors()
-    b = cell.reciprocal_vectors()
-
-    if isinstance(vxcG, cp.ndarray):
-        vrhoG = vxcG.reshape(ni.mesh)
-        vtauG = None
-        kern = libmgrid.orth_aft_lda_strain
-    else:
-        vrhoG, vtauG = vxcG
-        vrhoG = vrhoG.reshape(ni.mesh)
-        vtauG = vtauG.reshape(ni.mesh)
-        kern = libmgrid.orth_aft_mgga_strain
-
-    # See get_Gv_weights
-    weight = abs(np.linalg.det(b)) / (2*np.pi)**3
-
-    nkpts = len(ni.bvkmesh_Ls)
-    weight /= nkpts
-
-    sigma = cp.zeros((3, 3))
-
-    for bucket in ni.aft_buckets:
-        mesh = bucket['mesh']
-        mesh_cum = cp.array(np.append(0, np.cumsum(mesh)), dtype=np.int32)
-        nimgs = bucket['nimgs']
-        nimgs_cum = cp.array(np.append(0, np.cumsum(nimgs*2+1)), dtype=np.int32)
-        # In real space formula, VxcG in reciprocal space is first IFFT to real
-        # space. Here, AFT integrals for -G are identical to the inverse FT.
-        Gx, Gy, Gz = _get_Gv_bases(mesh, b)
-        G_bases = -cp.hstack([Gx[0], Gy[1], Gz[2]])
-        L_bases = _get_L_bases(nimgs, a)
-
-        bas_ij_idx = bucket['bas_ij_idx']
-
-        sub_vrhoG = _take_4d(vrhoG, mesh)
-        sub_vtauG = sub_vrhoG
-        if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh)
-        err = kern(
-            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sub_vrhoG.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sub_vtauG.data.ptr, ctypes.c_void_p),
-            ctypes.byref(ni.mg_envs),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(G_bases.data.ptr, ctypes.c_void_p),
-            ctypes.cast(L_bases.data.ptr, ctypes.c_void_p),
-            ctypes.cast(mesh_cum.data.ptr, ctypes.c_void_p),
-            ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
-            (ctypes.c_int*3)(*mesh),
-            ctypes.c_int(len(bas_ij_idx)),
-            ctypes.c_double(weight))
-        if err != 0:
-            raise RuntimeError('contract_orth_aopair_coulG kernel failed')
-    return sigma
-
 def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
     cell = ni.sorted_cell
     if ni.aft_buckets is not None:
@@ -330,6 +269,7 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
     else:
         kern = libmgrid.evaluate_tau
         work1 = cp.empty_like(rhoG)
+
     mg_envs = ni.mg_envs
 
     tile_info = None
@@ -400,8 +340,6 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
         vxc_mat = ndarray((nkpts, nao, nao), dtype=np.float64, buffer=out)
         vxc_mat.fill(0.)
 
-    a = cell.lattice_vectors()
-
     if isinstance(vxcG, cp.ndarray):
         vrhoG = vxcG.reshape(ni.mesh)
         vtauG = None
@@ -414,12 +352,13 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_mat_v2
 
+    a = cell.lattice_vectors()
+
     mg_envs = ni.mg_envs
 
     fft_buckets = ni.fft_buckets or []
     for bucket in fft_buckets:
         mesh = bucket['mesh']
-
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
@@ -489,7 +428,6 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
     for bucket in fft_buckets:
         assert bucket['grid_tile_cache'] is not None
         mesh = bucket['mesh']
-
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
@@ -538,9 +476,6 @@ def _eval_gradient(ni, dm_sc, vxcG, work=None):
     else:
         gradient = cp.zeros((cell.natm, 3))
 
-    a = cell.lattice_vectors()
-    nkpts = len(ni.bvkmesh_Ls)
-
     if isinstance(vxcG, cp.ndarray):
         vrhoG = vxcG.reshape(ni.mesh)
         vtauG = None
@@ -553,14 +488,15 @@ def _eval_gradient(ni, dm_sc, vxcG, work=None):
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_grad
 
+    a = cell.lattice_vectors()
+    nkpts = len(ni.bvkmesh_Ls)
+    weight = 1./nkpts
+
     mg_envs = ni.mg_envs
 
     fft_buckets = ni.fft_buckets or []
     for bucket in fft_buckets:
         mesh = bucket['mesh']
-
-        weight = 1. / nkpts
-
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
@@ -599,18 +535,81 @@ def _eval_gradient(ni, dm_sc, vxcG, work=None):
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return gradient
 
-def _eval_strain(ni, dm_sc, vxcG, work=None):
+def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
+    '''
+    Evaluate energy gradients wrt atomic positions and strain gradients
+    together.
+
+    Note, contents of vxcG will be destroyed in this function
+    '''
+    cell = ni.sorted_cell
+    gradient = cp.zeros((cell.natm, 3))
+    sigma = cp.zeros((3, 3))
+
+    if isinstance(vxcG, cp.ndarray):
+        vrhoG = vxcG.reshape(ni.mesh)
+        vtauG = None
+        work = ndarray((3,vrhoG.size), dtype=np.float64, buffer=work)
+        kern = libmgrid.evaluate_lda_grad1
+    else:
+        vrhoG, vtauG = vxcG
+        vrhoG = vrhoG.reshape(ni.mesh)
+        vtauG = vtauG.reshape(ni.mesh)
+        work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
+        kern = libmgrid.evaluate_mgga_grad1
+
+    a = cell.lattice_vectors()
+    nkpts = len(ni.bvkmesh_Ls)
+    weight = 1./nkpts
+
+    mg_envs = ni.mg_envs
+
+    for bucket in fft_buckets:
+        mesh = bucket['mesh']
+        dxyz_dabc = a / mesh[:,None]
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+
+        # _take_4d does not always make a copy. In the last bucket, the contents
+        # of vrhoG will be overwritten by ifft_in_place
+        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
+        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
+        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
+        sub_vtauR = sub_vrhoR # placeholder
+
+        if vtauG is not None:
+            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
+            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
+            sub_vtauR[:] = ifft_in_place(sub_vtauG).real
+
+        for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
+                bucket['lij_patterns'], bucket['bas_ij_cache'],
+                bucket['grid_ranges_cache']):
+            if len(bas_ij_idx) == 0: continue
+            err = kern(
+                ctypes.cast(gradient.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
+                ctypes.byref(mg_envs),
+                dxyz_dabc.ctypes,
+                ctypes.c_int(li),
+                ctypes.c_int(lj),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
+                (ctypes.c_int*3)(*mesh),
+                ctypes.c_int(len(bas_ij_idx)),
+                ctypes.c_double(weight),
+                ctypes.c_double(bucket['negligible']))
+            if err != 0:
+                raise RuntimeError('evaluate_xc_grad kernel failed')
+    return gradient, sigma
+
+def _eval_strain(ni, dm_sc, vxcG, fft_buckets, work=None):
     '''Note, contents of vxcG will be destroyed in this function
     '''
     cell = ni.sorted_cell
-    if ni.aft_buckets is not None:
-        sigma = _aft_eval_strain(ni, dm_sc, vxcG)
-    else:
-        sigma = cp.zeros((3, 3))
-
-    a = cell.lattice_vectors()
-    vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
+    sigma = cp.zeros((3, 3))
 
     if isinstance(vxcG, cp.ndarray):
         vrhoG = vxcG.reshape(ni.mesh)
@@ -624,15 +623,14 @@ def _eval_strain(ni, dm_sc, vxcG, work=None):
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_strain
 
+    a = cell.lattice_vectors()
+    nkpts = len(ni.bvkmesh_Ls)
+    weight = 1./nkpts
+
     mg_envs = ni.mg_envs
 
-    fft_buckets = ni.fft_buckets or []
     for bucket in fft_buckets:
         mesh = bucket['mesh']
-        ngrids = np.prod(mesh)
-
-        weight = vol / ngrids / nkpts
-
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
@@ -688,7 +686,6 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     '''Estimate the FFT energy cutoff and the spread of each orbital pair
     in real space'''
     cell = ni.sorted_cell
-    b = cell.reciprocal_vectors(norm_to=1)
     # Some orbitals may require high Ecut, sometimes higher than ni.ke_cutoff.
     # Use ke_max to limit the highest Ecut. This ensures that these orbital
     # pairs are included in the last bucket in _partition_ke_for_fft.
@@ -761,7 +758,7 @@ def mesh_to_ke(a, mesh):
     gs = np.asarray(mesh) / 2
     Gmax = gs * np.array([rx, ry, rz])
     ke_cutoff = Gmax**2 / 2
-    return ke_cutoff.min()
+    return ke_cutoff
 
 def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     cell = ni.sorted_cell
@@ -784,7 +781,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     buckets = []
 
     ke_lower, ke_upper = 0, init_ke
-    while ke_lower < ke_max:
+    while ke_lower <= ke_max:
         mesh = np.where(mesh < mesh_final, mesh, mesh_final)
         filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
         if len(filtered_pairs) > 0:
@@ -810,7 +807,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
 
         mesh = (mesh * 0.75).astype(np.int32) * 2
         mesh[mesh < 8] = 8
-        ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
+        ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh).min()
     return buckets
 
 def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
@@ -889,7 +886,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
         # For very small initial mesh, such as [2,2,2], mesh*1.2 may not
         # increase the mesh, causing the loop stuck
         mesh[mesh < 8] = 8
-        ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh)
+        ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh).min()
     return buckets
 
 def _non_trivial_bvk_pairs(ni, precision):
@@ -989,41 +986,40 @@ def _grid_range_to_tile_info_converter(fft_buckets, cell):
 
     nimgs = cell.nimgs
     nbas = cell.nbas
+
     def tile_info(bas_ij_idx, grid_range, mesh):
-        return _group_pairs_in_tile(bas_ij_idx, grid_range, nimgs, mesh, nbas, work, work1)
+        npairs = len(bas_ij_idx)
+        assert npairs > 0
+        tile_counts = work[-1:]
+        err = libmgrid.grid_range_to_tiles(
+            ctypes.cast(work.data.ptr, ctypes.c_void_p),
+            ctypes.cast(work1.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_range.data.ptr, ctypes.c_void_p),
+            (ctypes.c_int*3)(*nimgs),
+            (ctypes.c_int*3)(*mesh),
+            ctypes.c_int(npairs),
+            ctypes.c_int(nbas),
+            ctypes.cast(tile_counts.data.ptr, ctypes.c_void_p))
+        if err != 0:
+            raise RuntimeError('grid_range_to_tiles failed')
+        n = int(tile_counts[0].get())
+        assert n < 2**31, 'int32 indexing in shl_pair_offsets'
+
+        sorted_idx = cp.argsort(work[:n])
+        grid_tile_idx = work[sorted_idx]
+        shl_pair_offsets = _segment_offsets(grid_tile_idx)
+
+        # TODO: Partition large segments in shell_pair_offsets for better load
+        # balance.
+
+        # Store only the unique grid tile ids.
+        grid_tile_idx = grid_tile_idx[shl_pair_offsets[:-1]]
+
+        dressed_bas_ij = work1[sorted_idx]
+        return grid_tile_idx, dressed_bas_ij, shl_pair_offsets
+
     return tile_info
-
-def _group_pairs_in_tile(bas_ij_idx, grid_range, nimgs, mesh, nbas, work, work1):
-    npairs = len(bas_ij_idx)
-    assert npairs > 0
-    tile_counts = work[-1:]
-    err = libmgrid.grid_range_to_tiles(
-        ctypes.cast(work.data.ptr, ctypes.c_void_p),
-        ctypes.cast(work1.data.ptr, ctypes.c_void_p),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grid_range.data.ptr, ctypes.c_void_p),
-        (ctypes.c_int*3)(*nimgs),
-        (ctypes.c_int*3)(*mesh),
-        ctypes.c_int(npairs),
-        ctypes.c_int(nbas),
-        ctypes.cast(tile_counts.data.ptr, ctypes.c_void_p))
-    if err != 0:
-        raise RuntimeError('grid_range_to_tiles failed')
-    n = int(tile_counts[0].get())
-    assert n < 2**31, 'int32 indexing in shl_pair_offsets'
-
-    sorted_idx = cp.argsort(work[:n])
-    grid_tile_idx = work[sorted_idx]
-    shl_pair_offsets = _segment_offsets(grid_tile_idx)
-
-    # TODO: Further divide large entry in shell_pair_offsets for better
-    # load balance.
-
-    # Store only the unique grid tile ids.
-    grid_tile_idx = grid_tile_idx[shl_pair_offsets[:-1]]
-
-    dressed_bas_ij = work1[sorted_idx]
-    return grid_tile_idx, dressed_bas_ij, shl_pair_offsets
 
 def fft_in_place(x):
     return fft.fftn(x, axes=(-3, -2, -1), overwrite_x=True)
@@ -1396,28 +1392,16 @@ def get_nuc(ni, kpts=None):
 
     ni._ensure_initialized(kpts, 'LDA')
 
-    vneG = _eval_nucG(cell, ni.mesh)
+    mesh = ni.mesh
+    ZSI = _get_ZSI(cell, mesh)
+    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+    vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
+
     vne = _eval_xc_mat(ni, vneG)
     vne = _inverse_wannier_transform_fock(ni, vne, kpts)
     if is_single_kpt:
         vne = vne[0]
     return vne
-
-def _eval_nucG(cell, mesh, out=None):
-    '''Nuclear attraction potential on Gv'''
-    assert cell.dimension == 3
-    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-    coords = cp.asarray(cell.atom_coords())
-    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
-    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
-    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
-    SIx *= cp.asarray(-cell.atom_charges())[:,None]
-    rho_xy = SIx[:,:,None] * SIy[:,None,:]
-    mesh = [x.shape[1] for x in Gv_bases]
-    out = ndarray(mesh, dtype=np.complex128, buffer=out)
-    nuc_density = contract('qxy,qz->xyz', rho_xy, SIz, out=out)
-    nucG = _get_coulomb_in_place(nuc_density, Gv_bases)[1]
-    return nucG.ravel()
 
 def get_pp(ni, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
@@ -1542,7 +1526,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
             xc_code, density, deriv=1, xctype=xctype, spin=0, inplace=True)[:2]
 
-        xc_for_fock *= weight
         xc_for_fock = xc_for_fock.reshape(nvar, *mesh)
 
         xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).get()) * weight
@@ -1560,6 +1543,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             coulomb_on_g_mesh.fill(0)
         rhoG = None
 
+        xc_for_fock *= weight
         # Now xc_for_fock represents xc on G space
         xc_for_fock = _vxc_to_reciprocal_space(
             xc_for_fock, coulomb_on_g_mesh, Gv_bases, work=tauG)
@@ -1656,7 +1640,6 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     xc_for_energy, xc_for_fock = ni.eval_xc_eff(
         xc_code, density, deriv=1, xctype=xctype, spin=1, inplace=True)[:2]
 
-    xc_for_fock *= weight
     xc_for_fock = xc_for_fock.reshape(2, nvar, *mesh)
 
     xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).get()) * weight
@@ -1664,6 +1647,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
     t0 = log.timer_debug1("eval_xc_eff", *t0)
 
+    xc_for_fock *= weight
     if with_j:
         ecoul, coulomb_a = _get_coulomb_in_place(rhoG_sf, Gv_bases)
         ecoul = (.5 / vol) * float(ecoul.get())
@@ -1792,11 +1776,6 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         b = cell.reciprocal_vectors(norm_to=1)
         libmgrid.update_lattice_vectors(a.ctypes, b.ctypes)
 
-        # Scaling factors for mesh grids, make the mesh resolution along each
-        # axis is proportional to the corresponding cell dimension.
-        b_norm = np.linalg.norm(b, axis=1)
-        mesh_scale = np.prod(b_norm)**(1./3) / b_norm
-
         # a penalty to encounter for lattice sum
         rad = cell.rcut / bvkcell.vol**(1./3) + 1
         surface = 4*np.pi * rad**2
@@ -1814,7 +1793,10 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         mesh = self.mesh
         self.ke_cutoff = max(0.1, mesh_to_ke(a, mesh).min())
 
-        if self.enable_aft and is_orth_lattice and nimgs > 40:
+        init_ke = mesh_to_ke(a, [16]*3).max()
+        log.debug1('initial ke_cutoff = %g', init_ke)
+
+        if self.enable_aft and is_orth_lattice and nimgs > 30:
             # Estimate Ecut for AFT integrals. These can be potentially handled by
             # aft_eval_* functions.
             # Use self.ke_cutoff to limit the highest Ecut. This ensures to handle
@@ -1822,17 +1804,16 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             aft_Ecut = _aft_Ecut_estimation(
                 self, bas_ij_idx, self.ke_cutoff, precision, xctype)
 
-            aft_init_ke = mesh_to_ke(a, (16 * mesh_scale + 1e-4).astype(np.int32))
             # aft_final_ke based on system size
-            final_ke_fac = nimgs / 40
-            aft_final_ke = aft_init_ke * final_ke_fac
+            final_ke_fac = max(nimgs / 40, 1.)
+            aft_final_ke = init_ke * final_ke_fac
             log.debug1('aft init_ke_cutoff = %g, final_ke_cutoff = %g (%.2fx)',
-                       aft_init_ke, aft_final_ke, final_ke_fac)
+                       init_ke, aft_final_ke, final_ke_fac)
             self.aft_buckets = _partition_ke_for_aft(
-                self, bas_ij_idx, aft_Ecut, aft_init_ke, aft_final_ke, xctype, log)
+                self, bas_ij_idx, aft_Ecut, init_ke, aft_final_ke, xctype, log)
 
-            # Filter shell pairs that are not handled by AFT. The remaining pairs
-            # are handled by FFT.
+            # Filter shell pairs that are not handled by AFT. Using FFT code for
+            # the remaining pairs.
             if self.aft_buckets:
                 aft_ke_max = self.aft_buckets[-1]['ke_cutoff']
                 if aft_ke_max < self.ke_cutoff:
@@ -1840,10 +1821,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
                 else:
                     bas_ij_idx = None
 
-            fft_init_ke = aft_final_ke * 1.5
-        else:
-            fft_init_ke = mesh_to_ke(a, (16 * mesh_scale + 1e-4).astype(np.int32))
-        log.debug1('fft initial ke_cutoff = %g', fft_init_ke)
+            init_ke = aft_final_ke * 1.5
 
         if bas_ij_idx is not None and len(bas_ij_idx) > 0:
             # bas_ij_idx are the effective paris between cell0 and bvkcell.
@@ -1851,7 +1829,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             # Every bvkcell shell in bas_ij_idx needs to be unpacked to several
             # primitive shells in supmol.
             self.fft_buckets = _partition_ke_for_fft(
-                self, bas_ij_idx, fft_init_ke, precision, xctype, log)
+                self, bas_ij_idx, init_ke, precision, xctype, log)
 
             nimgs = cell.nimgs
             Tx = np.arange(-nimgs[0], nimgs[0]+1, dtype=np.float64)
@@ -1943,6 +1921,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
             rho1 = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
 
+            # rho1 has been scaled by (ngrids/cell.vol)
             wv = cp.einsum('xg,xyg->yg', rho1, fxc).reshape(nvar, *mesh)
             rho1 = None
 
@@ -2072,7 +2051,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[1])
         rhoG = tauG = None
 
-        density *= ngrids / cell.vol
+        weight = cell.vol / ngrids
+        density *= 1./weight
         vxc, fxc = self.eval_xc_eff(xc_code, density, deriv=2, xctype=xctype,
                                     spin=spin, inplace=True)[1:3]
         return None, vxc, fxc
@@ -2134,7 +2114,10 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             if cell._pseudo:
                 coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh, out=tauG)
             else:
-                coulomb_on_g_mesh += _eval_nucG(cell, mesh, rhoG, out=tauG)
+                ZSI = _get_ZSI(cell, mesh, out=tauG)
+                vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
+                coulomb_on_g_mesh += vneG.reshape(mesh)
+                ZSI = vneG = None
         tauG = None
 
         # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
@@ -2142,9 +2125,9 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         density *= 1/weight
         vxc = self.eval_xc_eff(
             xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)[1]
-        vxc *= weight
         vxc = vxc.reshape(n_dm, nvar, *mesh)
 
+        vxc *= weight
         if n_dm == 1: # RHF
             vxc = _vxc_to_reciprocal_space(vxc[0], coulomb_on_g_mesh, Gv_bases)
             gradient = _eval_gradient(self, dm_sc, vxc)
@@ -2157,7 +2140,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             vxc_b = _vxc_to_reciprocal_space(vxc[1], vxc_b, Gv_bases)
             gradient += _eval_gradient(self, dm_sc[1], vxc_b)
 
-        t0 = log.timer("xc", *t0)
+        t0 = log.timer("xc energy gradients", *t0)
         return gradient
 
     def energy_strain_gradient(self, xc_code, dm_kpts, kpts=None, with_j=False,
@@ -2171,10 +2154,9 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
                 Whether to include the contribution from the local part of
                 pseudo-potential or electron-nuclear Coulomb interactions
         '''
-        from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
         from gpu4pyscf.pbc.grad.rks_stress import (
-            _get_coulG_strain_derivatives)
-        from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
+            _get_vpplocG_strain_derivatives,
+            _get_pp_nonloc_strain_derivatives)
 
         cell = self.cell
         log = logger.new_logger(cell)
@@ -2190,7 +2172,6 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         ngrids = np.prod(mesh)
         vol = cell.vol
         weight_0 = vol / ngrids
-        weight_1 = cp.eye(3) * weight_0
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
@@ -2199,6 +2180,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
             spin = 0
 
+            density *= 1/weight_0
             rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
             rho_sf[:] = density[0].real
 
@@ -2213,55 +2195,111 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             rhoGb = None
             spin = 1
 
+            density *= 1/weight_0
             rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
             rho_sf[:] = density[0].real
             rho_sf[:] += density[1].real
 
-        density *= 1/weight_0
         exc, vxc = self.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)[:2]
-        vxc *= weight_0
-        vxc = vxc.reshape(n_dm, nvar, *mesh)
+            xc_code, density, deriv=1, xctype=xctype, spin=spin)[:2]
 
-        sigma = rho_sf.dot(exc.ravel()) * weight_1
+        # grid weight response
+        sigma = rho_sf.dot(exc.ravel()) * weight_0 * cp.eye(3)
+
+        if xctype == 'GGA' or xctype == 'MGGA':
+            # The response of grids wrt the lattice vectors introduces an extra
+            # term r_t in the Vxc integral:
+            #     integrate[(\nabla_s rho) Vxc[r] r_t] .
+            # When applying _vxc_to_reciprocal_space to Vxc, the Fourier
+            # transform also needs to be performed on r_t, leading to an
+            # additional term in the integral:
+            #     sigma_st ~ \sum_i (nabla_s rho) Vxc[r]_i \nabla_i r_t
+            #                 = (nabla_s rho) Vxc[r]_t
+            vxc = vxc.reshape(n_dm, nvar, ngrids)
+            density = density.reshape(n_dm, nvar, ngrids)
+            for s in range(n_dm):
+                sigma -= cp.einsum('xg,yg->xy', density[s,1:4], vxc[s,1:4]) * weight_0
+
         density = exc = rho_sf = None
 
         if with_j:
             Gv = cp.asarray(cell.get_Gv())
-            coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
-            sigma += cp.einsum('xyg,g->xy', coulG_1, rhoG.conj()*rhoG).real.get() * (weight_0/ngrids)
+            G2 = cp.einsum('gx,gx->g', Gv, Gv)
+            G2[0] = np.inf
+            coulG_0 = 4 * np.pi / G2
+            coulGxy = cp.einsum('gx,gy->xyg', Gv, Gv)
+            coulGxy *= coulG_0
+            coulG_1 = coulGxy * 2/G2
+            sigma += cp.einsum('xyg,g,g->xy', coulG_1,
+                               rhoG.ravel().conj(),
+                               rhoG.ravel()).real * (0.5 / vol)
 
-            ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases)
+            ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG.copy(), Gv_bases)
             ecoul = (.5 / vol) * ecoul
-            sigma += ecoul * weight_1
+            # grid weight response
+            sigma += ecoul * cp.eye(3)
         else:
-            coulomb_on_g_mesh = rhoG
-            coulomb_on_g_mesh.fill(0.)
-        rhoG = None
+            coulomb_on_g_mesh = cp.zeros_like(rhoG)
 
         if with_nuc:
             if cell._pseudo:
-                coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh, out=tauG)
+                vpplocG_0, vpplocG_1 = _get_vpplocG_strain_derivatives(cell, mesh)
+                sigma += cp.einsum('g,xyg->xy', rhoG.ravel().conj(), vpplocG_1).real * (1./vol)
+                sigma += cp.array(_get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts))
+                coulomb_on_g_mesh += vpplocG_0.reshape(mesh)
             else:
-                coulomb_on_g_mesh += _eval_nucG(cell, mesh, out=tauG)
+                Gv = cp.asarray(cell.get_Gv())
+                G2 = cp.einsum('gx,gx->g', Gv, Gv)
+                G2[0] = np.inf
+                coulG_0 = 4 * np.pi / G2
+                coulGxy = cp.einsum('gx,gy->xyg', Gv, Gv)
+                coulGxy *= coulG_0
+                coulG_1 = coulGxy * 2/G2
+                ZSI = _get_ZSI(cell, mesh, out=tauG)
+                sigma += cp.einsum('xyg,g->xy', coulG_1,
+                                   rhoG.ravel().conj()*ZSI).real * (1./vol)
+
+                vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
+                coulomb_on_g_mesh += vneG.reshape(mesh)
+                ZSI = vneG = None
+        rhoG = tauG = None
 
         sigma = cp.asarray(sigma)
 
-        rhoG = tauG = None
+        # Reconstruct fft_buckets if aft_buckets is initialized. In this case,
+        # self.fft_buckets miss orbital pairs with low Ecut.
+        if self.aft_buckets is None:
+            fft_buckets = self.fft_buckets
+        else:
+            rad = cell.rcut / self.bvkcell.vol**(1./3) + 1
+            surface = 4*np.pi * rad**2
+            lattice_sum_factor = surface
+            log.debug1('lattice_sum_factor = %g', lattice_sum_factor)
+            precision = cell.precision / lattice_sum_factor
+            bas_ij_idx = _non_trivial_bvk_pairs(self, precision)
+            init_ke = mesh_to_ke(cell.lattice_vectors(), [16]*3).max()
+            fft_buckets = _partition_ke_for_fft(
+                self, bas_ij_idx, init_ke, precision, xctype, log)
+
+        vxc *= weight_0
+        vxc = vxc.reshape(n_dm, nvar, *mesh)
 
         if n_dm == 1: # RHF
             vxc = _vxc_to_reciprocal_space(vxc[0], coulomb_on_g_mesh, Gv_bases)
-            sigma += _eval_strain(self, dm_sc, vxc)
+            grad1, sigma1 = _eval_gradients(self, dm_sc, vxc, fft_buckets)
+            sigma += sigma1
         else:
             vxc_a, coulomb_on_g_mesh = coulomb_on_g_mesh, None
             vxc_b = vxc_a.copy()
             vxc_a = _vxc_to_reciprocal_space(vxc[0], vxc_a, Gv_bases)
-            sigma += _eval_strain(self, dm_sc[0], vxc_a)
-            vxc_a = None
             vxc_b = _vxc_to_reciprocal_space(vxc[1], vxc_b, Gv_bases)
-            sigma += _eval_strain(self, dm_sc[1], vxc_b)
+            vxc = None
+            grad1, sigma1 = _eval_gradients(self, dm_sc[0], vxc_a, fft_buckets)
+            sigma += sigma1
+            grad1, sigma1 = _eval_gradients(self, dm_sc[1], vxc_b, fft_buckets)
+            sigma += sigma1
 
-        t0 = log.timer("xc", *t0)
+        t0 = log.timer("xc strain derivatives", *t0)
         return sigma
 
     to_cpu = NotImplemented
