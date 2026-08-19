@@ -121,7 +121,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True,
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
 
-    omega, lr_factor, sr_factor = _check_rsh_factors(self.mol, omega, lr_factor, sr_factor)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
     if omega == 0:
         vj, vk = vhfopt.get_jk(dms, hermi, log)
