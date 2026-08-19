@@ -229,7 +229,7 @@ class Gradients(uhf_grad.Gradients):
     def energy_ee(self, mol, dm):
         return self.jk_energy_per_atom(dm, hermi=1)
 
-    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1,
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, *,
                            omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
         '''
@@ -238,9 +238,14 @@ class Gradients(uhf_grad.Gradients):
         '''
         mf = self.base
         if dm is None: dm = mf.make_rdm1()
+        mol = mf.with_df.mol
+        auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory
+        with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
+            sorted_mol = SortedMole.from_mol(mol, decontract=True)
+            int3c2e_opt = Int3c2eOpt(sorted_mol, auxmol).build()
         return _jk_energy_per_atom(
-            mf.with_df.intopt, dm, j_factor, k_factor, hermi=hermi,
+            int3c2e_opt, dm, j_factor, k_factor, hermi=hermi,
             auxbasis_response=self.auxbasis_response, verbose=verbose,
             omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 

@@ -775,7 +775,7 @@ def _factorize_j2c(auxmol, aux_sorting=None, omega=None, lr_factor=None, sr_fact
     original_auxmol = auxmol.mol
     j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     w, v = cp.linalg.eigh(j2c)
-    is_lr_coulomb = omega > 0
+    is_lr_coulomb = omega is not None and omega > 0
     if ((is_lr_coulomb or original_auxmol.cart) and
         w[0] < df.LINEAR_DEP_THR):
         v = v[:,w>df.LINEAR_DEP_THR]

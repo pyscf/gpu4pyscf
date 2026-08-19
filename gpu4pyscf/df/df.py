@@ -68,6 +68,7 @@ class DF(lib.StreamObject):
         self._cderi_idx = None
         self._cd_j2c = None
         self._rsh_df = {}
+        self._rsh_parameters = None
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('intopt', '_cderi'))
@@ -104,7 +105,7 @@ class DF(lib.StreamObject):
         intopt.mol = SortedMole.from_mol(mol, decontract=True)
         intopt.build()
         if build_cderi:
-            self._rsh = (omega, lr_factor, sr_factor)
+            self._rsh_parameters = (omega, lr_factor, sr_factor)
             self._cderi, self._cderi_idx = _cholesky_eri(
                 intopt, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor,
                 use_gpu_memory=self.use_gpu_memory)
@@ -172,8 +173,9 @@ class DF(lib.StreamObject):
         assert lr_factor is None and sr_factor is None
 
         with self.range_coulomb(omega) as dfobj:
-            assert dfobj._rsh == (omega, lr_factor, sr_factor)
-            if with_j and (omega is not None or omega != 0):
+            if getattr(dfobj, '_rsh_parameters', None):
+                assert dfobj._rsh_parameters == (omega, lr_factor, sr_factor)
+            if with_j and (omega is not None and omega != 0):
                 raise RuntimeError(
                     'Cannot compute J matrix with a range-separated Coulomb operator. '
                     'J is only supported with the standard Coulomb operator (omega=0).')
@@ -291,6 +293,7 @@ class DF(lib.StreamObject):
         self._cderi_idx = None
         self._cd_j2c = None
         self._rsh_df = {}
+        self._rsh_parameters = None
         return self
 
     @contextlib.contextmanager

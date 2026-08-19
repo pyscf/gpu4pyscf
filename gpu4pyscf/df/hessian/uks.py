@@ -90,7 +90,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     h1mo = df_uhf_hess._get_veff(intopt, mo_coeff, mo_occ, 1., hyb)
 
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        veff_lr = df_uhf_hess._get_veff(intopt, mo_coeff, mo_occ, 0., alpha-hyb, omega)
+        veff_lr = df_uhf_hess._get_veff(intopt, mo_coeff, mo_occ, 0., alpha-hyb,
+                                        omega=omega)
         h1mo[0] += veff_lr[0]
         h1mo[1] += veff_lr[1]
 
