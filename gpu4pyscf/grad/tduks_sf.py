@@ -461,7 +461,9 @@ class Gradients(tduhf_grad.Gradients):
         return grad_elec(self, xy, atmlst, self.verbose)
 
     def jk_energies_per_atom(
-        self, dm_list, j_factor=None, k_factor=None, omega=0, hermi=0, sum_results=False, verbose=None
+        self, dm_list, j_factor=None, k_factor=None,
+        *, omega=None, lr_factor=None, sr_factor=None,
+        hermi=0, sum_results=False, verbose=None
     ):
         """
         Computes a set of first-order derivatives of J/K contributions for each
@@ -497,7 +499,9 @@ class Gradients(tduhf_grad.Gradients):
                 vhfopt = mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
         if isinstance(dm_list, cp.ndarray) and dm_list.ndim == 2:
             dm_list = dm_list[None]
-        ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor, sum_results, verbose)
+        ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor,
+                                    omega=omega, lr_factor=lr_factor, sr_factor=sr_factor,
+                                    sum_results=sum_results, verbose=verbose)
         return ejk
 
 
