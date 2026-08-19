@@ -43,6 +43,10 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
         assert omega is None or omega == 0
         return _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi, verbose)
 
+    if j_factor is not None and (omega is not None and omega != 0):
+        raise RuntimeError(
+            'Cannot compute J contributions with range-separated Coulomb operator.')
+
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
@@ -334,6 +338,10 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
         assert omega is None or omega == 0
         return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor,
                                     sum_results, verbose)
+
+    if j_factor is not None and (omega is not None and omega != 0):
+        raise RuntimeError(
+            'Cannot compute J contributions with range-separated Coulomb operator.')
 
     mol = int3c2e_opt.mol
     dm_factors = [_factorize_multiple_dm(mol, dm1_dm2, hermi=0)
@@ -819,10 +827,12 @@ class Gradients(tdrhf_grad.Gradients):
             if not isinstance(hermi, int):
                 hermi = all(x == 1 for x in hermi)
             return _jk_energy_per_atom(
-                int3c2e_opt, dm_list, j_factor, k_factor, hermi, verbose=verbose)
+                int3c2e_opt, dm_list, j_factor, k_factor, hermi,
+                omega, lr_factor, sr_factor, verbose=verbose)
 
         ejk = _jk_energies_per_atom(
-            int3c2e_opt, dm_list, j_factor, k_factor, sum_results, verbose=verbose)
+            int3c2e_opt, dm_list, j_factor, k_factor, sum_results,
+            verbose=verbose, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
         return ejk
 
 Grad = Gradients

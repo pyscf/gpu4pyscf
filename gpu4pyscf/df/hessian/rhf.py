@@ -45,12 +45,47 @@ num_devices = multi_gpu.num_devices
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
                         omega=None, lr_factor=None, sr_factor=None, verbose=None):
-    '''
-    Computes the first-order derivatives of the energy contributions from
-    J and K terms per atom.
+    r'''Compute the second-order derivatives of the Coulomb and exchange
+    energies with respect to atomic positions.
+
+        j_factor * J - k_factor * K
+
+    Parameters
+    ----------
+    int3c2e_opt : gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt object
+        Handler for DF integrals computation.
+    dm : ndarray
+        Density matrix or (for UKS) a sequence of density matrices.
+    j_factor : float, optional
+        Scaling factor applied to the Coulomb (J) contribution.
+    k_factor : float, optional
+        Scaling factor applied to the exchange (K) contribution.
+    omega : float, optional
+        Range-separation parameter. Together with ``lr_factor`` and
+        ``sr_factor``, defines the range-separated Coulomb operator used in
+        exchange (K) matrix evaluation:
+            lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+    lr_factor : float, optional
+        Scaling factor for the long-range interaction,
+    sr_factor : float, optional
+        Scaling factor for the short-range interaction,
+
+    Notes
+    -----
+    When omega, lr_factor, and sr_factor parameters are specified, the K
+    contribution is evaluated using the attenuated Coulomb operator.
+
+    Returns
+    -------
+    Array of shape ``(natm, natm, 3, 3)``.
     '''
     if k_factor == 0:
+        assert omega is None or omega == 0
         return _j_energy_per_atom(int3c2e_opt, dm, verbose) * j_factor
+
+    if j_factor != 0 and (omega is not None and omega != 0):
+        raise RuntimeError(
+            'Cannot compute J contributions with range-separated Coulomb operator.')
 
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
@@ -328,7 +363,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
                 contract('r,s->rs', _auxvec, _auxvec, j_factor, 1, dm_aux)
             # (00|0)(2|0)(0|00)
             ejk_aux = _int2c2e_ip2_per_atom(
-                auxmol, dm_aux[_aux_sorting[:,None], _aux_sorting], omega)
+                auxmol, dm_aux[_aux_sorting[:,None], _aux_sorting], omega,
+                lr_factor, sr_factor)
             ejk -= ejk_aux
 
             j2c_ip2 = None
@@ -779,9 +815,6 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
-
-    if omega is None:
-        omega = mol.omega
 
     ao_idx = mol.get_ao_idx()
     mo_coeff = mol.apply_C_dot(mo_coeff, axis=0)

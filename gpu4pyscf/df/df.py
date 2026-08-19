@@ -104,6 +104,7 @@ class DF(lib.StreamObject):
         intopt.mol = SortedMole.from_mol(mol, decontract=True)
         intopt.build()
         if build_cderi:
+            self._rsh = (omega, lr_factor, sr_factor)
             self._cderi, self._cderi_idx = _cholesky_eri(
                 intopt, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor,
                 use_gpu_memory=self.use_gpu_memory)
@@ -112,6 +113,55 @@ class DF(lib.StreamObject):
 
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True, direct_scf_tol=None,
                omega=None, lr_factor=None, sr_factor=None):
+        r'''Compute Coulomb (J) and exchange (K) matrices.
+
+        Parameters
+        ----------
+        mol : pyscf.gto.Mole
+            Mole object that defines the basis set and molecular geometry.
+        dm : ndarray or sequence of ndarray
+            Density matrix or a sequence of density matrices. If multiple density
+            matrices are provided, the corresponding J and K matrices are computed
+            for each input density matrix.
+        hermi : int, optional
+            Symmetry of the density matrix:
+            - ``0``: no symmetry
+            - ``1``: Hermitian
+            - ``2``: anti-Hermitian
+        with_j : bool, optional
+            Whether to compute the Coulomb (J) matrix. If ``False``, the returned
+            J matrix is ``None``.
+        with_k : bool, optional
+            Whether to compute the exchange (K) matrix. If ``False``, the returned
+            K matrix is ``None``.
+        omega : float, optional
+            Range-separation parameter. Together with ``lr_factor`` and
+            ``sr_factor``, defines the range-separated Coulomb operator used in
+            exchange (K) matrix evaluation:
+                lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+        lr_factor : float, optional
+            Scaling factor for the long-range interaction,
+        sr_factor : float, optional
+            Scaling factor for the short-range interaction,
+        direct_scf_tol : float, optional
+            Deprecated. Retained for backward compatibility only.
+
+        Notes
+        -----
+        When omega, lr_factor, and sr_factor parameters are specified, the K matrix
+        is computed using the attenuated Coulomb operator. The J matrix is not
+        available in this mode. Requesting both J and K will raise an error.
+
+        Returns
+        -------
+        (vj, vk)
+        vj : ndarray or sequence of ndarray or None
+            Coulomb matrices. The returned object has the same shape as the input
+            density matrices. Returns ``None`` if ``with_j`` is ``False``.
+        vk : ndarray or sequence of ndarray or None
+            Exchange matrices. The returned object has the same shape as the input
+            density matrices. Returns ``None`` if ``with_k`` is ``False``.
+        '''
         if not with_k and self._cderi is None:
             assert omega is None or omega == 0
             return df_jk.get_j(self, dm, hermi), None
@@ -121,10 +171,12 @@ class DF(lib.StreamObject):
         # Temporarily disable this feature for backward compatibility.
         assert lr_factor is None and sr_factor is None
 
-        if lr_factor is not None or sr_factor is not None:
-            assert not with_j
-
         with self.range_coulomb(omega) as dfobj:
+            assert dfobj._rsh == (omega, lr_factor, sr_factor)
+            if with_j and (omega is not None or omega != 0):
+                raise RuntimeError(
+                    'Cannot compute J matrix with a range-separated Coulomb operator. '
+                    'J is only supported with the standard Coulomb operator (omega=0).')
             return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k,
                                 omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 

@@ -70,6 +70,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         return _j_energy_per_atom(int3c2e_opt, dm, hermi, auxbasis_response,
                                   verbose) * j_factor
 
+    if j_factor != 0 and (omega is not None and omega != 0):
+        raise RuntimeError(
+            'Cannot compute J contributions with range-separated Coulomb operator.')
+
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
@@ -348,9 +352,44 @@ class Gradients(rhf_grad.Gradients):
     def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1,
                            omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
-        '''
-        Computes the first-order derivatives of the energy per atom for
-        j_factor * J_derivatives - k_factor * K_derivatives
+        r'''Compute the first-order derivatives of the Coulomb and exchange
+        energies with respect to atomic positions.
+
+            j_factor * dE_J / dR - k_factor * dE_K / dR
+
+        Parameters
+        ----------
+        dm : ndarray or sequence of ndarray, optional
+            Density matrix or (for UKS) a sequence of density matrices.
+        j_factor : float, optional
+            Scaling factor applied to the Coulomb (J) contribution.
+        k_factor : float, optional
+            Scaling factor applied to the exchange (K) contribution.
+        omega : float, optional
+            Range-separation parameter. Together with ``lr_factor`` and
+            ``sr_factor``, defines the range-separated Coulomb operator used in
+            exchange (K) matrix evaluation:
+                lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+        lr_factor : float, optional
+            Scaling factor for the long-range interaction,
+        sr_factor : float, optional
+            Scaling factor for the short-range interaction,
+        hermi : int, optional
+            Symmetry of the density matrix:
+            - ``0``: no symmetry
+            - ``1``: Hermitian
+            - ``2``: anti-Hermitian
+
+        Notes
+        -----
+        When omega, lr_factor, and sr_factor parameters are specified, the K
+        contribution is evaluated using the attenuated Coulomb operator.
+
+        Returns
+        -------
+        Array of shape ``(natm, 3)`` containing the derivative of the weighted
+        Coulomb and exchange energy with respect to the Cartesian coordinates of
+        each atom.
         '''
         mf = self.base
         if dm is None: dm = mf.make_rdm1()

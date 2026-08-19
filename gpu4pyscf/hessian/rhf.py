@@ -244,10 +244,13 @@ def _hess_nuc_without_ecp(mol, dm0):
     de *= 2
     return de
 
-def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=None):
+def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
+                     omega=None, lr_factor=None, sr_factor=None,
+                     verbose=None):
     '''Compute the energy per atom for
         j_factor * J_derivatives - k_factor * K_derivatives
     '''
+    assert omega is None or omega == 0
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:

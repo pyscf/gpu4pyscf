@@ -57,11 +57,14 @@ libvhf_rys.RYS_per_atom_jk_ip1.restype = ctypes.c_int
 #     dd_cache_size = nf * min(THREADS, _nearest_power2(SHM_SIZE//(g_size*3*8)))
 DD_CACHE_MAX = 101250 * (SHM_SIZE//(45*1024))
 
-def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
+def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
+                        omega=None, lr_factor=None, sr_factor=None,
+                        verbose=None):
     '''
     Computes the first-order derivatives of the energy per atom for
     j_factor * J_derivatives - k_factor * K_derivatives
     '''
+    assert omega is None or omega == 0
     log = logger.new_logger(vhfopt.mol, verbose)
     cput0 = log.init_timer()
     mol = vhfopt.sorted_mol
@@ -570,11 +573,47 @@ class Gradients(GradientsBase):
     def energy_ee(self, mol, dm):
         return self.jk_energy_per_atom(dm)
 
-    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1,
+                           omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
-        '''
-        Computes the first-order derivatives of the energy per atom for
-        j_factor * J_derivatives - k_factor * K_derivatives
+        r'''Compute the first-order derivatives of the Coulomb and exchange
+        energies with respect to atomic positions.
+
+            j_factor * dE_J / dR - k_factor * dE_K / dR
+
+        Parameters
+        ----------
+        dm : ndarray or sequence of ndarray, optional
+            Density matrix or (for UKS) a sequence of density matrices.
+        j_factor : float, optional
+            Scaling factor applied to the Coulomb (J) contribution.
+        k_factor : float, optional
+            Scaling factor applied to the exchange (K) contribution.
+        omega : float, optional
+            Range-separation parameter. Together with ``lr_factor`` and
+            ``sr_factor``, defines the range-separated Coulomb operator used in
+            exchange (K) matrix evaluation:
+                lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+        lr_factor : float, optional
+            Scaling factor for the long-range interaction,
+        sr_factor : float, optional
+            Scaling factor for the short-range interaction,
+        hermi : int, optional
+            Symmetry of the density matrix:
+            - ``0``: no symmetry
+            - ``1``: Hermitian
+            - ``2``: anti-Hermitian
+
+        Notes
+        -----
+        When omega, lr_factor, and sr_factor parameters are specified, the K
+        contribution is evaluated using the attenuated Coulomb operator.
+
+        Returns
+        -------
+        Array of shape ``(natm, 3)`` containing the derivative of the weighted
+        Coulomb and exchange energy with respect to the Cartesian coordinates of
+        each atom.
         '''
         if dm is None: dm = self.base.make_rdm1()
         mf = self.base
@@ -585,6 +624,7 @@ class Gradients(GradientsBase):
             with mol.with_range_coulomb(omega):
                 vhfopt = mf._opt_gpu[omega] = _VHFOpt(
                     mol, mf.direct_scf_tol).build()
-        return _jk_energy_per_atom(vhfopt, dm, j_factor, k_factor, verbose)
+        return _jk_energy_per_atom(vhfopt, dm, j_factor, k_factor,
+                                   omega, lr_factor, sr_factor, verbose)
 
 Grad = Gradients
