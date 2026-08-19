@@ -16,7 +16,6 @@
 3-center 2-electron Coulomb integral helper functions
 '''
 
-from functools import lru_cache
 import ctypes
 import math
 import numpy as np
@@ -32,6 +31,7 @@ from gpu4pyscf.lib.cupy_helper import (
     load_library, contract, dist_matrix, asarray, hermi_triu, transpose_sum,
     ndarray)
 from gpu4pyscf.lib.utils import splits_by_blocksize
+from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedMole, RysIntEnvVars, extract_pgto_params, groupby)
 from gpu4pyscf.scf.jk import (
@@ -544,7 +544,6 @@ class Int3c2eEnvVars(ctypes.Structure):
         return Int3c2eEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc,
                                   self.log_cutoff)
 
-@lru_cache
 def int3c2e_scheme(*, short_range=False, shm_size=SHM_SIZE, gout_width=None,
                    gout_ndim='ijk', deriv=None, cache_cart_idx=False,
                    angular_inc=None):
