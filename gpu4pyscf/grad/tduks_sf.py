@@ -462,7 +462,7 @@ class Gradients(tduhf_grad.Gradients):
 
     def jk_energies_per_atom(
         self, dm_list, j_factor=None, k_factor=None,
-        *, omega=None, lr_factor=None, sr_factor=None,
+        omega=None, lr_factor=None, sr_factor=None,
         hermi=0, sum_results=False, verbose=None
     ):
         """

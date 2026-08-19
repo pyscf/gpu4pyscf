@@ -291,7 +291,7 @@ def as_scanner(td_grad, state=1):
                          (TDSCF_GradScanner, td_grad.__class__), name)
 
 def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
-                          *, omega=None, lr_factor=None, sr_factor=None,
+                          omega=None, lr_factor=None, sr_factor=None,
                           sum_results=False, verbose=None):
     '''
     Computes a set of first-order derivatives of J/K contributions for each
@@ -582,7 +582,7 @@ class Gradients(rhf_grad.GradientsBase):
         return mf_grad.grad_nuc(mol, atmlst)
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None,
-                           *, omega=None, lr_factor=None, sr_factor=None,
+                           omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
         '''
         Computes the sum of first-order derivatives of J/K contributions for
