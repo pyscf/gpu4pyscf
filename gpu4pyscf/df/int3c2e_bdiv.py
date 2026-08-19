@@ -544,7 +544,6 @@ class Int3c2eEnvVars(ctypes.Structure):
         return Int3c2eEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc,
                                   self.log_cutoff)
 
-@multi_gpu.lru_cache
 def int3c2e_scheme(*, short_range=False, shm_size=SHM_SIZE, gout_width=None,
                    gout_ndim='ijk', deriv=None, cache_cart_idx=False,
                    angular_inc=None):
