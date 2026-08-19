@@ -250,7 +250,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
     '''Compute the energy per atom for
         j_factor * J_derivatives - k_factor * K_derivatives
     '''
-    assert omega is None or omega == 0
+    assert lr_factor is None and sr_factor is None
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:

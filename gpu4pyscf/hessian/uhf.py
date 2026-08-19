@@ -372,8 +372,6 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
     mf = hessobj.base
     omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
     vj = vk = None
-    if omega is None:
-        omega = mol.omega
     nao = dms.shape[-1]
     dms = dms.reshape(-1,nao,nao)
     n_dm = len(dms)

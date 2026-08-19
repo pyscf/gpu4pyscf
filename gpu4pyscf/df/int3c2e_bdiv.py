@@ -765,10 +765,14 @@ def _create_pair_recontraction(mol, int3c2e_context):
     return recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses
 
 def int3c2e_scheme_ip1(omega=0, gout_width=None):
+    if omega is None:
+        omega = 0
     return int3c2e_scheme(
         short_range=omega<0, gout_width=gout_width, deriv=(1,0,0))
 
 def int3c2e_scheme_ipaux(omega=0, gout_width=None):
+    if omega is None:
+        omega = 0
     return int3c2e_scheme(
         short_range=omega<0, gout_width=gout_width, deriv=(0,0,1))
 

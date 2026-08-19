@@ -64,7 +64,7 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
     Computes the first-order derivatives of the energy per atom for
     j_factor * J_derivatives - k_factor * K_derivatives
     '''
-    assert omega is None or omega == 0
+    assert lr_factor is None and sr_factor is None
     log = logger.new_logger(vhfopt.mol, verbose)
     cput0 = log.init_timer()
     mol = vhfopt.sorted_mol

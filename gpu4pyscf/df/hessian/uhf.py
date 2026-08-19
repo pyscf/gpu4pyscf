@@ -469,6 +469,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
     ao_idx = mol.get_ao_idx()
     mo_coeff = mol.apply_C_dot(mo_coeff, axis=1)
     mo_coeff = mo_coeff[:,ao_idx]

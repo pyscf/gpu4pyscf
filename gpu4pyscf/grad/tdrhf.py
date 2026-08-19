@@ -314,7 +314,7 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         sum_results : bool
             If True, aggregate all sets of derivatives into a single result.
     '''
-    assert omega is None or omega == 0
+    assert lr_factor is None and sr_factor is None
     log = logger.new_logger(vhfopt.mol, verbose)
     cput0 = log.init_timer()
     mol = vhfopt.sorted_mol
