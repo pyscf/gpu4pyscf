@@ -23,16 +23,16 @@ from pyscf import lib
 from pyscf.pbc.grad import krhf as krhf_cpu
 from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
-from gpu4pyscf.pbc.dft import UniformGrids
+from gpu4pyscf.pbc.dft import UniformGrids, BeckeGrids
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.tools.pbc import get_coulG
-from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, jk_energy_per_atom
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
