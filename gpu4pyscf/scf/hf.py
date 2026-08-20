@@ -692,6 +692,34 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
         self._last_mol_fp = mol.ao_loc
         return e_tot
 
+
+def make_rdm2(mo_coeff, mo_occ, **kwargs):
+    '''Two-particle density matrix in AO representation
+
+    NOTE the indices of the two-particle density matrix is ordered to
+
+    dm2[p,q,r,s] = <q^+ s^+ r p>.
+
+    HF energy can be computed
+    E = einsum('pq,qp', hcore, 1pdm) + einsum('pqrs,pqrs', eri, 2pdm) / 2
+    where h1[p,q] = <p|h|q> and eri[p,q,r,s] = (pq|rs)
+to make the density matrix consistent with the density matrix obtained
+    from post-HF methods,
+
+    Args:
+        mo_coeff : 2D ndarray
+            Orbital coefficients. Each column is one orbital.
+        mo_occ : 1D ndarray
+            Occupancy
+    Returns:
+        Two-particle density matrix, 4D ndarray
+    '''
+    dm1 = make_rdm1(mo_coeff, mo_occ, **kwargs)
+    dm2 = (cupy.einsum('ij,kl->ijkl', dm1, dm1)
+         - cupy.einsum('ij,kl->iklj', dm1, dm1)/2)
+    return dm2
+
+
 class SCF(pyscf_lib.StreamObject):
 
     # attributes
@@ -843,7 +871,6 @@ class SCF(pyscf_lib.StreamObject):
     init_guess_by_chkfile    = return_cupy_array(hf_cpu.SCF.init_guess_by_chkfile)
     from_chk                 = return_cupy_array(hf_cpu.SCF.from_chk)
     get_init_guess           = hf_cpu.SCF.get_init_guess
-    make_rdm2                = NotImplemented
     energy_elec              = NotImplemented
     energy_tot               = energy_tot
     energy_nuc               = hf_cpu.SCF.energy_nuc
@@ -899,6 +926,11 @@ class SCF(pyscf_lib.StreamObject):
         if mo_occ is None: mo_occ = self.mo_occ
         if mo_coeff is None: mo_coeff = self.mo_coeff
         return make_rdm1(mo_coeff, mo_occ)
+
+    def make_rdm2(self, mo_coeff=None, mo_occ=None, **kwargs):
+        if mo_occ is None: mo_occ = self.mo_occ
+        if mo_coeff is None: mo_coeff = self.mo_coeff
+        return make_rdm2(mo_coeff, mo_occ)
 
     def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
                    verbose=logger.NOTE):
