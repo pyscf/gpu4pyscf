@@ -24,6 +24,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.pbc.dft import BeckeGrids
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 __all__ = ['Gradients']
@@ -36,6 +37,9 @@ def energy_ee(ks_grad, dm, kpts):
 
     if ks_grad.grid_response:
         raise NotImplementedError
+
+    if isinstance(mf.grids, BeckeGrids):
+        raise NotImplementedError('gradients for BeckeGrids not supported')
 
     ni = mf._numint
     omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)

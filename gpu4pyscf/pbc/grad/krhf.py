@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
-from gpu4pyscf.pbc.dft import UniformGrids, BeckeGrids
+from gpu4pyscf.pbc.dft import UniformGrids
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc import tools
@@ -69,9 +69,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     # derivatives of the two-electron contribution
     e2_grad = mf_grad.energy_ee(dm0, kpts)
     t1 = log.timer('gradients of 2e part', *t0)
-
-    if isinstance(mf.grids, BeckeGrids):
-        raise NotImplementedError('gradients for BeckeGrids not supported')
 
     ni = mf._numint
     if isinstance(ni, multigrid.MultiGridNumInt):
