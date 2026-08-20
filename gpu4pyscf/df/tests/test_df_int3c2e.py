@@ -517,6 +517,7 @@ def test_cholesky_eri_rsh():
 
     with_df = mf.with_df.build(omega=omega, lr_factor=lr_factor,
                                sr_factor=sr_factor)
+    with_df._cderi[0] = cp.vstack([cp.asarray(x) for x in with_df._cderi])
     i, j = cp.tril_indices(mol.nao)
     for cderi, _ in with_df.loop():
         cderi = cderi[:,i,j]
@@ -524,10 +525,12 @@ def test_cholesky_eri_rsh():
     assert abs(out.get()-ref).max() < .5e-4
 
     with_df = mf.with_df.build(omega=0)
+    with_df._cderi[0] = cp.vstack([cp.asarray(x) for x in with_df._cderi])
     for cderi, _ in with_df.loop():
         cderi = cderi[:,i,j]
         out = cderi.T.dot(cderi) * sr_factor
     with_df = mf.with_df.build(omega=omega)
+    with_df._cderi[0] = cp.vstack([cp.asarray(x) for x in with_df._cderi])
     for cderi, _ in with_df.loop():
         cderi = cderi[:,i,j]
         out += cderi.T.dot(cderi) * (lr_factor - sr_factor)
@@ -543,6 +546,7 @@ def test_cholesky_eri_rsh():
 
     with_df = mf.with_df.build(omega=omega, lr_factor=lr_factor,
                                sr_factor=sr_factor)
+    with_df._cderi[0] = cp.vstack([cp.asarray(x) for x in with_df._cderi])
     for cderi, _ in with_df.loop():
         cderi = cderi[:,i,j]
         out = cderi.T.dot(cderi)
