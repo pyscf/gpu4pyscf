@@ -22,9 +22,9 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, get_avail_mem, empty_aligned)
+from gpu4pyscf.lib.utils import nearest_power2
 from gpu4pyscf.df.int3c2e_bdiv import (
-    _split_l_ctr_pattern, get_ao_pair_loc, _nearest_power2,
-    SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
+    _split_l_ctr_pattern, get_ao_pair_loc, SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
 from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_kpts
@@ -78,6 +78,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free - 2*naux*nocc**2*8 - nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8*bvk_ncells))))
+    assert batch_size < POOL_SIZE
     eval_j3c, _, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, cart=True)
     aux_batches = len(aux_offsets) - 1
@@ -306,14 +307,17 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
-    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, 1000000)
-    ao_pair_loc = get_ao_pair_loc(cell.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache, cart=True)
-
     l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
     l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
         l_ctr_aux_offsets, auxcell.uniq_l_ctr, batch_size)
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
+
+    nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
+    shl_pair_batch_size = nearest_power2(POOL_SIZE // nksh_per_batch.max())
+    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+        int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
+    ao_pair_loc = get_ao_pair_loc(cell.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache, cart=True)
 
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
