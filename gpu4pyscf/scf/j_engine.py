@@ -48,7 +48,29 @@ libvhf_md.dm_to_Rt.restype = ctypes.c_int
 libvhf_md.Rt_to_dm.restype = ctypes.c_int
 
 def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
-    '''Compute J matrix
+    r'''Compute Coulomb (J) matrix.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Mole object that defines the basis set and molecular geometry.
+    dm : ndarray or sequence of ndarray
+        Density matrix or a sequence of density matrices. If multiple density
+        matrices are provided, the corresponding J and K matrices are computed
+        for each input density matrix.
+    hermi : int, optional
+        Symmetry of the density matrix:
+        - ``0``: no symmetry
+        - ``1``: Hermitian
+        - ``2``: anti-Hermitian
+    vhfopt : gpu4ypscf.scf.j_engine._VHFOpt object, optional
+        Handler for J matrix computation.
+
+    Returns
+    -------
+    vj : ndarray or sequence of ndarray
+        Exchange matrices. The returned object has the same shape as the input
+        density matrices.
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()

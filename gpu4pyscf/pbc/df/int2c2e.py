@@ -38,12 +38,13 @@ __all__ = [
 
 libpbc.fill_int2c2e.restype = ctypes.c_int
 
-def int2c2e(auxcell, kpts=None, bvk_kmesh=None, omega=None):
+def int2c2e(auxcell, kpts=None, bvk_kmesh=None,
+            omega=None, lr_factor=None, sr_factor=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
     opt = Int2c2eOpt(auxcell, bvk_kmesh)
-    return opt.int2c2e(kpts, omega=omega)
+    return opt.int2c2e(kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
 def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     if omega > 0:
@@ -59,18 +60,22 @@ def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
         auxcell.rcut = rcut_backup
         auxcell.omega = omega_backup
 
-def int2c2e_ip1_per_atom(auxcell, dm, kpts=None, omega=None):
+def int2c2e_ip1_per_atom(auxcell, dm, kpts=None,
+                         omega=None, lr_factor=None, sr_factor=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     opt = Int2c2eOpt(auxcell)
-    return opt.energy_ip1_per_atom(dm, kpts, omega=omega)
+    return opt.energy_ip1_per_atom(
+        dm, kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
-def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True, omega=None):
+def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True,
+                omega=None, lr_factor=None, sr_factor=None):
     '''Derivatives of SR 2c2e Coulomb integrals for the first electronic
     coordinates'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
     opt = Int2c2eOpt(auxcell, bvk_kmesh)
-    return opt.int2c2e_ip1(kpts, sort_output=sort_output, omega=omega)
+    return opt.int2c2e_ip1(kpts, sort_output=sort_output,
+                           omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
 def _estimate_sr_2c2e_rcut(cell, omega, precision=None):
     '''Estimate rcut for SR int2c2e. cell.rcut is likely insufficient to
@@ -174,13 +179,14 @@ class Int2c2eOpt:
             idx = (img[:,None] * nbas + ijsh).ravel()
             bas_ij_cache[i, j] = cp.asarray(idx, dtype=np.uint32)
 
-    def int2c2e(self, kpts=None, sort_output=True, omega=None):
+    def int2c2e(self, kpts=None, sort_output=True,
+                omega=None, lr_factor=None, sr_factor=None):
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cell = self.cell
         bvk_kmesh = self.bvk_kmesh
         bvk_ncells = len(self.bvkmesh_Ls)
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, None, None)
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
         nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, gout_width=60)
         lmax = cell.uniq_l_ctr[:,0].max()
@@ -218,14 +224,15 @@ class Int2c2eOpt:
             out = contract('lk,lpq->kpq', expLk, out)
         return out
 
-    def int2c2e_ip1(self, kpts=None, sort_output=True, omega=None):
+    def int2c2e_ip1(self, kpts=None, sort_output=True,
+                    omega=None, lr_factor=None, sr_factor=None):
         '''Derivatives of 2c2e Coulomb integrals for first electronic
         coordinates'''
         assert kpts is None
         cell = self.cell
         bvk_ncells = len(self.bvkmesh_Ls)
         assert bvk_ncells == 1
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, None, None)
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
         shm_size = SHM_SIZE
         li = np.arange(L_AUX_MAX+1)[:,None]
@@ -282,12 +289,13 @@ class Int2c2eOpt:
             out = out[0]
         return out
 
-    def energy_ip1_per_atom(self, dm, kpts=None, omega=None):
+    def energy_ip1_per_atom(self, dm, kpts=None,
+                            omega=None, lr_factor=None, sr_factor=None):
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
         if self.bas_ij_cache is None:
             self.build()
         cell = self.cell
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, None, None)
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
         li = np.arange(L_AUX_MAX+1)[:,None]
         lj = np.arange(L_AUX_MAX+1)

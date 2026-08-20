@@ -75,7 +75,7 @@ class ROHF(hf.RHF):
 
     nelec = rohf_cpu.ROHF.nelec
     check_sanity = hf.SCF.check_sanity
-    get_jk = hf._get_jk
+    get_jk = hf.RHF.get_jk
     scf = kernel = hf.RHF.kernel
     # FIXME: Needs more tests for get_fock and get_occ
     get_occ = hf.return_cupy_array(rohf_cpu.ROHF.get_occ)
