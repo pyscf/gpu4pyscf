@@ -594,11 +594,17 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None):
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, 1000000)
 
     l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
+    l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
+        l_ctr_aux_offsets, auxcell.uniq_l_ctr, POOL_SIZE)
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
+
+    nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
+    shl_pair_batch_size = nearest_power2(POOL_SIZE // nksh_per_batch.max())
+    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+        int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
 
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)

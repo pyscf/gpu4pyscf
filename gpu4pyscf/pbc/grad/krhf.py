@@ -70,6 +70,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     e2_grad = mf_grad.energy_ee(dm0, kpts)
     t1 = log.timer('gradients of 2e part', *t0)
 
+    if isinstance(mf.grids, BeckeGrids):
+        raise NotImplementedError('gradients for BeckeGrids not supported')
+
     ni = mf._numint
     if isinstance(ni, multigrid.MultiGridNumInt):
         raise NotImplementedError(
@@ -96,8 +99,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
         dh1e = dh1e.get()
 
     if cell._pseudo:
-        dm0_cpu = dm0.get()
-        dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0_cpu, kpts = kpts)
+        dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0, kpts = kpts)
         dh1e += dh1e_pp_nonlocal
 
     log.timer('gradients of 1e part', *t1)
