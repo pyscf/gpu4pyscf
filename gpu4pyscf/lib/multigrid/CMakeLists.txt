@@ -34,18 +34,12 @@ add_library(mgrid_v3 SHARED
   #multigrid_v3/eval_mgga_mat.cu
   multigrid_v3/eval_lda_mat_v2.cu
   multigrid_v3/eval_mgga_mat_v2.cu
-  multigrid_v3/eval_lda_grad.cu
-  multigrid_v3/eval_mgga_grad.cu
-  multigrid_v3/eval_lda_strain.cu
-  multigrid_v3/eval_mgga_strain.cu
   multigrid_v3/eval_lda_strain_grad.cu
   multigrid_v3/eval_mgga_strain_grad.cu
   multigrid_v3/aft_eval_density.cu
   multigrid_v3/aft_eval_tau.cu
   multigrid_v3/aft_eval_lda_mat.cu
   multigrid_v3/aft_eval_mgga_mat.cu
-  multigrid_v3/aft_eval_lda_grad.cu
-  multigrid_v3/aft_eval_mgga_grad.cu
 )
 
 set_target_properties(mgrid_v3 PROPERTIES

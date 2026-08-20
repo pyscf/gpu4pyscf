@@ -426,7 +426,7 @@ extern "C" {
             factor, negligible); \
     break
 
-int evaluate_lda_grad1(double *grad, double *sigma, double *dm,
+int evaluate_lda_grad(double *grad, double *sigma, double *dm,
                       double *vxc, double *placeholder, PBCIntEnvVars *envs,
                       double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
                       float2 *grid_frac_ranges, int *mesh, int npairs,
@@ -458,7 +458,7 @@ int evaluate_lda_grad1(double *grad, double *sigma, double *dm,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in eval_lda_mat_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in eval_lda_grad_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

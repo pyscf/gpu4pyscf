@@ -190,65 +190,6 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
     vxc_mat *= weight
     return vxc_mat
 
-def _aft_eval_gradient(ni, dm_sc, vxcG):
-    cell = ni.sorted_cell
-    bvkcell = ni.bvkcell
-
-    a = bvkcell.lattice_vectors()
-    b = cell.reciprocal_vectors()
-
-    if isinstance(vxcG, cp.ndarray):
-        vrhoG = vxcG.reshape(ni.mesh)
-        vtauG = None
-        kern = libmgrid.orth_aft_lda_grad
-    else:
-        vrhoG, vtauG = vxcG
-        vrhoG = vrhoG.reshape(ni.mesh)
-        vtauG = vtauG.reshape(ni.mesh)
-        kern = libmgrid.orth_aft_mgga_grad
-
-    weight = abs(np.linalg.det(b)) / (2*np.pi)**3 # = get_Gv_weights
-
-    nkpts = len(ni.bvkmesh_Ls)
-    weight /= nkpts
-
-    gradient = cp.zeros((cell.natm, 3))
-
-    for bucket in ni.aft_buckets:
-        mesh = bucket['mesh']
-        mesh_cum = cp.array(np.append(0, np.cumsum(mesh)), dtype=np.int32)
-        nimgs = bucket['nimgs']
-        nimgs_cum = cp.array(np.append(0, np.cumsum(nimgs*2+1)), dtype=np.int32)
-        # In real space formula, VxcG in reciprocal space is first IFFT to real
-        # space. Here, AFT integrals for -G are identical to the inverse FT.
-        Gx, Gy, Gz = _get_Gv_bases(mesh, b)
-        G_bases = -cp.hstack([Gx[0], Gy[1], Gz[2]])
-        L_bases = _get_L_bases(nimgs, a)
-
-        bas_ij_idx = bucket['bas_ij_idx']
-
-        sub_vrhoG = _take_4d(vrhoG, mesh)
-        sub_vtauG = sub_vrhoG
-        if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh)
-        err = kern(
-            ctypes.cast(gradient.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sub_vrhoG.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sub_vtauG.data.ptr, ctypes.c_void_p),
-            ctypes.byref(ni.mg_envs),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(G_bases.data.ptr, ctypes.c_void_p),
-            ctypes.cast(L_bases.data.ptr, ctypes.c_void_p),
-            ctypes.cast(mesh_cum.data.ptr, ctypes.c_void_p),
-            ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
-            (ctypes.c_int*3)(*mesh),
-            ctypes.c_int(len(bas_ij_idx)),
-            ctypes.c_double(weight))
-        if err != 0:
-            raise RuntimeError('contract_orth_aopair_coulG kernel failed')
-    return gradient
-
 def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
     cell = ni.sorted_cell
     if ni.aft_buckets is not None:
@@ -467,14 +408,15 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
 
-def _eval_gradient(ni, dm_sc, vxcG, work=None):
-    '''Note, contents of vxcG will be destroyed in this function
+def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
+    '''
+    Evaluate nuclear gradients and strain gradients together.
+
+    Note, contents of vxcG will be destroyed in this function
     '''
     cell = ni.sorted_cell
-    if ni.aft_buckets is not None:
-        gradient = _aft_eval_gradient(ni, dm_sc, vxcG)
-    else:
-        gradient = cp.zeros((cell.natm, 3))
+    gradient = cp.zeros((cell.natm, 3))
+    sigma = cp.zeros((3, 3))
 
     if isinstance(vxcG, cp.ndarray):
         vrhoG = vxcG.reshape(ni.mesh)
@@ -487,76 +429,6 @@ def _eval_gradient(ni, dm_sc, vxcG, work=None):
         vtauG = vtauG.reshape(ni.mesh)
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_grad
-
-    a = cell.lattice_vectors()
-    nkpts = len(ni.bvkmesh_Ls)
-    weight = 1./nkpts
-
-    mg_envs = ni.mg_envs
-
-    fft_buckets = ni.fft_buckets or []
-    for bucket in fft_buckets:
-        mesh = bucket['mesh']
-        dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
-
-        # _take_4d does not always make a copy. In the last bucket, the contents
-        # of vrhoG will be overwritten by ifft_in_place
-        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
-        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
-        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
-        sub_vtauR = sub_vrhoR # placeholder
-
-        if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
-            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
-            sub_vtauR[:] = ifft_in_place(sub_vtauG).real
-
-        for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
-                bucket['lij_patterns'], bucket['bas_ij_cache'],
-                bucket['grid_ranges_cache']):
-            if len(bas_ij_idx) == 0: continue
-            err = kern(
-                ctypes.cast(gradient.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
-                ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
-                ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
-                ctypes.byref(mg_envs),
-                dxyz_dabc.ctypes,
-                ctypes.c_int(li),
-                ctypes.c_int(lj),
-                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
-                (ctypes.c_int*3)(*mesh),
-                ctypes.c_int(len(bas_ij_idx)),
-                ctypes.c_double(weight),
-                ctypes.c_double(bucket['negligible']))
-            if err != 0:
-                raise RuntimeError('evaluate_xc_mat kernel failed')
-    return gradient
-
-def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
-    '''
-    Evaluate energy gradients wrt atomic positions and strain gradients
-    together.
-
-    Note, contents of vxcG will be destroyed in this function
-    '''
-    cell = ni.sorted_cell
-    gradient = cp.zeros((cell.natm, 3))
-    sigma = cp.zeros((3, 3))
-
-    if isinstance(vxcG, cp.ndarray):
-        vrhoG = vxcG.reshape(ni.mesh)
-        vtauG = None
-        work = ndarray((3,vrhoG.size), dtype=np.float64, buffer=work)
-        kern = libmgrid.evaluate_lda_grad1
-    else:
-        vrhoG, vtauG = vxcG
-        vrhoG = vrhoG.reshape(ni.mesh)
-        vtauG = vtauG.reshape(ni.mesh)
-        work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
-        kern = libmgrid.evaluate_mgga_grad1
 
     a = cell.lattice_vectors()
     nkpts = len(ni.bvkmesh_Ls)
@@ -604,70 +476,6 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
             if err != 0:
                 raise RuntimeError('evaluate_xc_grad kernel failed')
     return gradient, sigma
-
-def _eval_strain(ni, dm_sc, vxcG, fft_buckets, work=None):
-    '''Note, contents of vxcG will be destroyed in this function
-    '''
-    cell = ni.sorted_cell
-    sigma = cp.zeros((3, 3))
-
-    if isinstance(vxcG, cp.ndarray):
-        vrhoG = vxcG.reshape(ni.mesh)
-        vtauG = None
-        work = ndarray((3,vrhoG.size), dtype=np.float64, buffer=work)
-        kern = libmgrid.evaluate_lda_strain
-    else:
-        vrhoG, vtauG = vxcG
-        vrhoG = vrhoG.reshape(ni.mesh)
-        vtauG = vtauG.reshape(ni.mesh)
-        work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
-        kern = libmgrid.evaluate_mgga_strain
-
-    a = cell.lattice_vectors()
-    nkpts = len(ni.bvkmesh_Ls)
-    weight = 1./nkpts
-
-    mg_envs = ni.mg_envs
-
-    for bucket in fft_buckets:
-        mesh = bucket['mesh']
-        dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
-
-        # _take_4d does not always make a copy. In the last bucket, the contents
-        # of vrhoG will be overwritten by ifft_in_place
-        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
-        sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
-        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
-        sub_vtauR = sub_vrhoR # placeholder
-
-        if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
-            sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
-            sub_vtauR[:] = ifft_in_place(sub_vtauG).real
-
-        for (li, lj), bas_ij_idx, grid_frac_ranges in zip(
-                bucket['lij_patterns'], bucket['bas_ij_cache'],
-                bucket['grid_ranges_cache']):
-            if len(bas_ij_idx) == 0: continue
-            err = kern(
-                ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
-                ctypes.cast(sub_vrhoR.data.ptr, ctypes.c_void_p),
-                ctypes.cast(sub_vtauR.data.ptr, ctypes.c_void_p),
-                ctypes.byref(mg_envs),
-                dxyz_dabc.ctypes,
-                ctypes.c_int(li),
-                ctypes.c_int(lj),
-                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
-                (ctypes.c_int*3)(*mesh),
-                ctypes.c_int(len(bas_ij_idx)),
-                ctypes.c_double(weight),
-                ctypes.c_double(bucket['negligible']))
-            if err != 0:
-                raise RuntimeError('evaluate_xc_mat kernel failed')
-    return sigma
 
 def _get_Gv_bases(mesh, b):
     Gx = cp.array(np.fft.fftfreq(mesh[0], 1./mesh[0]) * b[0,:,None])
@@ -1909,9 +1717,9 @@ def get_veff_ip1(
 ):
     raise DeprecationWarning
     nkpts = len(kpts) if kpts is not None else 1
-    grad = ni.energy_gradient(xc_code, dm_kpts, kpts, with_j,
-                              with_pseudo_vloc_orbital_derivative)
-    return grad / nkpts
+    grad = ni.energy_gradients(xc_code, dm_kpts, kpts, with_j,
+                               with_pseudo_vloc_orbital_derivative)[0]
+    return grad * nkpts
 
 class MultiGridNumInt(multigrid.MultiGridNumIntBase):
     # Enable analytical Fourier transforms (AFT), which are typically more
@@ -2255,95 +2063,11 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
     cache_xc_kernel = NotImplemented
 
-    def energy_gradient(self, xc_code, dm_kpts, kpts=None, with_j=False,
-                        with_nuc=False):
-        '''Computes the derivatives of the Exc along with additional contributions
-        from the Coulomb and pseudopotential terms.
-
-        Kwargs:
-            with_j :
-                Whether to include the electron-electron Coulomb interactions
-            with_nuc :
-                Whether to include the contribution from the local part of
-                pseudo-potential or electron-nuclear Coulomb interactions
-        '''
-        cell = self.cell
-        log = logger.new_logger(cell)
-        t0 = log.init_timer()
-
-        xctype = self._xc_type(xc_code)
-        nvar = _xc_var_length(xctype)
-
-        dm_sc = _wannier_transform_dm(self, dm_kpts, kpts, 1, xctype)
-        n_dm = len(dm_sc)
-
-        mesh = self.mesh
-        ngrids = np.prod(mesh)
-        weight = cell.vol / ngrids
-
-        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-
-        if n_dm == 1: # RHF
-            rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
-            density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
-            spin = 0
-
-        else: # UHF
-            rhoGa, tauGa = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
-            rhoGb, tauGb = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
-            density = cp.empty((2, nvar, ngrids))
-            _density_to_real_space(rhoGa, tauGa, Gv_bases, xctype, out=density[0])
-            _density_to_real_space(rhoGb, tauGb, Gv_bases, xctype, out=density[1])
-            rhoG = rhoGa
-            rhoG += rhoGb
-            rhoGa = rhoGb = tauGa = tauGb = None
-            spin = 1
-
-        if with_j:
-            coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases)[1]
-        else:
-            coulomb_on_g_mesh = rhoG
-            coulomb_on_g_mesh.fill(0.)
-        rhoG = None
-
-        if with_nuc:
-            if cell._pseudo:
-                vpplocG = multigrid.eval_vpplocG(cell, mesh, out=tauG)
-                coulomb_on_g_mesh += vpplocG.reshape(mesh)
-                vpplocG = None
-            else:
-                ZSI = _get_ZSI(cell, mesh, out=tauG)
-                vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
-                coulomb_on_g_mesh += vneG.reshape(mesh)
-                ZSI = vneG = None
-        tauG = None
-
-        # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
-        # computing rhoR with IFFT, the weight factor is not needed.
-        density *= 1/weight
-        vxc = self.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xctype, spin=spin, inplace=True)[1]
-        vxc = vxc.reshape(n_dm, nvar, *mesh)
-
-        vxc *= weight
-        if n_dm == 1: # RHF
-            vxc = _vxc_to_reciprocal_space(vxc[0], coulomb_on_g_mesh, Gv_bases)
-            gradient = _eval_gradient(self, dm_sc, vxc)
-        else:
-            vxc_a, coulomb_on_g_mesh = coulomb_on_g_mesh, None
-            vxc_b = vxc_a.copy()
-            vxc_a = _vxc_to_reciprocal_space(vxc[0], vxc_a, Gv_bases)
-            gradient = _eval_gradient(self, dm_sc[0], vxc_a)
-            vxc_a = None
-            vxc_b = _vxc_to_reciprocal_space(vxc[1], vxc_b, Gv_bases)
-            gradient += _eval_gradient(self, dm_sc[1], vxc_b)
-
-        t0 = log.timer("xc energy gradients", *t0)
-        return gradient
-
-    def energy_strain_gradient(self, xc_code, dm_kpts, kpts=None, with_j=False,
+    def energy_gradients(self, xc_code, dm_kpts, kpts=None, with_j=False,
                                with_nuc=False):
-        '''Strain derivatives for Coulomb and Exc with k-point samples
+        '''Computes the nuclear gradients and strain derivatives of Exc
+        along with additional contributions from the Coulomb and pseudopotential
+        terms.
 
         Kwargs:
             with_j :
@@ -2460,7 +2184,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
         if n_dm == 1: # RHF
             vxc = _vxc_to_reciprocal_space(vxc[0], coulomb_on_g_mesh, Gv_bases)
-            grad1, sigma1 = _eval_gradients(self, dm_sc, vxc, fft_buckets)
+            grad, sigma1 = _eval_gradients(self, dm_sc, vxc, fft_buckets)
             sigma += sigma1
         else:
             vxc_a, coulomb_on_g_mesh = coulomb_on_g_mesh, None
@@ -2468,13 +2192,14 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             vxc_a = _vxc_to_reciprocal_space(vxc[0], vxc_a, Gv_bases)
             vxc_b = _vxc_to_reciprocal_space(vxc[1], vxc_b, Gv_bases)
             vxc = None
-            grad1, sigma1 = _eval_gradients(self, dm_sc[0], vxc_a, fft_buckets)
+            grad, sigma1 = _eval_gradients(self, dm_sc[0], vxc_a, fft_buckets)
             sigma += sigma1
             grad1, sigma1 = _eval_gradients(self, dm_sc[1], vxc_b, fft_buckets)
+            grad += grad1
             sigma += sigma1
 
-        t0 = log.timer("xc strain derivatives", *t0)
-        return sigma
+        t0 = log.timer("xc gradients", *t0)
+        return grad, sigma.get()
 
     to_cpu = NotImplemented
     to_gpu = NotImplemented

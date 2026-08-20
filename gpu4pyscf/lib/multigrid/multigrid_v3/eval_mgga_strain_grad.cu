@@ -423,6 +423,9 @@ void eval_mgga_grad_kernel(double *grad, double *sigma, double *dm,
                 grad_jx -= rho_jx;
                 grad_jy -= rho_jy;
                 grad_jz -= rho_jz;
+                rho_ix += rho_jx;
+                rho_iy += rho_jy;
+                rho_iz += rho_jz;
 
                 double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
                 double i_deriv2[6*nfi];
@@ -572,7 +575,7 @@ extern "C" {
             factor, negligible); \
     break
 
-int evaluate_mgga_grad1(double *grad, double *sigma, double *dm,
+int evaluate_mgga_grad(double *grad, double *sigma, double *dm,
                        double *vxc, double *tau, PBCIntEnvVars *envs,
                        double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
                        float2 *grid_frac_ranges, int *mesh, int npairs,
@@ -604,7 +607,7 @@ int evaluate_mgga_grad1(double *grad, double *sigma, double *dm,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in eval_lda_mat_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in eval_mgga_grad_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
