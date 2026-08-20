@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 import itertools
 import ctypes
 from dataclasses import dataclass
@@ -1404,6 +1405,9 @@ class MultiGridNumIntBase(lib.StreamObject, numint.LibXCMixin):
 
 class MultiGridNumInt(MultiGridNumIntBase):
     def __init__(self, cell):
+        warnings.warn(
+            'multigrid is deprecated. Use multigrid_v3 instead',
+            DeprecationWarning, stacklevel=2)
         self.mesh = cell.mesh
         self.reset(cell)
 
@@ -1481,6 +1485,18 @@ class MultiGridNumInt(MultiGridNumIntBase):
     nr_rks_fxc_st = NotImplemented
     cache_xc_kernel  = NotImplemented
     cache_xc_kernel1 = NotImplemented
+
+    def energy_nuclear_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                                with_j=False, with_nuc=False):
+        raise NotImplementedError('Please use multigrid_v3.MultiGridNumInt instead.')
+
+    def energy_strain_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                               with_j=False, with_nuc=False):
+        raise NotImplementedError
+
+    def energy_derivatives(self, xc_code, dm_kpts, kpts=None, spin=None,
+                           with_j=False, with_nuc=False):
+        raise NotImplementedError('Please use multigrid_v3.MultiGridNumInt instead.')
 
     to_gpu = utils.to_gpu
     device = utils.device

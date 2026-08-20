@@ -142,9 +142,9 @@ class Gradients(GradientsBase):
         # TODO: handle all-electron+GGA and pseudo+GGA differently
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
         if j_in_xc:
-            de += ni_TO_FIX.get_veff_ip1(
-                ni, xc, dm, with_j=j_in_xc,
-                with_pseudo_vloc_orbital_derivative=True).get()
+            assert isinstance(ni, multigrid.MultiGridNumIntBase)
+            de += ni.energy_nuclear_gradient(
+                xc, dm, spin=0, with_j=j_in_xc, with_nuc=True)
             j_factor = 0
         elif xc.upper() != 'HF':
             from gpu4pyscf.pbc.grad.krks import get_vxc
@@ -180,13 +180,7 @@ class Gradients(GradientsBase):
 
         ni = mf._numint
         if isinstance(ni, multigrid.MultiGridNumIntBase):
-            rhoG = multigrid_v3_TO_FIX.evaluate_density_on_g_mesh(ni, dm0)
-            rhoG = rhoG[0,0]
-            if cell._pseudo:
-                de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
-            else:
-                de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
-
+            # Vne or pploc contribution is evaluated in energy_ee
             dh1e_kin = int1e.int1e_ipkin(cell)
             de -= contract_h1e_dm(cell, dh1e_kin, dm0, hermi=1)
         else:

@@ -269,6 +269,15 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
 
     return rhoG, tauG
 
+# This function is not used by the current implementation. It is provided
+# to maintain compatibility with the multigrid_v2 implementation.
+def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
+    assert xctype == 'LDA'
+    dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1)
+    n_dm, nkpts, nao = dm_sc.shape[:3]
+    rhoG = cp.array([_eval_density(ni, dm_sc[i])[0] for i in range(n_dm)])
+    return rhoG
+
 def _eval_xc_mat(ni, vxcG, out=None, work=None):
     '''Note, contents of vxcG will be destroyed in this function
     '''
@@ -1717,8 +1726,8 @@ def get_veff_ip1(
 ):
     raise DeprecationWarning
     nkpts = len(kpts) if kpts is not None else 1
-    grad = ni.energy_gradients(xc_code, dm_kpts, kpts, with_j,
-                               with_pseudo_vloc_orbital_derivative)[0]
+    grad = ni.energy_nuclear_gradient(
+        xc_code, dm_kpts, kpts, with_j, with_pseudo_vloc_orbital_derivative)
     return grad * nkpts
 
 class MultiGridNumInt(multigrid.MultiGridNumIntBase):
@@ -2063,8 +2072,38 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
     cache_xc_kernel = NotImplemented
 
-    def energy_gradients(self, xc_code, dm_kpts, kpts=None, with_j=False,
-                               with_nuc=False):
+    def energy_nuclear_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                                with_j=False, with_nuc=False):
+        '''Computes the nuclear gradients of Exc along with additional
+        contributions from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        return self.energy_derivatives(xc_code, dm_kpts, kpts, spin, with_j,
+                                       with_nuc)[0]
+
+    def energy_strain_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                               with_j=False, with_nuc=False):
+        '''Computes the strain derivatives of Exc along with additional
+        contributions from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        return self.energy_derivatives(xc_code, dm_kpts, kpts, spin, with_j,
+                                       with_nuc)[1]
+
+    def energy_derivatives(self, xc_code, dm_kpts, kpts=None, spin=None,
+                           with_j=False, with_nuc=False):
         '''Computes the nuclear gradients and strain derivatives of Exc
         along with additional contributions from the Coulomb and pseudopotential
         terms.
@@ -2096,6 +2135,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
         if n_dm == 1: # RHF
+            assert spin is None or spin == 0
             rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
             density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
             spin = 0
@@ -2105,6 +2145,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             rho_sf[:] = density[0].real
 
         else: # UHF
+            assert spin is None or spin == 1
             rhoG , tauG  = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
             rhoGb, tauGb = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
             density = cp.empty((2, nvar, ngrids))
@@ -2146,7 +2187,6 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             if cell._pseudo:
                 coulomb_on_g_mesh = multigrid.eval_vpplocG(cell, mesh, out=tauG).reshape(mesh)
                 sigma += _pploc_strain_derivatives(cell, mesh, rhoG, Gv_bases) * (1./vol)
-                sigma += cp.asarray(_get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts))
             else:
                 ZSI = _get_ZSI(cell, mesh, out=tauG)
                 sigma += _coulomb_strain_derivatives(cell, mesh, rhoG, ZSI, Gv_bases) * (1./vol)
@@ -2156,6 +2196,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
         if with_j:
             sigma += _coulomb_strain_derivatives(cell, mesh, rhoG, rhoG, Gv_bases) * (0.5/vol)
+            # rhoG will be overwritten by _get_coulomb_in_place. Must be called
+            # after other operations.
             ecoul, coulomb_on_g_mesh1 = _get_coulomb_in_place(rhoG, Gv_bases)
             ecoul = (.5 / vol) * ecoul
             # grid weight response
@@ -2198,8 +2240,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             grad += grad1
             sigma += sigma1
 
-        t0 = log.timer("xc gradients", *t0)
-        return grad, sigma.get()
+        t0 = log.timer("xc derivatives", *t0)
+        return grad.get(), sigma.get()
 
     to_cpu = NotImplemented
     to_gpu = NotImplemented

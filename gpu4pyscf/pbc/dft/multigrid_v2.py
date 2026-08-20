@@ -43,13 +43,16 @@ from gpu4pyscf.lib.cupy_helper import (
 
 __all__ = ['MultiGridNumInt']
 
-libgpbc = load_library("libmgrid_v2")
-libgpbc.evaluate_density_driver.restype = ctypes.c_int
-libgpbc.evaluate_xc_driver.restype = ctypes.c_int
-libgpbc.evaluate_xc_gradient_driver.restype = ctypes.c_int
-libgpbc.count_non_trivial_pairs.restype = ctypes.c_int
-libgpbc.screen_gaussian_pairs.restype = ctypes.c_int
-libgpbc.count_pairs_on_blocks.restype = ctypes.c_int
+try:
+    libgpbc = load_library("libmgrid_v2")
+    libgpbc.evaluate_density_driver.restype = ctypes.c_int
+    libgpbc.evaluate_xc_driver.restype = ctypes.c_int
+    libgpbc.evaluate_xc_gradient_driver.restype = ctypes.c_int
+    libgpbc.count_non_trivial_pairs.restype = ctypes.c_int
+    libgpbc.screen_gaussian_pairs.restype = ctypes.c_int
+    libgpbc.count_pairs_on_blocks.restype = ctypes.c_int
+except OSError:
+    libgpbc = None
 
 
 def complex_type(dtype):
@@ -2146,6 +2149,59 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         return rho, vxc, fxc
 
     cache_xc_kernel = NotImplemented
+
+    def energy_nuclear_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                                with_j=False, with_nuc=False):
+        '''Computes the nuclear gradients of Exc along with additional
+        contributions from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        hermi = 1
+        return get_veff_ip1(ni, xc_code, dm_kpts, hermi, kpts, with_j, with_nuc)
+
+    def energy_strain_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                               with_j=False, with_nuc=False):
+        '''Computes the strain derivatives of Exc along with additional
+        contributions from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        if spin is None:
+            dms = _format_dms(dm_kpts, kpts)
+            spin = 0 if len(dms) == 1 else 1
+        if spin == 0:
+            sigma = _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts, with_j, with_nuc)
+        else:
+            sigma = _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts, with_j, with_nuc)
+        return sigma
+
+    def energy_derivatives(self, xc_code, dm_kpts, kpts=None, spin=None,
+                           with_j=False, with_nuc=False):
+        '''Computes the nuclear gradients and strain derivatives of Exc
+        along with additional contributions from the Coulomb and pseudopotential
+        terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        grad = self.energy_nuclear_gradient(xc_code, dm_kpts, kpts, spin, with_j, with_nuc)
+        sigma = self.energy_strain_gradient(xc_code, dm_kpts, kpts, spin, with_j, with_nuc)
+        return grad, sigma
 
     to_gpu = utils.to_gpu
     device = utils.device

@@ -74,7 +74,7 @@ print(density.shape)
 # by `pbc.dft.numint.NumInt` or `pbc.dft.numint.multigrid.MultiGridNumInt` directly.
 # For example, use the multigrid integrator to evaluate the density
 #
-from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 ni = MultiGridNumInt(cell)
 ni.mesh = [10, 10, 10]
 dm = mf.make_rdm1()
@@ -98,7 +98,7 @@ rhoG_FFT = fft(density, mf.grids.mesh)
 # Alternatively, the multigrid integrator provides a specialized routine to
 # compute the reciprocal-space density directly, which is more efficient.
 #
-from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt, _eval_rhoG
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt, _eval_rhoG
 ni = MultiGridNumInt(cell)
 dm = mf.make_rdm1()
 rhoG_direct = _eval_rhoG(ni, dm, kpts=kpts)

@@ -42,21 +42,9 @@ def energy_ee(ks_grad, dm, kpts):
     omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
     j_factor = 1
 
-    if isinstance(ni, multigrid.MultiGridNumInt):
-        raise NotImplementedError(
-            "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
-            "Please use the default KNumInt or multigrid_v3.MultiGridNumInt instead.")
-
     if isinstance(ni, multigrid.MultiGridNumIntBase):
-        if kpts is None:
-            nkpts = 1
-        else:
-            nkpts = len(kpts)
-        exc = ni_TO_FIX.get_veff_ip1(
-            ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
-        # exc of multigrid is the full response of dE/dX. However,
-        # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
-        exc /= nkpts
+        exc = ni.energy_nuclear_gradient(
+            mf.xc, dm, kpts=kpts, spin=1, with_j=True, with_nuc=True)
         j_factor = 0
     else:
         if ks_grad.grids is not None:

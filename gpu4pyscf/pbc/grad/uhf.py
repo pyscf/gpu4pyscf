@@ -58,9 +58,9 @@ class Gradients(rhf.GradientsBase):
             j_factor = 1
 
         if j_in_xc:
-            de += ni_TO_FIX.get_veff_ip1(
-                ni, xc, dm, with_j=j_in_xc,
-                with_pseudo_vloc_orbital_derivative=True).get()
+            assert isinstance(ni, multigrid.MultiGridNumIntBase)
+            de += ni.energy_nuclear_gradient(
+                xc, dm, spin=1, with_j=j_in_xc, with_nuc=True)
             j_factor = 0
         elif xc.upper() != 'HF':
             from gpu4pyscf.pbc.grad.kuks import get_vxc
@@ -97,13 +97,7 @@ class Gradients(rhf.GradientsBase):
 
         ni = mf._numint
         if isinstance(ni, multigrid.MultiGridNumIntBase):
-            rhoG = multigrid_v3_TO_FIX.evaluate_density_on_g_mesh(ni, dm0_sf)
-            rhoG = rhoG[0,0]
-            if cell._pseudo:
-                de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
-            else:
-                de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
-
+            # Vne or pploc contribution is evaluated in energy_ee
             dh1e_kin = int1e.int1e_ipkin(cell)
             de -= rhf.contract_h1e_dm(cell, dh1e_kin, dm0_sf, hermi=1)
         else:

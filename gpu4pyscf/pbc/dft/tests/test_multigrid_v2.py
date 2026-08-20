@@ -33,6 +33,9 @@ from gpu4pyscf.pbc.dft import KUKS as KUKS_gpu
 
 import pytest
 
+if multigrid.libgpbc is None:
+    raise unittest.SkipTest('multigrid v2 kernels not compiled')
+
 def setUpModule():
     global cell_orth, cell_nonorth, cell_he
     global kpts, dm, dm1
