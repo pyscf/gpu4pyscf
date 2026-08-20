@@ -376,22 +376,81 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
         out += Ene
     return out
 
+def _get_Gv_bases(mesh, b):
+    Gx = cp.array(np.fft.fftfreq(mesh[0], 1./mesh[0]) * b[0,:,None])
+    Gy = cp.array(np.fft.fftfreq(mesh[1], 1./mesh[1]) * b[1,:,None])
+    Gz = cp.array(np.fft.fftfreq(mesh[2], 1./mesh[2]) * b[2,:,None])
+    return (Gx, Gy, Gz)
+
 def _get_vpplocG_strain_derivatives(cell, mesh):
-    disp = 1e-5
+    assert cell.dimension == 3
+    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+    coords = cp.asarray(cell.atom_coords())
+    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
+    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
+    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
+
     ngrids = np.prod(mesh)
-    v1 = cp.empty((3,3, ngrids), dtype=np.complex128)
-    SI = get_SI(cell, mesh=mesh)
-    for x in range(3):
-        for y in range(3):
-            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            vpplocG1 = pseudo.get_vlocG(cell1, cell1.get_Gv(mesh))
-            vpplocG2 = pseudo.get_vlocG(cell2, cell2.get_Gv(mesh))
-            vpplocG1 = -np.einsum('ij,ij->j', SI, vpplocG1)
-            vpplocG2 = -np.einsum('ij,ij->j', SI, vpplocG2)
-            v1[x,y] = asarray((vpplocG1 - vpplocG2) / (2*disp))
-    vpplocG = pseudo.get_vlocG(cell, cell.get_Gv(mesh))
-    v0 = asarray(-np.einsum('ij,ij->j', SI, vpplocG))
-    return v0, v1
+    Gx, Gy, Gz = Gv_bases
+    GvT = Gx[:,:,None,None] + Gy[:,None,:,None] + Gz[:,None,None,:]
+    GvT = GvT.reshape(3, ngrids)
+    G2 = cp.einsum('xg,xg->g', GvT, GvT)
+    coulG = 4 * np.pi / G2
+    coulG[0] = 0
+    xyG = cp.einsum('xg,yg->xyg', GvT, GvT)
+
+    charges = cell.atom_charges()
+
+    vlocG0 = 0
+    vlocG_0 = cp.zeros(ngrids, dtype=np.complex128)
+    vlocG_1 = cp.zeros((3, 3, ngrids), dtype=np.complex128)
+
+    for ia in range(cell.natm):
+        symb = cell.atom_symbol(ia)
+        if symb not in cell._pseudo:
+            continue
+
+        pp = cell._pseudo[symb]
+        rloc, nexp, cexp = pp[1:3+1]
+
+        SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
+        x = G2 * rloc**2
+        expx = cp.exp(-0.5*x)
+        SI *= expx
+        Z = charges[ia]
+
+        coef1 = -Z * coulG * SI * (2/G2 + rloc**2)
+        coef1[0] = 0
+
+        cfacs = 0
+        dcfacs = 0
+        if nexp >= 1:
+            cfacs += cexp[0]
+        if nexp >= 2:
+            cfacs += cexp[1] * (3 - x)
+            dcfacs -= cexp[1]
+        if nexp >= 3:
+            cfacs += cexp[2] * (15 - 10*x + x*x)
+            dcfacs += cexp[2] * (-10 + 2*x)
+        if nexp >= 4:
+            cfacs += cexp[3] * (105 - 105*x + 21*x*x - x*x*x)
+            dcfacs += cexp[3] * (-105 + 42*x - 3*x*x)
+
+        coef2 = (
+            (2*np.pi)**1.5
+            * rloc**5
+            * SI
+            * (cfacs - 2 * dcfacs)
+        )
+
+        vlocG0 += 2*np.pi*Z*rloc**2
+        vlocG_0 -= Z * coulG * SI
+        vlocG_0 += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
+
+        vlocG_1 += (coef1 + coef2) * xyG
+
+    vlocG_0[0] += vlocG0
+    return vlocG_0, vlocG_1
 
 def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
     if kpts is None:

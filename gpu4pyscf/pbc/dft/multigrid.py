@@ -756,22 +756,8 @@ def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charg
                                            mesh, Gv_bases, SIx, SIy, SIz, vlocG):
     # Result will be appended to vlocG
 
-    fn_name = f"gth_loc_reciporcal_nexp_{nexp}_kernel"
+    fn_name = "gth_loc_reciporcal_kernel"
     if fn_name not in _kernel_registery:
-        C_declaration = ''
-        C_contribution = ''
-        if nexp >= 1:
-            C_declaration += ', const double cexp0'
-            C_contribution += 'cfacs += cexp0;'
-        if nexp >= 2:
-            C_declaration += ', const double cexp1'
-            C_contribution += 'cfacs += cexp1 * (3 - G2_red);'
-        if nexp >= 3:
-            C_declaration += ', const double cexp2'
-            C_contribution += 'cfacs += cexp2 * (15 - 10 * G2_red + G2_red * G2_red);'
-        if nexp >= 4:
-            C_declaration += ', const double cexp3'
-            C_contribution += 'cfacs += cexp3 * (105 - 105 * G2_red + 21 * G2_red * G2_red - G2_red * G2_red * G2_red);'
         kernel_code = r'''
             #include <cupy/complex.cuh>
             extern "C" __global__
@@ -779,37 +765,42 @@ def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charg
                 const double* __restrict__ Gx, const double* __restrict__ Gy, const double* __restrict__ Gz,
                 const complex<double>* __restrict__ grids_SIx, const complex<double>* __restrict__ grids_SIy, const complex<double>* __restrict__ grids_SIz,
                 complex<double>* __restrict__ grids_vlocG,
-                const int n_mesh_x, const int n_mesh_y, const int n_mesh_z, const int i_atom,
-                const double charge, const double rloc''' + C_declaration + r''')
+                const int nx, const int ny, const int nz, const int i_atom,
+                const double charge, const double rloc,
+                double cexp0, double cexp1, double cexp2, double cexp3, int nexp)
             {
-                size_t i_grid = blockDim.x * (size_t)blockIdx.x + threadIdx.x;
-                size_t nyz = n_mesh_y * n_mesh_z;
-                size_t ngrids = n_mesh_x * nyz;
-                if (i_grid >= ngrids) return;
+                int idx = blockDim.x * blockIdx.x + threadIdx.x;
+                int stride = gridDim.x * blockDim.x;
+                size_t nyz = ny * nz;
+                size_t ng = nx * nyz;
+                for (size_t i_grid = idx; i_grid < ng; i_grid += stride) {
+                    int ix = i_grid / nyz;
+                    int iyz = i_grid - nyz * ix;
+                    int iy = iyz / nz;
+                    int iz = iyz - nz * iy;
+                    double G2 = 0.;
+                    for (int n = 0; n < 3; ++n) {
+                        double Gv = Gx[nx*n+ix] + Gy[ny*n+iy] + Gz[nz*n+iz];
+                        G2 += Gv * Gv;
+                    }
+                    double coulG = 0.;
+                    if (G2 != 0) coulG = 12.566370614359172 / G2;
+                    const double G2_red = G2 * rloc * rloc;
+                    const complex<double> SIx = grids_SIx[i_atom * nx + ix];
+                    const complex<double> SIy = grids_SIy[i_atom * ny + iy];
+                    const complex<double> SIz = grids_SIz[i_atom * nz + iz];
+                    const complex<double> SI = SIx * SIy * SIz * exp(-0.5 * G2_red);
+                    complex<double> vlocG = -charge * coulG * SI;
 
-                int i_grid_x = i_grid / nyz;
-                int iyz = i_grid - nyz * i_grid_x;
-                int i_grid_y = iyz / n_mesh_z;
-                int i_grid_z = iyz - i_grid_y * n_mesh_z;
-                double G2 = 0.;
-                for (int n = 0; n < 3; ++n) {
-                    double Gv = Gx[n_mesh_x*n+i_grid_x] + Gy[n_mesh_y*n+i_grid_y] + Gz[n_mesh_z*n+i_grid_z];
-                    G2 += Gv * Gv;
+                    double cfacs = 0;
+                    if (nexp >= 1) cfacs += cexp0;
+                    if (nexp >= 2) cfacs += cexp1 * (3 - G2_red);
+                    if (nexp >= 3) cfacs += cexp2 * (15 + G2_red * (G2_red - 10));
+                    if (nexp >= 4) cfacs += cexp3 * (105 + G2_red * (G2_red * (21 - G2_red) - 105));
+                    vlocG += 15.749609945722419 * rloc * rloc * rloc * cfacs * SI;
+
+                    grids_vlocG[i_grid] += vlocG;
                 }
-                double coulG = 0.;
-                if (G2 != 0) coulG = 12.566370614359172 / G2;
-                const double G2_red = G2 * rloc * rloc;
-                const complex<double> SIx = grids_SIx[i_atom * n_mesh_x + i_grid_x];
-                const complex<double> SIy = grids_SIy[i_atom * n_mesh_y + i_grid_y];
-                const complex<double> SIz = grids_SIz[i_atom * n_mesh_z + i_grid_z];
-                const complex<double> SI = SIx * SIy * SIz * exp(-0.5 * G2_red);
-                complex<double> vlocG = -charge * coulG * SI;
-
-                double cfacs = 0;
-                ''' + C_contribution + r'''
-                vlocG += 15.749609945722419 * rloc * rloc * rloc * cfacs * SI;
-
-                grids_vlocG[i_grid] += vlocG;
             }
         '''
         _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
@@ -825,15 +816,13 @@ def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charg
     kernel_parameters = [Gv_bases[0], Gv_bases[1], Gv_bases[2],
                          SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
                          cp.int32(i_atom), cp.float64(charge), cp.float64(rloc)]
-    if nexp >= 1:
-        kernel_parameters.append(cp.float64(cexp[0]))
-    if nexp >= 2:
-        kernel_parameters.append(cp.float64(cexp[1]))
-    if nexp >= 3:
-        kernel_parameters.append(cp.float64(cexp[2]))
-    if nexp >= 4:
-        kernel_parameters.append(cp.float64(cexp[3]))
-    kernel(((ngrids + 1024 - 1) // 1024, ), (1024, ), kernel_parameters)
+
+    cexp = [cp.float64(x) for x in cexp] + [cp.float64(0.)] * 4
+    kernel_parameters.extend(cexp[:4])
+    kernel_parameters.append(cp.int32(nexp))
+
+    workers = gpu_specs['multiProcessorCount']
+    kernel((workers, ), (1024, ), kernel_parameters)
 
     # SI = (SIx[i_atom,:,None,None] * SIy[i_atom,:,None] * SIz[i_atom]).ravel()
     # G2_red = G2 * rloc**2

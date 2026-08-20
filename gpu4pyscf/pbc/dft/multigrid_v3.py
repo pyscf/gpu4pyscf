@@ -1222,6 +1222,202 @@ void ''' + fn_name + r'''(double *energy, double2* __restrict__ rhoG,
            (coul_energy, rhoG, Gv_bases[0], Gv_bases[1], Gv_bases[2], nx, ny, nz))
     return coul_energy[0], rhoG
 
+def _coulomb_strain_derivatives(cell, mesh, rhoG1, rhoG2, Gv_bases):
+    assert cell.dimension == 3
+    fn_name = 'coulomb_strain_derivatives'
+    if fn_name not in _kernel_registery:
+        kernel_code = r'''
+#include <cupy/complex.cuh>
+extern "C" __global__
+void ''' + fn_name + '''(
+double *out, double *Gx, double *Gy, double *Gz,
+complex<double> *rhoG1, complex<double> *rhoG2,
+int nx, int ny, int nz)
+{
+    int tid = threadIdx.x;
+    int idx = blockDim.x * blockIdx.x + tid;
+    int stride = gridDim.x * blockDim.x;
+    size_t nyz = ny * nz;
+    size_t ng = nx * nyz;
+    double sigma[9];
+    for (int n = 0; n < 9; n++) sigma[n] = 0;
+    for (size_t i_grid = idx; i_grid < ng; i_grid += stride) {
+        int ix = i_grid / nyz;
+        int iyz = i_grid - nyz * ix;
+        int iy = iyz / nz;
+        int iz = iyz - nz * iy;
+        double Gv[3];
+        double G2 = 0;
+        for (int n = 0; n < 3; n++) {
+            Gv[n] = Gx[nx*n+ix] + Gy[ny*n+iy] + Gz[nz*n+iz];
+            G2 += Gv[n] * Gv[n];
+        }
+        double prod = 0.;
+        if (G2 != 0) prod = 12.566370614359172 * 2 / (G2 * G2);
+        complex<double> r1 = rhoG1[i_grid];
+        complex<double> r2 = rhoG2[i_grid];
+        prod *= r1.real() * r2.real() + r1.imag() * r2.imag();
+        for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            sigma[i*3+j] += prod * Gv[i] * Gv[j];
+        } }
+    }
+    __shared__ double swap[32];
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int num_warps = blockDim.x / 32;
+    for (int n = 0; n < 9; n++) {
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
+        }
+        if (lane == 0) swap[warp] = sigma[n];
+        __syncthreads();
+        if (warp == 0) {
+            sigma[n] = (lane < num_warps) ? swap[lane] : 0.;
+            for (int offset = num_warps/2; offset > 0; offset >>= 1) {
+                sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
+            }
+        }
+        if (tid == 0) atomicAdd(out+n, sigma[n]);
+    }
+}'''
+        _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
+    kernel = _kernel_registery[fn_name]
+
+    nx, ny, nz = [x.shape[1] for x in Gv_bases]
+    assert rhoG1.size == nx * ny * nz
+    assert rhoG2.size == nx * ny * nz
+
+    out = cp.zeros((3, 3))
+
+    workers = gpu_specs['multiProcessorCount']
+    kernel((workers,), (512,),
+           [out, Gv_bases[0], Gv_bases[1], Gv_bases[2], rhoG1, rhoG2,
+            cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2])])
+    return out
+
+def _pploc_strain_derivatives(cell, mesh, rhoG, Gv_bases):
+    assert cell.dimension == 3
+    fn_name = 'pploc_strain_derivatives'
+    if fn_name not in _kernel_registery:
+        kernel_code = r'''
+#include <cupy/complex.cuh>
+extern "C" __global__
+void ''' + fn_name + '''(
+double *out, double *Gx, double *Gy, double *Gz,
+complex<double> *SIx, complex<double> *SIy, complex<double> *SIz,
+complex<double> *rhoG,
+int nx, int ny, int nz,
+int i_atom, double charge, double rloc,
+int nexp, double cexp0, double cexp1, double cexp2, double cexp3)
+{
+    int tid = threadIdx.x;
+    int idx = blockDim.x * blockIdx.x + tid;
+    int stride = gridDim.x * blockDim.x;
+    size_t nyz = ny * nz;
+    size_t ng = nx * nyz;
+    double sigma[9];
+    for (int n = 0; n < 9; n++) sigma[n] = 0;
+    for (size_t i_grid = idx; i_grid < ng; i_grid += stride) {
+        int ix = i_grid / nyz;
+        int iyz = i_grid - nyz * ix;
+        int iy = iyz / nz;
+        int iz = iyz - nz * iy;
+        double Gv[3];
+        double G2 = 0;
+        for (int n = 0; n < 3; n++) {
+            Gv[n] = Gx[nx*n+ix] + Gy[ny*n+iy] + Gz[nz*n+iz];
+            G2 += Gv[n] * Gv[n];
+        }
+        double rloc2 = rloc * rloc;
+        double G2_red = G2 * rloc2;
+        double expx = exp(-0.5 * G2_red);
+        complex<double> SI_x = SIx[i_atom * nx + ix];
+        complex<double> SI_y = SIy[i_atom * ny + iy];
+        complex<double> SI_z = SIz[i_atom * nz + iz];
+        complex<double> SI = SI_x * SI_y * SI_z * expx;
+        double coef1 = 0.;
+        if (G2 != 0) coef1 = 12.566370614359172 / G2 * (2 / G2 + rloc2) * -charge;
+
+        double cfacs = 0;
+        double dcfacs = 0;
+        if (nexp >= 1) cfacs += cexp0;
+        if (nexp >= 2) {
+            cfacs += cexp1 * (3 - G2_red);
+            dcfacs -= cexp1;
+        }
+        if (nexp >= 3) {
+            cfacs += cexp2 * (15 + G2_red * (G2_red - 10));
+            dcfacs += cexp2 * (-10 + 2*G2_red);
+        }
+        if (nexp >= 4) {
+            cfacs += cexp3 * (105 + G2_red * (G2_red * (21 - G2_red) - 105));
+            dcfacs += cexp3 * (-105 + 42*G2_red - 3*G2_red*G2_red);
+        }
+        double coef2 = 15.749609945722419 * rloc2 * rloc2 * rloc * (cfacs - 2 * dcfacs);
+
+        double prod  = coef1 + coef2;
+        complex<double> r = rhoG[i_grid];
+        prod *= r.real() * SI.real() + r.imag() * SI.imag();
+        for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            sigma[i*3+j] += prod * Gv[i] * Gv[j];
+        } }
+    }
+    __shared__ double swap[32];
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int num_warps = blockDim.x / 32;
+    for (int n = 0; n < 9; n++) {
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
+        }
+        if (lane == 0) swap[warp] = sigma[n];
+        __syncthreads();
+        if (warp == 0) {
+            sigma[n] = (lane < num_warps) ? swap[lane] : 0.;
+            for (int offset = num_warps/2; offset > 0; offset >>= 1) {
+                sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
+            }
+        }
+        if (tid == 0) atomicAdd(out+n, sigma[n]);
+    }
+}'''
+        _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
+    kernel = _kernel_registery[fn_name]
+
+    nx, ny, nz = [x.shape[1] for x in Gv_bases]
+    assert rhoG.size == nx * ny * nz
+
+    coords = cp.asarray(cell.atom_coords())
+    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
+    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
+    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
+
+    charges = cell.atom_charges()
+
+    out = cp.zeros((3, 3))
+
+
+    for ia in range(cell.natm):
+        symb = cell.atom_symbol(ia)
+        if symb not in cell._pseudo:
+            continue
+
+        pp = cell._pseudo[symb]
+        rloc, nexp, cexp = pp[1:3+1]
+
+        cexp = [cp.float64(x) for x in cexp] + [cp.float64(0.)] * 4
+        kernel_parameters = [
+            out, Gv_bases[0], Gv_bases[1], Gv_bases[2],
+            SIx, SIy, SIz, rhoG,
+            cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
+            cp.int32(ia), cp.float64(charges[ia]), cp.float64(rloc),
+            cp.int32(nexp)] + cexp[:4]
+        workers = gpu_specs['multiProcessorCount']
+        kernel((workers,), (512,), kernel_parameters)
+    return out
+
 def _xc_var_length(xctype):
     if xctype == 'LDA' or xctype == 'HF':
         nvar = 1
@@ -2093,14 +2289,14 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             spin = 0
 
         else: # UHF
+            rhoGa, tauGa = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
+            rhoGb, tauGb = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
             density = cp.empty((2, nvar, ngrids))
-            rhoG, tauG = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
-            tauG = None
-            _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
-            rhoGb, tauG = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
+            _density_to_real_space(rhoGa, tauGa, Gv_bases, xctype, out=density[0])
+            _density_to_real_space(rhoGb, tauGb, Gv_bases, xctype, out=density[1])
+            rhoG = rhoGa
             rhoG += rhoGb
-            _density_to_real_space(rhoGb, tauG, Gv_bases, xctype, out=density[1])
-            rhoGb = None
+            rhoGa = rhoGb = tauGa = tauGb = None
             spin = 1
 
         if with_j:
@@ -2112,7 +2308,9 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
         if with_nuc:
             if cell._pseudo:
-                coulomb_on_g_mesh += multigrid.eval_vpplocG(cell, mesh, out=tauG)
+                vpplocG = multigrid.eval_vpplocG(cell, mesh, out=tauG)
+                coulomb_on_g_mesh += vpplocG.reshape(mesh)
+                vpplocG = None
             else:
                 ZSI = _get_ZSI(cell, mesh, out=tauG)
                 vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
@@ -2154,9 +2352,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
                 Whether to include the contribution from the local part of
                 pseudo-potential or electron-nuclear Coulomb interactions
         '''
-        from gpu4pyscf.pbc.grad.rks_stress import (
-            _get_vpplocG_strain_derivatives,
-            _get_pp_nonloc_strain_derivatives)
+        from gpu4pyscf.pbc.grad.rks_stress import _get_pp_nonloc_strain_derivatives
 
         cell = self.cell
         log = logger.new_logger(cell)
@@ -2171,7 +2367,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         mesh = self.mesh
         ngrids = np.prod(mesh)
         vol = cell.vol
-        weight_0 = vol / ngrids
+        weight = vol / ngrids
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
@@ -2180,22 +2376,21 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
             spin = 0
 
-            density *= 1/weight_0
+            density *= 1/weight
             rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
             rho_sf[:] = density[0].real
 
         else: # UHF
+            rhoG , tauG  = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
+            rhoGb, tauGb = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
             density = cp.empty((2, nvar, ngrids))
-            rhoG, tauG = _eval_density(self, dm_sc[0], with_tau=xctype=='MGGA')
-            tauG = None
-            _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
-            rhoGb, tauG = _eval_density(self, dm_sc[1], with_tau=xctype=='MGGA')
+            _density_to_real_space(rhoG , tauG , Gv_bases, xctype, out=density[0])
+            _density_to_real_space(rhoGb, tauGb, Gv_bases, xctype, out=density[1])
             rhoG += rhoGb
-            _density_to_real_space(rhoGb, tauG, Gv_bases, xctype, out=density[1])
-            rhoGb = None
+            rhoGb = tauGb = None
             spin = 1
 
-            density *= 1/weight_0
+            density *= 1/weight
             rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
             rho_sf[:] = density[0].real
             rho_sf[:] += density[1].real
@@ -2204,7 +2399,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             xc_code, density, deriv=1, xctype=xctype, spin=spin)[:2]
 
         # grid weight response
-        sigma = rho_sf.dot(exc.ravel()) * weight_0 * cp.eye(3)
+        sigma = rho_sf.dot(exc.ravel()) * weight * cp.eye(3)
 
         if xctype == 'GGA' or xctype == 'MGGA':
             # The response of grids wrt the lattice vectors introduces an extra
@@ -2218,53 +2413,32 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             vxc = vxc.reshape(n_dm, nvar, ngrids)
             density = density.reshape(n_dm, nvar, ngrids)
             for s in range(n_dm):
-                sigma -= cp.einsum('xg,yg->xy', density[s,1:4], vxc[s,1:4]) * weight_0
+                sigma -= cp.einsum('xg,yg->xy', density[s,1:4], vxc[s,1:4]) * weight
 
         density = exc = rho_sf = None
 
-        if with_j:
-            Gv = cp.asarray(cell.get_Gv())
-            G2 = cp.einsum('gx,gx->g', Gv, Gv)
-            G2[0] = np.inf
-            coulG_0 = 4 * np.pi / G2
-            coulGxy = cp.einsum('gx,gy->xyg', Gv, Gv)
-            coulGxy *= coulG_0
-            coulG_1 = coulGxy * 2/G2
-            sigma += cp.einsum('xyg,g,g->xy', coulG_1,
-                               rhoG.ravel().conj(),
-                               rhoG.ravel()).real * (0.5 / vol)
+        coulomb_on_g_mesh = cp.zeros_like(rhoG)
+        if with_nuc:
+            if cell._pseudo:
+                coulomb_on_g_mesh = multigrid.eval_vpplocG(cell, mesh, out=tauG).reshape(mesh)
+                sigma += _pploc_strain_derivatives(cell, mesh, rhoG, Gv_bases) * (1./vol)
+                sigma += cp.asarray(_get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts))
+            else:
+                ZSI = _get_ZSI(cell, mesh, out=tauG)
+                sigma += _coulomb_strain_derivatives(cell, mesh, rhoG, ZSI, Gv_bases) * (1./vol)
+                vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
+                coulomb_on_g_mesh = vneG.reshape(mesh)
+                ZSI = vneG = None
 
-            ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG.copy(), Gv_bases)
+        if with_j:
+            sigma += _coulomb_strain_derivatives(cell, mesh, rhoG, rhoG, Gv_bases) * (0.5/vol)
+            ecoul, coulomb_on_g_mesh1 = _get_coulomb_in_place(rhoG, Gv_bases)
             ecoul = (.5 / vol) * ecoul
             # grid weight response
             sigma += ecoul * cp.eye(3)
-        else:
-            coulomb_on_g_mesh = cp.zeros_like(rhoG)
-
-        if with_nuc:
-            if cell._pseudo:
-                vpplocG_0, vpplocG_1 = _get_vpplocG_strain_derivatives(cell, mesh)
-                sigma += cp.einsum('g,xyg->xy', rhoG.ravel().conj(), vpplocG_1).real * (1./vol)
-                sigma += cp.array(_get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts))
-                coulomb_on_g_mesh += vpplocG_0.reshape(mesh)
-            else:
-                Gv = cp.asarray(cell.get_Gv())
-                G2 = cp.einsum('gx,gx->g', Gv, Gv)
-                G2[0] = np.inf
-                coulG_0 = 4 * np.pi / G2
-                coulGxy = cp.einsum('gx,gy->xyg', Gv, Gv)
-                coulGxy *= coulG_0
-                coulG_1 = coulGxy * 2/G2
-                ZSI = _get_ZSI(cell, mesh, out=tauG)
-                sigma += cp.einsum('xyg,g->xy', coulG_1,
-                                   rhoG.ravel().conj()*ZSI).real * (1./vol)
-
-                vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
-                coulomb_on_g_mesh += vneG.reshape(mesh)
-                ZSI = vneG = None
+            coulomb_on_g_mesh += coulomb_on_g_mesh1
+            coulomb_on_g_mesh1 = None
         rhoG = tauG = None
-
-        sigma = cp.asarray(sigma)
 
         # Reconstruct fft_buckets if aft_buckets is initialized. In this case,
         # self.fft_buckets miss orbital pairs with low Ecut.
@@ -2281,7 +2455,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             fft_buckets = _partition_ke_for_fft(
                 self, bas_ij_idx, init_ke, precision, xctype, log)
 
-        vxc *= weight_0
+        vxc *= weight
         vxc = vxc.reshape(n_dm, nvar, *mesh)
 
         if n_dm == 1: # RHF
