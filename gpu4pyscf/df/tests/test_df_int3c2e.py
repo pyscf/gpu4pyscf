@@ -505,7 +505,7 @@ def test_cholesky_eri_rsh():
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
         ''')
-    mf = mol.to_gpu().RHF().density_fit()
+    mf = mol.RHF().to_gpu().density_fit()
     omega = 0.33
     lr_factor = 0.65
     sr_factor = 0.19
