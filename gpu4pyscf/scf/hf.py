@@ -45,27 +45,15 @@ __all__ = [
     'energy_elec', 'RHF', 'SCF'
 ]
 
-def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
-           verbose=None):
-    '''Compute J, K matrices with CPU-GPU hybrid algorithm
-    '''
+@pyscf_lib.with_doc(jk.get_jk.__doc__)
+def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True,
+           omega=None, lr_factor=None, sr_factor=None, verbose=None):
     with mol.with_range_coulomb(omega):
-        vj, vk = jk.get_jk(mol, dm, hermi, vhfopt, with_j, with_k, verbose)
+        vj, vk = jk.get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega,
+                           lr_factor, sr_factor, verbose)
     if not isinstance(dm, cupy.ndarray):
         if with_j: vj = vj.get()
         if with_k: vk = vk.get()
-    return vj, vk
-
-def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True, omega=None):
-    if omega is None:
-        omega = mol.omega
-    vhfopt = mf._opt_gpu.get(omega)
-    if vhfopt is None:
-        with mol.with_range_coulomb(omega):
-            vhfopt = mf._opt_gpu[omega] = jk._VHFOpt(
-                mol, mf.direct_scf_tol).build()
-
-    vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
     return vj, vk
 
 def make_rdm1(mo_coeff, mo_occ):
@@ -854,7 +842,6 @@ class SCF(pyscf_lib.StreamObject):
     as_scanner               = hf_cpu.SCF.as_scanner
     _finalize                = hf_cpu.SCF._finalize
     init_direct_scf          = NotImplemented
-    get_jk                   = _get_jk
     get_veff                 = NotImplemented
     mulliken_meta = pop      = NotImplemented
     mulliken_pop             = NotImplemented
@@ -942,6 +929,22 @@ class SCF(pyscf_lib.StreamObject):
                 cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),
                 cupy.asnumpy(envs['mo_occ']), overwrite_mol=False)
 
+    @pyscf_lib.with_doc(jk.get_jk.__doc__)
+    def get_jk(self, mol, dm=None, hermi=1, with_j=True, with_k=True,
+               omega=None, lr_factor=None, sr_factor=None):
+        if dm is None: dm = self.make_rdm1()
+        if omega is None:
+            omega = mol.omega
+        vhfopt = self._opt_gpu.get(omega)
+        if vhfopt is None:
+            with mol.with_range_coulomb(omega):
+                vhfopt = self._opt_gpu[omega] = jk._VHFOpt(
+                    mol, self.direct_scf_tol).build()
+
+        return get_jk(mol, dm, hermi, vhfopt, with_j, with_k,
+                      omega, lr_factor, sr_factor)
+
+    @pyscf_lib.with_doc(j_engine.get_j.__doc__)
     def get_j(self, mol, dm, hermi=1, omega=None):
         if omega is None:
             omega = mol.omega
@@ -954,6 +957,7 @@ class SCF(pyscf_lib.StreamObject):
             vj = vj.get()
         return vj
 
+    @pyscf_lib.with_doc(jk.get_k.__doc__)
     def get_k(self, mol, dm, hermi=1, omega=None, lr_factor=None, sr_factor=None):
         if omega is None:
             omega = mol.omega

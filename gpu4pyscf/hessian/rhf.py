@@ -244,10 +244,13 @@ def _hess_nuc_without_ecp(mol, dm0):
     de *= 2
     return de
 
-def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=None):
+def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
+                     omega=None, lr_factor=None, sr_factor=None,
+                     verbose=None):
     '''Compute the energy per atom for
         j_factor * J_derivatives - k_factor * K_derivatives
     '''
+    assert lr_factor is None and sr_factor is None
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
@@ -827,12 +830,13 @@ def _ao2mo(v_ao, mocc, mo_coeff):
     return contract('nio,ip->npo', v_ao, mo_coeff)
 
 def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
-            hermi=1, with_j=True, with_k=True, omega=None):
+               hermi=1, with_j=True, with_k=True,
+               omega=None, lr_factor=None, sr_factor=None):
     ''' Compute J/K matrices in MO for multiple DMs
     '''
     assert hermi == 1
     mf = hessobj.base
-    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
     vj = vk = None
     nao = dms.shape[-1]
     dms = dms.reshape(-1,nao,nao)
