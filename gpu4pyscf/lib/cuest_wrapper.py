@@ -1090,17 +1090,26 @@ def pyscf_xc_to_cuest_functional(xc):
     xc = xc.replace("-", "")
 
     pyscf_xc_to_cuest_functional_map = {
-        "HF"     : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_HF    ,
-        "B3LYP"  : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B3LYP1,
-        "B3LYP5" : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B3LYP5,
-        "B97"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B97   ,
-        "BLYP"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_BLYP  ,
-        "M06L"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_M06L  ,
-        "PBE"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_PBE   ,
-        "PBE0"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_PBE0  ,
-        "R2SCAN" : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_R2SCAN,
-        "SVWN"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_SVWN5 ,
-        "B97MV"  : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B97MV ,
+        "HF"       : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_HF      ,
+        "B3LYP"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B3LYP1  ,
+        "B3LYP5"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B3LYP5  ,
+        "B97"      : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B97     ,
+        "BLYP"     : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_BLYP    ,
+        "M06L"     : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_M06L    ,
+        "PBE"      : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_PBE     ,
+        "PBE0"     : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_PBE0    ,
+        "R2SCAN"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_R2SCAN  ,
+        "SVWN"     : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_SVWN5   ,
+        "B97MV"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B97MV   ,
+        "LCWPBE"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_LCWPBE  ,
+        "WB97X"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_WB97X   ,
+        "WB97XV"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_WB97XV  ,
+        "WB97MV"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_WB97MV  ,
+        "LCWPBEH"  : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_LCWPBEH ,
+        "CAMB3LYP" : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_CAMB3LYP,
+        "HSE06"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_HSE06   ,
+        "M06"      : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_M06     ,
+        "M062X"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_M062X   ,
     }
 
     if xc not in pyscf_xc_to_cuest_functional_map:
@@ -1111,6 +1120,21 @@ def pyscf_xc_to_cuest_functional(xc):
 
 def check_cuest_pyscf_functional_consistency(mol, xc, numint, cuest_handle, xcintplan_handle):
     omega, alpha, hyb = numint.rsh_and_hybrid_coeff(xc, spin=mol.spin)
+    # HF_exchange = HF_FR * hyb + HF_LR * (alpha - hyb)
+    #             = HF_SR * hyb + HF_LR * alpha
+
+    is_hybrid = ce.data_int32_t()
+    cuest_check('Query XCIntPlan functional parameter is_hybrid',
+        ce.cuestQuery(
+            handle=cuest_handle,
+            type=ce.CuestType.CUEST_XCINTPLAN,
+            object=xcintplan_handle,
+            attribute=ce.CuestXCIntPlanAttributes.CUEST_XCINTPLAN_IS_HYBRID,
+            attributeValue=is_hybrid,
+            )
+        )
+    if is_hybrid.value == 0:
+        assert omega == 0 and alpha == 0 and hyb == 0
 
     exchange_scale = ce.data_double()
     cuest_check('Query XCIntPlan functional parameter exchange scale',
@@ -1124,6 +1148,19 @@ def check_cuest_pyscf_functional_consistency(mol, xc, numint, cuest_handle, xcin
         )
     assert exchange_scale.value == hyb
 
+    is_lrc_hybrid = ce.data_int32_t()
+    cuest_check('Query XCIntPlan functional parameter is_lrc_hybrid',
+        ce.cuestQuery(
+            handle=cuest_handle,
+            type=ce.CuestType.CUEST_XCINTPLAN,
+            object=xcintplan_handle,
+            attribute=ce.CuestXCIntPlanAttributes.CUEST_XCINTPLAN_IS_LRC_HYBRID,
+            attributeValue=is_lrc_hybrid,
+            )
+        )
+    if is_lrc_hybrid.value == 0:
+        assert omega == 0 and alpha == hyb
+
     lrc_exchange_scale = ce.data_double()
     cuest_check('Query XCIntPlan functional parameter long-range exchange scale',
         ce.cuestQuery(
@@ -1134,7 +1171,7 @@ def check_cuest_pyscf_functional_consistency(mol, xc, numint, cuest_handle, xcin
             attributeValue=lrc_exchange_scale,
             )
         )
-    assert lrc_exchange_scale.value == (alpha - hyb) # TODO: check if this is correct
+    assert lrc_exchange_scale.value == (alpha - hyb)
 
     lrc_omega = ce.data_double()
     cuest_check('Query XCIntPlan functional parameter long-range exchange omega',
@@ -1149,13 +1186,25 @@ def check_cuest_pyscf_functional_consistency(mol, xc, numint, cuest_handle, xcin
     if omega == 0:
         assert lrc_omega.value <= 0
     else:
-        assert abs(omega) == lrc_omega.value # TODO: check if this is correct
+        assert abs(omega) == lrc_omega.value
 
 def check_cuest_pyscf_nlc_consistency(mol, xc, numint, cuest_handle, nlc_xcintplan_handle):
     nlc_coefs = numint.nlc_coeff(xc)
     if len(nlc_coefs) != 1:
         raise NotImplementedError('Additive NLC not supported in CuEST wrapper')
     nlc_pars, fac = nlc_coefs[0]
+
+    is_vv10 = ce.data_int32_t()
+    cuest_check('Query XCIntPlan functional parameter is_vv10',
+        ce.cuestQuery(
+            handle=cuest_handle,
+            type=ce.CuestType.CUEST_XCINTPLAN,
+            object=nlc_xcintplan_handle,
+            attribute=ce.CuestXCIntPlanAttributes.CUEST_XCINTPLAN_IS_VV10,
+            attributeValue=is_vv10,
+            )
+        )
+    assert is_vv10.value != 0
 
     vv10_scale = ce.data_double()
     cuest_check('Query XCIntPlan nlc functional parameter vv10 scale',
@@ -2230,6 +2279,105 @@ def cuest_compute_ecpint(mol, cuest_handle, ecpintplan_handle, maximum_workspace
         )
 
     return ecp_matrix_device
+
+def cuest_compute_df_mo_integrals(mol, cleft_device, cright_device, cuest_handle, dfintplan_handle, auxbasis_handle, maximum_workspace_bytes):
+    # The input Cleft and Cright are assumed to be in cuest shape and order, and the returned MO 3-center integral is in cuest order for all three dimensions
+    log = logger.new_logger(mol, mol.verbose)
+
+    assert isinstance(cleft_device, cp.ndarray)
+    assert cleft_device.shape[1] == mol.nao
+    num_left_orbitals = cleft_device.shape[0]
+    assert isinstance(cright_device, cp.ndarray)
+    assert cright_device.shape[1] == mol.nao
+    num_right_orbitals = cright_device.shape[0]
+
+    cleft_device_handle = ce.Pointer()
+    cleft_device_handle.value = cleft_device.data.ptr
+    cright_device_handle = ce.Pointer()
+    cright_device_handle.value = cright_device.data.ptr
+
+    auxbasis_num_ao = ce.data_uint64_t()
+    cuest_check(f'Query Aux Basis Num AO',
+        ce.cuestQuery(
+            handle=cuest_handle,
+            type=ce.CuestType.CUEST_AOBASIS,
+            object=auxbasis_handle,
+            attribute=ce.CuestAOBasisAttributes.CUEST_AOBASIS_NUM_AO,
+            attributeValue=auxbasis_num_ao,
+            )
+        )
+    naux = auxbasis_num_ao.value
+
+    tensors_device = cp.empty([naux, num_left_orbitals, num_right_orbitals], order = "C", dtype = cp.float64)
+    tensors_device_handle = ce.Pointer()
+    tensors_device_handle.value = tensors_device.data.ptr
+
+    dfmo_compute_parameters = ce.cuestDFMOIntegralsComputeParameters()
+    cuest_check('Create DFMOIntegrals Params',
+        ce.cuestParametersCreate(
+            parametersType=ce.CuestParametersType.CUEST_DFMOINTEGRALSCOMPUTE_PARAMETERS,
+            outParameters=dfmo_compute_parameters,
+            )
+        )
+
+    maximum_workspace_bytes = min(maximum_workspace_bytes, get_cupy_maximum_free_bytes())
+    maximum_workspace_descriptor = WorkspaceDescriptor(
+        host_buffer_size_in_bytes=0,
+        device_buffer_size_in_bytes=maximum_workspace_bytes,
+        )
+
+    temporary_workspace_descriptor = WorkspaceDescriptor()
+
+    num_coefficient_matrices = 1 # CuEST supports processing a list of Cleft matrices and Cright matrices in one shot, but we don't support it yet
+    num_left_orbitals = [num_left_orbitals]
+    num_right_orbitals = [num_right_orbitals]
+
+    cuest_check('Compute DFMOIntegrals Workspace Query',
+        ce.cuestDFMOIntegralsComputeWorkspaceQuery(
+            handle=cuest_handle,
+            plan=dfintplan_handle,
+            parameters=dfmo_compute_parameters,
+            variableBufferSize=maximum_workspace_descriptor.pointer,
+            temporaryWorkspaceDescriptor=temporary_workspace_descriptor.pointer,
+            numCoefficientMatrices=num_coefficient_matrices,
+            numLeftOrbitals=num_left_orbitals,
+            numRightOrbitals=num_right_orbitals,
+            leftCoefficientMatrices=cleft_device_handle,
+            rightCoefficientMatrices=cright_device_handle,
+            outTensors=tensors_device_handle,
+            )
+        )
+
+    log.debug(f"CuEST: DF MO integral Temporary sizes: {temporary_workspace_descriptor}")
+
+    dfmoint_temporary_workspace = Workspace(workspaceDescriptor=temporary_workspace_descriptor)
+
+    cuest_check('Compute DFMOIntegrals',
+        ce.cuestDFMOIntegralsCompute(
+            handle=cuest_handle,
+            plan=dfintplan_handle,
+            parameters=dfmo_compute_parameters,
+            variableBufferSize=maximum_workspace_descriptor.pointer,
+            temporaryWorkspace=dfmoint_temporary_workspace.pointer,
+            numCoefficientMatrices=num_coefficient_matrices,
+            numLeftOrbitals=num_left_orbitals,
+            numRightOrbitals=num_right_orbitals,
+            leftCoefficientMatrices=cleft_device_handle,
+            rightCoefficientMatrices=cright_device_handle,
+            outTensors=tensors_device_handle,
+            )
+        )
+
+    del dfmoint_temporary_workspace
+
+    cuest_check('Destroy DFMOIntegrals Params',
+        ce.cuestParametersDestroy(
+            parametersType=ce.CuestParametersType.CUEST_DFMOINTEGRALSCOMPUTE_PARAMETERS,
+            parameters=dfmo_compute_parameters,
+            )
+        )
+
+    return tensors_device
 
 def cuest_compute_overlap_gradient(mol, densitymatrix_device, cuest_handle, oeintplan_handle):
     # The input dme is assumed to be in cuest shape and order
@@ -3838,7 +3986,7 @@ class CuESTExtractedNumint(NumInt):
 
     def __init__(self, numint, mol, grids, nlcgrids, xc, handles, maximum_workspace_bytes, threshold_pq, turn_on_cuest_xc, turn_on_cuest_nlc):
         assert numint is not None
-        
+
         self.mol = mol
         self.grids = grids
         self.nlcgrids = nlcgrids
@@ -4632,6 +4780,68 @@ class CuESTWrapper(lib.StreamObject):
         raise NotImplementedError("CuESTWrapper does not support newton (soscf) method yet. "
                                   "In particular, DFT XC response function requires functional second derivative, and that is not available from CuEST.")
 
+    def df_mo_integral(self, Cleft, Cright):
+        # Cleft is assumed to have shape (nao, n_left), where n_left can be nmo, nocc, nvir, or anything else other than zero. The same applies to Cright.
+        # The output tensor order is (naux, n_left, n_right)
+
+        mol = self.mol
+
+        log = logger.new_logger(mol, mol.verbose)
+
+        cuest_handle = self.handles.cuest_handle
+        if self.handles.auxbasis_handle is None:
+            self.handles.build_auxbasis(self)
+        auxbasis_handle = self.handles.auxbasis_handle
+        if self.handles.dfintplan_handle is None:
+            self.handles.build_dfintplan(self)
+        dfintplan_handle = self.handles.dfintplan_handle
+
+        time_pre_post = 0
+        time_kernel = 0
+        if mol.verbose >= logger.DEBUG:
+            cp.cuda.runtime.deviceSynchronize()
+            time0 = time.time()
+
+        Cleft_copy  = cp.array( Cleft.T, order = "C", dtype = cp.float64) # cp.array gaurantees it makes a copy, so it's safe to modify it. Don't use cp.asarray here.
+        Cright_copy = cp.array(Cright.T, order = "C", dtype = cp.float64) # cp.array gaurantees it makes a copy, so it's safe to modify it. Don't use cp.asarray here.
+        if mol.cart:
+            Cleft_cuest_order  = pyscf_to_cuest_input_scale_cartesian(mol,  Cleft_copy, axis = 1)
+            Cright_cuest_order = pyscf_to_cuest_input_scale_cartesian(mol, Cright_copy, axis = 1)
+        else:
+            Cleft_cuest_order  = pyscf_to_cuest_input_reorder_spherical(mol,  Cleft_copy, axis = 1)
+            Cright_cuest_order = pyscf_to_cuest_input_reorder_spherical(mol, Cright_copy, axis = 1)
+
+        if mol.verbose >= logger.DEBUG:
+            cp.cuda.runtime.deviceSynchronize()
+            time1 = time.time()
+            time_pre_post += time1 - time0
+            time0 = time1
+
+        df_mo_cuest_order = cuest_compute_df_mo_integrals(mol, Cleft_cuest_order, Cright_cuest_order, cuest_handle, dfintplan_handle, auxbasis_handle, self.maximum_workspace_bytes)
+
+        if mol.verbose >= logger.DEBUG:
+            cp.cuda.runtime.deviceSynchronize()
+            time1 = time.time()
+            time_kernel += time1 - time0
+            time0 = time1
+
+        auxmol = self.auxmol
+        assert auxmol is not None and auxmol.nao > 0
+        if auxmol.cart:
+            df_mo = cuest_to_pyscf_output_scale_cartesian(auxmol, df_mo_cuest_order, axis = [0])
+        else:
+            df_mo = cuest_to_pyscf_output_reorder_spherical(auxmol, df_mo_cuest_order, axis = [0])
+
+        if mol.verbose >= logger.DEBUG:
+            cp.cuda.runtime.deviceSynchronize()
+            time1 = time.time()
+            time_pre_post += time1 - time0
+            time0 = time1
+
+        log.debug(f"CuEST: time_DF_MO_pre_and_post_processing = {time_pre_post} s, time_DF_MO_kernel = {time_kernel} s")
+
+        return df_mo
+
 class CuESTGradientWrapper(lib.StreamObject):
     def __init__(self, method):
         self.__dict__.update(method.__dict__)
@@ -4683,7 +4893,7 @@ class CuESTGradientWrapper(lib.StreamObject):
         assert dm.shape == (mol.nao, mol.nao)
 
         if not self.base.turn_on_cuest_hcore:
-            from gpu4pyscf.grad.rhf import int3c2e, get_ecp_ip, contract, contract_h1e_dm, ensure_numpy
+            from gpu4pyscf.grad.rhf import int3c2e, get_ecp_ip, contract, contract_h1e_dm
 
             # (\nabla i | hcore | j) - (\nabla i | j)
             h1 = cp.asarray(super().get_hcore(mol, exclude_ecp=True))
@@ -4700,7 +4910,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                 dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm)
 
             dh = contract_h1e_dm(mol, h1, dm, hermi=1)
-            dh += ensure_numpy(dh1e)
+            dh += cp.asnumpy(dh1e)
 
             return dh
 

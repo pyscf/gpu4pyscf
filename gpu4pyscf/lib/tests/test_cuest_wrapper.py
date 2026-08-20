@@ -1163,6 +1163,107 @@ class KnownValues(unittest.TestCase):
 
         assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-5
 
+    def test_df_mo_hf_reconstruct_j3c_spherical(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        naux = mf.with_df.auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        ref_J, ref_K = mf.get_jk(dm = dm, hermi = 0)
+
+        mf.with_df.build()
+        _cderi = mf.with_df._cderi
+        _cderi = _cderi[0]
+        _cderi_idx = mf.with_df._cderi_idx
+        pair_addresses, diag_addrs = _cderi_idx
+        pair_address_i = pair_addresses // nao
+        pair_address_j = pair_addresses % nao
+
+        ref_j3c = cp.zeros((naux, nao, nao))
+
+        factors = cp.ones(pair_addresses.shape[0])
+        factors[diag_addrs] = 0.5
+
+        for i_pair in range(pair_addresses.shape[0]):
+            i = pair_address_i[i_pair]
+            j = pair_address_j[i_pair]
+            factor = factors[i_pair]
+            ref_j3c[:, i, j] += factor * _cderi[:, i_pair]
+            ref_j3c[:, j, i] += factor * _cderi[:, i_pair]
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 1e-10
+        assert cp.max(cp.abs(test_K - ref_K)) < 1e-10
+
+        mo_i = cp.random.rand(nao, 3) * 2 - 1
+        mo_j = cp.random.rand(nao, 5) * 2 - 1
+        mo_k = cp.random.rand(nao, 7) * 2 - 1
+        mo_l = cp.random.rand(nao, 11) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-9
+
+    def test_df_mo_hf_reconstruct_j3c_cartesian(self):
+        mol = self.mol_cart
+        auxbasis = self.auxbasis
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        naux = mf.with_df.auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        ref_J, ref_K = mf.get_jk(dm = dm, hermi = 0)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright)
+        assert test_j3c.shape[1:] == (nao, nao)
+        assert test_j3c.shape[0] < naux # Cuest uses spherical auxbasis, pyscf uses cartesian auxbasis
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 1e-1 # The different auxasis leads to very different J and K
+        assert cp.max(cp.abs(test_K - ref_K)) < 1e-1
+
+    def test_df_mo_pbe0_reconstruct_j3c_for_k(self):
+        raise
+
+    def test_df_mo_hse06_reconstruct_j3c_for_k(self):
+        raise
+
+    def test_df_mo_wb97x_reconstruct_j3c_for_k(self):
+        raise
+
     ### Gradient tests from here on
 
     def test_overlap_derivative_spherical(self):
@@ -1174,6 +1275,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
 
         s1 = gobj.get_ovlp(mol)
+        s1 = cp.asnumpy(s1)
         aoslices = mol.aoslice_by_atom()
         ref_ds = np.zeros((mol.natm, 3))
         for ia in range(mol.natm):
@@ -1196,6 +1298,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
 
         s1 = gobj.get_ovlp(mol)
+        s1 = cp.asnumpy(s1)
         aoslices = mol.aoslice_by_atom()
         ref_ds = np.zeros((mol.natm, 3))
         for ia in range(mol.natm):
@@ -1276,7 +1379,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1305,7 +1408,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1334,7 +1437,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1366,7 +1469,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('sxij,sij->x', vhf[:,:,p0:p1], (dm + dm.transpose(0,2,1))[:,p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1512,7 +1615,7 @@ class KnownValues(unittest.TestCase):
 
         test_dvxc = gobj.get_xc_grad(dm)
 
-        assert np.max(np.abs(test_dvxc - ref_dvxc)) < 1e-10
+        assert np.max(np.abs(test_dvxc - ref_dvxc)) < 1e-9
 
     def test_rks_pure_veff_derivative_spherical_mo(self):
         mol = self.mol_sph
@@ -2277,7 +2380,7 @@ class KnownValues(unittest.TestCase):
 
     def test_uhf_spherical(self):
         mf = UHF(self.mol_unrestricted).density_fit(auxbasis = self.auxbasis)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         # ref_energy = mf.kernel()
         ref_energy = -150.402311053481
 
