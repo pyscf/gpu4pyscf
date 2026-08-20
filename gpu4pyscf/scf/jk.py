@@ -27,6 +27,7 @@ from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
     load_library, condense, transpose_sum, hermi_triu, asarray, ndarray)
+from gpu4pyscf.lib.utils import nearest_power2 as _nearest_power2
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
@@ -889,27 +890,6 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
     return n, gout_stride, with_gout
-
-def _nearest_power2(n, return_leq=True):
-    '''nearest 2**x that is leq or geq than n.
-
-    Kwargs:
-        return_leq specifies that the return is less or equal than n.
-        Otherwise, the return is greater or equal than n.
-    '''
-    if isinstance(n, np.ndarray):
-        n = n.astype(int, copy=False)
-        if return_leq:
-            return 2 ** np.log2(n).astype(int)
-        else:
-            return 2 ** np.ceil(np.log2(n)).astype(int)
-
-    n = int(n)
-    assert n > 0
-    if return_leq:
-        return 1 << (n.bit_length() - 1)
-    else:
-        return 1 << ((n-1).bit_length())
 
 def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=True):
     '''A fast routine to estimate the Schwarz inequality condition
