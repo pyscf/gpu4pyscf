@@ -34,3 +34,6 @@ gpu4pyscf/gpu4pyscf/lib/dftd3
 gpu4pyscf/gpu4pyscf/lib/dftd4
 gpu4pyscf/wheelhouse
 .vscode/
+.aider*
+core.*
+*.bak_bpcache
