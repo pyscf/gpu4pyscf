@@ -120,7 +120,7 @@ class Gradients(kuks_grad.Gradients):
                     sc_sub = SC_k[:, idx_arr]
                     
                     term = cp.einsum('pq, xqi, pi -> x', P_spin, sc1_sub, sc_sub.conj())
-                    dE_c[atm_id] += weight * 2.0 * vc * term.real
+                    dE_c[atm_id] += w_k * 2.0 * vc * term.real
                     
                     constraint_idx += 1
 

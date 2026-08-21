@@ -46,7 +46,7 @@ class KnownValues(unittest.TestCase):
         mm_coords = (np.random.random((5, 3)) - 0.5) * 20
         mm_charges = (np.random.random(5) - 0.5) * 2
 
-        cpu_mf = cpu_dft.RKS(mol, xc='pbe')
+        cpu_mf = cpu_dft.UKS(mol, xc='pbe')
         cpu_mf.grids.atom_grid = (50,194)
         cpu_mf.conv_tol = 1e-12
         cpu_mf = cpu_qmmm.mm_charge(cpu_mf, mm_coords, mm_charges, unit = "Bohr")
@@ -59,7 +59,7 @@ class KnownValues(unittest.TestCase):
         cpu_gobj = cpu_mf.nuc_grad_method()
         cpu_gradient = cpu_gobj.kernel()
 
-        cpu_dm = cpu_mf.make_rdm1()
+        cpu_dm = cpu_mf.make_rdm1().sum(axis=0)
         cpu_gradient_mm = cpu_gobj.grad_nuc_mm() + cpu_gobj.grad_hcore_mm(cpu_dm)
 
         cpu_dipole = cpu_mf.dip_moment()

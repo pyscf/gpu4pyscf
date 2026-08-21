@@ -100,6 +100,57 @@ class KnownValues(unittest.TestCase):
         g_fd = (e_plus - e_minus) / (2.0 * h)
         self.assertAlmostEqual(g_ana[atom_idx, coord_idx], g_fd, 5)
 
+    def test_finite_diff_cdft_spin_grad(self):
+        kpts = cell.make_kpts([3, 2, 1])
+        spin_constraints = ([[0], [1]], [0.2, -0.2])
+        mf = kucdft.CDFT_KUKS(cell, kpts, spin_constraints=spin_constraints)
+        mf.xc = 'pbe'
+        mf.minao_ref = 'gth-szv'
+        mf.conv_tol = 1e-12
+        mf.kernel()
+
+        dm0 = mf.make_rdm1()
+        v_lagrange0 = mf.v_lagrange.copy()
+
+        g_obj = kucdft_grad.Gradients(mf)
+        g_ana = g_obj.kernel()
+
+        atom_idx = 1
+        coord_idx = 0
+        h = 1e-3
+
+        base_coords = cell.atom_coords()
+        coords_plus = base_coords.copy()
+        coords_plus[atom_idx, coord_idx] += h
+        cell_plus = cell.copy()
+        cell_plus.set_geom_(coords_plus, unit='Bohr')
+
+        mf_plus = kucdft.CDFT_KUKS(cell_plus, kpts, spin_constraints=spin_constraints)
+        mf_plus.verbose = 0
+        mf_plus.xc = 'pbe'
+        mf_plus.minao_ref = 'gth-szv'
+        mf_plus.conv_tol = 1e-12
+        mf_plus.v_lagrange = v_lagrange0
+        mf_plus.kernel(dm0=dm0)
+        e_plus = mf_plus.e_tot
+
+        coords_minus = base_coords.copy()
+        coords_minus[atom_idx, coord_idx] -= h
+        cell_minus = cell.copy()
+        cell_minus.set_geom_(coords_minus, unit='Bohr')
+
+        mf_minus = kucdft.CDFT_KUKS(cell_minus, kpts, spin_constraints=spin_constraints)
+        mf_minus.verbose = 0
+        mf_minus.xc = 'pbe'
+        mf_minus.minao_ref = 'gth-szv'
+        mf_minus.conv_tol = 1e-12
+        mf_minus.v_lagrange = v_lagrange0
+        mf_minus.kernel(dm0=dm0)
+        e_minus = mf_minus.e_tot
+
+        g_fd = (e_plus - e_minus) / (2.0 * h)
+        self.assertAlmostEqual(g_ana[atom_idx, coord_idx], g_fd, 5)
+
     def test_ref_cdft_grad(self):
         kpts = cell.make_kpts([3, 2, 1])
         charge_constraints = ([[0]], [4.1])

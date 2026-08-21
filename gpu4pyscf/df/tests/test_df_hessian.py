@@ -13,9 +13,11 @@
 # limitations under the License.
 
 import numpy as np
-import pyscf
-from gpu4pyscf import dft, scf
+import cupy as cp
 import unittest
+import pyscf
+from pyscf import lib
+from gpu4pyscf import dft, scf
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -33,10 +35,9 @@ eps = 1e-3
 def setUpModule():
     global mol_sph, mol_cart
     mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=0,
-                      output='/dev/null', verbose=1)
-
+                      output='/dev/null', verbose=6)
     mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1,
-                       output='/dev/null', verbose=1)
+                       output='/dev/null', verbose=6)
 
 def tearDownModule():
     global mol_sph, mol_cart
@@ -298,7 +299,7 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
-    
+
     def test_hessian_qz(self):
         mol = pyscf.M(atom=atom, basis='def2-qzvpp', max_memory=32000, cart=0,
                       output='/dev/null', verbose=1)

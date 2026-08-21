@@ -22,8 +22,7 @@ from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df_jk import (
-    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l,
-    _transpose_dm)
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _transpose_dm)
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
@@ -42,16 +41,16 @@ def contract_h1e_dm_batched(mol, h1e, dms, hermi=0):
     atm_id_for_ao = np.repeat(mol._bas[:, gto.ATOM_OF], dims)
     atm_id_for_ao = cp.asarray(atm_id_for_ao)
 
-    de_partial = cp.einsum('xij, nji -> nix', h1e, dms).real
+    de_partial = contract('xij, nji -> nix', h1e, dms).real
 
     if hermi != 1:
-        de_partial += cp.einsum('xij, nij -> nix', h1e, dms).real
+        de_partial += contract('xij, nij -> nix', h1e, dms).real
 
     atm_ids = cp.arange(natm)[:, None]
     mask = (atm_ids == atm_id_for_ao[None, :])
     mask = mask.astype(de_partial.dtype)
 
-    de = cp.einsum('ai, nix -> nax', mask, de_partial)
+    de = contract('ai, nix -> nax', mask, de_partial)
 
     if hermi == 1:
         de *= 2

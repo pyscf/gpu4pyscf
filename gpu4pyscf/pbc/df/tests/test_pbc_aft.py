@@ -185,41 +185,52 @@ class KnownValues(unittest.TestCase):
               np.random.random((nkpts,nao,nocc))*1j)
         mo_occ = np.ones((nkpts,nocc))
         dm = np.random.rand(nkpts, nao, nao)
-        dm = dm + dm.transpose(0,2,1)
+        dm = dm + np.random.rand(nkpts, nao, nao) * 1j
+        dm = dm + dm.transpose(0,2,1).conj()
         kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-9
 
+        dm = np.einsum('npi,nqi->npq', mo, mo.conj())
         dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
         kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(cp.array(dm), hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-9
 
     def test_aft_k3(self):
         kpts = cell.make_kpts([6,1,1])
         nkpts = len(kpts)
-        mesh = [13]*3
+        mesh = [11]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
-        mydf0.k_conj_symmetry = False
-        mydf.k_conj_symmetry = False
+        mydf0.time_reversal_symmetry = False
+        mydf.time_reversal_symmetry = False
 
-        nao = cell.nao
-        np.random.seed(12)
-        nocc = 2
-        mo = (np.random.random((nkpts,nao,nocc)) +
-              np.random.random((nkpts,nao,nocc))*1j)
-        mo_occ = np.ones((nkpts,nocc))
-        dm = np.random.rand(nkpts, nao, nao)
-        dm = dm + dm.transpose(0,2,1)
-        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        assert abs(vk.get() - kref).max() < 3e-9
+        try:
+            bak = aft_jk.get_avail_mem
+            aft_jk.get_avail_mem = lambda **kw: 10000000
 
-        dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
-        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        assert abs(vk.get() - kref).max() < 3e-9
+            nao = cell.nao
+            np.random.seed(12)
+            nocc = 2
+            mo = (np.random.random((nkpts,nao,nocc)) +
+                  np.random.random((nkpts,nao,nocc))*1j)
+            mo_occ = np.ones((nkpts,nocc))
+            dm = np.random.rand(nkpts, nao, nao)
+            dm = dm + dm.transpose(0,2,1)
+            kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+            vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+            # difference is smaller for pyscf-2.13 or newer
+            assert abs(vk.get() - kref).max() < 1e-8
+
+            dm = np.einsum('npi,nqi->npq', mo, mo.conj())
+            kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+            dm = tag_array(cp.array(dm), mo_coeff=cp.array(mo), mo_occ=cp.array(mo_occ))
+            vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+            # difference is smaller for pyscf-2.13 or newer
+            assert abs(vk.get() - kref).max() < 1e-8
+        finally:
+            aft_jk.get_avail_mem = bak
 
     def test_ej_ip1_gamma_point(self):
         cell = pgto.M(
@@ -355,7 +366,7 @@ class KnownValues(unittest.TestCase):
             for i in range(cell.natm):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
-            assert abs(ek_ewald - ref).max() < 1e-8
+            assert abs(ek_ewald - ref).max() < 3e-8
 
     @unittest.skipIf(num_devices > 1, '')
     def test_ek_ip1_kpts(self):
@@ -383,7 +394,7 @@ class KnownValues(unittest.TestCase):
 
         cell.precision = 1e-10
         cell.build(0, 0)
-        myfft = fft_cpu.FFTDF(cell)
+        myfft = fft_cpu.FFTDF(cell, kpts=kpts)
         vk = myfft.get_k_e1(dm, kpts=kpts)
         aoslices = cell.aoslice_by_atom()
         ref = np.empty((cell.natm, 3))

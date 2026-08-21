@@ -29,6 +29,7 @@ import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.dft import KohnShamDFT, BeckeGrids
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.gto.mole import groupby
 
@@ -42,6 +43,17 @@ class GradientsBase(mol_rhf.GradientsBase):
     get_ovlp    = NotImplemented
 
     get_dispersion = NotImplemented
+
+    def __init__(self, method):
+        mol_rhf.GradientsBase.__init__(self, method)
+        self.cell = method.cell
+
+    @property
+    def mol(self):
+        return self.cell
+    @mol.setter
+    def mol(self, x):
+        self.cell = x
 
     def reset(self, cell=None):
         if cell is not None:
@@ -161,6 +173,9 @@ class Gradients(GradientsBase):
             mo_coeff = mf.mo_coeff
         if mo_occ is None:
             mo_occ = mf.mo_occ
+
+        if isinstance(mf, KohnShamDFT) and isinstance(mf.grids, BeckeGrids):
+            raise NotImplementedError('gradients for BeckeGrids not supported')
 
         if getattr(mf, 'with_x2c', None):
             raise NotImplementedError('X2C gradients')

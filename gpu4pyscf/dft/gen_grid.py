@@ -35,6 +35,8 @@ from pyscf import gto
 from pyscf.dft import gen_grid as gen_grid_cpu
 from gpu4pyscf.lib import utils
 from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
+from pyscf.data.elements import _std_symbol_without_ghost
+from pyscf.data.elements import charge as elements_proton
 from pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
@@ -217,7 +219,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
         symb = mol.atom_symbol(ia)
 
         if symb not in atom_grids_tab:
-            chg = gto.charge(symb)
+            chg = elements_proton(_std_symbol_without_ghost(symb))
             atom_config = atom_grid.get(symb, default)
             if atom_config is not None:
                 n_rad, n_ang = atom_config

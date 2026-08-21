@@ -25,7 +25,7 @@ from gpu4pyscf.lib.cupy_helper import contract
 
 
 def setUpModule():
-    global cell, grids, cell_he
+    global cell, grids, cell_he, cell_he_cart
     cell = pbcgto.Cell()
     cell.verbose = 5
     cell.output = '/dev/null'
@@ -42,15 +42,29 @@ def setUpModule():
         atom='He 0 0 0',
         basis=[[0, ( 1, 1, .1), (.5, .1, 1)],
                [1, (.8, 1)],
-               [2, (.6, 1)]],
+               [2, (.6, 1)],
+               [4, (.9, 1)],
+              ],
         unit='B',
         precision = 1e-9,
         a=np.eye(3)*5)
 
+    cell_he_cart = pbcgto.M(
+        atom='He 0 0 0',
+        basis=[[0, ( 1, 1, .1), (.5, .1, 1)],
+               [1, (.8, 1)],
+               [2, (.6, 1)],
+               [4, (.9, 1)],
+              ],
+        unit='B',
+        cart=True,
+        precision = 1e-9,
+        a=np.eye(3)*5)
+
 def tearDownModule():
-    global cell, grids, cell_he
+    global cell, grids, cell_he, cell_he_cart
     cell.stdout.close()
-    del cell, grids, cell_he
+    del cell, grids, cell_he, cell_he_cart
 
 
 class KnownValues(unittest.TestCase):
@@ -463,7 +477,7 @@ S
         self.assertAlmostEqual(dat.get(), ref)
 
     def test_nr_rks_fxc(self):
-        cell = cell_he
+        cell = cell_he_cart
         np.random.seed(9)
         nao = cell.nao
         dm_he = np.random.rand(nao, nao)

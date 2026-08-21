@@ -29,7 +29,7 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, hermi_triu
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
 from gpu4pyscf.df.int3c2e_bdiv import (
-    _nearest_power2, SHM_SIZE, L_AUX_MAX, THREADS)
+    _nearest_power2, SHM_SIZE, L_AUX_MAX, THREADS, _check_rsh_factors)
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 
 __all__ = [
@@ -38,12 +38,13 @@ __all__ = [
 
 libpbc.fill_int2c2e.restype = ctypes.c_int
 
-def int2c2e(auxcell, kpts=None, bvk_kmesh=None):
+def int2c2e(auxcell, kpts=None, bvk_kmesh=None,
+            omega=None, lr_factor=None, sr_factor=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
     opt = Int2c2eOpt(auxcell, bvk_kmesh)
-    return opt.int2c2e(kpts)
+    return opt.int2c2e(kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
 def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     if omega > 0:
@@ -54,22 +55,27 @@ def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     try:
         auxcell.rcut, rcut_backup = rcut, auxcell.rcut
         auxcell.omega, omega_backup = omega, auxcell.omega
-        return int2c2e(auxcell, kpts, bvk_kmesh)
+        return int2c2e(auxcell, kpts, bvk_kmesh, omega)
     finally:
         auxcell.rcut = rcut_backup
         auxcell.omega = omega_backup
 
-def int2c2e_ip1_per_atom(auxcell, dm, kpts=None):
+def int2c2e_ip1_per_atom(auxcell, dm, kpts=None,
+                         omega=None, lr_factor=None, sr_factor=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     opt = Int2c2eOpt(auxcell)
-    return opt.energy_ip1_per_atom(dm, kpts)
+    return opt.energy_ip1_per_atom(
+        dm, kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
-def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None):
-    '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True,
+                omega=None, lr_factor=None, sr_factor=None):
+    '''Derivatives of SR 2c2e Coulomb integrals for the first electronic
+    coordinates'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
     opt = Int2c2eOpt(auxcell, bvk_kmesh)
-    return opt.int2c2e_ip1(kpts)
+    return opt.int2c2e_ip1(kpts, sort_output=sort_output,
+                           omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
 def _estimate_sr_2c2e_rcut(cell, omega, precision=None):
     '''Estimate rcut for SR int2c2e. cell.rcut is likely insufficient to
@@ -173,14 +179,16 @@ class Int2c2eOpt:
             idx = (img[:,None] * nbas + ijsh).ravel()
             bas_ij_cache[i, j] = cp.asarray(idx, dtype=np.uint32)
 
-    def int2c2e(self, kpts=None, sort_output=True):
+    def int2c2e(self, kpts=None, sort_output=True,
+                omega=None, lr_factor=None, sr_factor=None):
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cell = self.cell
         bvk_kmesh = self.bvk_kmesh
         bvk_ncells = len(self.bvkmesh_Ls)
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
-        nsp_per_block, gout_stride, shm_size = int2c2e_scheme(cell.omega, gout_width=60)
+        nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, gout_width=60)
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
         gout_stride = cp.asarray(gout_stride, dtype=np.int32)
@@ -194,7 +202,9 @@ class Int2c2eOpt:
         out = cp.empty((bvk_ncells, nao, nao))
         err = libpbc.fill_int2c2e(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
+            ctypes.byref(rys_envs), ctypes.c_double(omega),
+            ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
+            ctypes.c_int(shm_size_max),
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
@@ -214,12 +224,15 @@ class Int2c2eOpt:
             out = contract('lk,lpq->kpq', expLk, out)
         return out
 
-    def int2c2e_ip1(self, kpts=None, sort_output=True):
-        '''Derivatives of 2c2e Coulomb integrals'''
+    def int2c2e_ip1(self, kpts=None, sort_output=True,
+                    omega=None, lr_factor=None, sr_factor=None):
+        '''Derivatives of 2c2e Coulomb integrals for first electronic
+        coordinates'''
         assert kpts is None
         cell = self.cell
         bvk_ncells = len(self.bvkmesh_Ls)
         assert bvk_ncells == 1
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
         shm_size = SHM_SIZE
         li = np.arange(L_AUX_MAX+1)[:,None]
@@ -228,7 +241,7 @@ class Int2c2eOpt:
         nfj = (lj + 1) * (lj + 2) // 2
         order = li + lj + 1
         nroots = order//2 + 1
-        if cell.omega < 0:
+        if omega < 0:
             nroots *= 2 # for short-range
         g_size = (li+2)*(lj+1)
         unit = g_size*3 + nroots*2 + 4
@@ -256,7 +269,9 @@ class Int2c2eOpt:
         out = cp.empty((bvk_ncells*3, nao, nao))
         err = libpbc.fill_int2c2e_ip1(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
+            ctypes.byref(rys_envs), ctypes.c_double(omega),
+            ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
+            ctypes.c_int(shm_size_max),
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
@@ -274,14 +289,19 @@ class Int2c2eOpt:
             out = out[0]
         return out
 
-    def energy_ip1_per_atom(self, dm, kpts=None):
+    def energy_ip1_per_atom(self, dm, kpts=None,
+                            omega=None, lr_factor=None, sr_factor=None):
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+        if self.bas_ij_cache is None:
+            self.build()
         cell = self.cell
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
+
         li = np.arange(L_AUX_MAX+1)[:,None]
         lj = np.arange(L_AUX_MAX+1)
         order = li + lj + 1
         nroots = order//2 + 1
-        if cell.omega < 0:
+        if omega < 0:
             nroots *= 2 # for short-range
         g_size = (li+2)*(lj+2)
         unit = g_size*3 + nroots*2 + 4
@@ -302,7 +322,9 @@ class Int2c2eOpt:
         err = libpbc.e_int2c2e_ip1(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-            ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
+            ctypes.byref(rys_envs), ctypes.c_double(omega),
+            ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
+            ctypes.c_int(shm_size_max),
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),

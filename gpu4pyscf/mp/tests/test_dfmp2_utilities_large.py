@@ -37,7 +37,7 @@ from gpu4pyscf.mp import dfmp2_drivers
 
 
 def setUpModule():
-    global mol, aux, mf, mp, with_df, intopt, vhfopt
+    global mol, aux, mf, mp, with_df, intopt
     token = """
     C                 -0.07551087    1.68127663   -0.10745193
     O                  1.33621755    1.87147409   -0.39326987
@@ -83,12 +83,6 @@ class Intermediates(unittest.TestCase):
         vir_coeff = mf.mo_coeff[:, nocc:]
         occ_energy = mf.mo_energy[:nocc]
         vir_energy = mf.mo_energy[nocc:]
-
-        result = dfmp2_drivers.dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, j3c_backend='vhfopt')
-        self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
-        self.assertAlmostEqual(result['e_corr_os'], -0.9626136186267932, 7)
-        self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)
-        self.assertAlmostEqual(result['e_corr_ss'], -0.3337013459521023, 7)
 
         result = dfmp2_drivers.dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, j3c_backend='bdiv')
         self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)

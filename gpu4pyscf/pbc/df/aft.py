@@ -31,7 +31,7 @@ from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG
-from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights
+from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights, get_SI
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
@@ -403,44 +403,6 @@ def _fake_nuc(cell, with_pseudo=True):
 
     fakenuc.rcut = 0.1
     return fakenuc
-
-def get_SI(cell, Gv=None, mesh=None, atmlst=None):
-    '''Calculate the structure factor (0D, 1D, 2D, 3D) for all atoms; see MH (3.34).
-
-    Args:
-        cell : instance of :class:`Cell`
-
-        Gv : (N,3) array
-            G vectors
-
-        atmlst : list of ints, optional
-            Indices of atoms for which the structure factors are computed.
-
-    Returns:
-        SI : (natm, ngrids) ndarray, dtype=np.complex128
-            The structure factor for each atom at each G-vector.
-    '''
-    coords = cp.asarray(cell.atom_coords())
-    if atmlst is not None:
-        coords = coords[np.asarray(atmlst)]
-    if Gv is None:
-        if mesh is None:
-            mesh = cell.mesh
-        basex, basey, basez = get_Gv_base(cell, mesh)
-        basex = cp.asarray(basex)
-        basey = cp.asarray(basey)
-        basez = cp.asarray(basez)
-        b = cp.asarray(cell.reciprocal_vectors())
-        rb = coords.dot(b.T)
-        SIx = cp.exp(-1j*rb[:,0,None] * basex)
-        SIy = cp.exp(-1j*rb[:,1,None] * basey)
-        SIz = cp.exp(-1j*rb[:,2,None] * basez)
-        SI = SIx[:,:,None,None] * SIy[:,None,:,None] * SIz[:,None,None,:]
-        natm = coords.shape[0]
-        SI = SI.reshape(natm, -1)
-    else:
-        SI = cp.exp(-1j*coords.dot(cp.asarray(Gv).T))
-    return SI
 
 def _get_ZSI(cell, mesh=None):
     '''

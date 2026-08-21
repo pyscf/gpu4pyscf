@@ -14,6 +14,7 @@
 
 import os
 import sys
+import warnings
 import functools
 import ctypes
 import numpy as np
@@ -73,14 +74,10 @@ def get_avail_mem(exclude_memory_pool=False):
 
     mempool = cupy.get_default_memory_pool()
     used_mem = mempool.used_bytes()
-    mem_limit = mempool.get_limit()
-    if(mem_limit != 0):
-        return mem_limit - used_mem
-    else:
-        total_mem = mempool.total_bytes()
-        # get memGetInfo() is slow
-        mem_avail = cupy.cuda.runtime.memGetInfo()[0]
-        return mem_avail + total_mem - used_mem
+    total_mem = mempool.total_bytes()
+    # get memGetInfo() is slow
+    mem_avail = cupy.cuda.runtime.memGetInfo()[0]
+    return mem_avail + total_mem - used_mem
 
 def concatenate(array_list):
     ''' Concatenate axis=0 only
@@ -266,27 +263,58 @@ def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
     return out
 
 def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
+    warnings.warn(
+        'unpack_sparse is deprecated. Use fill_symmetric instead',
+        DeprecationWarning, stacklevel=2)
+    return fill_symmetric(cderi_sparse, row*nao+col, nao, p0, p1, out, stream)
+
+def fill_symmetric(a, pair_addresses, nao, p0=0, p1=None, out=None, stream=None):
+    '''
+    Performs:
+
+        i, j = divmod(pair_addresses, nao)
+        out[j,i,:] = out[i,j,:] = a[:,p0:p1]
+    '''
+    assert a.ndim == 2
+    if p1 is None:
+        p1 = a.shape[1]
+
+    if out is None:
+        out = cupy.zeros([nao,nao,p1-p0], dtype=a.dtype)
+    else:
+        assert out.ndim == 3
+
     if stream is None:
         stream = cupy.cuda.get_current_stream()
-    if out is None:
-        out = cupy.zeros([nao,nao,p1-p0])
-    nij = len(row)
-    naux = cderi_sparse.shape[1]
-    nao = out.shape[1]
-    err = libcupy_helper.unpack_sparse(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(cderi_sparse.data.ptr, ctypes.c_void_p),
-        ctypes.cast(row.data.ptr, ctypes.c_void_p),
-        ctypes.cast(col.data.ptr, ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(nao),
-        ctypes.c_int(nij),
-        ctypes.c_int(naux),
-        ctypes.c_int(p0),
-        ctypes.c_int(p1)
-    )
-    if err != 0:
-        raise RuntimeError('failed in unpack_sparse')
+
+    pair_addresses = cupy.asarray(pair_addresses, dtype=np.int32)
+    out_stride = out.strides[-2] // out.itemsize
+    if a.strides[-1] == 8: # a is in row major
+        a_stride = a.strides[-2] // a.itemsize
+        err = libcupy_helper.decompress_and_fill(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(out_stride),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(pair_addresses)),
+            ctypes.c_int(nao),
+            ctypes.c_int(a_stride),
+            ctypes.c_int(p0), ctypes.c_int(p1))
+        if err != 0:
+            raise RuntimeError('decompress_and_fill failed')
+    else: # a is in column major
+        err = libcupy_helper.decompress_and_transpose(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(out_stride), ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_addresses.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(pair_addresses)),
+            ctypes.c_int(nao),
+            ctypes.c_int(p0), ctypes.c_int(p1),
+            ctypes.c_int(1), ctypes.c_int(0))
+        if err != 0:
+            raise RuntimeError('decompress_and_transpose failed')
     return out
 
 def add_sparse(a, b, indices):
@@ -295,7 +323,8 @@ def add_sparse(a, b, indices):
     '''
     assert a.device == b.device
     assert a.flags.c_contiguous
-    assert b.flags.c_contiguous
+    if not b.flags.c_contiguous:
+        b = cupy.ascontiguousarray(b)
     if len(indices) == 0: return a
     indices = cupy.asarray(indices, dtype=np.int32)
     n = a.shape[-1]
@@ -1173,7 +1202,7 @@ def sandwich_dot(a, c, out=None):
         out = out[0]
     return out
 
-MEMPOOL_THRESHOLD = 100000000
+MEMPOOL_THRESHOLD = 100*1024*1024
 
 def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     '''
@@ -1190,7 +1219,7 @@ def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     cuda_malloc = cupy.cuda.memory._malloc
     default_mempool_malloc = cupy.get_default_memory_pool().malloc
     def malloc(size):
-        if size >= n_bytes_threshold:
+        if size > n_bytes_threshold:
             return cuda_malloc(size)
         return default_mempool_malloc(size)
     cupy.cuda.set_allocator(malloc)

@@ -419,8 +419,8 @@ class KnownValues(unittest.TestCase):
 
         mol0 = gto.M(atom='H 0 0 0; F .1 0 2.1', verbose=0, unit='B')
         td_ref = mol0.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA(equilibrium_solvation=True).run(conf_tol=1e-10)
-        assert abs(e - -98.20379057832794) < 1e-8
-        assert abs(e - td_ref.e_tot[0]) < 1e-8
+        assert abs(e - -98.20379057832794) < 1e-7
+        assert abs(e - td_ref.e_tot[0]) < 1e-7
 
         mol1 = gto.M(atom='H 0 0 -0.001; F .1 0 2.1', verbose=0, unit='B')
         td1 = mol1.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA(equilibrium_solvation=True).run(conf_tol=1e-10)

@@ -288,7 +288,7 @@ class UHF(hf.SCF):
                 if homo_b is not None:
                     logger.info(self, 'beta HOMO = %.12g  LUMO = %.12g', homo_b, lumo_b)
                 else:
-                    logger.info(self, 'beta               LUMO = %.12g', homo_b)
+                    logger.info(self, 'beta               LUMO = %.12g', lumo_b)
                 if homo+1e-3 > lumo:
                     logger.warn(self, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
                 else:

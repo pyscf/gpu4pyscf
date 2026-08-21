@@ -23,6 +23,7 @@
 #include "rys_roots_for_k.cu"
 #include "rys_contract_k.cuh"
 #include "create_tasks.cu"
+#include "build_rys_gxyz.cuh"
 
 // type 1: (d^2i j | k l)
 // type 2: (di dj | k l)
@@ -32,9 +33,9 @@ __global__ static
 void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                               uint32_t *pool, double *dd_pool, int *head
+                               uint32_t *pool, double *dd_pool, int *head, int nf
                                #ifdef USE_SYCL
-                               , sycl::nd_item<2> &item, double* shared_memory
+                               , sycl::nd_item<2> &item, double *shared_memory
                                #endif
                                )
 {
@@ -49,12 +50,11 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nf = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&aij_cache)[4] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[4]>(thread_block);
+    int &ri = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     #else
@@ -66,20 +66,21 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
 
     extern __shared__ double shared_memory[];
 
-    __shared__ int ntasks, pair_ij, pair_kl0, nf;
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
     __shared__ double rjri[3];
     __shared__ double aij_cache[4];
-    __shared__ int expi, expj;
+    __shared__ int ri, expi, expj;
     #endif
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
     int gout_id = threadIdx_y;
     int gout_stride = blockDim_y;
-    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
+
+    int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
     uint32_t nbas = envs.nbas;
     int *bas = envs.bas;
@@ -106,21 +107,13 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
 
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
-    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+8);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+6);
     const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
     const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
-
-    if (t_id == 0) {
-        nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
-    }
-    __syncthreads();
-    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -138,11 +131,13 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, jk, envs, bounds, shared_memory);
+                        q_cond_ij, q_cond_kl,
+                        (int *)shared_memory, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl,
-                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds, shared_memory);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, jk, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -150,13 +145,13 @@ while (1) {
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     }
     __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[t_id] = env[ri_ptr+t_id];
-        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - env[ri_ptr+t_id];
     }
     __syncthreads();
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -323,10 +318,10 @@ while (1) {
             int lp = klp % lprim;
             double ak = env[expk+kp];
             double al = env[expl+lp];
+            double akl = ak + al;
+            double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double akl = ak + al;
-                double al_akl = al / akl;
                 double xlxk = rlrk[0*nsq_per_block];
                 double ylyk = rlrk[1*nsq_per_block];
                 double zlzk = rlrk[2*nsq_per_block];
@@ -334,8 +329,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
@@ -347,11 +340,9 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double akl = akl_cache[0];
-                double al_akl = akl_cache[nsq_per_block];
-                double xij = ri[0] + rjri[0] * aj_aij;
-                double yij = ri[1] + rjri[1] * aj_aij;
-                double zij = ri[2] + rjri[2] * aj_aij;
+                double xij = env[ri+0] + rjri[0] * aj_aij;
+                double yij = env[ri+1] + rjri[1] * aj_aij;
+                double zij = env[ri+2] + rjri[2] * aj_aij;
                 double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
@@ -376,116 +367,7 @@ while (1) {
                 int nroots = bounds.nroots;
                 rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor);
                 for (int irys = 0; irys < nroots; ++irys) {
-                    __syncthreads();
-                    if (gout_id == 0) {
-                        gx[nsq_per_block*g_size*2] = rw[(irys*2+1)*nsq_per_block];
-                    }
-                    double rt = rw[irys*2*nsq_per_block];
-                    double aij = aij_cache[0];
-                    double akl = akl_cache[0];
-                    double rt_aa = rt / (aij + akl);
-                    double rt_aij = rt_aa * akl;
-                    double rt_akl = rt_aa * aij;
-                    double b00 = .5 * rt_aa;
-                    double b10 = .5/aij * (1 - rt_aij);
-                    double b01 = .5/akl * (1 - rt_akl);
-                    double s0x, s1x, s2x;
-
-                    __syncthreads();
-                    // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
-                    for (int n = gout_id; n < 3; n += gout_stride) {
-                        double *_gx = gx + n * g_size * nsq_per_block;
-                        double Rpa = rjri[n] * aij_cache[1];
-                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
-                        s0x = _gx[0];
-                        s1x = c0x * s0x;
-                        _gx[nsq_per_block] = s1x;
-                        for (int i = 1; i < lij; ++i) {
-                            s2x = c0x * s1x + i * b10 * s0x;
-                            _gx[(i+1)*nsq_per_block] = s2x;
-                            s0x = s1x;
-                            s1x = s2x;
-                        }
-                    }
-
-                    int lij3 = (lij+1)*3;
-                    for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                        __syncthreads();
-                        int i = n / 3; //for i in range(lij+1):
-                        int _ix = n % 3;
-                        double *_gx = gx + (i + _ix * g_size) * nsq_per_block;
-                        double Rqc = rlrk[_ix*nsq_per_block] * akl_cache[nsq_per_block];
-                        double cpx = Rqc + rt_akl * Rpq[_ix*nsq_per_block];
-                        //for i in range(lij+1):
-                        //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
-                        if (n < lij3) {
-                            s0x = _gx[0];
-                            s1x = cpx * s0x;
-                            if (i > 0) {
-                                s1x += i * b00 * _gx[-nsq_per_block];
-                            }
-                            _gx[stride_k*nsq_per_block] = s1x;
-                        }
-
-                        //for k in range(1, lkl):
-                        //    for i in range(lij+1):
-                        //        trr(i,k+1) = cp * trr(i,k) + k*b01 * trr(i,k-1) + i*b00 * trr(i-1,k)
-                        for (int k = 1; k < lkl; ++k) {
-                            __syncthreads();
-                            if (n < lij3) {
-                                s2x = cpx*s1x + k*b01*s0x;
-                                if (i > 0) {
-                                    s2x += i * b00 * _gx[(k*stride_k-1)*nsq_per_block];
-                                }
-                                _gx[(k*stride_k+stride_k)*nsq_per_block] = s2x;
-                                s0x = s1x;
-                                s1x = s2x;
-                            }
-                        }
-                    }
-
-                    // hrr
-                    // g(i,j+1) = rirj * g(i,j) +  g(i+1,j)
-                    // g(...,k,l+1) = rkrl * g(...,k,l) + g(...,k+1,l)
-                    __syncthreads();
-                    if (task_id < ntasks) {
-                        int lkl3 = (lkl+1)*3;
-                        for (int m = gout_id; m < lkl3; m += gout_stride) {
-                            int k = m / 3;
-                            int _ix = m % 3;
-                            double xjxi = rjri[_ix];
-                            double *_gx = gx + (_ix*g_size + k*stride_k) * nsq_per_block;
-                            for (int j = 0; j <= lj; ++j) {
-                                int ij = (lij-j) + j*stride_j;
-                                s1x = _gx[ij*nsq_per_block];
-                                for (--ij; ij >= j*stride_j; --ij) {
-                                    s0x = _gx[ij*nsq_per_block];
-                                    _gx[(ij+stride_j)*nsq_per_block] = s1x - xjxi * s0x;
-                                    s1x = s0x;
-                                }
-                            }
-                        }
-                    }
-                    __syncthreads();
-                    if (task_id < ntasks) {
-                        for (int n = gout_id; n < stride_k*3; n += gout_stride) {
-                            int i = n / 3;
-                            int _ix = n % 3;
-                            double xlxk = rlrk[_ix*nsq_per_block];
-                            double *_gx = gx + (_ix*g_size + i) * nsq_per_block;
-                            for (int l = 0; l <= ll; ++l) {
-                                int kl = (lkl-l)*stride_k + l*stride_l;
-                                s1x = _gx[kl*nsq_per_block];
-                                for (kl-=stride_k; kl >= l*stride_l; kl-=stride_k) {
-                                    s0x = _gx[kl*nsq_per_block];
-                                    _gx[(kl+stride_l)*nsq_per_block] = s1x - xlxk * s0x;
-                                    s1x = s0x;
-                                }
-                            }
-                        }
-                    }
-
-                    __syncthreads();
+                    BUILD_4C_GXYZ(lj+1, ll+1, task_id < ntasks);
                     if (task_id >= ntasks) {
                         continue;
                     }
@@ -775,7 +657,7 @@ __global__ static
 void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                               float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                               float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                              uint32_t *pool, double *dd_pool, int *head
+                              uint32_t *pool, double *dd_pool, int *head, int nf
                               #ifdef USE_SYCL
                               , sycl::nd_item<2> &item, double *shared_memory
                               #endif
@@ -792,12 +674,11 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nf = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&aij_cache)[4] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[4]>(thread_block);
+    int &ri = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     #else
@@ -809,21 +690,22 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
 
     extern __shared__ double shared_memory[];
 
-    __shared__ int ntasks, pair_ij, pair_kl0, nf;
-    __shared__ int ish;
-    __shared__ int jsh;
-    __shared__ double ri[3];
+    __shared__ int ntasks, pair_ij, pair_kl0;
+    __shared__ int ish, jsh;
     __shared__ double rjri[3];
     __shared__ double aij_cache[4];
-    __shared__ int expi, expj;
+    __shared__ int ri, expi, expj;
     #endif
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
     int gout_id = threadIdx_y;
     int gout_stride = blockDim_y;
-    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
-    int threads = blockDim_x * blockDim_y;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
+
+    int t_id = gout_id * nsq_per_block + sq_id;
+    int threads = nsq_per_block * gout_stride;
     uint32_t nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -849,21 +731,13 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
 
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
-    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
-    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+8);
+    double *gx = shared_memory + nsq_per_block * 6 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+6);
     const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
     const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
-
-    if (t_id == 0) {
-        nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
-    }
-    __syncthreads();
-    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -881,11 +755,13 @@ while (1) {
     }
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                        q_cond_ij, q_cond_kl, jk, envs, bounds, shared_memory);
+                        q_cond_ij, q_cond_kl,
+                        (int *)shared_memory, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl,
-                           s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds, shared_memory);
+                           s_cond_ij, s_cond_kl, diffuse_exps,
+                           (int *)shared_memory, jk, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -893,13 +769,13 @@ while (1) {
     if (t_id == 0) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     }
     __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[t_id] = env[ri_ptr+t_id];
-        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - env[ri_ptr+t_id];
     }
     __syncthreads();
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -1060,10 +936,10 @@ while (1) {
             int lp = klp % lprim;
             double ak = env[expk+kp];
             double al = env[expl+lp];
+            double akl = ak + al;
+            double al_akl = al / akl;
             __syncthreads();
             if (gout_id == 0) {
-                double akl = ak + al;
-                double al_akl = al / akl;
                 double xlxk = rlrk[0*nsq_per_block];
                 double ylyk = rlrk[1*nsq_per_block];
                 double zlzk = rlrk[2*nsq_per_block];
@@ -1071,8 +947,6 @@ while (1) {
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
                 gx[0] = ckcl;
-                akl_cache[0] = akl;
-                akl_cache[nsq_per_block] = al_akl;
             }
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
@@ -1084,11 +958,9 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                double akl = akl_cache[0];
-                double al_akl = akl_cache[nsq_per_block];
-                double xij = ri[0] + rjri[0] * aj_aij;
-                double yij = ri[1] + rjri[1] * aj_aij;
-                double zij = ri[2] + rjri[2] * aj_aij;
+                double xij = env[ri+0] + rjri[0] * aj_aij;
+                double yij = env[ri+1] + rjri[1] * aj_aij;
+                double zij = env[ri+2] + rjri[2] * aj_aij;
                 double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
@@ -1113,120 +985,7 @@ while (1) {
                 int nroots = bounds.nroots;
                 rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor);
                 for (int irys = 0; irys < nroots; ++irys) {
-                    __syncthreads();
-                    if (gout_id == 0) {
-                        gx[nsq_per_block*g_size*2] = rw[(irys*2+1)*nsq_per_block];
-                    }
-                    double rt = rw[irys*2*nsq_per_block];
-                    double aij = aij_cache[0];
-                    double akl = akl_cache[0];
-                    double rt_aa = rt / (aij + akl);
-                    double rt_aij = rt_aa * akl;
-                    double rt_akl = rt_aa * aij;
-                    double b00 = .5 * rt_aa;
-                    double b10 = .5/aij * (1 - rt_aij);
-                    double b01 = .5/akl * (1 - rt_akl);
-                    double s0x, s1x, s2x;
-
-                    __syncthreads();
-                    // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
-                    for (int n = gout_id; n < 3; n += gout_stride) {
-                        double *_gx = gx + n * g_size * nsq_per_block;
-                        double Rpa = rjri[n] * aij_cache[1];
-                        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
-                        s0x = _gx[0];
-                        s1x = c0x * s0x;
-                        _gx[nsq_per_block] = s1x;
-                        for (int i = 1; i < lij; ++i) {
-                            s2x = c0x * s1x + i * b10 * s0x;
-                            _gx[(i+1)*nsq_per_block] = s2x;
-                            s0x = s1x;
-                            s1x = s2x;
-                        }
-                    }
-
-                    int lij3 = (lij+1)*3;
-                    for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                        __syncthreads();
-                        int i = n / 3; //for i in range(lij+1):
-                        int _ix = n % 3;
-                        double *_gx = gx + (i + _ix * g_size) * nsq_per_block;
-                        double Rqc = rlrk[_ix*nsq_per_block] * akl_cache[nsq_per_block];
-                        double cpx = Rqc + rt_akl * Rpq[_ix*nsq_per_block];
-                        //for i in range(lij+1):
-                        //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
-                        if (n < lij3) {
-                            s0x = _gx[0];
-                            s1x = cpx * s0x;
-                            if (i > 0) {
-                                s1x += i * b00 * _gx[-nsq_per_block];
-                            }
-                            _gx[stride_k*nsq_per_block] = s1x;
-                        }
-
-                        //for k in range(1, lkl):
-                        //    for i in range(lij+1):
-                        //        trr(i,k+1) = cp * trr(i,k) + k*b01 * trr(i,k-1) + i*b00 * trr(i-1,k)
-                        for (int k = 1; k < lkl; ++k) {
-                            __syncthreads();
-                            if (n < lij3) {
-                                s2x = cpx*s1x + k*b01*s0x;
-                                if (i > 0) {
-                                    s2x += i * b00 * _gx[(k*stride_k-1)*nsq_per_block];
-                                }
-                                _gx[(k*stride_k+stride_k)*nsq_per_block] = s2x;
-                                s0x = s1x;
-                                s1x = s2x;
-                            }
-                        }
-                    }
-
-                    // hrr
-                    // g(i,j+1) = rirj * g(i,j) +  g(i+1,j)
-                    // g(...,k,l+1) = rkrl * g(...,k,l) + g(...,k+1,l)
-                    if (lj > 0) {
-                        __syncthreads();
-                        if (task_id < ntasks) {
-                            int lkl3 = (lkl+1)*3;
-                            for (int m = gout_id; m < lkl3; m += gout_stride) {
-                                int k = m / 3;
-                                int _ix = m % 3;
-                                double xjxi = rjri[_ix];
-                                double *_gx = gx + (_ix*g_size + k*stride_k) * nsq_per_block;
-                                for (int j = 0; j < lj; ++j) {
-                                    int ij = (lij-j) + j*stride_j;
-                                    s1x = _gx[ij*nsq_per_block];
-                                    for (--ij; ij >= j*stride_j; --ij) {
-                                        s0x = _gx[ij*nsq_per_block];
-                                        _gx[(ij+stride_j)*nsq_per_block] = s1x - xjxi * s0x;
-                                        s1x = s0x;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (ll > 0) {
-                        __syncthreads();
-                        if (task_id < ntasks) {
-                            for (int n = gout_id; n < stride_k*3; n += gout_stride) {
-                                int i = n / 3;
-                                int _ix = n % 3;
-                                double xlxk = rlrk[_ix*nsq_per_block];
-                                double *_gx = gx + (_ix*g_size + i) * nsq_per_block;
-                                for (int l = 0; l < ll; ++l) {
-                                    int kl = (lkl-l)*stride_k + l*stride_l;
-                                    s1x = _gx[kl*nsq_per_block];
-                                    for (kl-=stride_k; kl >= l*stride_l; kl-=stride_k) {
-                                        s0x = _gx[kl*nsq_per_block];
-                                        _gx[(kl+stride_l)*nsq_per_block] = s1x - xlxk * s0x;
-                                        s1x = s0x;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    __syncthreads();
+                    BUILD_4C_GXYZ(lj, ll, task_id < ntasks);
                     if (task_id >= ntasks) {
                         continue;
                     }
@@ -1572,10 +1331,11 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
 
     if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
                                      s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers)) {
+        int nf = nfi * nfj * nfk * nfl;
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        int buflen = (nroots*2 + g_size*3 + 8) * quartets_per_block + ij_prims;
+        int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block + ij_prims;
 
         #ifdef USE_SYCL
         sycl::range<2> blocks(1, workers);
@@ -1584,15 +1344,26 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
           sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
           cgh.parallel_for<class rys_ejk_ip2_type12_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
             rys_ejk_ip2_type12_kernel(envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                                      s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head,
+                                      s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf,
                                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
           });
         });
         #else
         dim3 threads(quartets_per_block, gout_stride);
-        rys_ejk_ip2_type12_kernel<<<workers, threads, buflen*sizeof(double)>>>(
+        int shm_bytes = buflen * sizeof(double);
+        if (shm_bytes > 48000) {
+            cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_bytes,
+                        cudaGetErrorString(err));
+                return 1;
+            }
+        }
+
+        rys_ejk_ip2_type12_kernel<<<workers, threads, shm_bytes>>>(
                 envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head);
+                s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
         #endif
     }
     cudaError_t err = cudaGetLastError();
@@ -1672,11 +1443,12 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
 
     if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
                                     s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers)) {
+        int nf = nfi * nfj * nfk * nfl;
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        int buflen = (nroots*2 + g_size*3 + 8) * quartets_per_block + ij_prims;
-        buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
+        int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block + ij_prims;
+        buflen = max(buflen, 9*gout_stride*quartets_per_block);
 
         #ifdef USE_SYCL
         sycl::range<2> blocks(1, workers);
@@ -1685,15 +1457,26 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
           sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
           cgh.parallel_for<class rys_ejk_ip2_type3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
             rys_ejk_ip2_type3_kernel(envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                                     s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head,
+                                     s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf,
                                      item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
           });
         });
         #else
         dim3 threads(quartets_per_block, gout_stride);
-        rys_ejk_ip2_type3_kernel<<<workers, threads, buflen*sizeof(double)>>>(
+        int shm_bytes = buflen * sizeof(double);
+        if (shm_bytes > 48000) {
+            cudaFuncSetAttribute(rys_ejk_ip2_type3_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_bytes,
+                        cudaGetErrorString(err));
+                return 1;
+            }
+        }
+
+        rys_ejk_ip2_type3_kernel<<<workers, threads, shm_bytes>>>(
                 envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head);
+                s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
         #endif
     }
     cudaError_t err = cudaGetLastError();
@@ -1704,19 +1487,6 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
             printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
         }
         fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip2_type3, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
-        return 1;
-    }
-    return 0;
-}
-
-int RYS_build_ejk_ip2_init(int shm_size)
-{
-    cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(rys_ejk_ip2_type3_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
-                cudaGetErrorString(err));
         return 1;
     }
     return 0;

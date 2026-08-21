@@ -27,6 +27,7 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.scf import _response_functions # noqa
+from gpu4pyscf.df.df_jk import _make_factorized_dm
 from pyscf import __config__
 
 REAL_EIG_THRESHOLD = tdhf_cpu.REAL_EIG_THRESHOLD
@@ -104,7 +105,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         Q = Kinv @ R
         Qs = 0.5*(Q+Q.T)
         
-        q_sym = cp.einsum('gh,hkl->gkl', Qs, vmat)
+        q_sym = contract('gh,hkl->gkl', Qs, vmat)
         kEao = contract('gij,gkl->ijkl', vmat, q_sym)
         kEmo = contract('pjkl,pi->ijkl', kEao, orbo.conj())
         kEmo = contract('ipkl,pj->ijkl', kEmo, mo)
@@ -316,8 +317,8 @@ def gen_tda_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     def vind(zs):
         zs = cp.asarray(zs).reshape(-1,nocc,nvir)
         mo1 = contract('xov,pv->xpo', zs, orbv)
-        dms = contract('xpo,qo->xpq', mo1, orbo2.conj())
-        dms = tag_array(dms, mo1=mo1, occ_coeff=orbo)
+        #:dms = contract('xpo,qo->xpq', mo1, orbo2.conj())
+        dms = _make_factorized_dm(mo1, orbo2, symmetrize=0)
         v1ao = vresp(dms)
         v1mo = contract('xpq,qo->xpo', v1ao, orbo)
         v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())
@@ -533,15 +534,16 @@ class TDBase(lib.StreamObject):
 
         #Incompatible to old np version
         #ints = np.einsum('...pq,pi,qj->...ij', ints, orbo.conj(), orbv)
-        ints = cp.einsum('xpq,pi,qj->xij', ints.reshape(-1,nao,nao), orbo.conj(), orbv)
+        ints = contract('xpq,pi->xiq', ints.reshape(-1,nao,nao), orbo.conj())
+        ints = contract('xiq,qj->xij', ints, orbv)
         xs = cp.asarray([x for x,y in xy])
-        pol = cp.einsum('xij,nij->nx', ints, xs).get() * 2
+        pol = contract('xij,nij->nx', ints, xs).get() * 2
         if isinstance(xy[0][1], (np.ndarray, cp.ndarray)):
             ys = cp.asarray([y for x,y in xy])
             if hermi:
-                pol += cp.einsum('xij,nij->nx', ints, ys).get() * 2
+                pol += contract('xij,nij->nx', ints, ys).get() * 2
             else:  # anti-Hermitian
-                pol -= cp.einsum('xij,nij->nx', ints, ys).get() * 2
+                pol -= contract('xij,nij->nx', ints, ys).get() * 2
         pol = pol.reshape((nstates,)+pol_shape)
         return pol
 
@@ -607,13 +609,15 @@ class TDA(TDBase):
         S_vir = orbv2.T.dot(S).dot(orbv1)
 
         X_mo = cp.stack([asarray(x) for x, y in xy])
-        X_mo = cp.einsum('ui,nij,vj->nuv', S_occ, X_mo, S_vir)
+        tmp = contract('ui,nij->nuj', S_occ, X_mo)
+        X_mo = contract('nuj,vj->nuv', tmp, S_vir)
         Y_mo = xy[0][1]
         if not isinstance(Y_mo, (np.ndarray, cp.ndarray)):
             return X_mo.reshape(nstates, -1)
 
         Y_mo = cp.stack([asarray(y) for x, y in xy])
-        Y_mo = cp.einsum('ui,nij,vj->nuv', S_occ, Y_mo, S_vir)
+        tmp = contract('ui,nij->nuj', S_occ, Y_mo)
+        Y_mo = contract('nuj,vj->nuv', tmp, S_vir)
         x0 = cp.hstack((X_mo.reshape(nstates, -1), Y_mo.reshape(nstates, -1)))
         return x0
 

@@ -22,6 +22,7 @@ from pyscf import lib, gto
 from pyscf.data import radii
 from pyscf.dft.gen_grid import LEBEDEV_ORDER
 from gpu4pyscf.solvent import pcm, _attach_solvent
+from gpu4pyscf.solvent.pcm import natm_without_ghost
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import int3c1e
 from cupyx.scipy.linalg import lu_factor
@@ -398,6 +399,9 @@ class SMD(lib.StreamObject):
         if ng is None:
             ng = self.sasa_ng
 
+        if natm_without_ghost(mol) != mol.natm:
+            raise RuntimeError('SMD does not support ghost atoms')
+
         self.surface = pcm.gen_surface(mol, rad=radii_table, ng=ng)
         self._intermediates = {}
         F, A = pcm.get_F_A(self.surface)
@@ -492,8 +496,10 @@ class SMD(lib.StreamObject):
         if hasattr(out, 'lebedev_order'):
             out.lebedev_order = self.lebedev_order
         out.solvent = self.solvent
-        if self.eps is not None:
-            out.eps = self.eps
-        if self.radii_table is not None:
+        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
+        out.eps = self.eps or solvent_descriptors[5]
+        if self.radii_table is None:
+            out.radii_table = smd_radii(solvent_descriptors[2])
+        else:
             out.radii_table = cupy.asnumpy(self.radii_table)
         return out

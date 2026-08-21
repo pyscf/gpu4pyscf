@@ -19,10 +19,11 @@ from pyscf import symm
 from pyscf import lib
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh
 from gpu4pyscf.dft.rks import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, transpose_sum
+from gpu4pyscf.lib.cupy_helper import contract, transpose_sum
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import uhf as tdhf_gpu
 from gpu4pyscf import dft
+from gpu4pyscf.df.df_jk import _make_factorized_dm, _stack_uhf_occ_oribtals
 
 __all__ = [
     'TDA', 'TDDFT', 'TDUKS', 'CasidaTDDFT', 'TDDFTNoHybrid',
@@ -103,20 +104,18 @@ class CasidaTDDFT(TDDFT):
         nocca, nvira = e_ia_a.shape
         noccb, nvirb = e_ia_b.shape
 
+        orbo = _stack_uhf_occ_oribtals(orboa, orbob)
+
         def vind(zs):
             assert zs.dtype == np.float64
             nz = len(zs)
             zs = cp.asarray(zs).reshape(nz,-1)
             dmsa = (zs[:,:nocca*nvira] * d_ia[:nocca*nvira]).reshape(nz,nocca,nvira)
             dmsb = (zs[:,nocca*nvira:] * d_ia[nocca*nvira:]).reshape(nz,noccb,nvirb)
-            mo1a = contract('xov,pv->xpo', dmsa, orbva)
-            dmsa = contract('xpo,qo->xpq', mo1a, orboa)
-            mo1b = contract('xov,pv->xpo', dmsb, orbvb)
-            dmsb = contract('xpo,qo->xpq', mo1b, orbob)
-            dmsa = transpose_sum(dmsa)
-            dmsb = transpose_sum(dmsb)
-            dms = cp.asarray((dmsa, dmsb))
-            dms = tag_array(dms, mo1=[mo1a,mo1b], occ_coeff=[orboa,orbob])
+            mo1 = _stack_uhf_occ_oribtals(
+                contract('xov,pv->xpo', dmsa, orbva),
+                contract('xov,pv->xpo', dmsb, orbvb))
+            dms = _make_factorized_dm(mo1, orbo, symmetrize=1)
             v1ao = vresp(dms)
             v1a = contract('xpq,qo->xpo', v1ao[0], orboa)
             v1a = contract('xpo,pv->xov', v1a, orbva)

@@ -244,7 +244,7 @@ H -0.646 -0.464 -0.804
         mf.conv_tol_cpscf = 1e-7
         mf.kernel()
         hessobj = mf.Hessian()
-        hessobj.auxbasis_response = 1
+        hessobj.auxbasis_response = 2
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()

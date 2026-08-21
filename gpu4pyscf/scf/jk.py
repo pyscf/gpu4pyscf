@@ -27,6 +27,7 @@ from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
     load_library, condense, transpose_sum, hermi_triu, asarray, ndarray)
+from gpu4pyscf.lib.utils import nearest_power2 as _nearest_power2
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
@@ -45,19 +46,15 @@ libvhf_rys.cuda_version.restype = ctypes.c_int
 CUDA_VERSION = libvhf_rys.cuda_version()
 libgint = load_library('libgint')
 
-libvhf_rys.RYS_init_constant()
-
 PTR_BAS_COORD = 7
 LMAX = 4
-TILE = 6
-# Host-side task-pool depth used to size the `pool` device buffer and to batch
-# pair_kl (blksize = QUEUE_DEPTH - 512). This MUST match the C-side QUEUE_DEPTH in
-# lib/gvhf-rys/vhf.cuh, which is the per-block pool stride and the offset at which
-# the device kernels carve out the `head` counter:
-#   int *head = (int *)(pool + workers * QUEUE_DEPTH)
-# Keeping them equal guarantees the +1/+3/+n_dm slots reserved by the host pool
-# allocation land exactly on the `head` counter region.
-QUEUE_DEPTH = 65536
+TILE = 12
+# NOTE (SYCL): the device kernels stride the task pool by the C-side
+# QUEUE_DEPTH in lib/gvhf-rys/vhf.cuh (65536) and carve the head counter at
+# pool + workers*QUEUE_DEPTH_C. This host value only sizes the allocation, so
+# it may exceed the C-side value (that merely over-allocates) but must never
+# be smaller.
+QUEUE_DEPTH = 262144
 SHM_SIZE = shm_size - 1024
 del shm_size
 GOUT_WIDTH = 42
@@ -65,11 +62,56 @@ THREADS = 256
 GROUP_SIZE = 256
 Q_COND_MARGIN = 4.
 
-libvhf_rys.RYS_build_k_init.restype = ctypes.c_int
-libvhf_rys.RYS_build_jk_init.restype = ctypes.c_int
+def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True,
+           omega=None, lr_factor=None, sr_factor=None, verbose=None):
+    r'''Compute Coulomb (J) and exchange (K) matrices.
 
-def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None):
-    '''Compute J, K matrices
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Mole object that defines the basis set and molecular geometry.
+    dm : ndarray or sequence of ndarray
+        Density matrix or a sequence of density matrices. If multiple density
+        matrices are provided, the corresponding J and K matrices are computed
+        for each input density matrix.
+    hermi : int, optional
+        Symmetry of the density matrix:
+        - ``0``: no symmetry
+        - ``1``: Hermitian
+        - ``2``: anti-Hermitian
+    vhfopt : gpu4ypscf.scf.jk._VHFOpt object, optional
+        Handler for JK matrix computation.
+    with_j : bool, optional
+        Whether to compute the Coulomb (J) matrix. If ``False``, the returned
+        J matrix is ``None``.
+    with_k : bool, optional
+        Whether to compute the exchange (K) matrix. If ``False``, the returned
+        K matrix is ``None``.
+    omega : float, optional
+        Range-separation parameter. Together with ``lr_factor`` and
+        ``sr_factor``, defines the range-separated Coulomb operator used in
+        exchange (K) matrix evaluation:
+            lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+    lr_factor : float, optional
+        Scaling factor for the long-range interaction,
+    sr_factor : float, optional
+        Scaling factor for the short-range interaction,
+
+    Notes
+    -----
+    When omega, lr_factor, and sr_factor parameters are specified, the K matrix
+    is computed using the attenuated Coulomb operator. J matrix is always
+    computed using the standard Coulomb operator 1/r.
+
+    Returns
+    -------
+    (vj, vk)
+    vj : ndarray or sequence of ndarray or None
+        Coulomb matrices. The returned object has the same shape as the input
+        density matrices. Returns ``None`` if ``with_j`` is ``False``.
+    vk : ndarray or sequence of ndarray or None
+        Exchange matrices. The returned object has the same shape as the input
+        density matrices. Returns ``None`` if ``with_k`` is ``False``.
     '''
     assert with_j or with_k
     log = logger.new_logger(mol, verbose)
@@ -85,7 +127,18 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
 
-    vj, vk = vhfopt.get_jk(dms, hermi, log)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+
+    if omega == 0:
+        vj, vk = vhfopt.get_jk(dms, hermi, log)
+    else:
+        if with_k:
+            vk = vhfopt.get_k(dms, hermi, log, omega, lr_factor, sr_factor)
+        if with_j:
+            dms = transpose_sum(dms)
+            dms *= .5
+            vj = vhfopt.get_j(dms, log)
+
     if with_k:
         #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
         vk = vhfopt.apply_coeff_CT_mat_C(vk)
@@ -103,7 +156,38 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     return vj, vk
 
 def get_k(mol, dm, hermi=0, vhfopt=None, omega=None, lr_factor=None, sr_factor=None):
-    '''Compute K matrix
+    r'''Compute exchange (K) matrix.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Mole object that defines the basis set and molecular geometry.
+    dm : ndarray or sequence of ndarray
+        Density matrix or a sequence of density matrices. If multiple density
+        matrices are provided, the corresponding J and K matrices are computed
+        for each input density matrix.
+    hermi : int, optional
+        Symmetry of the density matrix:
+        - ``0``: no symmetry
+        - ``1``: Hermitian
+        - ``2``: anti-Hermitian
+    vhfopt : gpu4ypscf.scf.jk._VHFOpt object, optional
+        Handler for K matrix computation.
+    omega : float, optional
+        Range-separation parameter. Together with ``lr_factor`` and
+        ``sr_factor``, defines the range-separated Coulomb operator used in
+        exchange (K) matrix evaluation:
+            lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+    lr_factor : float, optional
+        Scaling factor for the long-range interaction,
+    sr_factor : float, optional
+        Scaling factor for the short-range interaction,
+
+    Returns
+    -------
+    vk : ndarray or sequence of ndarray
+        Exchange matrices. The returned object has the same shape as the input
+        density matrices.
     '''
     log = logger.new_logger(mol)
     cput0 = log.init_timer()
@@ -449,9 +533,6 @@ class _VHFOpt:
             stream = cp.cuda.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
-            err = libvhf_rys.RYS_build_jk_init(ctypes.c_int(SHM_SIZE))
-            if err != 0:
-                raise RuntimeError('RYS build_jk CUDA kernel initialization failed')
             dms = cp.asarray(dms) # transfer to current device
             dm_cond = cp.asarray(dm_cond)
 
@@ -624,7 +705,7 @@ class _VHFOpt:
             bas_pair_cache = {k: [cp.asarray(x) for x in v]
                               for k, v in self.bas_pair_cache.items()}
 
-            err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_int(SHM_SIZE))
+            err = libvhf_rys.RYS_init_rysj_constant()
             if err != 0:
                 raise RuntimeError('CUDA kernel initialization')
 
@@ -747,9 +828,6 @@ class _VHFOpt:
             stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
-            err = libvhf_rys.RYS_build_k_init(ctypes.c_int(SHM_SIZE))
-            if err != 0:
-                raise RuntimeError('RYS build_k CUDA kernel initialization failed')
             dms = cp.asarray(dms) # transfer to current device
             dm_cond = cp.asarray(dm_cond)
 
@@ -876,35 +954,6 @@ def _make_j_engine_pair_locs(mol):
     pair_loc = np.append(0, np.cumsum((ll+1)*(ll+2)*(ll+3)//6))
     return np.asarray(pair_loc, dtype=np.int32)
 
-def quartets_scheme(mol, l_ctr_pattern, with_j, with_k, shm_size=SHM_SIZE):
-    raise RuntimeError('deprecated')
-    ls = l_ctr_pattern[:,0]
-    li, lj, lk, ll = ls
-    order = li + lj + lk + ll
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfk = (lk + 1) * (lk + 2) // 2
-    nfl = (ll + 1) * (ll + 2) // 2
-    gout_size = nfi * nfj * nfk * nfl
-    g_size = (li+1)*(lj+1)*(lk+1)*(ll+1)
-    nps = l_ctr_pattern[:,1]
-    ij_prims = nps[0] * nps[1]
-    nroots = order // 2 + 1
-    jk_cache_size = 0
-    if with_j: jk_cache_size += nfi*nfj + nfk*nfl
-    if with_k: jk_cache_size += nfi*nfk + nfi*nfl + nfj*nfk + nfj*nfl
-    root_g_jk_cache_shared = max(nroots*2 + g_size*3, jk_cache_size)
-    unit = root_g_jk_cache_shared + ij_prims + 8
-    if mol.omega < 0: # SR
-        unit += nroots * 2
-    counts = shm_size // (unit*8)
-    n = min(THREADS, _nearest_power2(counts))
-    gout_stride = THREADS // n
-    while gout_stride < 16 and gout_size / (gout_stride*GOUT_WIDTH) > 1:
-        n //= 2
-        gout_stride *= 2
-    return n, gout_stride
-
 def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
@@ -936,27 +985,6 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
     return n, gout_stride, with_gout
-
-def _nearest_power2(n, return_leq=True):
-    '''nearest 2**x that is leq or geq than n.
-
-    Kwargs:
-        return_leq specifies that the return is less or equal than n.
-        Otherwise, the return is greater or equal than n.
-    '''
-    if isinstance(n, np.ndarray):
-        n = n.astype(int, copy=False)
-        if return_leq:
-            return 2 ** np.log2(n).astype(int)
-        else:
-            return 2 ** np.ceil(np.log2(n)).astype(int)
-
-    n = int(n)
-    assert n > 0
-    if return_leq:
-        return 1 << (n.bit_length() - 1)
-    else:
-        return 1 << ((n-1).bit_length())
 
 def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=True):
     '''A fast routine to estimate the Schwarz inequality condition

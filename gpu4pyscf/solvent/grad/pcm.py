@@ -24,13 +24,32 @@ from cupyx.scipy.special import erf
 from pyscf import lib
 from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
+from pyscf.data.elements import is_ghost_atom
 from gpu4pyscf.gto import int3c1e
-from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent, left_multiply_S, left_multiply_D
+from gpu4pyscf.solvent.pcm import (PI, switch_h, libsolvent, left_multiply_S, left_multiply_D,
+                                   atom_coords_without_ghost, atom_charges_without_ghost, natm_without_ghost)
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad.rhf import GradientsBase
 from pyscf import lib as pyscf_lib
+
+def gradient_nonghost_to_all(mol, grad):
+    natm = grad.shape[0]
+    if mol.natm == natm:
+        return grad
+
+    natm_nonghost = natm_without_ghost(mol)
+    assert grad.shape == (natm_nonghost, 3)
+
+    if isinstance(grad, cupy.ndarray):
+        grad_full = cupy.zeros((mol.natm, 3))
+    else:
+        assert isinstance(grad, numpy.ndarray)
+        grad_full = numpy.zeros((mol.natm, 3))
+    nonghost_mask = [not is_ghost_atom(element) for element in mol.elements]
+    grad_full[nonghost_mask, :] = grad
+    return grad_full
 
 def grad_switch_h(x):
     ''' first derivative of h(x)'''
@@ -409,8 +428,8 @@ def grad_nuc(pcmobj, dm, q_sym = None):
         q_sym_left = q_sym_left.get()
         q_sym += q_sym_left
 
-    atom_coords = mol.atom_coords(unit='B')
-    atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
+    atom_coords = atom_coords_without_ghost(mol)
+    atom_charges = numpy.asarray(atom_charges_without_ghost(mol), dtype=numpy.float64)
     fakemol_nuc = gto.fakemol_for_charges(atom_coords)
     fakemol = gto.fakemol_for_charges(grid_coords, expnt=exponents**2)
 
@@ -427,6 +446,7 @@ def grad_nuc(pcmobj, dm, q_sym = None):
     dv_g = numpy.einsum('gx,g->gx', dv_g, q_sym)
 
     de -= numpy.asarray([numpy.sum(dv_g[p0:p1], axis=0) for p0,p1 in gridslice])
+    de = gradient_nonghost_to_all(mol, de)
     t1 = log.timer_debug1('grad nuc', *t1)
     return de
 
@@ -474,6 +494,7 @@ def grad_qv(pcmobj, dm, q_sym = None):
     aoslice = mol.aoslice_by_atom()
     dvj = 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
+    dq = gradient_nonghost_to_all(mol, dq)
     de = dq + dvj
     t1 = log.timer_debug1('grad qv', *t1)
     return de.get()
@@ -535,7 +556,8 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         tmp = B.dot(c)
         return (a*tmp).T
 
-    de = cupy.zeros([pcmobj.mol.natm,3])
+    natm = natm_without_ghost(pcmobj.mol)
+    de = cupy.zeros([natm, 3])
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         # dR = 0, dK = dS
         de_dS  = 0.5 * vK_1.reshape(-1, 1) * left_multiply_dS_offdiagonal(pcmobj.surface, q, stream = None)
@@ -730,6 +752,8 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
     if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
         # Refer to the comments in gpu4pyscf/solvent/pcm.py::_get_vind()
         de *= 2
+
+    de = gradient_nonghost_to_all(mol, de)
 
     t1 = log.timer_debug1('grad solver', *t1)
     return de.get()
