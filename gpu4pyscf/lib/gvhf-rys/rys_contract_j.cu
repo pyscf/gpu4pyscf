@@ -23,8 +23,8 @@
 #include "create_tasks.cu"
 
 #ifdef USE_SYCL
-SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
-SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
+SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
 #else
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
@@ -47,8 +47,8 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int blockDim_y = item.get_local_range(0);
     int blockIdx_x = item.get_group(1);
 
-    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
-    auto c_i_in_fold3idx = s_i_in_fold3idx.get();
+    auto c_i_in_fold2idx = s_rys_i_in_fold2idx.get();
+    auto c_i_in_fold3idx = s_rys_i_in_fold3idx.get();
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -548,7 +548,7 @@ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int blockDim_y = item.get_local_range(0);
     int blockIdx_x = item.get_group(1);
 
-    auto c_i_in_fold3idx = s_i_in_fold3idx.get();
+    auto c_i_in_fold3idx = s_rys_i_in_fold3idx.get();
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -1028,8 +1028,8 @@ int RYS_init_rysj_constant(int shm_size)
         } }
     }
     #ifdef USE_SYCL
-    sycl_get_queue()->memcpy(s_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
-    sycl_get_queue()->memcpy(s_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();
+    sycl_get_queue()->memcpy(s_rys_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
+    sycl_get_queue()->memcpy(s_rys_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();
     #else
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));

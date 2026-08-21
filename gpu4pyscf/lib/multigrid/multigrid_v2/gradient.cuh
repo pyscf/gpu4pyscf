@@ -408,13 +408,13 @@ __global__ void evaluate_xc_kernel(
 }
 
 #ifdef USE_SYCL
-namespace { struct evaluate_xc_tu_tag {}; }
-namespace { template<int> struct evaluate_xc_callsite_tag {}; }
+namespace { struct evaluate_xc_grad_tu_tag {}; }
+namespace { template<int> struct evaluate_xc_grad_callsite_tag {}; }
 template<int LI, int LJ, typename TUtag, typename CallTag, typename KernelTypeTag, typename NChannelsTag, typename NonOrthTag> struct evaluate_xc_kernel_sycl_name;
 template<int LI, int LJ, int CS, typename KernelType, int NCH, bool NONORTH>
 using evaluate_xc_kernel_sycl_t = evaluate_xc_kernel_sycl_name<LI, LJ,
-                                                               evaluate_xc_tu_tag,
-                                                               evaluate_xc_callsite_tag<CS>,
+                                                               evaluate_xc_grad_tu_tag,
+                                                               evaluate_xc_grad_callsite_tag<CS>,
                                                                KernelType, // encodes KernelType
                                                                std::integral_constant<int, NCH>, // encodes n_channels
                                                                std::bool_constant<NONORTH>>; // encodes is_non_orthogonal
@@ -1029,13 +1029,13 @@ __global__ void evaluate_xc_with_tau_kernel(
 }
 
 #ifdef USE_SYCL
-namespace { struct evaluate_xc_with_tau_tu_tag {}; }
-namespace { template<int> struct evaluate_xc_with_tau_callsite_tag {}; }
+namespace { struct evaluate_xc_with_tau_grad_tu_tag {}; }
+namespace { template<int> struct evaluate_xc_with_tau_grad_callsite_tag {}; }
 template<int LI, int LJ, typename TUtag, typename CallTag, typename KernelTypeTag, typename NChannelsTag, typename NonOrthTag> struct evaluate_xc_with_tau_kernel_sycl_name;
 template<int LI, int LJ, int CS, typename KernelType, int NCH, bool NONORTH>
 using evaluate_xc_with_tau_kernel_sycl_t = evaluate_xc_with_tau_kernel_sycl_name<LI, LJ,
-                                                                         evaluate_xc_with_tau_tu_tag,
-                                                                         evaluate_xc_with_tau_callsite_tag<CS>,
+                                                                         evaluate_xc_with_tau_grad_tu_tag,
+                                                                         evaluate_xc_with_tau_grad_callsite_tag<CS>,
                                                                          KernelType,                                 // encodes KernelType
                                                                          std::integral_constant<int, NCH>,          // encodes n_channels
                                                                          std::bool_constant<NONORTH>>;                // encodes is_non_orthogonal

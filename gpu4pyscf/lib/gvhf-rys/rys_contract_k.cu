@@ -26,7 +26,7 @@
 #include "rys_contract_k.cuh"
 
 #ifdef USE_SYCL
-SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_gxyz_offset;
+SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_rys_gxyz_offset;
 #endif
 
 #define GOUT_WIDTH1     81
@@ -68,7 +68,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
 
-    auto gxyz_offsets = s_gxyz_offset.get() + OFFSET;
+    auto gxyz_offsets = s_rys_gxyz_offset.get() + OFFSET;
     #else
     int threadIdx_x = threadIdx.x;
     int threadIdx_y = threadIdx.y;
@@ -589,7 +589,7 @@ GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
     }
 
 #ifdef USE_SYCL
-    sycl_get_queue()->memcpy(s_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset)).wait();
+    sycl_get_queue()->memcpy(s_rys_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset)).wait();
     return nullptr;
 #else
     checkCudaErrors(

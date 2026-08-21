@@ -191,12 +191,23 @@ static inline unsigned get_smid()
   return (g % max_cu);
 }
 
-// // to ensure that each SM only executes one block
-#define adjust_threads(kernel, threads) { \
-    threads *= 2; }
+// NOTE: On CUDA, adjust_threads doubles the launch's nsq_per_block only when
+// cudaFuncGetAttributes confirms the kernel's actual register usage supports
+// 2x occupancy per SM. Each unrolled *_ip1 kernel hardcodes its own internal
+// `constexpr int nsq_per_block` used to lay out shared/local memory, so the
+// host-side "threads" value driving the nd_range and local_accessor buflen
+// MUST stay equal to that constant. Unconditionally doubling it here (as a
+// stand-in for the missing SYCL equivalent of cudaFuncGetAttributes) makes
+// the launched work-group width diverge from the kernel's baked-in shared
+// memory layout, corrupting the block-level reduction (silently wrong
+// gradients/JK energies -- worst case is the simplest all-s-function case,
+// e.g. RHF/H2 in a minimal basis, since that's the first switch-case hit).
+// Until a real SYCL analogue of the CUDA register-occupancy query exists,
+// this must be a no-op.
+#define adjust_threads(kernel, threads) { }
 
-extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
-extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
+extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
 
 //NOTE: `_c_cartesian_lexical_xyz` equvialent in SYCL is converted to
 // `static constexpr` var defined in rys_contract_k.cuh becuase this
@@ -205,7 +216,7 @@ extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
 // declared or defined here
 
 // Here 625 is just a random MAX chosen from rys_constant.cu
-extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_gxyz_offset;
+extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_rys_gxyz_offset;
 
 #endif // __CUDACC__
 

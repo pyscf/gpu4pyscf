@@ -25,7 +25,7 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
                       int ish, int jsh, int ksh, int lsh)
 {
 #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    auto c_bpcache = s_gvhf_bpcache.get();
 #endif  
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish  ];

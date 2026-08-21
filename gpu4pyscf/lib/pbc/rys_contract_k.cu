@@ -26,7 +26,17 @@
 #include "create_tasks.cu"
 
 #ifdef USE_SYCL
-SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_gxyz_offset;
+// NOTE: this device_global and PBC_make_gxyz_offset() below are deliberately
+// named differently from their libgvhf_rys counterparts. Both libraries are
+// loaded into the SAME process (verified via /proc/self/maps), neither lists
+// the other in DT_NEEDED, and the symbols are GLOBAL DEFAULT visibility. When
+// both exported `s_pbc_gxyz_offset` / `PBC_make_gxyz_offset`, the dynamic linker
+// bound every caller in the process to whichever library happened to load
+// first -- so one library's device_global was written by the other library's
+// host memcpy, leaving its own copy uninitialised. Reading it yields garbage
+// int8_t offsets that flow into load_dm() as an arbitrary pointer
+// displacement. Keep these names library-unique.
+SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_pbc_gxyz_offset;
 #endif
 
 #define GOUT_WIDTH1     81
@@ -76,7 +86,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
 
-    auto gxyz_offsets = s_gxyz_offset.get() + OFFSET;
+    auto gxyz_offsets = s_pbc_gxyz_offset.get() + OFFSET;
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -503,7 +513,7 @@ while (1) {
 }
 }
 
-GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
+GXYZOffset *PBC_make_gxyz_offset(BoundsInfo &bounds)
 {
 /*
     nfi = (li + 1) * (li + 2) // 2
@@ -540,7 +550,7 @@ GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
         }
     }
     #ifdef USE_SYCL
-    sycl_get_queue()->memcpy(s_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset)).wait();
+    sycl_get_queue()->memcpy(s_pbc_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset)).wait();
     return nullptr;
     #else
     checkCudaErrors(
@@ -678,7 +688,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl,
                            diffuse_exps, dm_penalty, pool, head, workers)) {
-        GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
+        GXYZOffset* p_gxyz_offset = PBC_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
                             ((lk == 0) << 1) |

@@ -30,7 +30,7 @@ static void GINTkernel_int3c2e_getj_pass1(GINTEnvVars envs, JKMatrix jk, double*
                        int ish, int jsh, int ksh)
 {
 #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    auto c_bpcache = s_gvhf_bpcache.get();
 #endif
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
@@ -88,7 +88,7 @@ static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double*
                        int ish, int jsh, int ksh)
 {
 #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    auto c_bpcache = s_gvhf_bpcache.get();
 #endif
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;

@@ -7,6 +7,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <stdexcept>
+#include <atomic>
 
 #include <sycl/sycl.hpp>
 

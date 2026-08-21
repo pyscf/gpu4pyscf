@@ -87,6 +87,10 @@ static void rys_roots(int nroots, double x, double *rw,
 }
 
 // rys_roots for range-separation Coulomb
+// NOTE (SYCL/PVC): see rys_roots_for_k.cu -- the barriers are skipped when
+// stride == 1, because such callers evaluate every root on the calling
+// work-item and invoke this routine from a work-item dependent loop, where a
+// group barrier deadlocks on Level Zero.
 __device__ __forceinline__ static
 void rys_roots_rs(int nroots, double theta, double rr, double omega,
                   double *rw, int block_size, int rt_id, int stride)
@@ -100,7 +104,7 @@ void rys_roots_rs(int nroots, double theta, double rr, double omega,
     } else if (omega > 0) {
         double theta_fac = omega * omega / (omega * omega + theta);
         rys_roots(nroots, theta_fac*theta_rr, rw, block_size, rt_id, stride);
-        __syncthreads();
+        if (stride > 1) { __syncthreads(); }
         double sqrt_theta_fac = sqrt(theta_fac);
         for (int irys = rt_id; irys < nroots; irys+=stride) {
             rw[ irys*2   *block_size] *= theta_fac;
@@ -112,7 +116,7 @@ void rys_roots_rs(int nroots, double theta, double rr, double omega,
         double theta_fac = omega * omega / (omega * omega + theta);
         double *rw1 = rw + nroots*block_size;
         rys_roots(_nroots, theta_fac*theta_rr, rw1, block_size, rt_id, stride);
-        __syncthreads();
+        if (stride > 1) { __syncthreads(); }
         double sqrt_theta_fac = -sqrt(theta_fac);
         for (int irys = rt_id; irys < _nroots; irys+=stride) {
             rw1[ irys*2   *block_size] *= theta_fac;

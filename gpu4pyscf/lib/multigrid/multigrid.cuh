@@ -84,8 +84,8 @@ typedef struct {
 } Fold3Index;
 
 #ifdef USE_SYCL
-extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
-extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_mg_i_in_fold2idx;
+extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_mg_i_in_fold3idx;
 #else //USE_SYCL
 #ifdef __CUDACC__
 extern __constant__ Fold2Index c_i_in_fold2idx[];

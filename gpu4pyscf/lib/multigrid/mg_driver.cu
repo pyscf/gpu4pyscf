@@ -20,8 +20,8 @@
 #include "multigrid.cuh"
 
 #ifdef USE_SYCL
-SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
-SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_mg_i_in_fold2idx;
+SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_mg_i_in_fold3idx;
 #else
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
@@ -52,8 +52,8 @@ int MG_init_constant(int shm_size)
 
 #ifdef USE_SYCL
     sycl::queue &stream = *sycl_get_queue();
-    stream.memcpy(s_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
-    stream.memcpy(s_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();
+    stream.memcpy(s_mg_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
+    stream.memcpy(s_mg_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();
 #else
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));

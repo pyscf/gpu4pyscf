@@ -13,6 +13,7 @@
 # limitations under the License.
 
 
+import math
 import warnings
 import cupy as cp
 import numpy as np
@@ -136,7 +137,7 @@ def eval_xc_collinear_spin(func, rho_tm, deriv, spin_samples):
     ngrids = rho_tm.shape[-1]
     # samples on z=cos(theta) and their weights between [0, 1]
     sgridz, weights = _make_paxis_samples(spin_samples)
-    blksize = int(cp.ceil(1e5 / ngrids)) * 8
+    blksize = math.ceil(1e5 / ngrids) * 8
 
     if rho_tm.ndim == 2:
         nvar = 1
@@ -210,7 +211,7 @@ def _eval_xc_lebedev(func, rho_tm, deriv, spin_samples,
         ndim = 2
     else:
         ndim = 4
-    blksize = int(cp.ceil(ndim*1e5 / ngrids)) * 8
+    blksize = math.ceil(ndim*1e5 / ngrids) * 8
     exc_eff = vxc_eff = fxc_eff = kxc_eff = 0
     for p0, p1 in _prange(0, weights.size, blksize):
         nsg = p1 - p0
