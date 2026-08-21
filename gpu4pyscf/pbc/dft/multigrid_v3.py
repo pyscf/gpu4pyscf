@@ -685,8 +685,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
             #     Shell-pair indices contributing to the tiles in grid_tile_idx.
             #   - shl_pair_offsets:
             #     Partition the shell pairs in supmol_pair_idx by grid tile.
-            weight = vol / np.prod(mesh)
-            ao_val_threshold = precision * 1e-3 / max(1., 12.56*40**2 * weight)
+            ao_val_threshold = precision * 1e-5
             buckets.append({
                 'ke_cutoff': ke_upper,
                 'mesh': np.asarray(mesh, dtype=np.int32),
@@ -696,8 +695,8 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
                 'grid_tile_cache': None,
                 'negligible': ao_val_threshold
             })
-            log.debug('Add fft bucket: ke=%g mesh=%s, shl_pairs=%d, ao_val_threshold=%g',
-                      ke_upper, mesh, len(filtered_pairs), ao_val_threshold)
+            log.debug('Add fft bucket: ke=%g mesh=%s, shl_pairs=%d',
+                      ke_upper, mesh, len(filtered_pairs))
 
         mesh = (mesh * 1.2).astype(np.int32)
         # For very small initial mesh, such as [2,2,2], mesh*1.2 may not

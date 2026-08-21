@@ -350,22 +350,44 @@ int evaluate_tau(double *density, double *tau, double *dm, PBCIntEnvVars *envs,
     double da_squared = distance_squared(dxyz_dabc[0], dxyz_dabc[1], dxyz_dabc[2]);
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
-    switch (i_angular * LMAX1 + j_angular) {
-        eval_tau_kernel_case(0,0, 1, 1, 1);
-        eval_tau_kernel_case(1,0, 3, 1, 1);
-        eval_tau_kernel_case(1,1, 3, 3, 1);
-        eval_tau_kernel_case(2,0, 6, 1, 1);
-        eval_tau_kernel_case(2,1, 6, 3, 1);
-        eval_tau_kernel_case(2,2, 6, 6, 1);
-        eval_tau_kernel_case(3,0,10, 1, 1);
-        eval_tau_kernel_case(3,1,10, 3, 1);
-        eval_tau_kernel_case(3,2, 5, 6, 1);
-        eval_tau_kernel_case(3,3,10, 5, 1);
-        eval_tau_kernel_case(4,0,15, 1, 1);
-        eval_tau_kernel_case(4,1,15, 3, 1);
-        eval_tau_kernel_case(4,2, 8, 6, 1);
-        eval_tau_kernel_case(4,3, 8, 5, 1);
-        eval_tau_kernel_case(4,4, 5, 5, 1);
+    if (fabs(dxyz_dabc[1]) < 1e-14 && fabs(dxyz_dabc[2]) < 1e-14 &&
+        fabs(dxyz_dabc[3]) < 1e-14 && fabs(dxyz_dabc[5]) < 1e-14 &&
+        fabs(dxyz_dabc[6]) < 1e-14 && fabs(dxyz_dabc[8]) < 1e-14) {
+        switch (i_angular * LMAX1 + j_angular) {
+            eval_tau_kernel_case(0,0, 1, 1, 0);
+            eval_tau_kernel_case(1,0, 3, 1, 0);
+            eval_tau_kernel_case(1,1, 3, 3, 0);
+            eval_tau_kernel_case(2,0, 6, 1, 0);
+            eval_tau_kernel_case(2,1, 6, 3, 0);
+            eval_tau_kernel_case(2,2, 6, 6, 1);
+            eval_tau_kernel_case(3,0,10, 1, 0);
+            eval_tau_kernel_case(3,1,10, 3, 1);
+            eval_tau_kernel_case(3,2, 5, 6, 1);
+            eval_tau_kernel_case(3,3,10, 5, 1);
+            eval_tau_kernel_case(4,0,15, 1, 0);
+            eval_tau_kernel_case(4,1,15, 3, 1);
+            eval_tau_kernel_case(4,2, 8, 6, 1);
+            eval_tau_kernel_case(4,3, 8, 5, 1);
+            eval_tau_kernel_case(4,4, 5, 5, 1);
+        }
+    } else {
+        switch (i_angular * LMAX1 + j_angular) {
+            eval_tau_kernel_case(0,0, 1, 1, 1);
+            eval_tau_kernel_case(1,0, 3, 1, 1);
+            eval_tau_kernel_case(1,1, 3, 3, 1);
+            eval_tau_kernel_case(2,0, 6, 1, 1);
+            eval_tau_kernel_case(2,1, 6, 3, 1);
+            eval_tau_kernel_case(2,2, 6, 6, 1);
+            eval_tau_kernel_case(3,0,10, 1, 1);
+            eval_tau_kernel_case(3,1,10, 3, 1);
+            eval_tau_kernel_case(3,2, 5, 6, 1);
+            eval_tau_kernel_case(3,3,10, 5, 1);
+            eval_tau_kernel_case(4,0,15, 1, 1);
+            eval_tau_kernel_case(4,1,15, 3, 1);
+            eval_tau_kernel_case(4,2, 8, 6, 1);
+            eval_tau_kernel_case(4,3, 8, 5, 1);
+            eval_tau_kernel_case(4,4, 5, 5, 1);
+        }
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
