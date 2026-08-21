@@ -2637,6 +2637,9 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
         break;
     }
 
+#ifndef USE_SYCL
+    dim3 threads(nsq_per_block, gout_stride);
+#endif
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;

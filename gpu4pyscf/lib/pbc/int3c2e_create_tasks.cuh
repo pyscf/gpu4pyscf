@@ -57,6 +57,9 @@ typedef struct {
 __device__ inline
 int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+#endif
     tmp_storage[t_id] = keep;
     __syncthreads();
     for (int offset = 1; offset < threads; offset <<= 1) {
