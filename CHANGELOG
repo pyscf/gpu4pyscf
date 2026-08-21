@@ -1,3 +1,14 @@
+v1.8.1 (2026-08-09)
+-------------------
+* Fixes
+  - Support ghost atom for PCM
+  - GPU OOM because of incorrect DF workspace size estimation
+  - Remove a redundant DF get_k for RSH functionals
+  - contract_2e bug for FCI solver
+  - np.log underflow in extract_pgto_params
+  - multigrid OOM due to the overhead in cp.einsum
+
+
 v1.8.0 (2026-07-23)
 -------------------
 * New Features

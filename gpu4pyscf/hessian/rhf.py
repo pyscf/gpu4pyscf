@@ -28,8 +28,7 @@ from pyscf.gto import ATOM_OF
 from gpu4pyscf.gto.ecp import get_ecp_ip, get_ecp_ipip
 from gpu4pyscf.scf import cphf, j_engine
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, transpose_sum, get_avail_mem, condense,
-    krylov)
+    contract, tag_array, transpose_sum, get_avail_mem, condense, krylov)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.lib import logger
@@ -245,10 +244,13 @@ def _hess_nuc_without_ecp(mol, dm0):
     de *= 2
     return de
 
-def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=None):
+def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
+                     omega=None, lr_factor=None, sr_factor=None,
+                     verbose=None):
     '''Compute the energy per atom for
         j_factor * J_derivatives - k_factor * K_derivatives
     '''
+    assert lr_factor is None and sr_factor is None
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
@@ -749,7 +751,7 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
         mo1 = cupy.asarray(mo1)
         mo1 = mo1.reshape(-1,nmo,nocc)
         mo1_mo = contract('npo,ip->nio', mo1, mo_coeff)
-        dm1 = contract('npi,qi->npq', mo1_mo, orbo_2)
+        dm1 = cp.asarray(contract('npi,qi->npq', mo1_mo, orbo_2), order='C')
         transpose_sum(dm1, inplace=True, hermi=1)
         dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=orbo, symmetrize=1)
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
@@ -828,12 +830,13 @@ def _ao2mo(v_ao, mocc, mo_coeff):
     return contract('nio,ip->npo', v_ao, mo_coeff)
 
 def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
-            hermi=1, with_j=True, with_k=True, omega=None):
+               hermi=1, with_j=True, with_k=True,
+               omega=None, lr_factor=None, sr_factor=None):
     ''' Compute J/K matrices in MO for multiple DMs
     '''
     assert hermi == 1
     mf = hessobj.base
-    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
     vj = vk = None
     nao = dms.shape[-1]
     dms = dms.reshape(-1,nao,nao)

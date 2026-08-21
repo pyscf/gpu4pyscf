@@ -15,6 +15,8 @@
 
 ###########################################################
 #  Example of DFT with Dispersion correction (dftd3/dftd4)
+#
+# More examples for dispersion configurations can be found in example 45-custom_disp.py
 ###########################################################
 
 import numpy as np

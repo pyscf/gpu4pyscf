@@ -25,6 +25,8 @@ from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid
 from pyscf.data import radii
+from pyscf.data.elements import is_ghost_atom
+from pyscf.data.elements import charge as charge_of_element
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
@@ -57,6 +59,20 @@ from gpu4pyscf import tdscf
 scf.hf.RHF.PCM = pcm_for_scf
 scf.uhf.UHF.PCM = pcm_for_scf
 tdscf.rhf.TDBase.PCM = pcm_for_tdscf
+
+def natm_without_ghost(mol):
+    return sum(1 for element in mol.elements if not is_ghost_atom(element))
+
+def atom_coords_without_ghost(mol, unit='Bohr'):
+    nonghost_mask = [not is_ghost_atom(element) for element in mol.elements]
+    return mol.atom_coords(unit=unit)[nonghost_mask]
+
+def atom_charges_without_ghost(mol):
+    nonghost_mask = [not is_ghost_atom(element) for element in mol.elements]
+    return mol.atom_charges()[nonghost_mask]
+
+def element_index_without_ghost(mol):
+    return [charge_of_element(e) for e in mol.elements if not is_ghost_atom(e)]
 
 # TABLE II,  J. Chem. Phys. 122, 194110 (2005)
 XI = {
@@ -113,10 +129,12 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, surface_discretization_method =
     libdft.MakeAngularGrid(unit_sphere.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ng))
     unit_sphere = cupy.asarray(unit_sphere)
 
-    atom_coords = cupy.asarray(mol.atom_coords(unit='B'))
-    N_J = ng * cupy.ones(mol.natm)
-    from pyscf.data.elements import charge as charge_of_element
-    element_index = [charge_of_element(e) for e in mol.elements]
+    natm = natm_without_ghost(mol)
+    if natm != mol.natm:
+        logger.warn(mol, f"{mol.natm - natm} ghost atoms detected. PCM grids are assigned to real atoms only.")
+    atom_coords = cupy.asarray(atom_coords_without_ghost(mol))
+    N_J = ng * cupy.ones(natm)
+    element_index = element_index_without_ghost(mol)
     R_J = cupy.asarray([rad[chg] for chg in element_index])
     if surface_discretization_method.upper() == "SWIG":
         R_sw_J = R_J * (14.0 / N_J)**0.5
@@ -132,7 +150,7 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, surface_discretization_method =
     area = []
     gslice_by_atom = []
     p0 = p1 = 0
-    for ia in range(mol.natm):
+    for ia in range(natm):
         r_vdw = R_J[ia]
 
         atom_grid = r_vdw * unit_sphere[:,:3] + atom_coords[ia,:]
@@ -574,8 +592,8 @@ class PCM(lib.StreamObject):
 
         charge_exp  = self.surface['charge_exp']
         grid_coords = self.surface['grid_coords']
-        atom_coords = mol.atom_coords(unit='B')
-        atom_charges = mol.atom_charges()
+        atom_coords = atom_coords_without_ghost(mol)
+        atom_charges = atom_charges_without_ghost(mol)
 
         intopt = int3c1e.VHFOpt(mol)
         intopt.build(1e-14)

@@ -19,7 +19,6 @@
 
 import numpy as np
 import pyscf
-from pyscf.dft import rks
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -30,7 +29,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 # ----------------------- to_gpu -------------------------------
 print('running to_gpu ...')
 mol = pyscf.M(atom=atom, basis='sto3g', output='./pyscf.log')
-mf = rks.RKS(mol, xc='b3lyp').density_fit()
+mf = mol.RKS(xc='b3lyp').density_fit()
 mf.conv_tol = 1e-10
 mf.conv_tol_cpscf = 1e-6
 
@@ -52,25 +51,24 @@ h_gpu = h.to_gpu().kernel()
 print(f"Hessian diff {np.linalg.norm(h_cpu - h_gpu)}")
 
 # ----------------------- to_cpu -------------------------------
-from gpu4pyscf.dft import rks
 print('running to_cpu ...')
 mol = pyscf.M(atom=atom, basis='sto3g', output='./pyscf.log')
-mf = rks.RKS(mol, xc='b3lyp').density_fit()
-mf.conv_tol = 1e-10
-mf.conv_tol_cpscf = 1e-6
+mf_gpu = mol.to_gpu().RKS(xc='b3lyp').density_fit()
+mf_gpu.conv_tol = 1e-10
+mf_gpu.conv_tol_cpscf = 1e-6
 
-e_gpu = mf.kernel()
-e_cpu = mf.to_cpu().kernel()
+e_gpu = mf_gpu.kernel()
+e_cpu = mf_gpu.to_cpu().kernel()
 print(f"Energy diff {e_cpu - e_gpu}")
 
 # Compute Gradient
-g = mf.nuc_grad_method()
+g = mf_gpu.nuc_grad_method()
 g_gpu = g.kernel()
 g_cpu = g.to_cpu().kernel()
 print(f"Gradient diff {np.linalg.norm(g_cpu - g_gpu)}")
 
 # Compute Hessian
-h = mf.Hessian()
+h = mf_gpu.Hessian()
 h_gpu = h.kernel()
 h_cpu = h.to_cpu().kernel()
 print(f"Hessian diff {np.linalg.norm(h_cpu - h_gpu)}")

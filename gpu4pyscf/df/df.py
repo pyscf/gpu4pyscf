@@ -68,6 +68,7 @@ class DF(lib.StreamObject):
         self._cderi_idx = None
         self._cd_j2c = None
         self._rsh_df = {}
+        self._rsh_parameters = None
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('intopt', '_cderi'))
@@ -88,7 +89,9 @@ class DF(lib.StreamObject):
         from pyscf.df.df import DF
         return utils.to_cpu(self, out=DF(self.mol, auxbasis=self.auxbasis))
 
-    def build(self, direct_scf_tol=None, omega=None, build_cderi=True):
+    def build(self, *, direct_scf_tol=None,
+              omega=None, lr_factor=None, sr_factor=None,
+              build_cderi=True):
         mol = self.mol
         auxmol = self.auxmol
         log = logger.new_logger(mol, mol.verbose)
@@ -102,18 +105,82 @@ class DF(lib.StreamObject):
         intopt.mol = SortedMole.from_mol(mol, decontract=True)
         intopt.build()
         if build_cderi:
+            self._rsh_parameters = (omega, lr_factor, sr_factor)
             self._cderi, self._cderi_idx = _cholesky_eri(
-                intopt, omega=omega, use_gpu_memory=self.use_gpu_memory)
+                intopt, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor,
+                use_gpu_memory=self.use_gpu_memory)
             log.timer_debug1('cholesky_eri', *t0)
         return self
 
-    def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
-               direct_scf_tol=None, omega=None):
+    def get_jk(self, dm, hermi=1, with_j=True, with_k=True, direct_scf_tol=None,
+               omega=None, lr_factor=None, sr_factor=None):
+        r'''Compute Coulomb (J) and exchange (K) matrices.
+
+        Parameters
+        ----------
+        mol : pyscf.gto.Mole
+            Mole object that defines the basis set and molecular geometry.
+        dm : ndarray or sequence of ndarray
+            Density matrix or a sequence of density matrices. If multiple density
+            matrices are provided, the corresponding J and K matrices are computed
+            for each input density matrix.
+        hermi : int, optional
+            Symmetry of the density matrix:
+            - ``0``: no symmetry
+            - ``1``: Hermitian
+            - ``2``: anti-Hermitian
+        with_j : bool, optional
+            Whether to compute the Coulomb (J) matrix. If ``False``, the returned
+            J matrix is ``None``.
+        with_k : bool, optional
+            Whether to compute the exchange (K) matrix. If ``False``, the returned
+            K matrix is ``None``.
+        omega : float, optional
+            Range-separation parameter. Together with ``lr_factor`` and
+            ``sr_factor``, defines the range-separated Coulomb operator used in
+            exchange (K) matrix evaluation:
+                lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+        lr_factor : float, optional
+            Scaling factor for the long-range interaction,
+        sr_factor : float, optional
+            Scaling factor for the short-range interaction,
+        direct_scf_tol : float, optional
+            Deprecated. Retained for backward compatibility only.
+
+        Notes
+        -----
+        When omega, lr_factor, and sr_factor parameters are specified, the K matrix
+        is computed using the attenuated Coulomb operator. The J matrix is not
+        available in this mode. Requesting both J and K will raise an error.
+
+        Returns
+        -------
+        (vj, vk)
+        vj : ndarray or sequence of ndarray or None
+            Coulomb matrices. The returned object has the same shape as the input
+            density matrices. Returns ``None`` if ``with_j`` is ``False``.
+        vk : ndarray or sequence of ndarray or None
+            Exchange matrices. The returned object has the same shape as the input
+            density matrices. Returns ``None`` if ``with_k`` is ``False``.
+        '''
         if not with_k and self._cderi is None:
+            assert omega is None or omega == 0
             return df_jk.get_j(self, dm, hermi), None
 
+        # When lr_factor or sr_factor are specified, the DF cderi will be
+        # constructed using the aggregated Coulomb potential.
+        # Temporarily disable this feature for backward compatibility.
+        assert lr_factor is None and sr_factor is None
+
         with self.range_coulomb(omega) as dfobj:
-            return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k, omega=omega)
+            if getattr(dfobj, '_rsh_parameters', None):
+                assert dfobj._rsh_parameters == (omega, lr_factor, sr_factor)
+            if with_j and (omega is not None and omega != 0):
+                raise RuntimeError(
+                    'Cannot compute J matrix with a range-separated Coulomb operator. '
+                    'J is only supported with the standard Coulomb operator (omega=0).')
+            return df_jk.get_jk(dfobj, dm, hermi, with_j, with_k,
+                                omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
     def get_blksize(self, extra=0, nao=None, mem_fraction=0.3):
         '''
@@ -226,6 +293,7 @@ class DF(lib.StreamObject):
         self._cderi_idx = None
         self._cd_j2c = None
         self._rsh_df = {}
+        self._rsh_parameters = None
         return self
 
     @contextlib.contextmanager
@@ -445,7 +513,8 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
             t1 = log.timer_debug1(f'transfer data for {cp_ij_id} / {nq} on Device {device_id}', *t1)
     return
 
-def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
+def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
+                  use_gpu_memory=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
     if intopt._int3c2e_envs is None:
         intopt.build()
@@ -469,7 +538,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
     eval_j3c, aux_sorting, ao_pair_offsets, _, clone_context = intopt.int3c2e_evaluator(
         ao_pair_batch_size=batch_size, reorder_aux=True,
         pair_batch_by_l=needs_recontraction, return_clone_context=True,
-        omega=omega)
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     cderi_batch_size = int(max(ao_pair_offsets[1:] - ao_pair_offsets[:-1]))
     batch_size = cderi_batch_size
     # * When the get_avail_mem() returns a small amount of memory, the actual
@@ -498,7 +567,7 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
         cderi_idx = (pair_addresses, diag_addrs)
 
-    aux_coef, tag = _decompose_j2c(auxmol, aux_sorting, omega)
+    aux_coef, tag = _decompose_j2c(auxmol, aux_sorting, omega, lr_factor, sr_factor)
     if num_devices > 1:
         # cupy cannot copy non-contiguous array aux_coef[:,aux0:aux1] between
         # devices. This slicing is a contiguous array in the F-order storage.
@@ -508,9 +577,9 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
     naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
 
     cp.get_default_memory_pool().free_all_blocks()
-    word_avail -= batch_size * naux
+    word_avail -= batch_size * naux_sorted
     if needs_recontraction:
-        word_avail -= cderi_batch_size * naux_per_device
+        word_avail -= batch_size * naux_per_device
 
     # Put cderi on GPU whenever possible
     on_gpu = True
@@ -533,21 +602,22 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
-                    reorder_aux=True, clone_context=clone_context, omega=omega)[0]
+                    reorder_aux=True, clone_context=clone_context,
+                    omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[0]
 
             work = cp.empty(naux_sorted * batch_size)
+            work2 = cp.empty(naux * batch_size)
             if needs_recontraction:
-                work1 = cp.empty(naux_sorted * cderi_batch_size)
-            work2 = cp.empty(naux * cderi_batch_size)
+                work1 = cp.empty(naux * cderi_batch_size)
 
             for batch_id in batch_iter:
                 log.debug1('processing cderi batch %d', batch_id)
                 j3c = _eval_j3c(shl_pair_batch_id=batch_id, out=work)
-                if needs_recontraction:
-                    tmp = ndarray((j3c.shape[0], naux_sorted), buffer=work1)
-                    j3c = recontract(batch_id, j3c, out=tmp)
                 cderi_gpu = ndarray((j3c.shape[0], naux), buffer=work2)
                 cderi_gpu = j3c.dot(c, out=cderi_gpu)
+                if needs_recontraction:
+                    cderi_gpu = recontract(batch_id, cderi_gpu, out=work1)
+
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 # TODO: async-write to host memory in another stream
                 err = libvhf_rys.transpose_write(
@@ -570,13 +640,14 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         def proc():
             device_id = cp.cuda.device.get_device_id()
             aux0 = naux_per_device * device_id
-            aux1 = min(int(aux_coef.shape[1]), aux0 + naux_per_device)
+            aux1 = min(naux, aux0 + naux_per_device)
             c = cp.asarray(aux_coef[:,aux0:aux1])
 
             _eval_j3c = eval_j3c
             if device_id != current_device:
                 _eval_j3c = intopt.int3c2e_evaluator(
-                    reorder_aux=True, clone_context=clone_context, omega=omega)[0]
+                    reorder_aux=True, clone_context=clone_context,
+                    omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[0]
 
             out = cp.empty((cderi_npairs, aux1-aux0))
             work = cp.empty(naux_sorted * batch_size)
@@ -597,8 +668,10 @@ def _cholesky_eri(intopt, omega=None, use_gpu_memory=None):
         cderi = multi_gpu.run(proc, non_blocking=True)
     return cderi, cderi_idx
 
-def _decompose_j2c(auxmol, aux_sorting=None, omega=None):
-    j2c = int3c2e_bdiv.int2c2e(auxmol, omega=omega)
+def _decompose_j2c(auxmol, aux_sorting=None,
+                   omega=None, lr_factor=None, sr_factor=None):
+    j2c = int3c2e_bdiv.int2c2e(auxmol, omega=omega, lr_factor=lr_factor,
+                               sr_factor=sr_factor)
 
     try:
         cd_low = cholesky(j2c)

@@ -28,6 +28,7 @@ from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.dft import KohnShamDFT, BeckeGrids
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.gto.mole import groupby
 
@@ -171,6 +172,9 @@ class Gradients(GradientsBase):
             mo_coeff = mf.mo_coeff
         if mo_occ is None:
             mo_occ = mf.mo_occ
+
+        if isinstance(mf, KohnShamDFT) and isinstance(mf.grids, BeckeGrids):
+            raise NotImplementedError('gradients for BeckeGrids not supported')
 
         if getattr(mf, 'with_x2c', None):
             raise NotImplementedError('X2C gradients')

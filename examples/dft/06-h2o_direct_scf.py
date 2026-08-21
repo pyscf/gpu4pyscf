@@ -13,29 +13,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''
-Compute J and K matrices separately. The J matrix is evaluated using J-engine.
-'''
+#######################################################
+#  Example of DFT with direct SCF scheme
+#######################################################
 
-import pyscf
-from gpu4pyscf import scf
-from gpu4pyscf.scf import jk
+from pyscf import gto
+import numpy as np
 
-mol = pyscf.M(
-atom = '''
+h2o = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
-''',
-basis='def2-tzvp',
-verbose=5
-)
+'''
 
-def get_veff(self, mol, dm, *args, **kwargs):
-    vj = jk.get_j(mol, dm[0] + dm[1], hermi=1)
-    _, vk = jk.get_jk(mol, dm, hermi=1, with_j=False)
-    return vj - vk
+mol = gto.M(atom=h2o, basis='def2-tzvpp', cart=1, verbose=4)
 
-scf.uhf.UHF.get_veff = get_veff
+mf = mol.to_gpu().RKS(xc='b3lyp')
+mf.direct_scf_tol = 1e-14
+mf.conv_tol = 1e-12
+e_gpu = mf.kernel()
 
-mf = mol.UHF().to_gpu().run()
+gpu_gradient = mf.nuc_grad_method()
+g_gpu = gpu_gradient.kernel()
+
+gpu_hess = mf.Hessian()
+h_gpu = gpu_hess.kernel()
+
+# Move the object to CPU
+mf = mf.to_cpu()
+e_cpu = mf.kernel()
+
+cpu_gradient = mf.nuc_grad_method()
+g_cpu = cpu_gradient.kernel()
+
+cpu_hess = mf.Hessian()
+h_cpu = cpu_hess.kernel()
+
+print('e diff = ', e_cpu - e_gpu)
+print('g diff = \n', g_cpu - g_gpu)
+print('h diff = \n', h_cpu - h_gpu)

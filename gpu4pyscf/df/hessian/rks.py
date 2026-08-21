@@ -87,7 +87,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     h1mo = df_rhf_hess._get_veff(intopt, mo_coeff, mo_occ, 1., hyb)
 
     if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
-        h1mo += df_rhf_hess._get_veff(intopt, mo_coeff, mo_occ, 0., alpha-hyb, omega)
+        h1mo += df_rhf_hess._get_veff(intopt, mo_coeff, mo_occ, 0., alpha-hyb,
+                                      omega=omega)
 
     h1mo += rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
     h1mo += rks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)

@@ -28,7 +28,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 mol = pyscf.M(atom=atom, basis='def2-tzvpp')
-mf = rks.RKS(mol, xc='HYB_GGA_XC_B3LYP').density_fit()
+mf = rks.RKS(mol, xc='B3LYP').density_fit()
 mf = mf.PCM()
 mf.grids.atom_grid = (99,590)
 mf.with_solvent.lebedev_order = 29  # 302 Lebedev grids

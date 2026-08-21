@@ -31,7 +31,7 @@ start_time = time.time()
 mol = pyscf.M(atom=atom, verbose=4)
 
 print(f'{mol.nao} atomic orbitals')
-mf = rks.RKS(mol, xc='HYB_MGGA_XC_WB97M_V').density_fit()
+mf = rks.RKS(mol, xc='WB97M-V').density_fit()
 mf.grids.atom_grid = (99,590)
 mf.nlcgrids.atom_grid = (50,194)
 mf.conv_tol = 1e-8

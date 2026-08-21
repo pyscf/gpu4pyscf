@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import lru_cache
 import ctypes
 import math
 import numpy as np
@@ -229,7 +228,6 @@ class Int3c2eOpt:
             vj = vj[0]
         return vj
 
-@lru_cache
 def _int3c2e_dm_scheme():
     li = np.arange(LMAX*2+1)
     lk = np.arange(L_AUX_MAX+1)
@@ -249,7 +247,6 @@ def _int3c2e_dm_scheme():
     nsp_lookup = cp.asarray(nsp_per_block, dtype=np.int32)
     return nsp_lookup, shm_size
 
-@lru_cache
 def _int3c2e_auxvec_scheme():
     li = np.arange(LMAX*2+1)
     lk = np.arange(L_AUX_MAX+1)

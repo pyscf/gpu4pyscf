@@ -22,7 +22,8 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, cholesky, eigh, transpose_sum, get_avail_mem)
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df.int3c2e_bdiv import (
-    _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, int3c2e_scheme,
+    _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
+    int2c2e_ip1_per_atom, int3c2e_scheme,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df
 from gpu4pyscf.df.df_jk import factorize_dm, _DFHF
@@ -56,17 +57,22 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
     return j2c_solver
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
-                        auxbasis_response=True, verbose=None):
+                        auxbasis_response=True, verbose=None,
+                        omega=None, lr_factor=None, sr_factor=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
+        assert omega is None or omega == 0
         return _j_energy_per_atom(int3c2e_opt, dm, hermi, auxbasis_response,
                                   verbose) * j_factor
+
+    if j_factor != 0 and (omega is not None and omega != 0):
+        raise RuntimeError(
+            'Cannot compute J contributions with range-separated Coulomb operator.')
 
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
@@ -87,7 +93,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     mem_avail = mem_free - naux*nocc**2*8 - nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8))))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True)
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
@@ -118,7 +125,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     aux_coeff[aux_sorting] = tmp
     tmp = None
 
-    j2c = int2c2e(auxmol)
+    j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
     else:
@@ -156,6 +163,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libvhf_rys.sum_ejk_int3c2e_ip1
+    assert lr_factor is None and sr_factor is None
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
     buf1 = cp.empty((blksize, nao, nao))
@@ -226,7 +234,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
                               alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
         dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
         #ejk_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
-        ejk_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ejk_aux -= cp.asarray(
+            int2c2e_ip1_per_atom(auxmol, dm_aux, omega, lr_factor, sr_factor))
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk += ejk_aux
 
@@ -237,7 +246,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
@@ -342,11 +350,47 @@ class Gradients(rhf_grad.Gradients):
     def energy_ee(self, mol, dm):
         return self.jk_energy_per_atom(dm, hermi=1)
 
-    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, *,
+                           omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
-        '''
-        Computes the first-order derivatives of the energy per atom for
-        j_factor * J_derivatives - k_factor * K_derivatives
+        r'''Compute the first-order derivatives of the Coulomb and exchange
+        energies with respect to atomic positions.
+
+            j_factor * dE_J / dR - k_factor * dE_K / dR
+
+        Parameters
+        ----------
+        dm : ndarray or sequence of ndarray, optional
+            Density matrix or (for UKS) a sequence of density matrices.
+        j_factor : float, optional
+            Scaling factor applied to the Coulomb (J) contribution.
+        k_factor : float, optional
+            Scaling factor applied to the exchange (K) contribution.
+        omega : float, optional
+            Range-separation parameter. Together with ``lr_factor`` and
+            ``sr_factor``, defines the range-separated Coulomb operator used in
+            exchange (K) matrix evaluation:
+                lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+        lr_factor : float, optional
+            Scaling factor for the long-range interaction,
+        sr_factor : float, optional
+            Scaling factor for the short-range interaction,
+        hermi : int, optional
+            Symmetry of the density matrix:
+            - ``0``: no symmetry
+            - ``1``: Hermitian
+            - ``2``: anti-Hermitian
+
+        Notes
+        -----
+        When omega, lr_factor, and sr_factor parameters are specified, the K
+        contribution is evaluated using the attenuated Coulomb operator.
+
+        Returns
+        -------
+        Array of shape ``(natm, 3)`` containing the derivative of the weighted
+        Coulomb and exchange energy with respect to the Cartesian coordinates of
+        each atom.
         '''
         mf = self.base
         if dm is None: dm = mf.make_rdm1()
@@ -358,6 +402,7 @@ class Gradients(rhf_grad.Gradients):
             int3c2e_opt = Int3c2eOpt(sorted_mol, auxmol).build()
         return _jk_energy_per_atom(
             int3c2e_opt, dm, j_factor, k_factor, hermi=hermi,
-            auxbasis_response=self.auxbasis_response, verbose=verbose)
+            auxbasis_response=self.auxbasis_response, verbose=verbose,
+            omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
 Grad = Gradients
