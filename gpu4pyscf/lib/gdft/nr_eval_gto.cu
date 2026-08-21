@@ -80,7 +80,7 @@ static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int blockIdx_x = item.get_group(1);
     const int blockIdx_y = item.get_group(0);
-    const int blockDim_x = item.get_group_range(1);
+    const int blockDim_x = item.get_local_range(1);
     const int threadIdx_x = item.get_local_id(1);
     double (&gridx_cache)[NG_PER_BLOCK*3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NG_PER_BLOCK*3]>(item.get_group());
 #else
@@ -152,7 +152,7 @@ static void _screen_index_legacy(int *non0shl_idx, double cutoff, int ang, int n
     int grid_id = item.get_global_id(1);
     int ish = item.get_group(0) + bas_offset;
     int (&sdata)[NG_PER_BLOCK] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NG_PER_BLOCK]>(item.get_group());
-    const int blockDim_x = item.get_group_range(1);
+    const int blockDim_x = item.get_local_range(1);
     const int threadIdx_x = item.get_local_id(1);
 #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;

@@ -97,7 +97,6 @@ if (USE_SYCL)
   include_directories(${PROJECT_SOURCE_DIR}/gsycl)      
 endif()
 
-
 # For better performance on A100, the option
 # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
 if (NOT USE_SYCL)

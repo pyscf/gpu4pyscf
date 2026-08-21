@@ -20,7 +20,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
         int ish, int jsh, int ksh)
 {
 #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    auto c_bpcache = s_gvhf_bpcache.get();
 #endif
     int *ao_loc = c_bpcache.ao_loc;
     const int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
@@ -219,7 +219,7 @@ static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
     const int ty = item.get_local_id(0);
     using tile_t = double[THREADSX][THREADSY];
     tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
-    auto c_bpcache = s_bpcache.get();
+    auto c_bpcache = s_gvhf_bpcache.get();
     #else
     const int tx = threadIdx.x;
     const int ty = threadIdx.y;
@@ -263,7 +263,7 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     auto item = syclex::this_work_item::get_nd_item<2>();
     int task_ij = item.get_global_id(1);
     int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    auto c_bpcache = s_gvhf_bpcache.get();
     #else
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -317,8 +317,8 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
-    const int blockDim_x = item.get_group_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const int blockDim_x = item.get_local_range(1);
+    auto c_bpcache = s_gvhf_bpcache.get();
     #else
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
@@ -511,7 +511,7 @@ void GINTint3c2e_ip2_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdO
     #ifdef USE_SYCL
     const int task_ij = item.get_group(1);
     const int task_kl = item.get_group(0);
-    auto c_bpcache = s_bpcache.get();
+    auto c_bpcache = s_gvhf_bpcache.get();
     #else
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
@@ -570,7 +570,7 @@ static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisPro
     const int ty = item.get_local_id(0);
     using tile_t = double[THREADSX][THREADSY];
     tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
-    auto c_bpcache = s_bpcache.get();
+    auto c_bpcache = s_gvhf_bpcache.get();
     #else
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
