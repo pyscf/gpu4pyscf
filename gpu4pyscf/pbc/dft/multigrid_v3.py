@@ -1433,7 +1433,7 @@ def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
     else:
         return out
 
-def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA'):
+def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1465,7 +1465,7 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA'):
         assert absmax(dm_sc.imag) < cell.precision*5e2
     dm_sc = cp.asarray(dm_sc.real, order='C')
 
-    dm_sc = cell.apply_C_mat_CT(dm_sc.reshape(-1,nao,nao))
+    dm_sc = cell.apply_C_mat_CT(dm_sc.reshape(-1,nao,nao), out=out)
 
     if hermi == 1:
         dm_sc *= 2
@@ -1649,6 +1649,12 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_energy_sum = None
 
     else:
+        # dm_sc is represented in primitive bases (by sorted_cell). Its size can be
+        # much larger than the input dm_kpts. Release its memory if remaining memory
+        # is insufficient.
+        if (nvar+2)*ngrids*8 > get_avail_mem():
+            dm_sc = None
+
         density = cp.empty((nvar, ngrids))
         _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density)
         # *(1./weight) because rhoR is scaled by weight in _eval_density. If
@@ -1754,6 +1760,12 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     n_electrons_b = rhoGb[0,0,0].real.get()
     n_electrons = np.array([n_electrons_a, n_electrons_b])
 
+    # dm_sc is represented in primitive bases (by sorted_cell). Its size can be
+    # much larger than the input dm_kpts. Release its memory if remaining memory
+    # is insufficient.
+    if (2*nvar+2)*ngrids*8 > get_avail_mem():
+        dm_sc = [None, None]
+
     density = cp.empty((2, nvar, ngrids))
     _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
     _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[1])
@@ -1795,45 +1807,25 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         coulomb_b.fill(0)
     rhoG = rhoGb = None
 
-    # dm_sc and the output have the shape shape. Reuse its memory.
-    veff = dm_sc
+    # maximum memory usage = (2,nvar,ngrids) float64s + 3(or 4 for MGGA)*ngrids complex128s
+    # The 3*ngrids complex128s consist of coulomb_a, coulomb_b and the
+    # workspace required by _vxc_to_reciprocal_space.
+    vxc_a = _vxc_to_reciprocal_space(xc_for_fock[0], coulomb_a, Gv_bases)
+    vxc_b = _vxc_to_reciprocal_space(xc_for_fock[1], coulomb_b, Gv_bases)
+    xc_for_fock = coulomb_a = coulomb_b = None # release memory
+
     if kpts_band is None:
-        if xctype == "LDA":
-            # maximum memory usage = (2,ngrids) float64s + 3*ngrids complex128s
-            # The 3*ngrids complex128s consist of coulomb_a, coulomb_b and the
-            # workspace required by _vxc_to_reciprocal_space.
-            vxc = _vxc_to_reciprocal_space(xc_for_fock[0], coulomb_a)
-            _eval_xc_mat(ni, vxc, out=veff[0])
-            vxc = coulomb_a = None # release memory
-            vxc = _vxc_to_reciprocal_space(xc_for_fock[1], coulomb_b)
-            _eval_xc_mat(ni, vxc, out=veff[1])
-            vxc = coulomb_b = xc_for_fock = None
-
-        else: # GGA or MGGA
-            # maximum memory usage = (2,nvar,ngrids) float64s + 3*ngrids complex128s
-            # The 3*ngrids complex128s consist of coulomb_a, coulomb_b and the
-            # workspace required by _vxc_to_reciprocal_space.
-            vxc = _vxc_to_reciprocal_space(xc_for_fock[0], coulomb_a, Gv_bases)
-            # It's safe to reuse the memory of xc_for_fock[0] as the workspace.
-            # The size of xc_for_fock[0] is 4*ngrids or 5*ngrids (float64), more
-            # than the workspace required by _eval_xc_mat (2*ngrids float64).
-            _eval_xc_mat(ni, vxc, out=veff[0], work=xc_for_fock[0])
-            vxc = coulomb_a = None # release memory
-            vxc = _vxc_to_reciprocal_space(xc_for_fock[1], coulomb_b, Gv_bases)
-            _eval_xc_mat(ni, vxc, out=veff[1], work=xc_for_fock[0])
-            vxc = coulomb_b = xc_for_fock = None
-
+        # dm_sc and the output have the shape shape. Reuse its memory.
+        veff_a = _eval_xc_mat(ni, vxc_a, out=dm_sc[0])
+        veff_b = _eval_xc_mat(ni, vxc_b, out=dm_sc[1])
         veff = cp.stack([
-            _inverse_wannier_transform_fock(ni, veff[0], kpts),
-            _inverse_wannier_transform_fock(ni, veff[1], kpts)])
+            _inverse_wannier_transform_fock(ni, veff_a, kpts),
+            _inverse_wannier_transform_fock(ni, veff_b, kpts)])
 
     else:
         kpts_band = kpts_band.reshape(-1, 3)
         kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
         ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
-        vxc_a = _vxc_to_reciprocal_space(xc_for_fock[0], coulomb_a)
-        vxc_b = _vxc_to_reciprocal_space(xc_for_fock[1], coulomb_b)
-        coulomb_a = coulomb_b = xc_for_fock = None
         veff_a = _eval_xc_mat(ni, vxc_a)
         veff_b = _eval_xc_mat(ni, vxc_b)
         veff = cp.stack([
@@ -2061,11 +2053,14 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         cell = self.cell
         mesh = self.mesh
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+        mem = get_avail_mem()
 
         for i_dm in range(n_dm):
             dm_sc = _wannier_transform_dm(self, dms[i_dm], kpts, hermi, xctype)
             rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
             rho1 = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
+            if dm_sc.nbytes * 10 > mem:
+                dm_sc = None
 
             # rho1 has been scaled by (ngrids/cell.vol)
             wv = cp.einsum('xg,xyg->yg', rho1, fxc).reshape(nvar, *mesh)
@@ -2076,12 +2071,12 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             else:
                 coulomb = rhoG
                 coulomb.fill(0.)
-            rhoG = None
             wv = _vxc_to_reciprocal_space(wv, coulomb, Gv_bases, work=tauG)
+            rhoG = tauG = coulomb = None
 
             veff = _eval_xc_mat(self, wv, out=dm_sc)
             out[i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
-            rhoG = tauG = veff = wv = coulomb = None
+            veff = dm_sc = wv = None
 
         return out.reshape(dms.shape)
 
@@ -2121,6 +2116,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         mesh = self.mesh
         ngrids = np.prod(mesh)
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+        mem = get_avail_mem()
 
         for i_dm in range(n_dm):
             dm_sc = _wannier_transform_dm(self, dms[:,i_dm], kpts, hermi, xctype)
@@ -2131,6 +2127,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             _density_to_real_space(rhoGb, tauGb, Gv_bases, xctype, out=rho1[1])
             rhoG += rhoGb
             tauG = tauGb = None # release memory
+            if dm_sc.nbytes * 10 > mem:
+                dm_sc = None
 
             wv = cp.einsum('axg,axbyg->byg', rho1, fxc).reshape(2, nvar, *mesh)
             rho1 = None
@@ -2152,7 +2150,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             out[0,i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
             veff = _eval_xc_mat(self, wv_b, out=dm_sc[1])
             out[1,i_dm] = _inverse_wannier_transform_fock(self, veff, kpts)
-            veff = wv_a = wv_b = None
+            veff = dm_sc = wv_a = wv_b = None
 
         return out.reshape(dms.shape)
 
