@@ -57,7 +57,7 @@ from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF, ft_ao
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
-from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.grad import rks as rks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -193,8 +193,9 @@ def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
         with_j = False
 
     # TODO: with_nuc should be disabled for all-electron calculations
-    if isinstance(ni, MultiGridNumInt):
-        sigma = _rks_exc_strain_deriv(ni, mf.xc, dm[None], None, with_j, with_nuc)
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
+        sigma = ni.energy_strain_gradient(mf.xc, dm[None], spin=0,
+                                          with_j=with_j, with_nuc=with_nuc)
     elif isinstance(ni, NumInt):
         sigma = get_vxc(mf_grad, cell, dm, with_j, with_nuc)
     else:
@@ -364,7 +365,6 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
             vpplocR = pbctools.ifft(vpplocG_0, mesh).real
             Ene = cp.einsum('xyg,g->xy', rho1[:,:,0], vpplocR).real.get()
             Ene += cp.einsum('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
-            Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm)
         else:
             # SI corresponds to Fourier components of the fractional atomic
             # positions within the cell. It does not respond to the strain
@@ -376,22 +376,81 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
         out += Ene
     return out
 
+def _get_Gv_bases(mesh, b):
+    Gx = cp.array(np.fft.fftfreq(mesh[0], 1./mesh[0]) * b[0,:,None])
+    Gy = cp.array(np.fft.fftfreq(mesh[1], 1./mesh[1]) * b[1,:,None])
+    Gz = cp.array(np.fft.fftfreq(mesh[2], 1./mesh[2]) * b[2,:,None])
+    return (Gx, Gy, Gz)
+
 def _get_vpplocG_strain_derivatives(cell, mesh):
-    disp = 1e-5
+    assert cell.dimension == 3
+    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+    coords = cp.asarray(cell.atom_coords())
+    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
+    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
+    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
+
     ngrids = np.prod(mesh)
-    v1 = cp.empty((3,3, ngrids), dtype=np.complex128)
-    SI = get_SI(cell, mesh=mesh)
-    for x in range(3):
-        for y in range(3):
-            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            vpplocG1 = pseudo.get_vlocG(cell1, cell1.get_Gv(mesh))
-            vpplocG2 = pseudo.get_vlocG(cell2, cell2.get_Gv(mesh))
-            vpplocG1 = -np.einsum('ij,ij->j', SI, vpplocG1)
-            vpplocG2 = -np.einsum('ij,ij->j', SI, vpplocG2)
-            v1[x,y] = asarray((vpplocG1 - vpplocG2) / (2*disp))
-    vpplocG = pseudo.get_vlocG(cell, cell.get_Gv(mesh))
-    v0 = asarray(-np.einsum('ij,ij->j', SI, vpplocG))
-    return v0, v1
+    Gx, Gy, Gz = Gv_bases
+    GvT = Gx[:,:,None,None] + Gy[:,None,:,None] + Gz[:,None,None,:]
+    GvT = GvT.reshape(3, ngrids)
+    G2 = cp.einsum('xg,xg->g', GvT, GvT)
+    coulG = 4 * np.pi / G2
+    coulG[0] = 0
+    xyG = cp.einsum('xg,yg->xyg', GvT, GvT)
+
+    charges = cell.atom_charges()
+
+    vlocG0 = 0
+    vlocG_0 = cp.zeros(ngrids, dtype=np.complex128)
+    vlocG_1 = cp.zeros((3, 3, ngrids), dtype=np.complex128)
+
+    for ia in range(cell.natm):
+        symb = cell.atom_symbol(ia)
+        if symb not in cell._pseudo:
+            continue
+
+        pp = cell._pseudo[symb]
+        rloc, nexp, cexp = pp[1:3+1]
+
+        SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
+        x = G2 * rloc**2
+        expx = cp.exp(-0.5*x)
+        SI *= expx
+        Z = charges[ia]
+
+        coef1 = -Z * coulG * SI * (2/G2 + rloc**2)
+        coef1[0] = 0
+
+        cfacs = 0
+        dcfacs = 0
+        if nexp >= 1:
+            cfacs += cexp[0]
+        if nexp >= 2:
+            cfacs += cexp[1] * (3 - x)
+            dcfacs -= cexp[1]
+        if nexp >= 3:
+            cfacs += cexp[2] * (15 - 10*x + x*x)
+            dcfacs += cexp[2] * (-10 + 2*x)
+        if nexp >= 4:
+            cfacs += cexp[3] * (105 - 105*x + 21*x*x - x*x*x)
+            dcfacs += cexp[3] * (-105 + 42*x - 3*x*x)
+
+        coef2 = (
+            (2*np.pi)**1.5
+            * rloc**5
+            * SI
+            * (cfacs - 2 * dcfacs)
+        )
+
+        vlocG0 += 2*np.pi*Z*rloc**2
+        vlocG_0 -= Z * coulG * SI
+        vlocG_0 += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
+
+        vlocG_1 += (coef1 + coef2) * xyG
+
+    vlocG_0[0] += vlocG0
+    return vlocG_0, vlocG_1
 
 def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
     if kpts is None:
@@ -518,16 +577,10 @@ def kernel(mf_grad):
     dme0 = mf_grad.make_rdm1e()
     sigma = ewald(cell)
     sigma -= int1e.ovlp_strain_deriv(cell, dme0)
-
-    disp = 1e-5
-    for x in range(3):
-        for y in range(3):
-            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            t1 = int1e.int1e_kin(cell1)
-            t2 = int1e.int1e_kin(cell2)
-            t1 = cp.einsum('ij,ji->', t1, dm0)
-            t2 = cp.einsum('ij,ji->', t2, dm0)
-            sigma[x,y] += (t1 - t2) / (2*disp)
+    sigma += int1e.kin_strain_deriv(cell, dm0)
+    if cell._pseudo:
+        # pploc contribution is evaluated in get_veff
+        sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     sigma += get_veff(mf_grad, cell, dm0, with_j=True, with_nuc=True)

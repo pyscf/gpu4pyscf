@@ -144,7 +144,7 @@ class _Int1eOpt:
                 bvkcell = cell
             else:
                 bvkcell = super_cell(cell, bvk_kmesh, wrap_around=True)
-                # PTR_BAS_COORD was not initialized in supe_rcell
+                # PTR_BAS_COORD was not initialized in the super_cell function
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
             Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]

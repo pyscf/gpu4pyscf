@@ -31,7 +31,7 @@ from gpu4pyscf.pbc.scf import hf as pbchf, khf
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from pyscf import __config__
 
@@ -69,7 +69,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
-    if isinstance(ni, (multigrid_v2.MultiGridNumInt, multigrid.MultiGridNumInt)):
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
         n, exc, vxc = ni.nr_rks(
@@ -268,7 +268,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
     def multigrid_numint(self, mesh=None):
         '''Apply the MultiGrid algorithm for XC numerical integartion'''
         mf = self.copy()
-        mf._numint = multigrid_v2.MultiGridNumInt(self.cell)
+        mf._numint = multigrid_v3.MultiGridNumInt(self.cell)
         if mesh is not None:
             mf._numint.mesh = mesh
         return mf
@@ -309,8 +309,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
         dm0 = None
 
         with_j = (singlet is None or singlet) and hermi != 2
-        j_in_xc = isinstance(ni, (multigrid_v2.MultiGridNumInt,
-                                  multigrid.MultiGridNumInt))
+        j_in_xc = isinstance(ni, multigrid.MultiGridNumIntBase)
 
         def vind(dm1):
             dm1_shape = dm1.shape

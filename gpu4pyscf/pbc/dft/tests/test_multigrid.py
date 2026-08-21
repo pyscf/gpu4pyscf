@@ -29,6 +29,9 @@ else:
 from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.tools import ifft, fft
 
+if multigrid.libmgrid is None:
+    raise unittest.SkipTest('multigrid kernels not compiled')
+
 diamond = '''
 C     0.      0.      0.
 C     0.8917  0.8917  0.8917

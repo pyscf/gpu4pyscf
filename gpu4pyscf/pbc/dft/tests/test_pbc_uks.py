@@ -213,7 +213,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
 
     def test_rsjk(self):
-        from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
+        from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
         L = 4.
         cell = pbcgto.Cell()
         cell.a = np.eye(3)*L
@@ -254,7 +254,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, -0.442283740471709, 8)
 
     def test_rsjk_kuks(self):
-        from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
+        from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
         L = 4.
         cell = pbcgto.Cell()
         cell.a = np.eye(3)*L

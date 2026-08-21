@@ -15,7 +15,7 @@
 import unittest
 import numpy as np
 from pyscf.pbc import gto as pbcgto
-from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 from gpu4pyscf.pbc.df import AFTDF
 import gpu4pyscf
 from gpu4pyscf.lib.multi_gpu import num_devices

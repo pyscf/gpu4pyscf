@@ -88,7 +88,7 @@ def get_rho(mf, dm=None, grids=None, kpt=None):
     '''Compute density in real space
     '''
     from gpu4pyscf.pbc.dft import UniformGrids
-    from gpu4pyscf.pbc.dft import numint, multigrid, multigrid_v2
+    from gpu4pyscf.pbc.dft import numint, multigrid
     if dm is None:
         dm = mf.make_rdm1()
     if getattr(dm, 'ndim', None) != 2:  # UHF
@@ -99,7 +99,7 @@ def get_rho(mf, dm=None, grids=None, kpt=None):
     ni = mf._numint
     if ni is None:
         ni = numint.NumInt()
-    if isinstance(ni, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
         assert grids is None or isinstance(grids, UniformGrids)
         if grids is not None and any(grids.mesh != ni.mesh):
             ni = ni.copy().reset()
@@ -215,8 +215,8 @@ class SCF(mol_hf.SCF):
         # MultiGridNumInt integrator to evaluate Coulomb integrals, skipping the
         # self.with_df code path.
         if isinstance(self.with_df, df.FFTDF) and self._numint is None:
-            from gpu4pyscf.pbc.dft import multigrid_v2
-            self._numint = multigrid_v2.MultiGridNumInt(self.cell)
+            from gpu4pyscf.pbc.dft import multigrid_v3
+            self._numint = multigrid_v3.MultiGridNumInt(self.cell)
 
         if self.verbose >= logger.WARN:
             self.check_sanity()
@@ -234,15 +234,15 @@ class SCF(mol_hf.SCF):
         return int1e.int1e_ovlp(cell, kpt)
 
     def get_hcore(self, cell=None, kpt=None):
-        from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+        from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
         if cell is None: cell = self.cell
         if kpt is None: kpt = self.kpt
-        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+        if isinstance(self._numint, multigrid.MultiGridNumIntBase):
             ni = self._numint
-        elif np.prod(cell.mesh) < 500**3:
+        elif np.prod(cell.mesh) < 1000**3:
             # In the pseudo and all-electron mixed case, MultiGridNumInt is
             # still more efficient if Ecut is not too high.
-            ni = multigrid_v2.MultiGridNumInt(cell)
+            ni = multigrid_v3.MultiGridNumInt(cell)
         else:
             ni = self.with_df
         if cell.pseudo:

@@ -56,7 +56,7 @@ from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.pbc.dft.numint import KNumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
-from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv
@@ -99,13 +99,17 @@ def get_veff(mf_grad, cell, dm, kpts, with_j=False, with_nuc=False):
     ni = mf._numint
     is_hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
+    if isinstance(mf.grids, BeckeGrids):
+        raise NotImplementedError('gradients for BeckeGrids not supported')
+
     j_factor = 1 if with_j else 0
     if is_hybrid and with_rsjk is not None:
         with_j = False
 
     # TODO: with_nuc should be disabled for all-electron calculations
-    if isinstance(ni, MultiGridNumInt):
-        sigma = _rks_exc_strain_deriv(ni, mf.xc, dm, kpts, with_j, with_nuc)
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
+        sigma = ni.energy_strain_gradient(mf.xc, dm, kpts, spin=0,
+                                          with_j=with_j, with_nuc=with_nuc)
     elif isinstance(ni, KNumInt):
         sigma = get_vxc(mf_grad, cell, dm, kpts, with_j, with_nuc)
     else:
@@ -277,9 +281,9 @@ def _contract_coulomb_and_nuc(cell, mesh, dm, kpts, rho0, rho1, grids, with_j, w
     Gv = get_Gv(cell, mesh)
     coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
     rhoG = pbctools.fft(rho0, mesh)
+    weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
     out = 0
     if with_j:
-        weight_0, weight_1 = _get_weight_strain_derivatives(cell, grids)
         vR = pbctools.ifft(rhoG * coulG_0, mesh)
         EJ = cp.einsum('xyg,g->xy', rho1, vR).real.get() * weight_0 * 2
         EJ += cp.einsum('g,g->', rho0, vR).real.get() * weight_1
@@ -292,9 +296,7 @@ def _contract_coulomb_and_nuc(cell, mesh, dm, kpts, rho0, rho1, grids, with_j, w
             vpplocR = pbctools.ifft(vpplocG_0, mesh).real
             Ene = cp.einsum('xyg,g->xy', rho1, vpplocR).real.get()
             Ene += cp.einsum('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
-            Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm, kpts)
         else:
-            coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
             # SI corresponds to Fourier components of the fractional atomic
             # positions within the cell. It does not respond to the strain
             # transformation
@@ -339,22 +341,10 @@ def kernel(mf_grad):
     sigma = ewald(cell)
 
     kpts = mf.kpts
-    kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
     sigma -= int1e.ovlp_strain_deriv(cell, dme0, kpts)
-
-    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-    nkpts = len(kpts)
-    disp = 1e-5
-    for x in range(3):
-        for y in range(3):
-            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-            t1 = int1e.int1e_kin(cell1, kpts1, kmesh)
-            t2 = int1e.int1e_kin(cell2, kpts2, kmesh)
-            t1 = cp.einsum('kij,kji->', t1, dm0).real
-            t2 = cp.einsum('kij,kji->', t2, dm0).real
-            sigma[x,y] += (t1 - t2).get() / (2*disp) / nkpts
+    sigma += int1e.kin_strain_deriv(cell, dm0, kpts)
+    if cell._pseudo:
+        sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0, kpts)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     sigma += get_veff(mf_grad, cell, dm0, kpts=kpts, with_j=True, with_nuc=True)

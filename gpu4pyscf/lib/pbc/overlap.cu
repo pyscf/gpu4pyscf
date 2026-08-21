@@ -2198,22 +2198,24 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef
     float xjxi = xj - xi;
     float yjyi = yj - yi;
     float zjzi = zj - zi;
-    float fac_norm = log_coeff[ish] + log_coeff[jsh] + 1.717f - 1.5f * logf(aij);
+
+    float log_cicj = log_coeff[ish] + log_coeff[jsh];
+    float log_fac = log_cicj + 1.717f - 1.5f * logf(aij) - log_cutoff;
+    log_fac = max(log_fac, 1e-9f);
+    float rr_raw = log_fac / theta;
+    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw);
+    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw);
+    // An approximate penalty for the polynomial part of the gaussian product
+    log_fac += li * dri_fac + lj * drj_fac;
+    log_fac = max(log_fac, 0.f);
+    float rr_cutoff = log_fac / theta;
+
     for (int img = 0; img < nimgs; ++img) {
         float xjLxi = xjxi + img_coords[img*3+0];
         float yjLyi = yjyi + img_coords[img*3+1];
         float zjLzi = zjzi + img_coords[img*3+2];
         float rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
-        if (theta*rr_ij > REMOTE_THRESHOLD) {
-            continue;
-        }
-        float dr = sqrtf(rr_ij);
-        float dri = fj * dr;
-        float drj = fi * dr;
-        float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
-        float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
-        float log_ovlp = fac_norm - theta*rr_ij + dri_fac + drj_fac;
-        if (log_ovlp > log_cutoff) {
+        if (rr_ij < rr_cutoff) {
             ovlp_mask[img*nbas+bas_ij] = 1;
             if (hermi) {
                 ovlp_mask[img*nbas+bas_ji] = 1;

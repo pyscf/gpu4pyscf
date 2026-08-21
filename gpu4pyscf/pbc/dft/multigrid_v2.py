@@ -43,13 +43,16 @@ from gpu4pyscf.lib.cupy_helper import (
 
 __all__ = ['MultiGridNumInt']
 
-libgpbc = load_library("libmgrid_v2")
-libgpbc.evaluate_density_driver.restype = ctypes.c_int
-libgpbc.evaluate_xc_driver.restype = ctypes.c_int
-libgpbc.evaluate_xc_gradient_driver.restype = ctypes.c_int
-libgpbc.count_non_trivial_pairs.restype = ctypes.c_int
-libgpbc.screen_gaussian_pairs.restype = ctypes.c_int
-libgpbc.count_pairs_on_blocks.restype = ctypes.c_int
+try:
+    libgpbc = load_library("libmgrid_v2")
+    libgpbc.evaluate_density_driver.restype = ctypes.c_int
+    libgpbc.evaluate_xc_driver.restype = ctypes.c_int
+    libgpbc.evaluate_xc_gradient_driver.restype = ctypes.c_int
+    libgpbc.count_non_trivial_pairs.restype = ctypes.c_int
+    libgpbc.screen_gaussian_pairs.restype = ctypes.c_int
+    libgpbc.count_pairs_on_blocks.restype = ctypes.c_int
+except OSError:
+    libgpbc = None
 
 
 def complex_type(dtype):
@@ -1468,10 +1471,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     dm_kpts = cp.asarray(dm_kpts, order="C")
-    dms = _format_dms(dm_kpts, kpts)
-    nset = dms.shape[0]
     mesh = ni.mesh
-    ngrids = np.prod(mesh)
 
     density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts)
     Gv = get_Gv(cell, mesh)
@@ -1480,13 +1480,6 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     coulomb_on_g_mesh = cp.einsum(
         "ng, g -> ng", density[:, 0], coulomb_kernel_on_g_mesh
     )
-    weight = cell.vol / ngrids
-
-    density = density.reshape(-1, *mesh)
-    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
-    # computing rhoR with IFFT, the weight factor is not needed.
-    density = ifft_in_place(density).real.reshape(nset, -1, ngrids)
-    density /= weight
 
     #if kpts_band is not None:
     #    ni = ni.copy().reset().build()
@@ -1755,6 +1748,20 @@ def get_veff_ip1(
     ngrids = np.prod(mesh)
     density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
 
+    if with_pseudo_vloc_orbital_derivative:
+        from gpu4pyscf.pbc.dft.multigrid_v3 import (
+            _get_Gv_bases, _pploc_derivatives, _ne_derivatives)
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+        if nset == 1:
+            rhoG = density[0,0]
+        else:
+            rhoG = density[:,0].sum(axis=0)
+        if cell._pseudo:
+            grad_pp = _pploc_derivatives(cell, mesh, rhoG, Gv_bases)[0]
+        else:
+            grad_pp = _ne_derivatives(cell, mesh, rhoG, Gv_bases)[0]
+        rhoG = None
+
     Gv = get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
     coulomb_on_g_mesh = cp.einsum(
@@ -1814,6 +1821,9 @@ def get_veff_ip1(
     veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
         ni, xc_for_fock, dm_kpts, hermi, kpts, with_tau = (xc_type == "MGGA")
     )
+
+    if with_pseudo_vloc_orbital_derivative:
+        veff_gradient += grad_pp
 
     t0 = log.timer("veff_gradient", *t0)
 
@@ -1987,7 +1997,7 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
                                      rho1_sf, grids, with_j, with_nuc)
     return out
 
-class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
+class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def __init__(self, cell):
         self.cell = cell
         self.mesh = cell.mesh
@@ -2169,6 +2179,59 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         return rho, vxc, fxc
 
     cache_xc_kernel = NotImplemented
+
+    def energy_nuclear_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                                with_j=False, with_nuc=False):
+        '''Computes the nuclear gradients of Exc along with additional
+        contributions from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        hermi = 1
+        return get_veff_ip1(self, xc_code, dm_kpts, hermi, kpts, with_j, with_nuc)
+
+    def energy_strain_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                               with_j=False, with_nuc=False):
+        '''Computes the strain derivatives of Exc along with additional
+        contributions from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        if spin is None:
+            dms = _format_dms(dm_kpts, kpts)
+            spin = 0 if len(dms) == 1 else 1
+        if spin == 0:
+            sigma = _rks_exc_strain_deriv(self, xc_code, dm_kpts, kpts, with_j, with_nuc)
+        else:
+            sigma = _uks_exc_strain_deriv(self, xc_code, dm_kpts, kpts, with_j, with_nuc)
+        return sigma
+
+    def energy_derivatives(self, xc_code, dm_kpts, kpts=None, spin=None,
+                           with_j=False, with_nuc=False):
+        '''Computes the nuclear gradients and strain derivatives of Exc
+        along with additional contributions from the Coulomb and pseudopotential
+        terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        grad = self.energy_nuclear_gradient(xc_code, dm_kpts, kpts, spin, with_j, with_nuc)
+        sigma = self.energy_strain_gradient(xc_code, dm_kpts, kpts, spin, with_j, with_nuc)
+        return grad, sigma
 
     to_gpu = utils.to_gpu
     device = utils.device

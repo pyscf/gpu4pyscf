@@ -23,7 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.grad.rks_stress import ewald
+from gpu4pyscf.pbc.grad.rks_stress import ewald, _get_pp_nonloc_strain_derivatives
 from gpu4pyscf.pbc.grad.krhf_stress import get_nuc, get_veff
 
 def kernel(mf_grad):
@@ -63,6 +63,8 @@ def kernel(mf_grad):
     sigma -= int1e.ovlp_strain_deriv(cell, dme0_sf, kpts)
     sigma += int1e.kin_strain_deriv(cell, dm0_sf, kpts)
     sigma += get_nuc(mf_grad, cell, dm0_sf, kpts)
+    if cell._pseudo:
+        sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0_sf, kpts)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     sigma += get_veff(mf_grad, cell, dm0, kpts)

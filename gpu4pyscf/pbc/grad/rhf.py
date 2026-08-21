@@ -24,8 +24,7 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 import gpu4pyscf.grad.rhf as mol_rhf
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.dft import multigrid_v2
-import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
+from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.gto import int1e
@@ -122,7 +121,7 @@ class Gradients(GradientsBase):
         # the GDF-based J. In this case, j_in_xc must be disabled, and the J
         # contribution must be evaluated using the GDF jk_energy_per_atom function.
         ni = mf._numint
-        j_in_xc = isinstance(ni, multigrid_v2.MultiGridNumInt)
+        j_in_xc = isinstance(ni, multigrid.MultiGridNumIntBase)
         de = 0
         xc = getattr(mf, 'xc', 'HF')
         if xc.upper() == 'HF':
@@ -144,9 +143,9 @@ class Gradients(GradientsBase):
         # TODO: handle all-electron+GGA and pseudo+GGA differently
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
         if j_in_xc:
-            de += multigrid_v2.get_veff_ip1(
-                ni, xc, dm, with_j=j_in_xc,
-                with_pseudo_vloc_orbital_derivative=True).get()
+            assert isinstance(ni, multigrid.MultiGridNumIntBase)
+            de += ni.energy_nuclear_gradient(
+                xc, dm, spin=0, with_j=j_in_xc, with_nuc=True)
             j_factor = 0
         elif xc.upper() != 'HF':
             from gpu4pyscf.pbc.grad.krks import get_vxc
@@ -184,14 +183,8 @@ class Gradients(GradientsBase):
         de = self.energy_ee(dm0)
 
         ni = mf._numint
-        if isinstance(ni, multigrid_v2.MultiGridNumInt):
-            rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
-            rhoG = rhoG[0,0]
-            if cell._pseudo:
-                de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
-            else:
-                de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
-
+        if isinstance(ni, multigrid.MultiGridNumIntBase):
+            # Vne or pploc contribution is evaluated in energy_ee
             dh1e_kin = int1e.int1e_ipkin(cell)
             de -= contract_h1e_dm(cell, dh1e_kin, dm0, hermi=1)
         else:

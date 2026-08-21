@@ -24,8 +24,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.dft import BeckeGrids
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
 
 __all__ = ['Gradients']
 
@@ -45,25 +44,13 @@ def energy_ee(ks_grad, dm, kpts):
     omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
     j_factor = 1
 
-    if isinstance(ni, multigrid.MultiGridNumInt):
-        raise NotImplementedError(
-            "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
-            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
-
-    if isinstance(ni, multigrid_v2.MultiGridNumInt):
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
         # Note the j_in_xc treatment here slightly differs from KRHF. In KRHF,
         # if GDF is enabled, J is evaluated with GDF CDERI. However, in KRKS,
         # J is evaluated using MultiGridNumInt whenever applicable. See also
         # the implementation in pbc.scf.krks
-        if kpts is None:
-            nkpts = 1
-        else:
-            nkpts = len(kpts)
-        exc = multigrid_v2.get_veff_ip1(
-            ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
-        # exc of multigrid_v2 is the full response of dE/dX. However,
-        # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
-        exc /= nkpts
+        exc = ni.energy_nuclear_gradient(
+            mf.xc, dm, kpts=kpts, spin=0, with_j=True, with_nuc=True)
         j_factor = 0
     else:
         if ks_grad.grids is not None:

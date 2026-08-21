@@ -15,6 +15,9 @@
 
 import unittest
 import numpy as np
+import cupy as cp
+import pyscf
+from pyscf.pbc.gto import pseudo
 from pyscf.pbc import dft, gto
 from pyscf.pbc.tools import pbc
 from pyscf.pbc.df import FFTDF
@@ -324,6 +327,32 @@ class KnownValues(unittest.TestCase):
             e1 = mf_scanner(cell1)
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 2e-7
+
+    def test_get_vpplocG_strain_derivatives(self):
+        from gpu4pyscf.pbc.grad.rks_stress import _get_vpplocG_strain_derivatives
+        np.random.seed(8)
+        cell = pyscf.M(
+            atom='C 0 0 0;#C .2 .3 .7',
+            basis=[[0, [0.4, 1]]],
+            pseudo={'C': [[2, 2], 0.38, 4, [-8.8, 1.33, 0.85, 0.55]]},
+            a=np.eye(3) * 2.5 + np.random.rand(3,3)*.5)
+        mesh = [11] * 3
+
+        disp = 1e-5
+        ngrids = np.prod(mesh)
+        ref = cp.empty((3,3, ngrids), dtype=np.complex128)
+        SI = cp.array(cell.get_SI(mesh=mesh))
+        for x in range(3):
+            for y in range(3):
+                cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+                vpplocG1 = pseudo.get_vlocG(cell1, cell1.get_Gv(mesh))
+                vpplocG2 = pseudo.get_vlocG(cell2, cell2.get_Gv(mesh))
+                vpplocG1 = -np.einsum('ij,ij->j', SI, vpplocG1)
+                vpplocG2 = -np.einsum('ij,ij->j', SI, vpplocG2)
+                ref[x,y] = cp.asarray((vpplocG1 - vpplocG2) / (2*disp))
+
+        dat = _get_vpplocG_strain_derivatives(cell, mesh)
+        assert abs(dat - ref).max().get() < 1e-7
 
 if __name__ == "__main__":
     print("Full Tests for RKS Stress tensor")

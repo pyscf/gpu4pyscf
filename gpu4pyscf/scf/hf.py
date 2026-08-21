@@ -228,12 +228,13 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     assert isinstance(dm0, cupy.ndarray)
 
+    dm, dm0 = dm0, None
+    vhf = mf.get_veff(mol, dm)
+
     h1e = cupy.asarray(mf.get_hcore())
     s1e = cupy.asarray(mf.get_ovlp())
     t1 = log.timer_debug1('hcore', *t1)
 
-    dm, dm0 = dm0, None
-    vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
     x_orth = mf.check_linear_dependency(s1e, log)
