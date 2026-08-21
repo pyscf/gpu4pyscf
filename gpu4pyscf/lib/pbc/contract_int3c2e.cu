@@ -25,7 +25,11 @@
 #include "int3c2e_create_tasks.cuh"
 
 #define NF_AUX_MAX      28
+#ifdef USE_SYCL
 #define GOUT_WIDTH      30
+#else
+#define GOUT_WIDTH      29
+#endif
 
 // lattice sum over j and k for (ij|k)
 __global__ static
