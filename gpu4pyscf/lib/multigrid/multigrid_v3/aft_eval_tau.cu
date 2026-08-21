@@ -48,7 +48,7 @@ void orth_ft_tau_dm_kernel(double *densityR, double *densityI, double *tauR, dou
     __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+3)];
     __shared__ int mesh_start[3];
     __shared__ int ri, rj;
-    __shared__ uint32_t ij_offset;
+    __shared__ size_t ij_offset;
     __shared__ double fac, ai, aj;
 
     int *bas = envs.bas;
@@ -109,7 +109,7 @@ void orth_ft_tau_dm_kernel(double *densityR, double *densityI, double *tauR, dou
             }
             int i0 = envs.ao_loc[ish_cell0];
             int j0 = envs.ao_loc[jsh_cell0];
-            uint32_t nao = envs.ao_loc[nbas];
+            size_t nao = envs.ao_loc[nbas];
             ij_offset = bvk_cell_id * nao * nao + i0 * nao + j0;
         }
 
@@ -150,7 +150,7 @@ void orth_ft_tau_dm_kernel(double *densityR, double *densityI, double *tauR, dou
             int nfj = c_nf[lj];
             int idx_i = lex_xyz_offset(li);
             int idx_j = lex_xyz_offset(lj);
-            uint32_t nao = envs.ao_loc[nbas];
+            size_t nao = envs.ao_loc[nbas];
             for (int i = 0; i < nfi; ++i) {
             for (int j = 0; j < nfj; ++j) {
                 int ix = _c_cartesian_lexical_xyz[idx_i+i*3+0];

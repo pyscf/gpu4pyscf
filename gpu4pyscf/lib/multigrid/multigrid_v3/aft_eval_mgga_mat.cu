@@ -261,7 +261,7 @@ void orth_mgga_mat_kernel(double *out, cuDoubleComplex *vrhoG,
         if (ish_cell0 == jsh_cell0) {
             fac *= .5;
         }
-        uint32_t nao = envs.ao_loc[nbas];
+        size_t nao = envs.ao_loc[nbas];
         int i0 = envs.ao_loc[ish_cell0];
         int j0 = envs.ao_loc[jsh_cell0];
         int i = n * c_div_nf[lj];

@@ -167,10 +167,10 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
         for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
 #pragma unroll
         for (int dm_j0 = 0; dm_j0 < nfj; dm_j0 += SLICE_SIZE_J) {
-            uint32_t nao = envs.ao_loc[nbas];
+            size_t nao = envs.ao_loc[nbas];
             int i0 = envs.ao_loc[ish_cell0];
             int j0 = envs.ao_loc[jsh_cell0];
-            uint32_t ij_offset = bvk_cell_id * nao * nao + (dm_i0+i0) * nao + dm_j0+j0;
+            size_t ij_offset = bvk_cell_id * nao * nao + (dm_i0+i0) * nao + dm_j0+j0;
             double dm_cache[SLICE_SIZE_I * SLICE_SIZE_J];
             if (pair_id < shl_pair1) {
 #pragma unroll

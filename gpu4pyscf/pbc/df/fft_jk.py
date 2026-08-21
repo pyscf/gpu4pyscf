@@ -402,31 +402,18 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
     if kpts_band is kpts or kpts_band is None:
         return v_kpts.reshape(dm_kpts.shape)
     else:
-        assert v_kpts.ndim == 4 # (Ndm,Nk,Nao,Nao)
-        # dm_kpts.shape     kpts.shape     nset
-        # (Nao,Nao)         (1 ,3)         None
-        # (Ndm,Nao,Nao)     (1 ,3)         Ndm
-        # (Nk,Nao,Nao)      (Nk,3)         None
-        # (Ndm,Nk,Nao,Nao)  (Nk,3)         Ndm
-        if kpts_band.ndim == 1:
-            assert dm_kpts.ndim <= 3
-            v_kpts = v_kpts[:,0]
-            if dm_kpts.ndim < 3: # RHF dm
-                v_kpts = v_kpts[0]
+        is_single_kpt = kpts is not None and kpts.ndim == 1
+        if is_single_kpt:
+            is_rhf = dm_kpts.ndim == 2
         else:
-            if kpts is None or kpts.ndim == 1 or (kpts.ndim == 2 and kpts.shape[0] == 1):
-                nkpts = 1
-                if dm_kpts.ndim == 2:
-                    dm_kpts = dm_kpts[None,:,:]
-            else:
-                nkpts = len(kpts)
-            assert kpts.ndim == 2
             assert dm_kpts.ndim >= 3
-            if dm_kpts.ndim == 3: # KRHF dms
-                assert len(dm_kpts) == nkpts
-                v_kpts = v_kpts[0]
-            else:  # KUHF dms
-                assert v_kpts.shape[1] == len(kpts_band)
+            is_rhf = dm_kpts.ndim == 3
+        nkpts_band = len(kpts_band)
+        nao = dm_kpts.shape[-1]
+        if is_rhf:
+            v_kpts = v_kpts.reshape(nkpts_band, nao, nao)
+        else:  # KUHF dms
+            v_kpts = v_kpts.reshape(2, nkpts_band, nao, nao)
         return v_kpts
 
 def _factorize_dm(dm_kpts, kpts=None):

@@ -56,7 +56,7 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
                         float *Ecut_by_shell, PBCIntEnvVars envs,
                         int64_t *bas_ij_idx, int li_inc, int lj_inc,
                         int npairs, float log_threshold,
-                        float undressed_threshold)
+                        float undressed_threshold, float ke_max)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (pair_id >= npairs) return;
@@ -168,6 +168,7 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
             //    logf(undressed_threshold);
             float log_factor = -logf(undressed_threshold);
             float ke_raw = log_factor * aij * 2;
+            ke_raw = min(ke_raw, ke_max);
             pair_ke[pair_id] = max(ke_raw, ke_two_centers);
         } else {
             pair_ke[pair_id] = ke_two_centers;
@@ -312,11 +313,12 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, PBCIntEnvVars envs,
     float log_fac = log_cicj + 1.717f - 1.5f * logf(aij) - log_cutoff;
     log_fac = max(log_fac, 1e-9f);
     float rr_raw = log_fac / theta;
-    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw);
-    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw);
+    float Ecut_raw = log_fac * (2*aij);
+    float Ecut_2a = Ecut_raw / (2*aij*aij);
+    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw + Ecut_2a);
+    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw + Ecut_2a);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
-    log_fac = max(log_fac, 0.f);
     float rr_cutoff = log_fac / theta;
 
     for (int img = 0; img < nimgs; ++img) {
@@ -373,7 +375,6 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars en
     float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw + Ecut_2a);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
-    log_fac = max(log_fac, 0.f);
 
     float xi = ri[0];
     float yi = ri[1];
@@ -494,12 +495,12 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
                               float *Ecut_by_shell, PBCIntEnvVars *envs,
                               int64_t *bas_ij_idx, int npairs,
                               int li_inc, int lj_inc, float log_threshold,
-                              float undressed_threshold)
+                              float undressed_threshold, float ke_max)
 {
     int batches = (npairs + THREADS-1) / THREADS;
     grid_ranges_kernel<<<batches, THREADS>>>(
         grid_frac_ranges, pair_ke, Ecut_by_shell, *envs, bas_ij_idx,
-        li_inc, lj_inc, npairs, log_threshold, undressed_threshold);
+        li_inc, lj_inc, npairs, log_threshold, undressed_threshold, ke_max);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in gaussian_prod_grid_ranges: %s\n", cudaGetErrorString(err));

@@ -28,6 +28,7 @@ from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.__config__ import num_devices, _p2p_access
+from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf import __config__
 
 LMAX_ON_GPU = 7
@@ -1223,6 +1224,42 @@ def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
             return cuda_malloc(size)
         return default_mempool_malloc(size)
     cupy.cuda.set_allocator(malloc)
+
+def vec_dot(vec1, vec2):
+    '''
+    einsum('g,g->', vec1, vec2)
+    '''
+    vec1 = cupy.asarray(vec1)
+    vec2 = cupy.asarray(vec2)
+    assert vec1.dtype == vec2.dtype == cupy.float64
+    assert vec1.shape == vec2.shape
+    n = vec1.size
+
+    fn_name = f'vec_dot_kernel_order'
+    if fn_name not in _kernel_registery:
+        kernel_code = (r'''
+extern "C" __global__
+void ''' + fn_name + r'''(double *out, double *vec1, double *vec2, long long n) {
+    int tid = threadIdx.x;
+    int idx = blockDim.x * blockIdx.x + tid;
+    int stride = gridDim.x * blockDim.x;
+    double sum = 0;
+    for (long long g = idx; g < n; g += stride) {
+        sum += vec1[g] * vec2[g];
+    }
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        sum += __shfl_down_sync(0xffffffff, sum, offset);
+    }
+    int lane = tid % 32;
+    if (lane == 0) atomicAdd(out, sum);
+}''')
+        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+
+    kernel = _kernel_registery[fn_name]
+    out = cupy.zeros(1)
+    workers = gpu_specs['multiProcessorCount']
+    kernel((workers*2,), (1024,), (out, vec1, vec2, n))
+    return out[0]
 
 def batched_vec3_norm2(batched_vec3):
     '''

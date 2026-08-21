@@ -121,7 +121,7 @@ void eval_lda_grad_kernel(double *grad, double *strain, double *dm,
         int ish_cell0 = ish;
         int bvk_cell_id = jsh / nbas;
         int jsh_cell0 = jsh - nbas * bvk_cell_id;
-        uint32_t nao = envs.ao_loc[nbas];
+        size_t nao = envs.ao_loc[nbas];
         int i0 = envs.ao_loc[ish_cell0];
         int j0 = envs.ao_loc[jsh_cell0];
         int i = n * c_div_nf[LJ];
