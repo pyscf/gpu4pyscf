@@ -343,7 +343,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
 
         if has_grad:
             dmz1doo_ee[-1] += cp.asarray(oo0)
-            im0[-1, :nocc, :nocc] += np.diag(mo_energy[:nocc]) * 2.0
+            im0[-1, :nocc, :nocc] += cp.diag(mo_energy[:nocc]) * 2.0
 
         im0_ao_ee = _c_mat_cT(mo_coeff, im0, mo_coeff)
 

@@ -30,6 +30,13 @@ __all__ = ['Gradients']
 
 DM_BLOCK = 7
 
+# Number of density matrices contracted in one matrix multiplication when
+# evaluating the auxiliary vectors (see _jk_energies_by_dm_factors). BLAS may
+# choose a different reduction order (k-splitting) for different batch sizes.
+# Contracting a fixed number of DMs at a time ensures that the auxiliary vector
+# of one DM does not depend on how many DMs are processed in the same call.
+AUXVEC_DM_CHUNK = 4
+
 def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
                         verbose=None):
     '''
@@ -390,17 +397,22 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
     nao_pair = len(pair_addresses)
     naux = auxmol.nao
 
+    npad = n_dm
     if j_factor is not None:
-        dm1 = cp.empty((n_dm, nao, nao))
-        dm2 = cp.empty((n_dm, nao, nao))
+        # The DMs are zero-padded to a multiple of AUXVEC_DM_CHUNK so that the
+        # auxiliary vectors can be evaluated with a fixed batch size (see the
+        # comments for AUXVEC_DM_CHUNK).
+        npad = (n_dm + AUXVEC_DM_CHUNK - 1) // AUXVEC_DM_CHUNK * AUXVEC_DM_CHUNK
+        dm1 = cp.zeros((npad, nao, nao))
+        dm2 = cp.zeros((npad, nao, nao))
         for i in range(n_dm):
             dm1_factor_l[i].dot(dm1_factor_r[i].T, out=dm1[i])
             dm2_factor_l[i].dot(dm2_factor_r[i].T, out=dm2[i])
-        auxvec1 = cp.empty((n_dm, naux))
-        auxvec2 = cp.empty((n_dm, naux))
+        auxvec1 = cp.empty((npad, naux))
+        auxvec2 = cp.empty((npad, naux))
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
-    mem_avail = mem_free - 2*naux*np.dot(dm1_noccs, dm2_noccs)*8 - 2*n_dm*nao**2*8
+    mem_avail = mem_free - 2*naux*np.dot(dm1_noccs, dm2_noccs)*8 - 2*npad*nao**2*8
     batch_size = int(mem_avail*.5/(n_dm*nao_pair*8))
     laux = auxmol.uniq_l_ctr[:,0].max()
     if batch_size <= (laux+1)*(laux+2)//2:
@@ -437,9 +449,16 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
                 contract('pqr,pi->iqr', j3c, dm1_factor_r[i], out=tmp)
                 contract('iqr,qj->rij', tmp, dm2_factor_l[i], out=j3c_o1o2[i][aux0:aux1])
             if j_factor is not None:
-                auxvec1[:,aux0:aux1] = cp.einsum('pqr,nqp->nr', j3c, dm1)
-                auxvec2[:,aux0:aux1] = cp.einsum('pqr,nqp->nr', j3c, dm2)
+                for p0 in range(0, npad, AUXVEC_DM_CHUNK):
+                    p1 = p0 + AUXVEC_DM_CHUNK
+                    auxvec1[p0:p1,aux0:aux1] = cp.einsum(
+                        'pqr,nqp->nr', j3c, dm1[p0:p1])
+                    auxvec2[p0:p1,aux0:aux1] = cp.einsum(
+                        'pqr,nqp->nr', j3c, dm2[p0:p1])
     j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
+    if j_factor is not None and npad != n_dm:
+        auxvec1 = auxvec1[:n_dm]
+        auxvec2 = auxvec2[:n_dm]
     t0 = log.timer_debug1('contract dm', *t0)
 
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
