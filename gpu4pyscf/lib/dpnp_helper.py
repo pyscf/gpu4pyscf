@@ -145,7 +145,42 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
 
 # Define dpnp array with tag using Python class wrapper
 class CPArrayWithTag(dpnp.ndarray):
-    pass
+    """A dpnp array that can carry pyscf's ad-hoc tags.
+
+    dpnp's array methods build plain ``dpnp_array`` results instead of
+    honouring the subclass the way NumPy/CuPy do, so a tagged array silently
+    degrades to an untaggable ``dpnp_array`` on indexing, ``.T``, ``reshape``
+    and friends. Call sites written against CuPy rely on those results still
+    being subclass instances so they can assign attributes onto them --
+    ``df_jk._transpose_dm`` does ``dm_T.factor_l = ...`` and
+    ``nac.tdrhf_grad_nacv._dms_to_list`` does ``dm.factor_l = ...`` while
+    iterating. Re-view the derived array to restore that.
+
+    Like CuPy, the tags themselves are *not* propagated -- only the ability to
+    hold them. Copying ``__dict__`` here would be wrong: a slice of a stacked
+    density matrix must not inherit the parent's ``factor_l``.
+    """
+
+    @staticmethod
+    def _retag(res):
+        if isinstance(res, dpnp.ndarray) and not isinstance(res, CPArrayWithTag):
+            return res.view(CPArrayWithTag)
+        return res
+
+    def __getitem__(self, key):
+        return CPArrayWithTag._retag(dpnp.ndarray.__getitem__(self, key))
+
+    @property
+    def T(self):
+        return CPArrayWithTag._retag(dpnp.ndarray.T.fget(self))
+
+    def reshape(self, *args, **kwargs):
+        return CPArrayWithTag._retag(
+            dpnp.ndarray.reshape(self, *args, **kwargs))
+
+    def transpose(self, *args, **kwargs):
+        return CPArrayWithTag._retag(
+            dpnp.ndarray.transpose(self, *args, **kwargs))
 
 #@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
