@@ -509,8 +509,13 @@ def gen_ijab_MVP(T_ij, T_ab):
             vir_end = min(vir_start + vir_chunk_size, n_vir)
             # vir_range = vir_end - vir_start
 
-            # Extract the corresponding chunk of T_ab
-            T_ab_chunk = T_ab[:, vir_start:vir_end, :]  # Shape: (nauxao, vir_range, n_vir)
+            # Extract the corresponding chunk of T_ab.
+            # Intentional CPU->GPU transfer: with in_ram=True (the default)
+            # T_ab is deliberately held in host RAM and streamed one chunk at a
+            # time, so each chunk has to be uploaded here. Done explicitly
+            # rather than relying on contract() to coerce it, so the transfer
+            # is visible at the point where it is intended.
+            T_ab_chunk = cp.asarray(T_ab[:, vir_start:vir_end, :])  # (nauxao, vir_range, n_vir)
 
             # Compute T_ab_V for the current chunk
             T_ab_chunk_V = contract("Pab,mjb->Pamj", T_ab_chunk, V)
@@ -574,8 +579,10 @@ def gen_ibja_MVP(T_ia):
             # Extract the current chunk of V
             V_chunk = V[:, occ_start:occ_end, :]  # Shape: (n_state, occ_range, n_vir)
 
-            # Extract the corresponding chunk of T_ia
-            T_ia_chunk = T_ia[:, occ_start:occ_end, :]  # Shape: (nauxao, occ_range, n_vir)
+            # Extract the corresponding chunk of T_ia.
+            # Intentional CPU->GPU transfer, same reason as T_ab above: T_ia
+            # lives in host RAM under in_ram=True and is streamed per chunk.
+            T_ia_chunk = cp.asarray(T_ia[:, occ_start:occ_end, :])  # (nauxao, occ_range, n_vir)
 
             # Compute T_ib_V for the current chunk
             T_ib_V_chunk = contract("Pib,mjb->Pimj", T_ia_chunk, V_chunk)

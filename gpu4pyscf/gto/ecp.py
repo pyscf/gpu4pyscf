@@ -20,8 +20,6 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import load_library, contract
 from gpu4pyscf.gto.mole import group_basis
 
-libecp = load_library('libgecp')
-
 ecp_cart_argtypes = [
     ctypes.c_void_p,
     ctypes.c_void_p,
@@ -38,10 +36,28 @@ ecp_cart_argtypes = [
     ctypes.c_int
 ]
 
-libecp.ECP_cart.argtypes = ecp_cart_argtypes
-libecp.ECP_ip_cart.argtypes = ecp_cart_argtypes
-libecp.ECP_ipipv_cart.argtypes = ecp_cart_argtypes
-libecp.ECP_ipvip_cart.argtypes = ecp_cart_argtypes
+# Lazy loader for the ECP shared library. Importing this module must not require
+# libgecp.so to be present/loadable; the library is only opened the first time an
+# ECP routine is actually invoked. This allows non-ECP calculations to run even
+# when libgecp.so has not been built.
+_libecp = None
+
+def _load_libecp():
+    global _libecp
+    if _libecp is None:
+        _libecp = load_library('libgecp')
+        _libecp.ECP_cart.argtypes = ecp_cart_argtypes
+        _libecp.ECP_ip_cart.argtypes = ecp_cart_argtypes
+        _libecp.ECP_ipipv_cart.argtypes = ecp_cart_argtypes
+        _libecp.ECP_ipvip_cart.argtypes = ecp_cart_argtypes
+    return _libecp
+
+def __getattr__(name):
+    # Module-level lazy attribute: `libecp` resolves to the loaded library on
+    # first access (PEP 562).
+    if name == 'libecp':
+        return _load_libecp()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 ECP_ATOM_ID = 7
 
@@ -171,7 +187,7 @@ def get_ecp(mol):
                 li = uniq_l_ctr[i,0]
                 lj = uniq_l_ctr[j,0]
                 lk = uniq_lecp[k]
-                err = libecp.ECP_cart(
+                err = _load_libecp().ECP_cart(
                     mat1.data.ptr, ao_loc.data.ptr, nao,
                     tasks.data.ptr, ntasks,
                     ecpbas.data.ptr, ecploc.data.ptr,
@@ -197,7 +213,7 @@ def get_ecp_ip(mol, ip_type='ip', ecp_atoms=None):
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
 
     if ip_type == 'ip':
-        fn = libecp.ECP_ip_cart
+        fn = _load_libecp().ECP_ip_cart
         comp = 3
     else:
         raise ValueError('Invalid IP type')
@@ -267,10 +283,10 @@ def get_ecp_ipip(mol, ip_type='ipipv', ecp_atoms=None):
         ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
 
     if ip_type == 'ipipv':
-        fn = libecp.ECP_ipipv_cart
+        fn = _load_libecp().ECP_ipipv_cart
         comp = 9
     elif ip_type == 'ipvip':
-        fn = libecp.ECP_ipvip_cart
+        fn = _load_libecp().ECP_ipvip_cart
         comp = 9
     else:
         raise ValueError('Invalid IP type')
