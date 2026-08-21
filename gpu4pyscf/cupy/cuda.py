@@ -1335,6 +1335,12 @@ class Stream:
     def synchronize(self):
         self._sycl_queue.wait()
 
+    def wait_event(self, event):
+        # Every Stream is the same in-order master queue, so any work the
+        # event was recorded after is already ordered before later
+        # submissions on this "stream" — nothing to wait for.
+        pass
+
     @classproperty
     def null(cls):
         return get_current_stream()

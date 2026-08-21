@@ -52,6 +52,8 @@ MEMPOOL_THRESHOLD = 100000000
 _kernel_registery = {}
 
 libdpnp_helper = load_library('libcupy_helper')
+# Upstream modules import the library handle under its cupy_helper name.
+libcupy_helper = libdpnp_helper
 
 def pin_memory(array):
     mem = dpctl.memory.MemoryUSMHost(array.nbytes)
