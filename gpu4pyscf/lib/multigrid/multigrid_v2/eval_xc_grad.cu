@@ -39,7 +39,6 @@ int evaluate_xc_gradient_driver(
     const int *bas, const double *env, const int n_channels,
     const int is_non_orthogonal, const int use_float_precision) {
   if (use_float_precision) {
-#if 0
     if (is_non_orthogonal) {
       if (n_channels == 1) {
         return gpu4pyscf::gpbc::multi_grid::gradient::evaluate_xc_driver<float, 1,
@@ -89,12 +88,12 @@ int evaluate_xc_gradient_driver(
             vectors_to_neighboring_images, n_images,
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
+      } else {
+        fprintf(stderr,
+                "evaluate_xc_gradient_driver: n_channels > 2 not supported");
+        return 1;
       }
     }
-#else
-    fprintf(stderr, "single precision not available\n");
-    return 1;
-#endif
   } else {
     if (is_non_orthogonal) {
       if (n_channels == 1) {

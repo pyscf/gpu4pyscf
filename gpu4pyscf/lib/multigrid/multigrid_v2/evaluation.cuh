@@ -299,7 +299,19 @@ __global__ static void evaluate_density_kernel(
           gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x, y - j_y,
                                                z - j_z);
 
-          const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          if constexpr (sizeof(KernelType) == 4) {
+            const KernelType px = start_position_x + a_index * dxyz_dabc[0] +
+                b_index * dxyz_dabc[3] + c_index * dxyz_dabc[6] - pair_x;
+            const KernelType py = start_position_y + a_index * dxyz_dabc[1] +
+                b_index * dxyz_dabc[4] + c_index * dxyz_dabc[7] - pair_y;
+            const KernelType pz = start_position_z + a_index * dxyz_dabc[2] +
+                b_index * dxyz_dabc[5] + c_index * dxyz_dabc[8] - pair_z;
+            gaussian = is_valid_pair
+                ? expf(-(ij_exponent_in_prefactor +
+                         ij_exponent * (px * px + py * py + pz * pz)))
+                : KernelType(0);
+          }
 #pragma unroll
           for (int i_channel = 0; i_channel < n_channels; i_channel++) {
             /*L1: per-i independent FMA chains expose ILP (break the serial
@@ -719,7 +731,19 @@ __global__ static void evaluate_xc_kernel(
           gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x, y - j_y,
                                                z - j_z);
 
-          const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          if constexpr (sizeof(KernelType) == 4) {
+            const KernelType px = start_position_x + a_index * dxyz_dabc[0] +
+                b_index * dxyz_dabc[3] + c_index * dxyz_dabc[6] - pair_x;
+            const KernelType py = start_position_y + a_index * dxyz_dabc[1] +
+                b_index * dxyz_dabc[4] + c_index * dxyz_dabc[7] - pair_y;
+            const KernelType pz = start_position_z + a_index * dxyz_dabc[2] +
+                b_index * dxyz_dabc[5] + c_index * dxyz_dabc[8] - pair_z;
+            gaussian = is_valid_pair
+                ? expf(-(ij_exponent_in_prefactor +
+                         ij_exponent * (px * px + py * py + pz * pz)))
+                : KernelType(0);
+          }
 #pragma unroll
           for (int i_channel = 0; i_channel < n_channels; i_channel++) {
             xc_value =
@@ -1141,7 +1165,19 @@ __global__ static void evaluate_density_tau_kernel(
               j_cartesian_gradient, j_cartesian, x - j_x, y - j_y, z - j_z,
               j_exponent);
 
-          const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          if constexpr (sizeof(KernelType) == 4) {
+            const KernelType px = start_position_x + a_index * dxyz_dabc[0] +
+                b_index * dxyz_dabc[3] + c_index * dxyz_dabc[6] - pair_x;
+            const KernelType py = start_position_y + a_index * dxyz_dabc[1] +
+                b_index * dxyz_dabc[4] + c_index * dxyz_dabc[7] - pair_y;
+            const KernelType pz = start_position_z + a_index * dxyz_dabc[2] +
+                b_index * dxyz_dabc[5] + c_index * dxyz_dabc[8] - pair_z;
+            gaussian = is_valid_pair
+                ? expf(-(ij_exponent_in_prefactor +
+                         ij_exponent * (px * px + py * py + pz * pz)))
+                : KernelType(0);
+          }
 #pragma unroll
           for (int i_channel = 0; i_channel < n_channels; i_channel++) {
             KernelType density_value_to_be_shared = 0;
@@ -1608,7 +1644,19 @@ __global__ static void evaluate_xc_with_tau_kernel(
               j_cartesian_gradient, j_cartesian, x - j_x, y - j_y, z - j_z,
               j_exponent);
 
-          const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          if constexpr (sizeof(KernelType) == 4) {
+            const KernelType px = start_position_x + a_index * dxyz_dabc[0] +
+                b_index * dxyz_dabc[3] + c_index * dxyz_dabc[6] - pair_x;
+            const KernelType py = start_position_y + a_index * dxyz_dabc[1] +
+                b_index * dxyz_dabc[4] + c_index * dxyz_dabc[7] - pair_y;
+            const KernelType pz = start_position_z + a_index * dxyz_dabc[2] +
+                b_index * dxyz_dabc[5] + c_index * dxyz_dabc[8] - pair_z;
+            gaussian = is_valid_pair
+                ? expf(-(ij_exponent_in_prefactor +
+                         ij_exponent * (px * px + py * py + pz * pz)))
+                : KernelType(0);
+          }
 #pragma unroll
           for (int i_channel = 0; i_channel < n_channels; i_channel++) {
             const KernelType xc_rho_value =
