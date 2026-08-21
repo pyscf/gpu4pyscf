@@ -63,7 +63,7 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
 
-    auto gxyz_offsets = s_gxyz_offset.get() + OFFSET;
+    auto gxyz_offsets = s_rys_gxyz_offset.get() + OFFSET;
     #else
     int threadIdx_x = threadIdx.x;
     int threadIdx_y = threadIdx.y;

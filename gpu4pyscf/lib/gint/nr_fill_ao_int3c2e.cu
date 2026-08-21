@@ -36,8 +36,7 @@
 #define GINT_CAT_(a, b) a##b
 #define GINT_CAT(a, b)  GINT_CAT_(a, b)
 #ifdef USE_SYCL
-// Kernel-id (with any template args) is the trailing __VA_ARGS__ so its commas
-// survive macro expansion. SYCL kernel name generated inline per source line.
+// Kernel name generated per source line for unique identification.
 // dev_envs/dev_eri/dev_offsets are on-host value copies for lambda capture.
 #define LAUNCH_KERNEL(...) { \
     auto dev_envs = *envs; auto dev_eri = *eri; auto dev_offsets = *offsets; \
@@ -45,6 +44,7 @@
         sycl::nd_range<2>(blocks * threads, threads), \
         [=](auto item) [[intel::kernel_args_restrict]] { \
             __VA_ARGS__(dev_envs, dev_eri, dev_offsets); }); }
+
 #else
 // CUDA passes the dereferenced structs by value at launch, like master.
 #define LAUNCH_KERNEL(...) \

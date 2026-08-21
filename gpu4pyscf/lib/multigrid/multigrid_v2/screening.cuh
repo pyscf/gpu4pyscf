@@ -19,9 +19,6 @@
 #ifdef USE_SYCL
 #define CONCAT_(a,b) a##b
 #define CONCAT(a,b)  CONCAT_(a,b)
-
-#include <dpct/dpct.hpp>
-#include <dpct/dpl_utils.hpp>
 #else
 #include <cub/cub.cuh>
 #endif
@@ -37,24 +34,6 @@
 
 namespace gpu4pyscf::gpbc::multi_grid {
 
-#ifdef USE_SYCL
-  // Notes: https://github.com/oneapi-src/SYCLomatic/blob/SYCLomatic/clang/runtime/dpct-rt/include/dpct/dpl_extras/dpcpp_extensions.h#L97C1-L110C2
-  // namespace dpct::detail {
-  //   template <typename Item, typename T, class BinaryOperation>
-  //   __inline__ __attribute__((always_inline)) T
-  //   exclusive_scan(const Item &item, T input, T init, BinaryOperation binary_op,
-  //                  T &group_aggregate) {
-  //     T output = sycl::exclusive_scan_over_group(item.get_group(), input, init,
-  //                                                binary_op);
-  //     if (item.get_local_linear_id() == item.get_local_range().size() - 1) {
-  //       group_aggregate = binary_op(output, input);
-  //     }
-
-  //     group_aggregate = sycl::group_broadcast(item.get_group(), group_aggregate, item.get_local_range().size() - 1);
-  //     return output;
-  //   }
-  // }
-#endif
 template <int i_angular, int j_angular>
 __device__ double
 gaussian_pair_cutoff(const double i_exponent, const double j_exponent,
@@ -376,9 +355,17 @@ __global__ void screen_gaussian_pairs_kernel(
   int write_pair_index = is_valid_pair ? 1 : 0;
   int aggregated_pairs;
   #ifdef USE_SYCL
-  write_pair_index = dpct::group::exclusive_scan(item, write_pair_index, 0, sycl::plus<>(), aggregated_pairs);
-  // write_pair_index = dpct::detail::exclusive_scan(item, write_pair_index,
-  //                                                 0, sycl::plus<>(), aggregated_pairs);
+  {
+    // Group-wide exclusive scan (init = 0) plus group aggregate, using
+    // standard SYCL group algorithms (replaces dpct::group::exclusive_scan).
+    const int input = write_pair_index;
+    const int exclusive =
+        sycl::exclusive_scan_over_group(item.get_group(), input, 0, sycl::plus<>());
+    const size_t last = item.get_local_range().size() - 1;
+    aggregated_pairs =
+        sycl::group_broadcast(item.get_group(), exclusive + input, last);
+    write_pair_index = exclusive;
+  }
   auto &offset_for_this_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
   if (item.get_local_id(1) == 0 && item.get_local_id(0) == 0) {
     offset_for_this_block = atomicAdd(written_counts, aggregated_pairs);
@@ -707,10 +694,32 @@ __global__ void put_pairs_on_blocks_kernel(
     }
     int aggregated_block;
     #ifdef USE_SYCL
-    dpct::group::exclusive_scan(item, valid_pairs, exclusive_sum, 0, sycl::plus<>());
-    // dpct's array-form exclusive_scan does not return the block aggregate
+    {
+      // Array-form (4 elements per work-item) exclusive scan across the group,
+      // using standard SYCL group algorithms (replaces
+      // dpct::group::exclusive_scan). Reproduces dpct semantics: reduce the
+      // per-work-item elements, perform a group exclusive scan on that
+      // per-work-item total, then sequentially scan the local elements.
+      int thread_valid_count = valid_pairs[0];
+      #pragma unroll
+      for (int i = 1; i < 4; i++) {
+        thread_valid_count += valid_pairs[i];
+      }
+      const int thread_exclusive = sycl::exclusive_scan_over_group(
+          item.get_group(), thread_valid_count, 0, sycl::plus<>());
+
+      int input = valid_pairs[0];
+      exclusive_sum[0] =
+          (item.get_local_linear_id() == 0) ? 0 : thread_exclusive;
+      #pragma unroll
+      for (int i = 1; i < 4; i++) {
+        exclusive_sum[i] = input + exclusive_sum[i - 1];
+        input = valid_pairs[i];
+      }
+    }
+    // The block aggregate is not produced by the array-form scan above
     // (unlike cub's ExclusiveSum). Recover it as the block-wide sum of the
-    // per-thread valid_pairs counts.
+    // per-work-item valid_pairs counts.
     int thread_valid_count = 0;
     #pragma unroll
     for (int i = 0; i < 4; i++) {

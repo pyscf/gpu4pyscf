@@ -23,6 +23,7 @@
 extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;
 
 // Generated with GINTinit_index1d_xyz
+// Look into constant.cu for details
 inline constexpr int c_idx[TOT_NF*3] = {
   0, 1, 0, 0, 2, 1, 1, 0, 0, 0, 3, 2, 2, 1, 1, 1, 0, 0, 0, 0, 4, 3, 3,
   2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 5, 4, 4, 3, 3, 3, 2, 2, 2, 2, 1,

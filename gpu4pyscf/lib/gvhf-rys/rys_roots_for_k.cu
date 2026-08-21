@@ -16,6 +16,19 @@
 
 #include "gvhf-rys/rys_roots.cu"
 
+// NOTE (SYCL/PVC): the barriers below must NOT be taken when `stride == 1`.
+// A number of callers (the "unrolled" int3c2e/ejk kernels) pass
+// stride=1, rt_id=0, meaning every work-item evaluates *all* of its own roots
+// into its own `rw` slot; no cross-thread data is exchanged, so the barrier is
+// semantically a no-op.  Those callers also drive a work-item dependent loop
+//     for (idx = st_id; idx < nst; idx += nst_per_block)
+// whose trip count differs between work-items.  Executing a group barrier in
+// such a loop is UB: on CUDA the hardware barrier ignores threads that already
+// exited the kernel, so it happens to work, but on Level Zero the work-items
+// that left the loop early never arrive and the work-group hangs forever.
+// Guarding on `stride > 1` (uniform within the group in every caller) keeps the
+// barrier exactly where it is actually needed - the cooperative gout_stride>1
+// callers, whose loops are uniform (`idx < nst + st_id`).
 static __device__ __forceinline__
 void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
                      double omega, double lr_factor, double sr_factor,
@@ -28,7 +41,7 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
     if (omega == 0) {
         rys_roots(nroots, theta_rr, rw, block_size, rt_id, stride);
         if (lr_factor != 1) {
-            __syncthreads();
+            if (stride > 1) { __syncthreads(); }
             for (int irys = rt_id; irys < nroots; irys+=stride) {
                 rw[(irys*2+1)*block_size] *= lr_factor;
             }
@@ -36,7 +49,7 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
     } else if (sr_factor == 0) {
         double theta_fac = omega * omega / (omega * omega + theta);
         rys_roots(nroots, theta_fac*theta_rr, rw, block_size, rt_id, stride);
-        __syncthreads();
+        if (stride > 1) { __syncthreads(); }
         double sqrt_theta_fac = sqrt(theta_fac) * lr_factor;
         for (int irys = rt_id; irys < nroots; irys+=stride) {
             rw[ irys*2   *block_size] *= theta_fac;
@@ -48,7 +61,7 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
         double theta_fac = omega * omega / (omega * omega + theta);
         double *rw1 = rw + nroots*block_size;
         rys_roots(_nroots, theta_fac*theta_rr, rw1, block_size, rt_id, stride);
-        __syncthreads();
+        if (stride > 1) { __syncthreads(); }
         double full_factor = sr_factor;
         double sqrt_theta_fac = sqrt(theta_fac) * (lr_factor - sr_factor);
         for (int irys = rt_id; irys < _nroots; irys+=stride) {

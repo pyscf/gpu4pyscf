@@ -25,6 +25,18 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "create_tasks.cu"
 
+#ifdef USE_SYCL
+// libpbc's OWN gxyz offset table, defined in pbc/rys_contract_k.cu.
+//
+// This TU includes gvhf-rys/vhf.cuh, which declares libgvhf_rys's
+// s_rys_gxyz_offset. Before the rename both libraries used the identical name
+// `s_gxyz_offset`, so this kernel silently compiled against gvhf-rys's
+// declaration and the dynamic linker then bound it to whichever library loaded
+// first -- the exact cross-library aliasing being fixed. Declare libpbc's own
+// symbol explicitly so this TU can never pick up the neighbouring library's.
+extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_pbc_gxyz_offset;
+#endif
+
 #define GOUT_WIDTH1     81
 
 __device__ static
@@ -221,7 +233,7 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
     int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
 
-    auto gxyz_offsets = s_gxyz_offset.get() + OFFSET;
+    auto gxyz_offsets = s_pbc_gxyz_offset.get() + OFFSET;
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -634,7 +646,7 @@ while (1) {
 }
 }
 
-extern GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds);
+extern GXYZOffset *PBC_make_gxyz_offset(BoundsInfo &bounds);
 
 static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
                                    int shm_size, int gout_stride_max)
@@ -721,7 +733,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
 
     if (1) {
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
-        GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
+        GXYZOffset* p_gxyz_offset = PBC_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
                             ((lk == 0) << 1) |

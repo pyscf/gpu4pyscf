@@ -81,7 +81,7 @@ void dm_to_dm_xyz(double *cache, double *dm_xyz, double *dm, int nao, int li, in
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
-    auto c_i_in_fold3idx = s_i_in_fold3idx.get();
+    auto c_i_in_fold3idx = s_mg_i_in_fold3idx.get();
 #else
     int thread_id = threadIdx.x;
 #endif
@@ -117,7 +117,7 @@ void dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj,
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
-    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
+    auto c_i_in_fold2idx = s_mg_i_in_fold2idx.get();
 #else
     int thread_id = threadIdx.x;
 #endif

@@ -26,7 +26,7 @@
 #define KERNEL_SETUP() \
     auto item = syclex::this_work_item::get_nd_item<1>(); \
     int thread_id = item.get_local_id(0); \
-    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
+    auto c_i_in_fold2idx = s_mg_i_in_fold2idx.get();
 #else
 #define KERNEL_SETUP() \
     int thread_id = threadIdx.x;
