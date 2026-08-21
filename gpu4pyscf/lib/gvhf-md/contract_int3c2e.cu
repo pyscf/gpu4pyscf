@@ -353,6 +353,153 @@ void _dot_Et(double *out, double *Rt, double ai)
     }
 }
 
+// Dot the P-tensor of the aux basis (efg_phase-weighted auxvec, already cached
+// at "auxvec") into Rt at Hermite index i (out of nf3ij), producing the
+// ij-Cartesian component contribution of contract('ijP,P->ij', int3c2e, auxvec).
+template <int L> __device__ inline
+void _dot_aux(double& out, double *Rt, double *auxvec,
+              const uint16_t *p1_ij, int nf3ij, int i, int nsp_per_block)
+{
+    if constexpr (L == 0) {
+        out += Rt[p1_ij[0*nf3ij+i]*nsp_per_block] * auxvec[0];
+    } else if constexpr (L == 1) {
+        out += Rt[p1_ij[1*nf3ij+i]*nsp_per_block] * auxvec[1];
+        out += Rt[p1_ij[2*nf3ij+i]*nsp_per_block] * auxvec[2];
+        out += Rt[p1_ij[3*nf3ij+i]*nsp_per_block] * auxvec[3];
+    } else if constexpr (L == 2) {
+        out += Rt[p1_ij[0*nf3ij+i]*nsp_per_block] * auxvec[0];
+        out += Rt[p1_ij[2*nf3ij+i]*nsp_per_block] * auxvec[2];
+        out += Rt[p1_ij[4*nf3ij+i]*nsp_per_block] * auxvec[4];
+        out += Rt[p1_ij[5*nf3ij+i]*nsp_per_block] * auxvec[5];
+        out += Rt[p1_ij[7*nf3ij+i]*nsp_per_block] * auxvec[7];
+        out += Rt[p1_ij[8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[9*nf3ij+i]*nsp_per_block] * auxvec[9];
+    } else if constexpr (L == 3) {
+        out += Rt[p1_ij[ 1*nf3ij+i]*nsp_per_block] * auxvec[1];
+        out += Rt[p1_ij[ 3*nf3ij+i]*nsp_per_block] * auxvec[3];
+        out += Rt[p1_ij[ 4*nf3ij+i]*nsp_per_block] * auxvec[4];
+        out += Rt[p1_ij[ 6*nf3ij+i]*nsp_per_block] * auxvec[6];
+        out += Rt[p1_ij[ 8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[ 9*nf3ij+i]*nsp_per_block] * auxvec[9];
+        out += Rt[p1_ij[10*nf3ij+i]*nsp_per_block] * auxvec[10];
+        out += Rt[p1_ij[12*nf3ij+i]*nsp_per_block] * auxvec[12];
+        out += Rt[p1_ij[14*nf3ij+i]*nsp_per_block] * auxvec[14];
+        out += Rt[p1_ij[15*nf3ij+i]*nsp_per_block] * auxvec[15];
+        out += Rt[p1_ij[17*nf3ij+i]*nsp_per_block] * auxvec[17];
+        out += Rt[p1_ij[18*nf3ij+i]*nsp_per_block] * auxvec[18];
+        out += Rt[p1_ij[19*nf3ij+i]*nsp_per_block] * auxvec[19];
+    } else if constexpr (L == 4) {
+        out += Rt[p1_ij[ 0*nf3ij+i]*nsp_per_block] * auxvec[0];
+        out += Rt[p1_ij[ 2*nf3ij+i]*nsp_per_block] * auxvec[2];
+        out += Rt[p1_ij[ 4*nf3ij+i]*nsp_per_block] * auxvec[4];
+        out += Rt[p1_ij[ 6*nf3ij+i]*nsp_per_block] * auxvec[6];
+        out += Rt[p1_ij[ 8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[ 9*nf3ij+i]*nsp_per_block] * auxvec[9];
+        out += Rt[p1_ij[11*nf3ij+i]*nsp_per_block] * auxvec[11];
+        out += Rt[p1_ij[13*nf3ij+i]*nsp_per_block] * auxvec[13];
+        out += Rt[p1_ij[14*nf3ij+i]*nsp_per_block] * auxvec[14];
+        out += Rt[p1_ij[16*nf3ij+i]*nsp_per_block] * auxvec[16];
+        out += Rt[p1_ij[18*nf3ij+i]*nsp_per_block] * auxvec[18];
+        out += Rt[p1_ij[19*nf3ij+i]*nsp_per_block] * auxvec[19];
+        out += Rt[p1_ij[21*nf3ij+i]*nsp_per_block] * auxvec[21];
+        out += Rt[p1_ij[23*nf3ij+i]*nsp_per_block] * auxvec[23];
+        out += Rt[p1_ij[24*nf3ij+i]*nsp_per_block] * auxvec[24];
+        out += Rt[p1_ij[25*nf3ij+i]*nsp_per_block] * auxvec[25];
+        out += Rt[p1_ij[27*nf3ij+i]*nsp_per_block] * auxvec[27];
+        out += Rt[p1_ij[29*nf3ij+i]*nsp_per_block] * auxvec[29];
+        out += Rt[p1_ij[30*nf3ij+i]*nsp_per_block] * auxvec[30];
+        out += Rt[p1_ij[32*nf3ij+i]*nsp_per_block] * auxvec[32];
+        out += Rt[p1_ij[33*nf3ij+i]*nsp_per_block] * auxvec[33];
+        out += Rt[p1_ij[34*nf3ij+i]*nsp_per_block] * auxvec[34];
+    } else if constexpr (L == 5) {
+        out += Rt[p1_ij[ 1*nf3ij+i]*nsp_per_block] * auxvec[1];
+        out += Rt[p1_ij[ 3*nf3ij+i]*nsp_per_block] * auxvec[3];
+        out += Rt[p1_ij[ 5*nf3ij+i]*nsp_per_block] * auxvec[5];
+        out += Rt[p1_ij[ 6*nf3ij+i]*nsp_per_block] * auxvec[6];
+        out += Rt[p1_ij[ 8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[10*nf3ij+i]*nsp_per_block] * auxvec[10];
+        out += Rt[p1_ij[12*nf3ij+i]*nsp_per_block] * auxvec[12];
+        out += Rt[p1_ij[14*nf3ij+i]*nsp_per_block] * auxvec[14];
+        out += Rt[p1_ij[15*nf3ij+i]*nsp_per_block] * auxvec[15];
+        out += Rt[p1_ij[17*nf3ij+i]*nsp_per_block] * auxvec[17];
+        out += Rt[p1_ij[19*nf3ij+i]*nsp_per_block] * auxvec[19];
+        out += Rt[p1_ij[20*nf3ij+i]*nsp_per_block] * auxvec[20];
+        out += Rt[p1_ij[21*nf3ij+i]*nsp_per_block] * auxvec[21];
+        out += Rt[p1_ij[23*nf3ij+i]*nsp_per_block] * auxvec[23];
+        out += Rt[p1_ij[25*nf3ij+i]*nsp_per_block] * auxvec[25];
+        out += Rt[p1_ij[27*nf3ij+i]*nsp_per_block] * auxvec[27];
+        out += Rt[p1_ij[29*nf3ij+i]*nsp_per_block] * auxvec[29];
+        out += Rt[p1_ij[30*nf3ij+i]*nsp_per_block] * auxvec[30];
+        out += Rt[p1_ij[32*nf3ij+i]*nsp_per_block] * auxvec[32];
+        out += Rt[p1_ij[34*nf3ij+i]*nsp_per_block] * auxvec[34];
+        out += Rt[p1_ij[35*nf3ij+i]*nsp_per_block] * auxvec[35];
+        out += Rt[p1_ij[37*nf3ij+i]*nsp_per_block] * auxvec[37];
+        out += Rt[p1_ij[39*nf3ij+i]*nsp_per_block] * auxvec[39];
+        out += Rt[p1_ij[40*nf3ij+i]*nsp_per_block] * auxvec[40];
+        out += Rt[p1_ij[42*nf3ij+i]*nsp_per_block] * auxvec[42];
+        out += Rt[p1_ij[44*nf3ij+i]*nsp_per_block] * auxvec[44];
+        out += Rt[p1_ij[45*nf3ij+i]*nsp_per_block] * auxvec[45];
+        out += Rt[p1_ij[46*nf3ij+i]*nsp_per_block] * auxvec[46];
+        out += Rt[p1_ij[48*nf3ij+i]*nsp_per_block] * auxvec[48];
+        out += Rt[p1_ij[50*nf3ij+i]*nsp_per_block] * auxvec[50];
+        out += Rt[p1_ij[51*nf3ij+i]*nsp_per_block] * auxvec[51];
+        out += Rt[p1_ij[53*nf3ij+i]*nsp_per_block] * auxvec[53];
+        out += Rt[p1_ij[54*nf3ij+i]*nsp_per_block] * auxvec[54];
+        out += Rt[p1_ij[55*nf3ij+i]*nsp_per_block] * auxvec[55];
+    } else if constexpr (L == 6) {
+        out += Rt[p1_ij[ 0*nf3ij+i]*nsp_per_block] * auxvec[0];
+        out += Rt[p1_ij[ 2*nf3ij+i]*nsp_per_block] * auxvec[2];
+        out += Rt[p1_ij[ 4*nf3ij+i]*nsp_per_block] * auxvec[4];
+        out += Rt[p1_ij[ 6*nf3ij+i]*nsp_per_block] * auxvec[6];
+        out += Rt[p1_ij[ 8*nf3ij+i]*nsp_per_block] * auxvec[8];
+        out += Rt[p1_ij[10*nf3ij+i]*nsp_per_block] * auxvec[10];
+        out += Rt[p1_ij[12*nf3ij+i]*nsp_per_block] * auxvec[12];
+        out += Rt[p1_ij[13*nf3ij+i]*nsp_per_block] * auxvec[13];
+        out += Rt[p1_ij[15*nf3ij+i]*nsp_per_block] * auxvec[15];
+        out += Rt[p1_ij[17*nf3ij+i]*nsp_per_block] * auxvec[17];
+        out += Rt[p1_ij[19*nf3ij+i]*nsp_per_block] * auxvec[19];
+        out += Rt[p1_ij[21*nf3ij+i]*nsp_per_block] * auxvec[21];
+        out += Rt[p1_ij[22*nf3ij+i]*nsp_per_block] * auxvec[22];
+        out += Rt[p1_ij[24*nf3ij+i]*nsp_per_block] * auxvec[24];
+        out += Rt[p1_ij[26*nf3ij+i]*nsp_per_block] * auxvec[26];
+        out += Rt[p1_ij[27*nf3ij+i]*nsp_per_block] * auxvec[27];
+        out += Rt[p1_ij[29*nf3ij+i]*nsp_per_block] * auxvec[29];
+        out += Rt[p1_ij[31*nf3ij+i]*nsp_per_block] * auxvec[31];
+        out += Rt[p1_ij[33*nf3ij+i]*nsp_per_block] * auxvec[33];
+        out += Rt[p1_ij[34*nf3ij+i]*nsp_per_block] * auxvec[34];
+        out += Rt[p1_ij[36*nf3ij+i]*nsp_per_block] * auxvec[36];
+        out += Rt[p1_ij[38*nf3ij+i]*nsp_per_block] * auxvec[38];
+        out += Rt[p1_ij[40*nf3ij+i]*nsp_per_block] * auxvec[40];
+        out += Rt[p1_ij[42*nf3ij+i]*nsp_per_block] * auxvec[42];
+        out += Rt[p1_ij[43*nf3ij+i]*nsp_per_block] * auxvec[43];
+        out += Rt[p1_ij[45*nf3ij+i]*nsp_per_block] * auxvec[45];
+        out += Rt[p1_ij[47*nf3ij+i]*nsp_per_block] * auxvec[47];
+        out += Rt[p1_ij[48*nf3ij+i]*nsp_per_block] * auxvec[48];
+        out += Rt[p1_ij[49*nf3ij+i]*nsp_per_block] * auxvec[49];
+        out += Rt[p1_ij[51*nf3ij+i]*nsp_per_block] * auxvec[51];
+        out += Rt[p1_ij[53*nf3ij+i]*nsp_per_block] * auxvec[53];
+        out += Rt[p1_ij[55*nf3ij+i]*nsp_per_block] * auxvec[55];
+        out += Rt[p1_ij[57*nf3ij+i]*nsp_per_block] * auxvec[57];
+        out += Rt[p1_ij[58*nf3ij+i]*nsp_per_block] * auxvec[58];
+        out += Rt[p1_ij[60*nf3ij+i]*nsp_per_block] * auxvec[60];
+        out += Rt[p1_ij[62*nf3ij+i]*nsp_per_block] * auxvec[62];
+        out += Rt[p1_ij[63*nf3ij+i]*nsp_per_block] * auxvec[63];
+        out += Rt[p1_ij[65*nf3ij+i]*nsp_per_block] * auxvec[65];
+        out += Rt[p1_ij[67*nf3ij+i]*nsp_per_block] * auxvec[67];
+        out += Rt[p1_ij[68*nf3ij+i]*nsp_per_block] * auxvec[68];
+        out += Rt[p1_ij[70*nf3ij+i]*nsp_per_block] * auxvec[70];
+        out += Rt[p1_ij[72*nf3ij+i]*nsp_per_block] * auxvec[72];
+        out += Rt[p1_ij[73*nf3ij+i]*nsp_per_block] * auxvec[73];
+        out += Rt[p1_ij[74*nf3ij+i]*nsp_per_block] * auxvec[74];
+        out += Rt[p1_ij[76*nf3ij+i]*nsp_per_block] * auxvec[76];
+        out += Rt[p1_ij[78*nf3ij+i]*nsp_per_block] * auxvec[78];
+        out += Rt[p1_ij[79*nf3ij+i]*nsp_per_block] * auxvec[79];
+        out += Rt[p1_ij[81*nf3ij+i]*nsp_per_block] * auxvec[81];
+        out += Rt[p1_ij[82*nf3ij+i]*nsp_per_block] * auxvec[82];
+        out += Rt[p1_ij[83*nf3ij+i]*nsp_per_block] * auxvec[83];
+    }
+}
+
 template <int LK> __device__ inline
 void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
                                int *shl_pair_offsets, uint32_t *bas_ij_idx,
@@ -633,6 +780,255 @@ void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
     #endif
 }
 
+// IJ_SIZE bounds the number of (Rt_id-strided) ij Hermite components handled
+// by a single thread; picked per LK to match the nsp_per_block/Rt_stride
+// combinations produced by the host-side sizing formula in j_engine_3c2e.py.
+template <int LK, int IJ_SIZE> __device__ inline
+void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
+                              int *shl_pair_offsets, int *ksh_offsets,
+                              uint32_t *bas_ij_idx, int *pair_ij_loc,
+                              int *aux_loc, int *nsp_lookup
+                              #ifdef USE_SYCL
+                              , sycl::nd_item<2> &item, char *shm_mem
+                              #endif
+                              )
+{
+    #ifdef USE_SYCL
+    int threadIdx_x = item.get_local_id(1);
+    int blockIdx_x = item.get_group(1);
+    int blockIdx_y = item.get_group(0);
+    int blockDim_x = item.get_local_range(1);
+    int gridDim_x = item.get_group_range(1);
+    int gridDim_y = item.get_group_range(0);
+
+    // Pack small shared vars into a single group_local_memory allocation
+    // instead of several separate ones
+    struct SharedVars {
+        int shl_pair0, shl_pair1, ksh0, ksh1;
+        int order, nf3ij, nf3ijkl;
+        int nsp_per_block, Rt_stride;
+    };
+
+    auto thread_block = item.get_group();
+    double *auxvec_cache = reinterpret_cast<double*>(shm_mem);
+    auto &sv = *sycl::ext::oneapi::group_local_memory_for_overwrite<SharedVars>(thread_block);
+    int &shl_pair0 = sv.shl_pair0;
+    int &shl_pair1 = sv.shl_pair1;
+    int &ksh0       = sv.ksh0;
+    int &ksh1       = sv.ksh1;
+    int &order      = sv.order;
+    int &nf3ij      = sv.nf3ij;
+    int &nf3ijkl    = sv.nf3ijkl;
+    int &nsp_per_block = sv.nsp_per_block;
+    int &Rt_stride  = sv.Rt_stride;
+    #else
+    int threadIdx_x = threadIdx.x;
+    int blockIdx_x = blockIdx.x;
+    int blockIdx_y = blockIdx.y;
+    int blockDim_x = blockDim.x;
+    int gridDim_x = gridDim.x;
+    int gridDim_y = gridDim.y;
+
+    __shared__ int shl_pair0, shl_pair1, ksh0, ksh1;
+    __shared__ int order, nf3ij, nf3ijkl;
+    __shared__ int nsp_per_block, Rt_stride;
+    extern __shared__ double auxvec_cache[];
+    #endif
+    constexpr int lk = LK;
+    constexpr int nfk = (lk + 1) * (lk + 2) / 2;
+    constexpr int nf3k = nfk * (lk + 3) / 3;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
+    int thread_id = threadIdx_x;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    if (thread_id == 0) {
+        ksh0 = ksh_offsets[ksh_block_id];
+        ksh1 = ksh_offsets[ksh_block_id+1];
+        shl_pair0 = shl_pair_offsets[sp_block_id];
+        shl_pair1 = shl_pair_offsets[sp_block_id+1];
+    }
+    __syncthreads();
+    int bas_ij0 = bas_ij_idx[shl_pair0];
+    int ish0 = bas_ij0 / envs.nbas;
+    int jsh0 = bas_ij0 % envs.nbas;
+    int li = bas[ANG_OF + ish0*BAS_SLOTS];
+    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    int lij = li + lj;
+    if (thread_id == 0) {
+        order = lij + lk;
+        nf3ij = (lij+1)*(lij+2)*(lij+3) / 6;
+        nf3ijkl = (order+1)*(order+2)*(order+3) / 6;
+        nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
+        Rt_stride = blockDim_x / nsp_per_block;
+    }
+    __syncthreads();
+    int sp_id = thread_id % nsp_per_block;
+    int Rt_id = thread_id / nsp_per_block;
+
+    double *gamma_inc = auxvec_cache + nf3k + sp_id;
+    double *Rt_buf = auxvec_cache + nf3k + (order+1) * nsp_per_block;
+    const uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
+    const int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
+    double *auxvec = jk.dm;
+
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
+        double vj_xyz[IJ_SIZE];
+#pragma unroll
+        for (int n = 0; n < IJ_SIZE; ++n) {
+            vj_xyz[n] = 0;
+        }
+        int bas_ij;
+        if (pair_ij < shl_pair1) {
+            bas_ij = bas_ij_idx[pair_ij];
+        } else {
+            bas_ij = bas_ij_idx[shl_pair0];
+        }
+        int ish = bas_ij / envs.nbas;
+        int jsh = bas_ij % envs.nbas;
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double aij = ai + aj;
+        double xij = (ai * ri[0] + aj * rj[0]) / aij;
+        double yij = (ai * ri[1] + aj * rj[1]) / aij;
+        double zij = (ai * ri[2] + aj * rj[2]) / aij;
+
+        for (int ksh = ksh0; ksh < ksh1; ++ksh) {
+            __syncthreads();
+            int k_loc0 = aux_loc[ksh - envs.nbas];
+            if (thread_id < nf3k) {
+                auxvec_cache[thread_id] = efg_phase[thread_id] * auxvec[k_loc0+thread_id];
+            }
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq*xpq + ypq*ypq + zpq*zpq;
+            int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+            double ak = env[expk];
+            double theta = aij * ak / (aij + ak);
+            double *Rt, *buf;
+            if (order % 2 == 0) {
+                Rt = Rt_buf + sp_id;
+                buf = Rt + nf3ijkl * nsp_per_block;
+            } else {
+                buf = Rt_buf + sp_id;
+                Rt = buf + nf3ijkl * nsp_per_block;
+            }
+            if (Rt_id == 0) {
+                // auxvec is already scaled by the aux contraction coefficient
+                // via the host-side Et_dot_auxvec pre-processing step, so only
+                // the geometric prefactor is needed here.
+                double fac = PI_FAC/(aij*ak*sqrt(aij+ak));
+                if (pair_ij >= shl_pair1) {
+                    fac = 0;
+                }
+                boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, 0, nsp_per_block);
+                Rt[0] = gamma_inc[order*nsp_per_block];
+            }
+            for (int n = 1; n <= order; ++n) {
+                __syncthreads();
+                // swap input and output
+                double *tmp = buf;
+                buf = Rt;
+                Rt = tmp;
+                if (n == 1) {
+                    if (Rt_id == 0) {
+                        double _Rt_0 = buf[0];
+                        Rt[1*nsp_per_block] = zpq * _Rt_0;
+                        Rt[2*nsp_per_block] = ypq * _Rt_0;
+                        Rt[3*nsp_per_block] = xpq * _Rt_0;
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
+                    }
+                } else if (n == 2) {
+                    if (Rt_id == 0) {
+                        double _Rt_0 = buf[0];
+                        double _Rt_1 = buf[1*nsp_per_block];
+                        double _Rt_2 = buf[2*nsp_per_block];
+                        double _Rt_3 = buf[3*nsp_per_block];
+                        Rt[1*nsp_per_block] = zpq * _Rt_0;
+                        Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                        Rt[3*nsp_per_block] = ypq * _Rt_0;
+                        Rt[4*nsp_per_block] = ypq * _Rt_1;
+                        Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
+                        Rt[6*nsp_per_block] = xpq * _Rt_0;
+                        Rt[7*nsp_per_block] = xpq * _Rt_1;
+                        Rt[8*nsp_per_block] = xpq * _Rt_2;
+                        Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
+                    }
+                } else {
+                    iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                    if (Rt_id == 0) {
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
+                    }
+                }
+            }
+            __syncthreads();
+
+            if (pair_ij < shl_pair1) {
+                double *Rt_final = Rt_buf + sp_id;
+#pragma unroll
+                for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {
+                    if (i >= nf3ij) break;
+                    _dot_aux<LK>(vj_xyz[n], Rt_final, auxvec_cache, p1_ij, nf3ij, i,
+                                 nsp_per_block);
+                }
+            }
+        }
+
+        if (pair_ij < shl_pair1) {
+            int ij_loc0 = pair_ij_loc[pair_ij];
+#pragma unroll
+            for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {
+                if (i >= nf3ij) break;
+                atomicAdd(jk.vj+ij_loc0+i, vj_xyz[n]);
+            }
+        }
+    }
+}
+
+__global__ static
+void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
+                            int *shl_pair_offsets, int *ksh_offsets,
+                            uint32_t *bas_ij_idx, int *pair_ij_loc,
+                            int *aux_loc, int *nsp_lookup
+                            #ifdef USE_SYCL
+                            , sycl::nd_item<2> &item, char *shm_mem
+                            #endif
+                            )
+{
+    #ifdef USE_SYCL
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int ksh = ksh_offsets[ksh_block_id];
+    int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
+    switch (lk) {
+    case 0: unrolled_contract_auxvec<0,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 1: unrolled_contract_auxvec<1,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 2: unrolled_contract_auxvec<2,15>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 3: unrolled_contract_auxvec<3,11>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 4: unrolled_contract_auxvec<4, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 5: unrolled_contract_auxvec<5, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 6: unrolled_contract_auxvec<6, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    }
+    #else
+    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int ksh = ksh_offsets[ksh_block_id];
+    int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
+    switch (lk) {
+    case 0: unrolled_contract_auxvec<0,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 1: unrolled_contract_auxvec<1,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 2: unrolled_contract_auxvec<2,15>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 3: unrolled_contract_auxvec<3,11>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 4: unrolled_contract_auxvec<4, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 5: unrolled_contract_auxvec<5, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 6: unrolled_contract_auxvec<6, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    }
+    #endif
+}
+
 extern "C" {
 // contract('ijP,ji->P', int3c2e, dm)
 int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
@@ -662,6 +1058,42 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm, error message = %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    #endif
+    return 0;
+}
+
+// contract('ijP,P->ij', int3c2e, auxvec)
+int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
+                            RysIntEnvVars *envs, int shm_size,
+                            int nbatches_shl_pair, int nbatches_ksh,
+                            int *shl_pair_offsets, int *ksh_offsets,
+                            uint32_t *bas_ij_idx, int *pair_ij_loc, int *aux_loc,
+                            int *nsp_lookup, double omega)
+{
+    JKMatrix jk = {vj, NULL, auxvec, n_dm, 0, omega};
+    #ifdef USE_SYCL
+    sycl::range<2> threads(1, THREADS);
+    sycl::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(shm_size, cgh);
+      cgh.parallel_for<class contract_int3c2e_md_auxvec_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        contract_auxvec_kernel(dev_envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
+                               aux_loc, nsp_lookup, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
+    cudaFuncSetAttribute(contract_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    dim3 threads(THREADS);
+    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
+    contract_auxvec_kernel<<<blocks, threads, shm_size>>>(
+        *envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
+        aux_loc, nsp_lookup);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
         return 1;
     }
     #endif
