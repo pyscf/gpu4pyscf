@@ -582,16 +582,10 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     cell = ni.sorted_cell
     bvkcell = ni.bvkcell
     a = cell.lattice_vectors()
-    mesh = ke_to_mesh(a, init_ke)
 
-    ke_cutoff = ni.ke_cutoff
     mesh_max = np.asarray(ni.mesh, dtype=np.int32)
-    if ke_max < ke_cutoff:
-        mesh_final = ke_to_mesh(a, ke_max)
-        mesh_final = np.where(mesh_final < mesh_max, mesh_final, mesh_max)
-    else:
-        ke_max = ke_cutoff
-        mesh_final = mesh_max
+    ke_max = min(ke_max, ni.ke_cutoff)
+    mesh = ke_to_mesh(a, init_ke)
 
     ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
     nimgs = np.asarray(bvkcell.nimgs, dtype=np.int32)
@@ -600,7 +594,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
 
     ke_lower, ke_upper = 0, init_ke
     while ke_lower <= ke_max:
-        mesh = np.where(mesh < mesh_final, mesh, mesh_final)
+        mesh = np.where(mesh < mesh_max, mesh, mesh_max)
         filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
         if len(filtered_pairs) > 0:
             ish, jsh = divmod(filtered_pairs, NBAS_MAX)
@@ -1916,8 +1910,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         # a penalty to encounter for lattice sum
         rad = cell.rcut / bvkcell.vol**(1./3) + 1
         surface = 4*np.pi * rad**2
-        # Consider two layers on the surface
-        lattice_sum_factor = surface * 2
+        lattice_sum_factor = surface
         log.debug1('lattice_sum_factor = %g', lattice_sum_factor)
         precision = cell.precision / lattice_sum_factor
         bas_ij_idx = _non_trivial_bvk_pairs(self, precision)
