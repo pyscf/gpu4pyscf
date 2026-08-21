@@ -20,7 +20,7 @@ import cupy as cp
 import numpy as np
 from pyscf.lib import prange
 from gpu4pyscf.lib.memcpy import p2p_transfer
-from gpu4pyscf.__config__ import num_devices
+from gpu4pyscf.__config__ import num_devices, _p2p_access
 
 __all__ = [
     'run', 'map', 'reduce', 'array_reduce', 'array_broadcast', 'lru_cache'
@@ -146,20 +146,30 @@ def array_reduce(array_list, inplace=False):
                 array_list[device_id] = array_list[device_id].copy().ravel()
 
     Device = cp.cuda.Device
-    blksize = 1024*1024*1024 // dtype.itemsize # 1GB
+    # corresponding to MEMPOOL_THRESHOLD
+    blksize = 100*1024*1024 // dtype.itemsize # 100 MB
     # Tree-reduce
     step = 1
     while step < num_devices:
-        for device_id in range(0, num_devices, 2*step):
-            if device_id + step < num_devices:
-                Device(device_id+step).synchronize()
-                with Device(device_id):
-                    dst = array_list[device_id]
-                    src = array_list[device_id+step]
-                    buf = cp.empty_like(dst[:blksize])
-                    for p0, p1 in prange(0, size, blksize):
-                        dst[p0:p1] += p2p_transfer(buf[:p1-p0], src[p0:p1])
+        for p0, p1 in prange(0, size, blksize):
+            for device_id in range(0, num_devices, 2*step):
+                if device_id + step < num_devices:
+                    Device(device_id+step).synchronize()
+                    with Device(device_id):
+                        dst = array_list[device_id]
+                        src = array_list[device_id+step]
+                        if _p2p_access:
+                            dst[p0:p1] += src[p0:p1]
+                        else:
+                            dst[p0:p1] += cp.asarray(src[p0:p1])
         step *= 2
+    # It's important to synchronize with the main thread before returning from
+    # this function. The CPU thread may return before the GPU transfers completed.
+    # In the caller, the worker thread contexts (which own the arrays on
+    # the other GPU devices) may be released. Resources on those devices are
+    # recycled while the transfers are still in progress. This can
+    # result in incomplete data transfers or illegal memory accesses.
+    synchronize()
     return array_list[0].reshape(out_shape)
 
 def property(cache=None):

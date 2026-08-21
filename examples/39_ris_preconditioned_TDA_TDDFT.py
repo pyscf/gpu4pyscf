@@ -1,1 +1,0 @@
-tddft/39_ris_preconditioned_TDA_TDDFT.py

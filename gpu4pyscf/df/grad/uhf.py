@@ -20,27 +20,34 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, get_avail_mem
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.df.grad.rhf import (
-    int3c2e_scheme, _j_energy_per_atom, _factorize_dm, _gen_metric_solver)
+    int3c2e_scheme, _factorize_dm, _gen_metric_solver)
 from gpu4pyscf.df.int3c2e_bdiv import (
-    _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
+    _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, int2c2e_ip1_per_atom,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df_jk
+from gpu4pyscf.gto.mole import SortedMole
 
 __all__ = ['Gradients']
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
-                        auxbasis_response=True, verbose=None):
+                        auxbasis_response=True, verbose=None,
+                        omega=None, lr_factor=None, sr_factor=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
     assert dm.ndim == 3
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
+        from gpu4pyscf.df.grad.rhf import _j_energy_per_atom
+        assert omega is None or omega == 0
         return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
                                   auxbasis_response, verbose) * j_factor
+
+    if j_factor != 0 and (omega is not None and omega != 0):
+        raise RuntimeError(
+            'Cannot compute J contributions with range-separated Coulomb operator.')
 
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
@@ -61,7 +68,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     mem_avail = mem_free - 2*naux*nocc**2*8 - nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8))))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True)
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
@@ -94,7 +102,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     aux_coeff[aux_sorting] = tmp
     tmp = None
 
-    j2c = int2c2e(auxmol)
+    j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
     else:
@@ -106,7 +114,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         auxvec = dm_oo.trace(axis1=2, axis2=3).sum(axis=0)
 
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+        short_range=mol.omega<0, gout_width=54, deriv=(1,0,0))
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
     lmax = mol.uniq_l_ctr[:,0].max()
     laux = auxmol.uniq_l_ctr[:,0].max()
@@ -122,23 +131,22 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         l_ctr_aux_offsets, auxmol.uniq_l_ctr, batch_size)
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
-    l_ctr_aux_counts = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
+    aux_offsets = aux_loc[ksh_offsets_cpu]
+    aux_batches = len(aux_offsets) - 1
 
     if j_factor != 0:
         dm = mol.apply_C_mat_CT(dm[0]+dm[1])
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libvhf_rys.sum_ejk_int3c2e_ip1
-    l = np.arange(laux+1)
-    nf = (l + 1) * (l + 2) // 2
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
     buf1 = cp.empty((blksize, nao, nao))
     buf2 = cp.empty(blksize*nao*max(2*nocc, nao))
     ejk = cp.zeros((mol.natm, 3))
     ejk_aux = cp.zeros((mol.natm, 3))
-    for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
-        naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
+    for kbatch in range(aux_batches):
+        naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -200,7 +208,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
                               alpha=-k_factor, beta=j_factor, out=dm_aux)
         dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-        ejk_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ejk_aux -= cp.asarray(
+            int2c2e_ip1_per_atom(auxmol, dm_aux, omega, lr_factor, sr_factor))
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk += ejk_aux
 
@@ -220,7 +229,8 @@ class Gradients(uhf_grad.Gradients):
     def energy_ee(self, mol, dm):
         return self.jk_energy_per_atom(dm, hermi=1)
 
-    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, *,
+                           omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
         '''
         Computes the first-order derivatives of the energy per atom for
@@ -232,9 +242,11 @@ class Gradients(uhf_grad.Gradients):
         auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory
         with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+            sorted_mol = SortedMole.from_mol(mol, decontract=True)
+            int3c2e_opt = Int3c2eOpt(sorted_mol, auxmol).build()
         return _jk_energy_per_atom(
             int3c2e_opt, dm, j_factor, k_factor, hermi=hermi,
-            auxbasis_response=self.auxbasis_response, verbose=verbose)
+            auxbasis_response=self.auxbasis_response, verbose=verbose,
+            omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
 Grad = Gradients

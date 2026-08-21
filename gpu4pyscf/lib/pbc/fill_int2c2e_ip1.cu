@@ -20,6 +20,7 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+#include "gvhf-rys/rys_roots_for_k.cu"
 
 #define THREADS         256
 #define GOUT_IP_WIDTH   20
@@ -28,8 +29,10 @@
 #define L_AUX1          (L_AUX+1)
 
 __global__ static
-void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
-                            uint32_t *bas_ij_idx, int *gout_stride_lookup
+void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
+                            double omega, double lr_factor, double sr_factor,
+                            int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                            int *gout_stride_lookup
                             #ifdef USE_SYCL
                             , sycl::nd_item<1> &item, char *shm_mem
                             #endif
@@ -50,7 +53,6 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
     int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double &omega = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
 
     double *shared_memory = reinterpret_cast<double*>(shm_mem);
     #else
@@ -61,7 +63,6 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
     __shared__ int nbas;
     __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
-    __shared__ double omega;
 
     extern __shared__ double shared_memory[];
     #endif
@@ -79,7 +80,6 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         nroots = (li + lj + 1) / 2 + 1;
-        omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2; // omega < 0
         }
@@ -107,9 +107,6 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
     double goutx[GOUT_IP_WIDTH];
     double gouty[GOUT_IP_WIDTH];
     double goutz[GOUT_IP_WIDTH];
-    if (gout_id == 0) {
-        gx[gx_len] = 1.;
-    }
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
 #pragma unroll
@@ -123,10 +120,19 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
         } else {
-            bas_ij = bas_ij_idx[shl_pair0];;
+            bas_ij = bas_ij_idx[shl_pair0];
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
+        if (gout_id == 0) {
+            double fac = PI_FAC;
+            if (ish == jsh) {
+                fac *= .5;
+            } else if (ish < jsh) {
+                fac = 0;
+            }
+            gx[gx_len] = fac;
+        }
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -160,10 +166,11 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
                     double cicj = ci[ip] * cj[jp];
-                    gx[0] = PI_FAC * cicj / (ai*aj*sqrt(aij));
+                    gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsp_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                                nsp_per_block, gout_stride, gout_id);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
@@ -286,6 +293,7 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
 
 __global__ static
 void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
+                          double omega, double lr_factor, double sr_factor,
                           int *shl_pair_offsets, uint32_t *bas_ij_idx,
                           int *gout_stride_lookup
                           #ifdef USE_SYCL
@@ -308,7 +316,6 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double &omega = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
 
     double *shared_memory = reinterpret_cast<double*>(shm_mem);
     #else
@@ -319,11 +326,10 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     __shared__ int nbas;
     __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
-    __shared__ double omega;
 
     extern __shared__ double shared_memory[];
     #endif
-    
+
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -337,7 +343,6 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         nroots = (li + lj + 1) / 2 + 1;
-        omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2; // omega < 0
         }
@@ -363,9 +368,6 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
     const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    if (gout_id == 0) {
-        gx[gx_len] = 1.;
-    }
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double v_ix = 0;
@@ -379,10 +381,19 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
         } else {
-            bas_ij = bas_ij_idx[shl_pair0];;
+            bas_ij = bas_ij_idx[shl_pair0];
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
+        if (gout_id == 0) {
+            double fac = PI_FAC;
+            if (ish == jsh) {
+                fac *= .5;
+            } else if (ish < jsh) {
+                fac = 0;
+            }
+            gx[gx_len] = fac;
+        }
         int i0 = envs.ao_loc[ish];
         int j0 = envs.ao_loc[jsh];
         double *dm_local = dm + j0 * nao + i0;
@@ -419,16 +430,12 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 double aij = ai + aj;
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
-                    double cicj = PI_FAC * ci[ip] * cj[jp];
-                    if (ish == jsh) {
-                        cicj *= .5;
-                    } else if (ish < jsh) {
-                        cicj = 0;
-                    }
+                    double cicj = ci[ip] * cj[jp];
                     gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsp_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                                nsp_per_block, gout_stride, gout_id);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
@@ -535,7 +542,8 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
 }
 
 extern "C" {
-int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs, int shm_size,
+int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs,
+                     double omega, double lr_factor, double sr_factor, int shm_size,
                      int nbatches_shl_pair, int *shl_pair_offsets,
                      uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
@@ -546,14 +554,16 @@ int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs, int shm_size,
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class pbc_int2c2e_ip1_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
-        pbc_int2c2e_ip1_kernel(out, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup,
+        pbc_int2c2e_ip1_kernel(out, dev_envs, omega, lr_factor, sr_factor,
+                               shl_pair_offsets, bas_ij_idx, gout_stride_lookup,
                                item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       });
     });
     #else
     cudaFuncSetAttribute(pbc_int2c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     pbc_int2c2e_ip1_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            out, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            out, *envs, omega, lr_factor, sr_factor,
+            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_ip1 kernel: %s\n", cudaGetErrorString(err));
@@ -563,9 +573,10 @@ int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs, int shm_size,
     return 0;
 }
 
-int e_int2c2e_ip1(double *out, double *dm, PBCIntEnvVars *envs, int shm_size,
-                     int nbatches_shl_pair, int *shl_pair_offsets,
-                     uint32_t *bas_ij_idx, int *gout_stride_lookup)
+int e_int2c2e_ip1(double *out, double *dm, PBCIntEnvVars *envs,
+                  double omega, double lr_factor, double sr_factor, int shm_size,
+                  int nbatches_shl_pair, int *shl_pair_offsets,
+                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     #ifdef USE_SYCL
     sycl::range<1> threads(THREADS);
@@ -574,14 +585,16 @@ int e_int2c2e_ip1(double *out, double *dm, PBCIntEnvVars *envs, int shm_size,
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class e_int2c2e_ip1_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
-        e_int2c2e_ip1_kernel(out, dm, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup,
+        e_int2c2e_ip1_kernel(out, dm, dev_envs, omega, lr_factor, sr_factor,
+                             shl_pair_offsets, bas_ij_idx, gout_stride_lookup,
                              item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       });
     });
     #else
     cudaFuncSetAttribute(e_int2c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     e_int2c2e_ip1_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            out, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            out, dm, *envs, omega, lr_factor, sr_factor,
+            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_ip1 kernel: %s\n", cudaGetErrorString(err));

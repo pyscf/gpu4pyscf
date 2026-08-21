@@ -1,1 +1,0 @@
-tddft/26-tddft_and_gradient.py

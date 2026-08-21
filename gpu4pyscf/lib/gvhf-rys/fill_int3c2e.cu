@@ -21,6 +21,7 @@
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "unrolled_int3c2e.cu"
+#include "build_rys_gxyz.cuh"
 
 #define THREADS         256
 #define GOUT_WIDTH      54
@@ -32,7 +33,8 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                     int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int ao_pair_offset, int aux_offset, int naux,
-                    int reorder_aux, int to_sph
+                    int reorder_aux, int to_sph,
+                    int *head, int nbatches_shl_pair, int nbatches_ksh
                     #ifdef USE_SYCL
                     , sycl::nd_item<2> &item, char *shm_mem
                     #endif
@@ -41,9 +43,6 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     #ifdef USE_SYCL
     int threadIdx_x = item.get_local_id(1);
     int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int gridDim_x = item.get_group_range(1);
-    int gridDim_y = item.get_group_range(0);
 
     auto thread_block = item.get_group();
     int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -63,15 +62,15 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     int &g_size = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &nst_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &sp_block_id = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh_block_id = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
 
     double *shared_memory = reinterpret_cast<double*>(shm_mem);
     #else
     int threadIdx_x = threadIdx.x;
     int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int gridDim_x = gridDim.x;
-    int gridDim_y = gridDim.y;
 
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1, nksp;
     __shared__ int ksh0, ksh1;
     __shared__ int li, lj, lk, nroots;
@@ -79,12 +78,24 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     __shared__ int nf, aux_start;
     __shared__ int g_size;
     __shared__ int gout_stride, nst_per_block;
-    extern __shared__ double shared_memory[];
+    __shared__ int sp_block_id, ksh_block_id;
     #endif
 
     int thread_id = threadIdx_x;
-    int sp_block_id = gridDim_x - blockIdx_x - 1;
-    int ksh_block_id = gridDim_y - blockIdx_y - 1;
+    int worker_id = blockIdx_x;
+while (1) {
+    __syncthreads();
+    if (thread_id == 0) {
+        int batch_id = atomicAdd(head, 1);
+        // For better load balance, process sp_blocks in the reversed order
+        sp_block_id = nbatches_shl_pair - 1 - batch_id / nbatches_ksh;
+        ksh_block_id = nbatches_ksh - 1 - batch_id % nbatches_ksh;
+    }
+    __syncthreads();
+    if (sp_block_id < 0) {
+        break;
+    }
+
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -127,8 +138,8 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                          shl_pair0, shl_pair1, ksh0, ksh1,
                          iprim, jprim, kprim, li, lj, lk, bas_ij_idx,
                          ao_pair_loc, ao_pair_offset, aux_start, naux,
-                         reorder_aux, to_sph, shared_memory)) {
-        return;
+                         reorder_aux, to_sph, thread_id, worker_id, shared_memory)) {
+        continue;
     }
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
@@ -139,12 +150,11 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int gx_len = g_size * nst_per_block;
-
     double *rjri = shared_memory + st_id;
-    double *Rpq = shared_memory + nst_per_block * 4 + st_id;
-    double *gx = shared_memory + nst_per_block * 7 + st_id;
-    double *rw = shared_memory + nst_per_block * (g_size*3+7) + st_id;
-    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+7));
+    double *Rpq = shared_memory + nst_per_block * 3 + st_id;
+    double *gx = shared_memory + nst_per_block * 6 + st_id;
+    double *rw = shared_memory + nst_per_block * (g_size*3+6) + st_id;
+    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+6));
     int *idx_j = idx_i + nfi * 3;
     int *idx_k = idx_j + nfj * 3;
     if (thread_id < nfi * 3) {
@@ -186,11 +196,9 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
             double xjxi = rj[0] - ri[0];
             double yjyi = rj[1] - ri[1];
             double zjzi = rj[2] - ri[2];
-            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
             rjri[0*nst_per_block] = xjxi;
             rjri[1*nst_per_block] = yjyi;
             rjri[2*nst_per_block] = zjzi;
-            rjri[3*nst_per_block] = rr_ij;
         }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -215,9 +223,12 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
             double ak = expk[kp];
             double aij = ai + aj;
             double aj_aij = aj / aij;
-            double xij = rjri[0*nst_per_block] * aj_aij + ri[0];
-            double yij = rjri[1*nst_per_block] * aj_aij + ri[1];
-            double zij = rjri[2*nst_per_block] * aj_aij + ri[2];
+            double xjxi = rjri[0*nst_per_block];
+            double yjyi = rjri[1*nst_per_block];
+            double zjzi = rjri[2*nst_per_block];
+            double xij = xjxi * aj_aij + ri[0];
+            double yij = yjyi * aj_aij + ri[1];
+            double zij = zjzi * aj_aij + ri[2];
             double xpq = xij - rk[0];
             double ypq = yij - rk[1];
             double zpq = zij - rk[2];
@@ -225,7 +236,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                 double cijk = ci[ip] * cj[jp] * ck[kp];
                 double fac = cijk / (aij*ak*sqrt(aij+ak));
                 double theta_ij = ai * aj_aij;
-                double rr_ij = rjri[3*nst_per_block];
+                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                 double Kab = theta_ij * rr_ij;
                 gx[0] = fac * exp(-Kab);
                 Rpq[0*nst_per_block] = xpq;
@@ -236,104 +247,11 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
             double theta = aij * ak / (aij + ak);
             rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
                             nst_per_block, gout_stride, gout_id);
-            double s0x, s1x, s2x;
             for (int irys = 0; irys < nroots; ++irys) {
+                int lij = li + lj;
                 int stride_j = li + 1;
                 int stride_k = stride_j * (lj + 1);
-                int nst = nst_per_block;
-                __syncthreads();
-                if (gout_id == 0) {
-                    gx[gx_len*2] = rw[(irys*2+1)*nst];
-                }
-                double rt = rw[ irys*2   *nst];
-                double rt_aa = rt / (aij + ak);
-                int lij = li + lj;
-                if (lij > 0) {
-                    __syncthreads();
-                    double rt_aij = rt_aa * ak;
-                    double b10 = .5/aij * (1 - rt_aij);
-                    // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
-                    for (int n = gout_id; n < 3; n += gout_stride) {
-                        double *_gx = gx + n * gx_len;
-                        double xjxi = rjri[n*nst];
-                        double xpa = xjxi * aj_aij;
-                        //double c0x = Rpa[ir] - rt_aij * Rpq[n*nst];
-                        double c0x = xpa - rt_aij * Rpq[n*nst];
-                        s0x = _gx[0];
-                        s1x = c0x * s0x;
-                        _gx[nst] = s1x;
-                        for (int i = 1; i < lij; ++i) {
-                            s2x = c0x * s1x + i * b10 * s0x;
-                            _gx[(i+1)*nst] = s2x;
-                            s0x = s1x;
-                            s1x = s2x;
-                        }
-                    }
-                }
-
-                if (lk > 0) {
-                    int lij3 = (lij+1)*3;
-                    double rt_ak  = rt_aa * aij;
-                    double b00 = .5 * rt_aa;
-                    double b01 = .5/ak  * (1 - rt_ak );
-                    for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                        __syncthreads();
-                        int i = n / 3; //for i in range(lij+1):
-                        int _ix = n % 3; // TODO: remove _ix for nroots > 2
-                        double *_gx = gx + (i + _ix * g_size) * nst;
-                        double cpx = rt_ak * Rpq[_ix*nst];
-                        //for i in range(lij+1):
-                        //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
-                        if (n < lij3) {
-                            s0x = _gx[0];
-                            s1x = cpx * s0x;
-                            if (i > 0) {
-                                s1x += i * b00 * _gx[-nst];
-                            }
-                            _gx[stride_k*nst] = s1x;
-                        }
-                        //for k in range(1, lk):
-                        //    for i in range(lij+1):
-                        //        trr(i,k+1) = cp * trr(i,k) + k*b01 * trr(i,k-1) + i*b00 * trr(i-1,k)
-                        for (int k = 1; k < lk; ++k) {
-                            __syncthreads();
-                            if (n < lij3) {
-                                s2x = cpx*s1x + k*b01*s0x;
-                                if (i > 0) {
-                                    s2x += i * b00 * _gx[(k*stride_k-1)*nst];
-                                }
-                                _gx[(k*stride_k+stride_k)*nst] = s2x;
-                                s0x = s1x;
-                                s1x = s2x;
-                            }
-                        }
-                    }
-                }
-
-                // hrr
-                // g(i,j+1) = rirj * g(i,j) +  g(i+1,j)
-                // g(...,k,l+1) = rkrl * g(...,k,l) + g(...,k+1,l)
-                if (lj > 0) {
-                    __syncthreads();
-                    int lk3 = (lk+1)*3;
-                    for (int m = gout_id; m < lk3; m += gout_stride) {
-                        int k = m / 3;
-                        int _ix = m % 3;
-                        double xjxi = rjri[_ix*nst];
-                        double *_gx = gx + (_ix*g_size + k*stride_k) * nst;
-                        for (int j = 0; j < lj; ++j) {
-                            int ij = (lij-j) + j*stride_j;
-                            s1x = _gx[ij*nst];
-                            for (--ij; ij >= j*stride_j; --ij) {
-                                s0x = _gx[ij*nst];
-                                _gx[(ij+stride_j)*nst] = s1x - xjxi * s0x;
-                                s1x = s0x;
-                            }
-                        }
-                    }
-                }
-
-                __syncthreads();
+                BUILD_3C_GXYZ(lj, lk, nst_per_block, ijk_idx < nksp);
                 if (ijk_idx < nksp) {
                     float div_nfi = c_div_nf[li];
                     float div_nfk = c_div_nf[lk];
@@ -368,7 +286,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
         if (to_sph && (li > 1 || lj > 1)) {
             i_stride = nst_per_block * nfk;
             aux_stride = nst_per_block;
-            out_local = pool + get_smid() * POOL_SIZE + st_id;
+            out_local = pool + worker_id * POOL_SIZE + st_id;
         }
         if (ijk_idx < nksp) {
 #pragma unroll
@@ -1019,6 +937,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
             }
         }
     }
+}
 }
 
 static __global__
@@ -1705,8 +1624,13 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
                  int to_sph)
 {
     #ifdef USE_SYCL
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    int *head = (int *)(pool + workers * POOL_SIZE);
+    cudaMemset(head, 0, sizeof(int));
     sycl::range<2> threads(1, THREADS);
-    sycl::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
+    sycl::range<2> blocks(1, workers);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
@@ -1715,18 +1639,22 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
             out, dev_envs, pool, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-            reorder_aux, to_sph,
+            reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh,
             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       });
     });
     #else
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    int3c2e_kernel<<<blocks, THREADS, shm_size>>>(
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    int *head = (int *)(pool + workers * POOL_SIZE);
+    cudaMemset(head, 0, sizeof(int));
+    int3c2e_kernel<<<workers, THREADS, shm_size>>>(
             out, *envs, pool, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-            reorder_aux, to_sph);
+            reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));

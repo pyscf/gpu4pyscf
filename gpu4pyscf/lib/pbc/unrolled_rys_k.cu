@@ -1,12 +1,15 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "create_tasks.cu"
-
+#include "pbc/create_tasks.cu"
+#include "pbc/unrolled_kernels.cuh"
 
 #ifdef USE_SYCL
+#undef JKMATRIX_KERNEL_ARGS
+#undef JKMATRIX_KERNEL_SETUP
+#undef LAUNCH_JKMATRIX_KERNEL
 
-#define KERNEL_ARGS                                             \
+#define JKMATRIX_KERNEL_ARGS                                             \
 RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,           \
   int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,           \
   int *supcell_shl, int *Ts_ij_lookup,                          \
@@ -16,10 +19,12 @@ RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,           \
   float dm_penalty, int64_t *pool, int *head                    \
   , sycl::nd_item<2> &item, double *shared_memory
 
-#define KERNEL_SETUP()                                                  \
-  int threadIdx_x = item.get_local_id(1);                               \
-  int blockDim_x = item.get_local_range(1);                             \
+#define JKMATRIX_KERNEL_SETUP()                                                  \
+  int sq_id = item.get_local_id(1);                                     \
+  int gout_id = item.get_local_id(0);                                   \
+  int _nsq_per_block = item.get_local_range(1);                         \
   int blockIdx_x = item.get_group(1);                                   \
+  int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;                 \
   auto thread_block = item.get_group();                                 \
   int &ntasks   = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
   int &pair_ij  = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
@@ -31,11 +36,10 @@ RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,           \
   int &j0       = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
   double (&ri)[3]   = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block); \
   double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block); \
-  double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block); \
   int &expi = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
   int &expj = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
 
-#define LAUNCH_KERNEL(KERNEL)                                           \
+#define LAUNCH_JKMATRIX_KERNEL(KERNEL)                                           \
     {                                                                   \
       auto dev_envs = *envs; auto dev_kmat = *kmat; auto dev_bounds = *bounds; \
       sycl::range<2> blocks(1, workers);                                \
@@ -51,56 +55,19 @@ RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,           \
         });                                                             \
       });                                                               \
     }
-
-#else // USE_SYCL
-
-#define KERNEL_ARGS                                             \
-RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,           \
-  int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,           \
-  int *supcell_shl, int *Ts_ij_lookup,                          \
-  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,      \
-  float *q_cond_ij, float *q_cond_kl,                           \
-  float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,      \
-  float dm_penalty, int64_t *pool, int *head
-
-#define KERNEL_SETUP()                                          \
-    int threadIdx_x = threadIdx.x;                              \
-    int blockDim_x = blockDim.x;                                \
-    int blockIdx_x = blockIdx.x;                                \
-    extern __shared__ double shared_memory[];                   \
-    __shared__ int ntasks, pair_ij, pair_kl0;                   \
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;        \
-    __shared__ double ri[3];                                    \
-    __shared__ double rjri[3];                                  \
-    __shared__ double aij_cache[2];                             \
-    __shared__ int expi;                                        \
-    __shared__ int expj;
-
-#define LAUNCH_KERNEL(KERNEL)                                           \
-    {                                                                   \
-      dim3 threads(nsq_per_block, gout_stride);                         \
-      KERNEL<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, \
-                                                          pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
-                                                          nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
-                                                          s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); \
-    }
-
 #endif // USE_SYCL
 
 
 __global__ static
-void rys_k_0000(KERNEL_ARGS)
+void rys_k_0000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 4;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -118,8 +85,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -212,11 +179,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -282,18 +244,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1000(KERNEL_ARGS)
+void rys_k_1000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 4;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -311,8 +270,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -405,11 +364,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -434,8 +388,6 @@ while (1) {
                 for (int irys = 0; irys < 2; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double xjxi = rjri[0];
                     double rt_aij = rt_aa * akl;
@@ -509,18 +461,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1010(KERNEL_ARGS)
+void rys_k_1010(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -538,8 +487,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -632,11 +581,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -661,8 +605,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double rt_akl = rt_aa * aij;
@@ -780,18 +722,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1011(KERNEL_ARGS)
+void rys_k_1011(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -809,8 +748,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -903,11 +842,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -932,8 +866,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double rt_akl = rt_aa * aij;
@@ -1157,18 +1089,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1100(KERNEL_ARGS)
+void rys_k_1100(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -1186,8 +1115,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1280,11 +1209,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -1309,8 +1233,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double xjxi = rjri[0];
                     double rt_aij = rt_aa * akl;
@@ -1406,18 +1328,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1110(KERNEL_ARGS)
+void rys_k_1110(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -1435,8 +1354,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1529,11 +1448,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -1558,8 +1472,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double rt_akl = rt_aa * aij;
@@ -1783,18 +1695,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2000(KERNEL_ARGS)
+void rys_k_2000(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -1812,8 +1721,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1906,11 +1815,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -1935,8 +1839,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double xjxi = rjri[0];
                     double rt_aij = rt_aa * akl;
@@ -2041,18 +1943,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2010(KERNEL_ARGS)
+void rys_k_2010(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -2070,8 +1969,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2164,11 +2063,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -2193,8 +2087,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
                     double rt_akl = rt_aa * aij;
@@ -2391,18 +2283,15 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2100(KERNEL_ARGS)
+void rys_k_2100(JKMATRIX_KERNEL_ARGS)
 {
-    KERNEL_SETUP();
-    int sq_id = threadIdx_x;
+    JKMATRIX_KERNEL_SETUP();
+    int nsq_per_block = _nsq_per_block;
     int t_id = sq_id;
-    int nsq_per_block = blockDim_x;
     int threads = nsq_per_block;
 
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
-
-    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -2420,8 +2309,8 @@ while (1) {
     int jsh = bas_ij % NBAS_MAX;
     _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                       pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
-                      q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                      dm_penalty, kmat, envs, bounds, shared_memory);
+                      q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
+                      (int *)shared_memory, kmat, envs, bounds);
     if (ntasks == 0) continue;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2514,11 +2403,6 @@ while (1) {
                 double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
-                if (sq_id == 0) {
-                    aij_cache[0] = aij;
-                    aij_cache[1] = aj_aij;
-                }
-                __syncthreads();
                 double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = rjri[0] * aj_aij;
@@ -2543,8 +2427,6 @@ while (1) {
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = aij_cache[0];
-                    double aj_aij = aij_cache[1];
                     double rt_aa = rt / (aij + akl);
                     double xjxi = rjri[0];
                     double rt_aij = rt_aa * akl;
@@ -2760,20 +2642,31 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
 
     switch (ijkl) {
-    case 0:   LAUNCH_KERNEL(rys_k_0000); break;
-    case 125: LAUNCH_KERNEL(rys_k_1000); break;
-    case 130: LAUNCH_KERNEL(rys_k_1010); break;
-    case 131: LAUNCH_KERNEL(rys_k_1011); break;
-    case 150: LAUNCH_KERNEL(rys_k_1100); break;
-    case 155: LAUNCH_KERNEL(rys_k_1110); break;
-    case 250: LAUNCH_KERNEL(rys_k_2000); break;
-    case 255: LAUNCH_KERNEL(rys_k_2010); break;
-    case 275: LAUNCH_KERNEL(rys_k_2100); break;
+    case 0: // (0, 0, 0, 0)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_0000); break;
+    case 125: // (1, 0, 0, 0)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1000); break;
+    case 130: // (1, 0, 1, 0)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1010); break;
+    case 131: // (1, 0, 1, 1)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1011); break;
+    case 150: // (1, 1, 0, 0)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1100); break;
+    case 155: // (1, 1, 1, 0)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_1110); break;
+    case 250: // (2, 0, 0, 0)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2000); break;
+    case 255: // (2, 0, 1, 0)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2010); break;
+    case 275: // (2, 1, 0, 0)
+        LAUNCH_JKMATRIX_KERNEL(rys_k_2100); break;
     default: return 0;
     }
     return 1;
 }
 
-#undef LAUNCH_KERNEL
-#undef KERNEL_SETUP
-#undef KERNEL_ARGS
+#ifdef USE_SYCL
+#undef LAUNCH_JKMATRIX_KERNEL
+#undef JKMATRIX_KERNEL_SETUP
+#undef JKMATRIX_KERNEL_ARGS
+#endif

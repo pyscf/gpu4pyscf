@@ -45,16 +45,14 @@ def numerical_tddft_gradient(mol, get_energy, dx = 1e-4):
 
 
 class KnownValues(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.remove_overlap_zero_eigenvalue = gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue
-        cls.overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+    def setUp(self):
+        self.remove_overlap_zero_eigenvalue = gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue
+        self.overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
         gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = True
 
-    @classmethod
-    def tearDownClass(cls):
-        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = cls.remove_overlap_zero_eigenvalue
-        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = cls.overlap_zero_eigenvalue_threshold
+    def tearDown(self):
+        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = self.remove_overlap_zero_eigenvalue
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = self.overlap_zero_eigenvalue_threshold
 
     def test_rtddft_diffuse_against_qchem(self):
         mol = pyscf.M(

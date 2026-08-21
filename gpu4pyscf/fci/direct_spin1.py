@@ -118,7 +118,9 @@ void _gather(double *out, double *t1,
         }
         __syncthreads();
     }
-    out[stra*nb+strb] += val;
+    if (stra < na && strb < nb) {
+        out[stra*nb+strb] += val;
+    }
 }
 }'''
 

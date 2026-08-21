@@ -164,8 +164,8 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
         t = int1e.int1e_kin(xmol, sort_output=sort_ao)
         s = int1e.int1e_ovlp(xmol, sort_output=sort_ao)
         nucmol = mole.fakemol_for_charges(xmol.atom_coords())
-        v = contract_int3c2e_auxvec(xmol, nucmol, -xmol.atom_charges(),
-                                    sort_output=sort_ao)
+        Z = cp.asarray(xmol.atom_charges(), dtype=np.float64)
+        v = contract_int3c2e_auxvec(xmol, nucmol, -Z, sort_output=sort_ao)
         with lib.temporary_env(xmol, cart=mol.cart):
             w = asarray(_sigma_dot(xmol.intor('int1e_spnucsp')))
         if not mol.cart:
@@ -226,8 +226,8 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
             t = int1e.int1e_kin(xmol, sort_output=sort_ao)
             s = int1e.int1e_ovlp(xmol, sort_output=sort_ao)
             nucmol = mole.fakemol_for_charges(xmol.atom_coords())
-            v = contract_int3c2e_auxvec(xmol, nucmol, -xmol.atom_charges(),
-                                        sort_output=sort_ao)
+            Z = cp.asarray(xmol.atom_charges(), dtype=np.float64)
+            v = contract_int3c2e_auxvec(xmol, nucmol, -Z, sort_output=sort_ao)
             with lib.temporary_env(xmol, cart=xmol.mol.cart):
                 w = asarray(_sigma_dot(xmol.intor('int1e_spnucsp')))
             if not mol.cart:

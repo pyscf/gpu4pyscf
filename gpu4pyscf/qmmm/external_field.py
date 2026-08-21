@@ -21,6 +21,7 @@ from pyscf import lib
 
 import gpu4pyscf
 from gpu4pyscf.lib import logger
+from gpu4pyscf.grad.rhf import contract_h1e_dm
 
 def add_external_field(scf_method, electric_field=None, origin=None):
     ''' Field and origin in AU '''
@@ -163,6 +164,25 @@ class EXTFGrad:
 
             dhcore -= cp.einsum('Edij,E->dij', dipole_integral_derivative, self.base.electric_field)
         return dhcore
+
+    def extra_force(self, atom_id=None):
+        assert atom_id is None
+        e1_grad = super().extra_force()
+        if self.base.electric_field is None:
+            return e1_grad
+
+        mol = self.mol
+        with mol.with_common_orig(self.base.origin):
+            # The original order is (3 dimension of r, 3 dimension of derivative, ao (not differentiated), ao (differentiated))
+            dipole_integral_derivative = mol.intor('int1e_irp').reshape(3, 3, mol.nao, mol.nao).transpose(0,1,3,2)
+            dipole_integral_derivative = cp.asarray(dipole_integral_derivative)
+
+        dhcore = cp.einsum('Edij,E->dij', dipole_integral_derivative, self.base.electric_field)
+        dm = self.base.make_rdm1()
+        if dm.ndim == 3: #UHF
+            dm = dm[0] + dm[1]
+        e1_grad = e1_grad - contract_h1e_dm(self.mol, dhcore, dm, hermi=1)
+        return e1_grad
 
     def grad_nuc(self, mol=None, atmlst=None):
         if mol is None: mol = self.mol

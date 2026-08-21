@@ -20,6 +20,7 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+#include "gvhf-rys/rys_roots_for_k.cu"
 
 #define THREADS         256
 #define GOUT_WIDTH      60
@@ -27,9 +28,11 @@
 #define L_AUX           6
 #define L_AUX1          (L_AUX+1)
 
-__global__
-void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
-                        uint32_t *bas_ij_idx, int *gout_stride_lookup
+__global__ static
+void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs,
+                        double omega, double lr_factor, double sr_factor,
+                        int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                        int *gout_stride_lookup
                         #ifdef USE_SYCL
                         , sycl::nd_item<1> &item, char *shm_mem
                         #endif
@@ -50,22 +53,18 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
     int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double &omega = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
 
     double *shared_memory = reinterpret_cast<double*>(shm_mem);
     #else
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
-
+    extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int nbas;
     __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
-    __shared__ double omega;
-
-    extern __shared__ double shared_memory[];
     #endif
-    
+
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -79,7 +78,6 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         nroots = (li + lj) / 2 + 1;
-        omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2; // omega < 0
         }
@@ -167,7 +165,8 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
                     gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsp_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                                nsp_per_block, gout_stride, gout_id);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
@@ -272,7 +271,8 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
 }
 
 extern "C" {
-int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
+int fill_int2c2e(double *out, PBCIntEnvVars *envs,
+                 double omega, double lr_factor, double sr_factor, int shm_size,
                  int nbatches_shl_pair, int *shl_pair_offsets,
                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
@@ -283,14 +283,16 @@ int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class pbc_int2c2e_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
-        pbc_int2c2e_kernel(out, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup,
+        pbc_int2c2e_kernel(out, dev_envs, omega, lr_factor, sr_factor,
+                           shl_pair_offsets, bas_ij_idx, gout_stride_lookup,
                            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       });
     });
     #else
     cudaFuncSetAttribute(pbc_int2c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            out, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            out, *envs, omega, lr_factor, sr_factor,
+            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));

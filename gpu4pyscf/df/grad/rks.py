@@ -26,7 +26,6 @@ def energy_ee(ks_grad, mol=None, dm=None, verbose=None):
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
     mf = ks_grad.base
-    mf.with_df.reset() # Release GPU memory
     if dm is None: dm = mf.make_rdm1()
 
     ni = mf._numint

@@ -17,6 +17,10 @@ import numpy as np
 import cupy as cp
 from gpu4pyscf.gto.mole import Cell, SortedCell
 
+__all__ = [
+    'get_Gv_weights', 'get_Gv', 'get_SI',
+]
+
 def get_Gv_base(cell, mesh=None):
     if mesh is None:
         mesh = cell.mesh
@@ -52,3 +56,41 @@ def get_Gv_weights(cell, mesh=None):
 
 def get_Gv(cell, mesh=None):
     return get_Gv_weights(cell, mesh)[0]
+
+def get_SI(cell, Gv=None, mesh=None, atmlst=None):
+    '''Calculate the structure factor (0D, 1D, 2D, 3D) for all atoms; see MH (3.34).
+
+    Args:
+        cell : instance of :class:`Cell`
+
+        Gv : (N,3) array
+            G vectors
+
+        atmlst : list of ints, optional
+            Indices of atoms for which the structure factors are computed.
+
+    Returns:
+        SI : (natm, ngrids) ndarray, dtype=np.complex128
+            The structure factor for each atom at each G-vector.
+    '''
+    coords = cp.asarray(cell.atom_coords())
+    if atmlst is not None:
+        coords = coords[np.asarray(atmlst)]
+    if Gv is None:
+        if mesh is None:
+            mesh = cell.mesh
+        basex, basey, basez = get_Gv_base(cell, mesh)
+        basex = cp.asarray(basex)
+        basey = cp.asarray(basey)
+        basez = cp.asarray(basez)
+        b = cp.asarray(cell.reciprocal_vectors())
+        rb = coords.dot(b.T)
+        SIx = cp.exp(-1j*rb[:,0,None] * basex)
+        SIy = cp.exp(-1j*rb[:,1,None] * basey)
+        SIz = cp.exp(-1j*rb[:,2,None] * basez)
+        SI = SIx[:,:,None,None] * SIy[:,None,:,None] * SIz[:,None,None,:]
+        natm = coords.shape[0]
+        SI = SI.reshape(natm, -1)
+    else:
+        SI = cp.exp(-1j*coords.dot(cp.asarray(Gv).T))
+    return SI

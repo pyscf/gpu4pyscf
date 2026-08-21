@@ -486,7 +486,7 @@ class FTOpt:
 
             if q is not None:
                 assert q.shape == (3,)
-                Gv = Gv + q
+                Gv = cp.asarray(Gv) + cp.asarray(q)
 
             if kpts is None:
                 kpts = kpts_cached

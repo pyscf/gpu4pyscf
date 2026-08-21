@@ -52,7 +52,7 @@ def setUpModule():
                'C2': 'ccpvdz',
                'O3': 'ccpvdz'}
     )
-    auxmol = mol.copy()
+    auxmol = mol.copy(False)
     auxmol.basis = {
         'C1':'''
 C    S

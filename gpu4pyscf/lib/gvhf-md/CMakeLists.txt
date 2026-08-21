@@ -4,6 +4,7 @@ set(GPU_SRCS
   md_indices.cu md_j_driver.cu md_pairdata.c 
   contract_int3c2e.cu
   pbc_md_contract_j.cu
+  contract_Et.cu
 )
 
 add_library(gvhf_md SHARED ${GPU_SRCS})

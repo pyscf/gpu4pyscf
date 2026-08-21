@@ -65,9 +65,6 @@ class KnownValues(unittest.TestCase):
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(j2c_decomp_alg='eig')
         self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 8)
 
-        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(j3c_backend='vhfopt')
-        self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 8)
-
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(fp_type='FP32')
         self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 6)
 
@@ -92,3 +89,7 @@ class KnownValues(unittest.TestCase):
         e_gpu, _ = mp_gpu.kernel()
         e_corr_ref = -0.27863248239139604
         self.assertAlmostEqual(e_gpu, e_corr_ref, 8)
+
+if __name__ == "__main__":
+    print("Full tests for dfmp2 module")
+    unittest.main()

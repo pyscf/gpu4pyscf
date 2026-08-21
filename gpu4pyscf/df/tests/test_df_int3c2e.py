@@ -1,5 +1,6 @@
 import numpy as np
 import cupy as cp
+import scipy.linalg
 import pyscf
 from pyscf import lib
 from pyscf.df import incore
@@ -278,7 +279,8 @@ def test_contract_int3c2e():
         H   0.757    4.   -0.4696
         C   1.      1.    0.
         ''',
-        basis=('ccpvtz', [[1, [3.7, 1, .1]], [1, [2., .5, .3]], [1, [.8, .5, .8]]])
+        basis=('ccpvtz', [[1, [3.7, 1, .1]], [1, [2., .5, .3]], [1, [.8, .5, .8]],
+                          [4, [1.2, 1.]]])
     )
     auxmol = mol.copy()
     auxmol.basis = ('weigend', [[3, [2, 1, .5], [1, .2, 1]]])
@@ -294,7 +296,7 @@ def test_contract_int3c2e():
     assert abs(dat.get() - ref).max() < 1e-9
 
     dat = contract_int3c2e_dm(mol, auxmol, dm)
-    assert abs(dat.get() - ref).max() < 1e-9
+    assert abs(dat.get() - ref).max() < 3e-9
 
     auxvec = np.random.rand(auxmol.nao)
     dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)
@@ -375,6 +377,39 @@ def test_int2c2e():
     ref = mol.intor('int2c2e_ip1')
     assert abs(j2c.get() - ref).max() < 1e-11
 
+def test_int2c2e_rsh():
+    mol = pyscf.M(
+        atom='''C1   1.3   .2       .3
+                C2   .19   .1      1.1
+                C1   .5   -.1      0.2
+                C2   .04   .6       .5
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]],
+                       [5, [.6, 1.]],
+                       [6, [.6, 1.]],
+                      ]
+                     ),
+               'C2': 'ccpvtz'}
+    )
+    omega, lr_factor, sr_factor = 0.33, 0.2, 0.6
+    j2c = int3c2e_bdiv.int2c2e(mol, omega=omega, lr_factor=lr_factor,
+                               sr_factor=sr_factor)
+    with mol.with_range_coulomb(omega):
+        ref = mol.intor('int2c2e') * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += mol.intor('int2c2e') * sr_factor
+    assert abs(j2c.get() - ref).max() < 3e-11
+
+    j2c = int3c2e_bdiv.int2c2e_ip1(mol, omega=omega, lr_factor=lr_factor,
+                                   sr_factor=sr_factor)
+    with mol.with_range_coulomb(omega):
+        ref = mol.intor('int2c2e_ip1') * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += mol.intor('int2c2e_ip1') * sr_factor
+    assert abs(j2c.get() - ref).max() < 1e-11
+
 def test_int3c2e_rsh():
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3
@@ -407,3 +442,199 @@ def test_int3c2e_rsh():
     with mol.with_range_coulomb(-omega):
         ref += incore.aux_e2(mol, auxmol) * sr_factor
     assert abs(out.get()-ref).max() < 1e-12
+
+def test_make_cderi():
+    from gpu4pyscf.gto.mole import SortedMole
+    from gpu4pyscf.df import df
+    from pyscf.df.incore import aux_e2
+    mol = pyscf.M(
+        atom='''
+O    0.873    5.017    1.816
+H    1.128    5.038    2.848
+H    0.173    4.317    1.960
+O    3.665    1.316    1.319
+H    3.904    2.233    1.002
+H    4.224    0.640    0.837
+C1   1.3    .2       .3
+C1   .19   .1      1.1
+C2   1.    .3      1.1
+C2   .1    1.1     -.1
+C2   .4    -.1     -.1
+C2   -.3    .2     -.7''',
+        basis={
+            'default': 'ccpvdz',
+            'C1': [[1, [7.7, 1, .1], [4., .2, .8], [.8, .2, .1]]],
+        },
+    )
+    auxmol = mol.copy()
+    auxmol.auxbasis = 'weigend'
+    auxmol.build(0, 0)
+
+    nao = mol.nao
+    def _unpack(a, row, col):
+        out = cp.zeros((a.shape[0],nao,nao))
+        out[:,col,row] = out[:,row,col] = a
+        return out
+
+    cp.random.seed(12)
+    dm = cp.random.rand(nao,nao)
+
+    j3c = aux_e2(mol, auxmol)
+    j2c = auxmol.intor_symmetric('int2c2e')
+    ref = np.einsum('ijp,ij->p', j3c, dm.get())
+    ref = np.einsum('ijp,p->ij', j3c, scipy.linalg.solve(j2c, ref))
+
+    opt = int3c2e_bdiv.Int3c2eOpt(SortedMole.from_mol(mol, decontract=True), auxmol)
+    cderi, (pair_address, diags) = df._cholesky_eri(opt)
+    row, col = divmod(pair_address, nao)
+    cderi = cp.vstack([cp.asarray(x) for x in cderi])
+    cderi = _unpack(cderi, row, col)
+    dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
+    assert abs(dat.get() - ref).max() < 1e-10
+
+    opt = int3c2e_bdiv.Int3c2eOpt(SortedMole.from_mol(mol, decontract=False), auxmol)
+    cderi, (pair_address, diags) = df._cholesky_eri(opt)
+    row, col = divmod(pair_address, nao)
+    cderi = cp.vstack([cp.asarray(x) for x in cderi])
+    cderi = _unpack(cderi, row, col)
+    dat = cp.einsum('pij,p->ij', cderi, cp.einsum('pij,ij->p', cderi, dm))
+    assert abs(dat.get() - ref).max() < 1e-10
+
+def test_cholesky_eri_rsh():
+    mol = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''')
+    mf = mol.RHF().to_gpu().density_fit()
+    omega = 0.33
+    lr_factor = 0.65
+    sr_factor = 0.19
+
+    with mol.with_range_coulomb(omega):
+        ref = mol.intor('int2e', aosym='s4') * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += mol.intor('int2e', aosym='s4') * sr_factor
+
+    with_df = mf.with_df.build(omega=omega, lr_factor=lr_factor,
+                               sr_factor=sr_factor)
+    with_df._cderi[0] = cp.vstack([cp.asarray(x) for x in with_df._cderi])
+    i, j = cp.tril_indices(mol.nao)
+    for cderi, _ in with_df.loop():
+        cderi = cderi[:,i,j]
+        out = cderi.T.dot(cderi)
+    assert abs(out.get()-ref).max() < .5e-4
+
+    with_df = mf.with_df.build(omega=0)
+    with_df._cderi[0] = cp.vstack([cp.asarray(x) for x in with_df._cderi])
+    for cderi, _ in with_df.loop():
+        cderi = cderi[:,i,j]
+        out = cderi.T.dot(cderi) * sr_factor
+    with_df = mf.with_df.build(omega=omega)
+    with_df._cderi[0] = cp.vstack([cp.asarray(x) for x in with_df._cderi])
+    for cderi, _ in with_df.loop():
+        cderi = cderi[:,i,j]
+        out += cderi.T.dot(cderi) * (lr_factor - sr_factor)
+    assert abs(out.get()-ref).max() < .5e-4
+
+    omega = 0.33
+    lr_factor = 0.3
+    sr_factor = 0.6
+    with mol.with_range_coulomb(omega):
+        ref = mol.intor('int2e', aosym='s4') * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += mol.intor('int2e', aosym='s4') * sr_factor
+
+    with_df = mf.with_df.build(omega=omega, lr_factor=lr_factor,
+                               sr_factor=sr_factor)
+    with_df._cderi[0] = cp.vstack([cp.asarray(x) for x in with_df._cderi])
+    for cderi, _ in with_df.loop():
+        cderi = cderi[:,i,j]
+        out = cderi.T.dot(cderi)
+    assert abs(out.get()-ref).max() < 1e-4
+
+def test_general_contraction():
+    from gpu4pyscf.gto.mole import SortedMole
+    auxmol = pyscf.M(
+        atom='''
+O    0.873    5.017    1.816
+H    1.128    5.038    2.848
+H    0.173    4.317    1.960
+C    .1    1.1     -.1
+C    -.3    .2     -.7''',
+        basis=[[0,[1,1]]])
+    naux = auxmol.nao
+
+    def eval_j3c(mol, decontract):
+        int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(
+            SortedMole.from_mol(mol, decontract=decontract), auxmol).build()
+        eval_j3c, _, _, _, clone_context = int3c2e_opt.int3c2e_evaluator(
+            cart=mol.cart, return_clone_context=True)
+        aux_coef = int3c2e_opt.aux_coeff
+        j3c = eval_j3c()
+        j3c = j3c.dot(aux_coef)
+        if decontract:
+            recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses = \
+                    int3c2e_bdiv._create_pair_recontraction(int3c2e_opt.mol, clone_context)
+            j3c = recontract(0, j3c)
+        else:
+            pair_addresses = int3c2e_opt.pair_and_diag_indices()[0]
+        nao = mol.nao
+        rows, cols = divmod(pair_addresses, nao)
+        out = cp.zeros((nao, nao, naux))
+        out[cols,rows] = j3c
+        out[rows,cols] = j3c
+        return out
+
+    mol = auxmol.copy()
+    mol.basis = 'ano'
+    mol.build(0,0)
+    ref = incore.aux_e2(mol, auxmol)
+    dat = eval_j3c(mol, True)
+    assert abs(dat.get() - ref).max() < 1e-10
+    dat = eval_j3c(mol, False)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+    mol = auxmol.copy()
+    mol.basis = 'def2-tzvp'
+    mol.build(0,0)
+    ref = incore.aux_e2(mol, auxmol)
+    dat = eval_j3c(mol, True)
+    assert abs(dat.get() - ref).max() < 1e-10
+    dat = eval_j3c(mol, False)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+    mol = auxmol.copy()
+    mol.basis = 'd-aug-cc-pvdz'
+    mol.build(0,0)
+    ref = incore.aux_e2(mol, auxmol)
+    dat = eval_j3c(mol, True)
+    assert abs(dat.get() - ref).max() < 1e-10
+    dat = eval_j3c(mol, False)
+    assert abs(dat.get() - ref).max() < 1e-10
+
+def test_contract_Et():
+    import ctypes
+    from gpu4pyscf.df import j_engine_3c2e
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    0.   -0.4696
+        H   0.757    0.   -0.4696
+        ''',
+        basis=[[l, [1., 1.]] for l in range(5)])
+    opt = j_engine_3c2e.Int3c2eOpt(mol, mol).build()
+    ao_loc = opt.mol.ao_loc
+    nao = ao_loc[-1]
+    np.random.seed(10)
+    dm = np.random.rand(nao,nao) - .5
+    dm = dm.dot(dm.T)
+
+    ref = j_engine_3c2e._dm_to_Rt(opt.mol, dm, opt.shl_pair_idx, opt.pair_loc)
+    dm_xyz = j_engine_3c2e._dm_to_Rt(opt.mol, dm, opt.shl_pair_idx,
+                                     opt.pair_loc, opt.int3c2e_envs)
+    assert abs(dm_xyz - ref).max().get() < 1e-12
+
+    ref = j_engine_3c2e._Rt_to_dm(opt.mol, dm_xyz, opt.shl_pair_idx, opt.pair_loc)
+    dm = j_engine_3c2e._Rt_to_dm(opt.mol, dm_xyz, opt.shl_pair_idx,
+                                 opt.pair_loc, opt.int3c2e_envs)
+    assert abs(dm - ref).max().get() < 1e-12

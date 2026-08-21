@@ -29,6 +29,7 @@ from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.qmmm.pbc.tools import get_multipole_tensors_pp, get_multipole_tensors_pg
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
+from gpu4pyscf.grad.rhf import contract_h1e_dm
 
 contract = cupy_helper.contract
 
@@ -1041,6 +1042,16 @@ class QMMMGrad:
 
         logger.timer(self, 'get_hcore', *cput0)
         return g_qm_orig + g_qm
+
+    def extra_force(self, atom_id=None):
+        assert atom_id is None
+        g_qm = get_hcore_mm(self)
+        dm = self.base.make_rdm1()
+        if dm.ndim == 3: #UHF
+            dm = dm[0] + dm[1]
+        e1_grad = contract_h1e_dm(self.mol, g_qm, dm, hermi=1)
+        e1_grad += super().extra_force()
+        return e1_grad
 
     def grad_hcore_mm(self, dm, mol=None):
         '''Nuclear gradients of the electronic energy, w.r.t charges

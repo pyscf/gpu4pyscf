@@ -291,6 +291,7 @@ def as_scanner(td_grad, state=1):
                          (TDSCF_GradScanner, td_grad.__class__), name)
 
 def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
+                          omega=None, lr_factor=None, sr_factor=None,
                           sum_results=False, verbose=None):
     '''
     Computes a set of first-order derivatives of J/K contributions for each
@@ -313,6 +314,7 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         sum_results : bool
             If True, aggregate all sets of derivatives into a single result.
     '''
+    assert lr_factor is None and sr_factor is None
     log = logger.new_logger(vhfopt.mol, verbose)
     cput0 = log.init_timer()
     mol = vhfopt.sorted_mol
@@ -363,9 +365,6 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         device_id = cp.cuda.device.get_device_id()
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
-        err = libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
-        if err != 0:
-            raise RuntimeError('RYS build_vjk_ip1 CUDA kernel initialization failed')
 
         timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
@@ -582,7 +581,8 @@ class Gradients(rhf_grad.GradientsBase):
         mf_grad = self.base._scf.nuc_grad_method()
         return mf_grad.grad_nuc(mol, atmlst)
 
-    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
+    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None,
+                           omega=None, lr_factor=None, sr_factor=None,
                            hermi=0, verbose=None):
         '''
         Computes the sum of first-order derivatives of J/K contributions for
@@ -601,10 +601,12 @@ class Gradients(rhf_grad.GradientsBase):
         Returns:
             An array of shape (Natm, 3).
         '''
-        return self.jk_energies_per_atom(dms, j_factor, k_factor, omega,
+        return self.jk_energies_per_atom(dms, j_factor, k_factor,
+                                         omega, lr_factor, sr_factor,
                                          sum_results=True, verbose=verbose)
 
-    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None, omega=0,
+    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None,
+                             omega=None, lr_factor=None, sr_factor=None,
                              hermi=0, sum_results=False, verbose=None):
         '''
         Computes a set of first-order derivatives of J/K contributions for each
@@ -643,6 +645,7 @@ class Gradients(rhf_grad.GradientsBase):
         if isinstance(dm_list, cp.ndarray) and dm_list.ndim == 2:
             dm_list = dm_list[None]
         ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor,
+                                    omega, lr_factor, sr_factor,
                                     sum_results, verbose)
         return ejk
 

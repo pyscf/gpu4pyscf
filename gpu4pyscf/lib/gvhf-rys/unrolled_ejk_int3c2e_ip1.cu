@@ -1,30 +1,32 @@
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#define THREADS         256
 #define BLOCK_SIZE      16
 
 
+#define KERNEL_ARGS \
+    double *ejk, double *ejk_aux, double *dm, double *density_auxvec, \
+    RysIntEnvVars& envs, int shl_pair0, int shl_pair1, \
+    int ksh0, int ksh1, int iprim, int jprim, int kprim, \
+    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc, \
+    int aux_offset, int naux, int nao, \
+    int thread_id, double *shared_memory
+
+#define LAUNCH_KERNEL(KERNEL) \
+    KERNEL(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim, \
+    omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, thread_id, shared_memory)
+
+
 __device__ inline
-void int3c2e_ip1_000(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
-                    RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double* shared_memory)
+void int3c2e_ip1_000(KERNEL_ARGS)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int thread_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -231,22 +233,11 @@ void int3c2e_ip1_000(double *ejk, double *ejk_aux, double *dm, double *density_a
 }
 
 __device__ inline
-void int3c2e_ip1_100(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
-                    RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double* shared_memory)
+void int3c2e_ip1_100(KERNEL_ARGS)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int thread_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -515,22 +506,11 @@ void int3c2e_ip1_100(double *ejk, double *ejk_aux, double *dm, double *density_a
 }
 
 __device__ inline
-void int3c2e_ip1_110(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
-                    RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double* shared_memory)
+void int3c2e_ip1_110(KERNEL_ARGS)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int thread_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -979,22 +959,11 @@ void int3c2e_ip1_110(double *ejk, double *ejk_aux, double *dm, double *density_a
 }
 
 __device__ inline
-void int3c2e_ip1_200(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
-                    RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double* shared_memory)
+void int3c2e_ip1_200(KERNEL_ARGS)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int thread_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1350,22 +1319,11 @@ void int3c2e_ip1_200(double *ejk, double *ejk_aux, double *dm, double *density_a
 }
 
 __device__ inline
-void int3c2e_ip1_001(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
-                    RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double* shared_memory)
+void int3c2e_ip1_001(KERNEL_ARGS)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int thread_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -1634,22 +1592,11 @@ void int3c2e_ip1_001(double *ejk, double *ejk_aux, double *dm, double *density_a
 }
 
 __device__ inline
-void int3c2e_ip1_101(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
-                    RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double* shared_memory)
+void int3c2e_ip1_101(KERNEL_ARGS)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int thread_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2093,22 +2040,11 @@ void int3c2e_ip1_101(double *ejk, double *ejk_aux, double *dm, double *density_a
 }
 
 __device__ inline
-void int3c2e_ip1_002(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
-                    RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
-                    int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double* shared_memory)
+void int3c2e_ip1_002(KERNEL_ARGS)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int thread_id = item.get_local_id(1);
-    int nst_per_block = item.get_local_range(1);
-    #else
-    int thread_id = threadIdx.x;
-    int nst_per_block = blockDim.x;
-    #endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
+    constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -2468,31 +2404,24 @@ int int3c2e_ip1_unrolled(double *ejk, double *ejk_aux, double *dm, double *densi
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
-                    int aux_offset, int naux, int nao, double* shared_memory)
+                    int aux_offset, int naux, int nao, int thread_id, double *shared_memory)
 {
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
-        int3c2e_ip1_000(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, shared_memory); break;
+        LAUNCH_KERNEL(int3c2e_ip1_000); break;
     case 5: // li=1 lj=0 lk=0
-        int3c2e_ip1_100(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, shared_memory); break;
+        LAUNCH_KERNEL(int3c2e_ip1_100); break;
     case 6: // li=1 lj=1 lk=0
-        int3c2e_ip1_110(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, shared_memory); break;
+        LAUNCH_KERNEL(int3c2e_ip1_110); break;
     case 10: // li=2 lj=0 lk=0
-        int3c2e_ip1_200(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, shared_memory); break;
+        LAUNCH_KERNEL(int3c2e_ip1_200); break;
     case 25: // li=0 lj=0 lk=1
-        int3c2e_ip1_001(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, shared_memory); break;
+        LAUNCH_KERNEL(int3c2e_ip1_001); break;
     case 30: // li=1 lj=0 lk=1
-        int3c2e_ip1_101(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, shared_memory); break;
+        LAUNCH_KERNEL(int3c2e_ip1_101); break;
     case 50: // li=0 lj=0 lk=2
-        int3c2e_ip1_002(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, shared_memory); break;
+        LAUNCH_KERNEL(int3c2e_ip1_002); break;
     default: return 0;
     }
     return 1;

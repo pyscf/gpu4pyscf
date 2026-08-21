@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The PySCF Developers. All Rights Reserved.
+ * Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,39 +17,44 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <assert.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
-#define RT2_MAX 9
-#define THREADS 256
-#define L_AUX_MAX 6
+#define RT2_MAX         9
+#define THREADS         256
+#define L_AUX_MAX       6
 
-__device__
-inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
-                      int nst_per_block, int gout_id, int gout_stride)
+template <int RT_SIZE> __device__ inline
+void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
+               int nsq_per_block, int gout_id, int gout_stride)
 {
-    int offsets = l*(l+1)*(l+2)*(l+3)/24;
-    const uint16_t *p1 = c_Rt_idx + offsets - l;
-    double *pout = out + nst_per_block;
-    for (int v = gout_id; v < l; v += gout_stride) {
-        pout[v*nst_per_block] = rz * Rt[v*nst_per_block] + v * Rt[p1[v]*nst_per_block];
-    }
-    pout += l * nst_per_block;
-    p1 += l;
+    int nf2 = (l + 1) * (l + 2) / 2;
+    int nf3 = nf2 * (l + 3) / 3;
+    int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
+    const uint16_t *p1 = c_Rt_idx + offsets;
     const int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
-
-    int n2 = l * (l+1) / 2;
-    for (int i = gout_id; i < n2; i += gout_stride) {
-        pout[i*nst_per_block] = ry * Rt[i*nst_per_block] + tuv_fac[i] * Rt[p1[i]*nst_per_block];
+    double Rt_tmp[RT_SIZE];
+    nf2 -= 1; // Drop the first element in Rt. It is assigned outside
+    nf3 -= 1;
+    for (int n = 0; n < RT_SIZE; ++n) {
+        int i = n * gout_stride + gout_id;
+        if (i >= nf3) break;
+        Rt_tmp[n] = tuv_fac[i] * Rt[p1[i]*nsq_per_block];
+        if (i < l) {
+            Rt_tmp[n] += rz * Rt[i*nsq_per_block];
+        } else if (i < nf2) {
+            Rt_tmp[n] += ry * Rt[(i-l)*nsq_per_block];
+        } else {
+            Rt_tmp[n] += rx * Rt[(i-nf2)*nsq_per_block];
+        }
     }
-    pout += n2 * nst_per_block;
-    p1 += n2;
-    tuv_fac += n2;
-
-    int n3 = n2 * (l+2) / 3;
-    for (int i = gout_id; i < n3; i += gout_stride) {
-        pout[i*nst_per_block] = rx * Rt[i*nst_per_block] + tuv_fac[i] * Rt[p1[i]*nst_per_block];
+    __syncthreads();
+    for (int n = 0; n < RT_SIZE; ++n) {
+        int i = n * gout_stride + gout_id;
+        if (i >= nf3) break;
+        Rt[(i+1)*nsq_per_block] = Rt_tmp[n];
     }
 }
 
@@ -79,277 +84,102 @@ template <int L> __device__ inline
 void _dot_Et(double *out, double *Rt, double ai)
 {
     double aa[L+1];
-    aa[0] = 1 / ai;
+    aa[0] = .5 / ai;
 #pragma unroll
     for (int n = 1; n < L; n++) {
         aa[n] = aa[n-1] * aa[0];
     }
     if constexpr (L == 0) {
-        out[0] += Rt[0];
+        out[0] = Rt[0];
     } else if constexpr (L == 1) {
-        out[0] += Rt[3] * aa[0] * 0.5;
-        out[1] += Rt[2] * aa[0] * 0.5;
-        out[2] += Rt[1] * aa[0] * 0.5;
+        out[0] = Rt[3] * aa[0];
+        out[1] = Rt[2] * aa[0];
+        out[2] = Rt[1] * aa[0];
     } else if constexpr (L == 2) {
-        out[0] += Rt[0] * aa[0] * 0.5;
-        out[0] += Rt[9] * aa[1] * 0.25;
-        out[1] += Rt[8] * aa[1] * 0.25;
-        out[2] += Rt[7] * aa[1] * 0.25;
-        out[3] += Rt[0] * aa[0] * 0.5;
-        out[3] += Rt[5] * aa[1] * 0.25;
-        out[4] += Rt[4] * aa[1] * 0.25;
-        out[5] += Rt[0] * aa[0] * 0.5;
-        out[5] += Rt[2] * aa[1] * 0.25;
+        out[0] = Rt[0] * aa[0] + Rt[9] * aa[1];
+        out[1] = Rt[8] * aa[1];
+        out[2] = Rt[7] * aa[1];
+        out[3] = Rt[0] * aa[0] + Rt[5] * aa[1];
+        out[4] = Rt[4] * aa[1];
+        out[5] = Rt[0] * aa[0] + Rt[2] * aa[1];
     } else if constexpr (L == 3) {
-        out[0] += Rt[10] * aa[1] * 0.75;
-        out[0] += Rt[19] * aa[2] * 0.125;
-        out[1] += Rt[4] * aa[1] * 0.25;
-        out[1] += Rt[18] * aa[2] * 0.125;
-        out[2] += Rt[1] * aa[1] * 0.25;
-        out[2] += Rt[17] * aa[2] * 0.125;
-        out[3] += Rt[10] * aa[1] * 0.25;
-        out[3] += Rt[15] * aa[2] * 0.125;
-        out[4] += Rt[14] * aa[2] * 0.125;
-        out[5] += Rt[10] * aa[1] * 0.25;
-        out[5] += Rt[12] * aa[2] * 0.125;
-        out[6] += Rt[4] * aa[1] * 0.75;
-        out[6] += Rt[9] * aa[2] * 0.125;
-        out[7] += Rt[1] * aa[1] * 0.25;
-        out[7] += Rt[8] * aa[2] * 0.125;
-        out[8] += Rt[4] * aa[1] * 0.25;
-        out[8] += Rt[6] * aa[2] * 0.125;
-        out[9] += Rt[1] * aa[1] * 0.75;
-        out[9] += Rt[3] * aa[2] * 0.125;
+        out[0] = Rt[10] * aa[1] * 3 + Rt[19] * aa[2];
+        out[1] = Rt[4] * aa[1] + Rt[18] * aa[2];
+        out[2] = Rt[1] * aa[1] + Rt[17] * aa[2];
+        out[3] = Rt[10] * aa[1] + Rt[15] * aa[2];
+        out[4] = Rt[14] * aa[2];
+        out[5] = Rt[10] * aa[1] + Rt[12] * aa[2];
+        out[6] = Rt[4] * aa[1] * 3 + Rt[9] * aa[2];
+        out[7] = Rt[1] * aa[1] + Rt[8] * aa[2];
+        out[8] = Rt[4] * aa[1] + Rt[6] * aa[2];
+        out[9] = Rt[1] * aa[1] * 3 + Rt[3] * aa[2];
     } else if constexpr (L == 4) {
-        out[0] += Rt[0] * aa[1] * 0.75;
-        out[0] += Rt[25] * aa[2] * 0.75;
-        out[0] += Rt[34] * aa[3] * 0.0625;
-        out[1] += Rt[19] * aa[2] * 0.375;
-        out[1] += Rt[33] * aa[3] * 0.0625;
-        out[2] += Rt[16] * aa[2] * 0.375;
-        out[2] += Rt[32] * aa[3] * 0.0625;
-        out[3] += Rt[0] * aa[1] * 0.25;
-        out[3] += Rt[9] * aa[2] * 0.125;
-        out[3] += Rt[25] * aa[2] * 0.125;
-        out[3] += Rt[30] * aa[3] * 0.0625;
-        out[4] += Rt[6] * aa[2] * 0.125;
-        out[4] += Rt[29] * aa[3] * 0.0625;
-        out[5] += Rt[0] * aa[1] * 0.25;
-        out[5] += Rt[2] * aa[2] * 0.125;
-        out[5] += Rt[25] * aa[2] * 0.125;
-        out[5] += Rt[27] * aa[3] * 0.0625;
-        out[6] += Rt[19] * aa[2] * 0.375;
-        out[6] += Rt[24] * aa[3] * 0.0625;
-        out[7] += Rt[16] * aa[2] * 0.125;
-        out[7] += Rt[23] * aa[3] * 0.0625;
-        out[8] += Rt[19] * aa[2] * 0.125;
-        out[8] += Rt[21] * aa[3] * 0.0625;
-        out[9] += Rt[16] * aa[2] * 0.375;
-        out[9] += Rt[18] * aa[3] * 0.0625;
-        out[10] += Rt[0] * aa[1] * 0.75;
-        out[10] += Rt[9] * aa[2] * 0.75;
-        out[10] += Rt[14] * aa[3] * 0.0625;
-        out[11] += Rt[6] * aa[2] * 0.375;
-        out[11] += Rt[13] * aa[3] * 0.0625;
-        out[12] += Rt[0] * aa[1] * 0.25;
-        out[12] += Rt[2] * aa[2] * 0.125;
-        out[12] += Rt[9] * aa[2] * 0.125;
-        out[12] += Rt[11] * aa[3] * 0.0625;
-        out[13] += Rt[6] * aa[2] * 0.375;
-        out[13] += Rt[8] * aa[3] * 0.0625;
-        out[14] += Rt[0] * aa[1] * 0.75;
-        out[14] += Rt[2] * aa[2] * 0.75;
-        out[14] += Rt[4] * aa[3] * 0.0625;
+        out[0] = Rt[0] * aa[1] * 3 + Rt[25] * aa[2] * 6 + Rt[34] * aa[3];
+        out[1] = Rt[19] * aa[2] * 3 + Rt[33] * aa[3];
+        out[2] = Rt[16] * aa[2] * 3 + Rt[32] * aa[3];
+        out[3] = Rt[0] * aa[1] + Rt[9] * aa[2] + Rt[25] * aa[2] + Rt[30] * aa[3];
+        out[4] = Rt[6] * aa[2] + Rt[29] * aa[3];
+        out[5] = Rt[0] * aa[1] + Rt[2] * aa[2] + Rt[25] * aa[2] + Rt[27] * aa[3];
+        out[6] = Rt[19] * aa[2] * 3 + Rt[24] * aa[3];
+        out[7] = Rt[16] * aa[2] + Rt[23] * aa[3];
+        out[8] = Rt[19] * aa[2] + Rt[21] * aa[3];
+        out[9] = Rt[16] * aa[2] * 3 + Rt[18] * aa[3];
+        out[10] = Rt[0] * aa[1] * 3 + Rt[9] * aa[2] * 6 + Rt[14] * aa[3];
+        out[11] = Rt[6] * aa[2] * 3 + Rt[13] * aa[3];
+        out[12] = Rt[0] * aa[1] + Rt[2] * aa[2] + Rt[9] * aa[2] + Rt[11] * aa[3];
+        out[13] = Rt[6] * aa[2] * 3 + Rt[8] * aa[3];
+        out[14] = Rt[0] * aa[1] * 3 + Rt[2] * aa[2] * 6 + Rt[4] * aa[3];
     } else if constexpr (L == 5) {
-        out[0] += Rt[21] * aa[2] * 1.875;
-        out[0] += Rt[46] * aa[3] * 0.625;
-        out[0] += Rt[55] * aa[4] * 0.03125;
-        out[1] += Rt[6] * aa[2] * 0.375;
-        out[1] += Rt[40] * aa[3] * 0.375;
-        out[1] += Rt[54] * aa[4] * 0.03125;
-        out[2] += Rt[1] * aa[2] * 0.375;
-        out[2] += Rt[37] * aa[3] * 0.375;
-        out[2] += Rt[53] * aa[4] * 0.03125;
-        out[3] += Rt[21] * aa[2] * 0.375;
-        out[3] += Rt[30] * aa[3] * 0.1875;
-        out[3] += Rt[46] * aa[3] * 0.0625;
-        out[3] += Rt[51] * aa[4] * 0.03125;
-        out[4] += Rt[27] * aa[3] * 0.1875;
-        out[4] += Rt[50] * aa[4] * 0.03125;
-        out[5] += Rt[21] * aa[2] * 0.375;
-        out[5] += Rt[23] * aa[3] * 0.1875;
-        out[5] += Rt[46] * aa[3] * 0.0625;
-        out[5] += Rt[48] * aa[4] * 0.03125;
-        out[6] += Rt[6] * aa[2] * 0.375;
-        out[6] += Rt[15] * aa[3] * 0.0625;
-        out[6] += Rt[40] * aa[3] * 0.1875;
-        out[6] += Rt[45] * aa[4] * 0.03125;
-        out[7] += Rt[1] * aa[2] * 0.125;
-        out[7] += Rt[12] * aa[3] * 0.0625;
-        out[7] += Rt[37] * aa[3] * 0.0625;
-        out[7] += Rt[44] * aa[4] * 0.03125;
-        out[8] += Rt[6] * aa[2] * 0.125;
-        out[8] += Rt[8] * aa[3] * 0.0625;
-        out[8] += Rt[40] * aa[3] * 0.0625;
-        out[8] += Rt[42] * aa[4] * 0.03125;
-        out[9] += Rt[1] * aa[2] * 0.375;
-        out[9] += Rt[3] * aa[3] * 0.0625;
-        out[9] += Rt[37] * aa[3] * 0.1875;
-        out[9] += Rt[39] * aa[4] * 0.03125;
-        out[10] += Rt[21] * aa[2] * 0.375;
-        out[10] += Rt[30] * aa[3] * 0.375;
-        out[10] += Rt[35] * aa[4] * 0.03125;
-        out[11] += Rt[27] * aa[3] * 0.1875;
-        out[11] += Rt[34] * aa[4] * 0.03125;
-        out[12] += Rt[21] * aa[2] * 0.125;
-        out[12] += Rt[23] * aa[3] * 0.0625;
-        out[12] += Rt[30] * aa[3] * 0.0625;
-        out[12] += Rt[32] * aa[4] * 0.03125;
-        out[13] += Rt[27] * aa[3] * 0.1875;
-        out[13] += Rt[29] * aa[4] * 0.03125;
-        out[14] += Rt[21] * aa[2] * 0.375;
-        out[14] += Rt[23] * aa[3] * 0.375;
-        out[14] += Rt[25] * aa[4] * 0.03125;
-        out[15] += Rt[6] * aa[2] * 1.875;
-        out[15] += Rt[15] * aa[3] * 0.625;
-        out[15] += Rt[20] * aa[4] * 0.03125;
-        out[16] += Rt[1] * aa[2] * 0.375;
-        out[16] += Rt[12] * aa[3] * 0.375;
-        out[16] += Rt[19] * aa[4] * 0.03125;
-        out[17] += Rt[6] * aa[2] * 0.375;
-        out[17] += Rt[8] * aa[3] * 0.1875;
-        out[17] += Rt[15] * aa[3] * 0.0625;
-        out[17] += Rt[17] * aa[4] * 0.03125;
-        out[18] += Rt[1] * aa[2] * 0.375;
-        out[18] += Rt[3] * aa[3] * 0.0625;
-        out[18] += Rt[12] * aa[3] * 0.1875;
-        out[18] += Rt[14] * aa[4] * 0.03125;
-        out[19] += Rt[6] * aa[2] * 0.375;
-        out[19] += Rt[8] * aa[3] * 0.375;
-        out[19] += Rt[10] * aa[4] * 0.03125;
-        out[20] += Rt[1] * aa[2] * 1.875;
-        out[20] += Rt[3] * aa[3] * 0.625;
-        out[20] += Rt[5] * aa[4] * 0.03125;
+        out[0] = Rt[21] * aa[2] * 15 + Rt[46] * aa[3] * 10 + Rt[55] * aa[4];
+        out[1] = Rt[6] * aa[2] * 3 + Rt[40] * aa[3] * 6 + Rt[54] * aa[4];
+        out[2] = Rt[1] * aa[2] * 3 + Rt[37] * aa[3] * 6 + Rt[53] * aa[4];
+        out[3] = Rt[21] * aa[2] * 3 + Rt[30] * aa[3] * 3 + Rt[46] * aa[3] + Rt[51] * aa[4];
+        out[4] = Rt[27] * aa[3] * 3 + Rt[50] * aa[4];
+        out[5] = Rt[21] * aa[2] * 3 + Rt[23] * aa[3] * 3 + Rt[46] * aa[3] + Rt[48] * aa[4];
+        out[6] = Rt[6] * aa[2] * 3 + Rt[15] * aa[3] + Rt[40] * aa[3] * 3 + Rt[45] * aa[4];
+        out[7] = Rt[1] * aa[2] + Rt[12] * aa[3] + Rt[37] * aa[3] + Rt[44] * aa[4];
+        out[8] = Rt[6] * aa[2] + Rt[8] * aa[3] + Rt[40] * aa[3] + Rt[42] * aa[4];
+        out[9] = Rt[1] * aa[2] * 3 + Rt[3] * aa[3] + Rt[37] * aa[3] * 3 + Rt[39] * aa[4];
+        out[10] = Rt[21] * aa[2] * 3 + Rt[30] * aa[3] * 6 + Rt[35] * aa[4];
+        out[11] = Rt[27] * aa[3] * 3 + Rt[34] * aa[4];
+        out[12] = Rt[21] * aa[2] + Rt[23] * aa[3] + Rt[30] * aa[3] + Rt[32] * aa[4];
+        out[13] = Rt[27] * aa[3] * 3 + Rt[29] * aa[4];
+        out[14] = Rt[21] * aa[2] * 3 + Rt[23] * aa[3] * 6 + Rt[25] * aa[4];
+        out[15] = Rt[6] * aa[2] * 15 + Rt[15] * aa[3] * 10 + Rt[20] * aa[4];
+        out[16] = Rt[1] * aa[2] * 3 + Rt[12] * aa[3] * 6 + Rt[19] * aa[4];
+        out[17] = Rt[6] * aa[2] * 3 + Rt[8] * aa[3] * 3 + Rt[15] * aa[3] + Rt[17] * aa[4];
+        out[18] = Rt[1] * aa[2] * 3 + Rt[3] * aa[3] + Rt[12] * aa[3] * 3 + Rt[14] * aa[4];
+        out[19] = Rt[6] * aa[2] * 3 + Rt[8] * aa[3] * 6 + Rt[10] * aa[4];
+        out[20] = Rt[1] * aa[2] * 15 + Rt[3] * aa[3] * 10 + Rt[5] * aa[4];
     } else if constexpr (L == 6) {
-        out[0] += Rt[0] * aa[2] * 1.875;
-        out[0] += Rt[49] * aa[3] * 2.8125;
-        out[0] += Rt[74] * aa[4] * 0.46875;
-        out[0] += Rt[83] * aa[5] * 0.015625;
-        out[1] += Rt[34] * aa[3] * 0.9375;
-        out[1] += Rt[68] * aa[4] * 0.3125;
-        out[1] += Rt[82] * aa[5] * 0.015625;
-        out[2] += Rt[29] * aa[3] * 0.9375;
-        out[2] += Rt[65] * aa[4] * 0.3125;
-        out[2] += Rt[81] * aa[5] * 0.015625;
-        out[3] += Rt[0] * aa[2] * 0.375;
-        out[3] += Rt[13] * aa[3] * 0.1875;
-        out[3] += Rt[49] * aa[3] * 0.375;
-        out[3] += Rt[58] * aa[4] * 0.1875;
-        out[3] += Rt[74] * aa[4] * 0.03125;
-        out[3] += Rt[79] * aa[5] * 0.015625;
-        out[4] += Rt[8] * aa[3] * 0.1875;
-        out[4] += Rt[55] * aa[4] * 0.1875;
-        out[4] += Rt[78] * aa[5] * 0.015625;
-        out[5] += Rt[0] * aa[2] * 0.375;
-        out[5] += Rt[2] * aa[3] * 0.1875;
-        out[5] += Rt[49] * aa[3] * 0.375;
-        out[5] += Rt[51] * aa[4] * 0.1875;
-        out[5] += Rt[74] * aa[4] * 0.03125;
-        out[5] += Rt[76] * aa[5] * 0.015625;
-        out[6] += Rt[34] * aa[3] * 0.5625;
-        out[6] += Rt[43] * aa[4] * 0.09375;
-        out[6] += Rt[68] * aa[4] * 0.09375;
-        out[6] += Rt[73] * aa[5] * 0.015625;
-        out[7] += Rt[29] * aa[3] * 0.1875;
-        out[7] += Rt[40] * aa[4] * 0.09375;
-        out[7] += Rt[65] * aa[4] * 0.03125;
-        out[7] += Rt[72] * aa[5] * 0.015625;
-        out[8] += Rt[34] * aa[3] * 0.1875;
-        out[8] += Rt[36] * aa[4] * 0.09375;
-        out[8] += Rt[68] * aa[4] * 0.03125;
-        out[8] += Rt[70] * aa[5] * 0.015625;
-        out[9] += Rt[29] * aa[3] * 0.5625;
-        out[9] += Rt[31] * aa[4] * 0.09375;
-        out[9] += Rt[65] * aa[4] * 0.09375;
-        out[9] += Rt[67] * aa[5] * 0.015625;
-        out[10] += Rt[0] * aa[2] * 0.375;
-        out[10] += Rt[13] * aa[3] * 0.375;
-        out[10] += Rt[22] * aa[4] * 0.03125;
-        out[10] += Rt[49] * aa[3] * 0.1875;
-        out[10] += Rt[58] * aa[4] * 0.1875;
-        out[10] += Rt[63] * aa[5] * 0.015625;
-        out[11] += Rt[8] * aa[3] * 0.1875;
-        out[11] += Rt[19] * aa[4] * 0.03125;
-        out[11] += Rt[55] * aa[4] * 0.09375;
-        out[11] += Rt[62] * aa[5] * 0.015625;
-        out[12] += Rt[0] * aa[2] * 0.125;
-        out[12] += Rt[2] * aa[3] * 0.0625;
-        out[12] += Rt[13] * aa[3] * 0.0625;
-        out[12] += Rt[15] * aa[4] * 0.03125;
-        out[12] += Rt[49] * aa[3] * 0.0625;
-        out[12] += Rt[51] * aa[4] * 0.03125;
-        out[12] += Rt[58] * aa[4] * 0.03125;
-        out[12] += Rt[60] * aa[5] * 0.015625;
-        out[13] += Rt[8] * aa[3] * 0.1875;
-        out[13] += Rt[10] * aa[4] * 0.03125;
-        out[13] += Rt[55] * aa[4] * 0.09375;
-        out[13] += Rt[57] * aa[5] * 0.015625;
-        out[14] += Rt[0] * aa[2] * 0.375;
-        out[14] += Rt[2] * aa[3] * 0.375;
-        out[14] += Rt[4] * aa[4] * 0.03125;
-        out[14] += Rt[49] * aa[3] * 0.1875;
-        out[14] += Rt[51] * aa[4] * 0.1875;
-        out[14] += Rt[53] * aa[5] * 0.015625;
-        out[15] += Rt[34] * aa[3] * 0.9375;
-        out[15] += Rt[43] * aa[4] * 0.3125;
-        out[15] += Rt[48] * aa[5] * 0.015625;
-        out[16] += Rt[29] * aa[3] * 0.1875;
-        out[16] += Rt[40] * aa[4] * 0.1875;
-        out[16] += Rt[47] * aa[5] * 0.015625;
-        out[17] += Rt[34] * aa[3] * 0.1875;
-        out[17] += Rt[36] * aa[4] * 0.09375;
-        out[17] += Rt[43] * aa[4] * 0.03125;
-        out[17] += Rt[45] * aa[5] * 0.015625;
-        out[18] += Rt[29] * aa[3] * 0.1875;
-        out[18] += Rt[31] * aa[4] * 0.03125;
-        out[18] += Rt[40] * aa[4] * 0.09375;
-        out[18] += Rt[42] * aa[5] * 0.015625;
-        out[19] += Rt[34] * aa[3] * 0.1875;
-        out[19] += Rt[36] * aa[4] * 0.1875;
-        out[19] += Rt[38] * aa[5] * 0.015625;
-        out[20] += Rt[29] * aa[3] * 0.9375;
-        out[20] += Rt[31] * aa[4] * 0.3125;
-        out[20] += Rt[33] * aa[5] * 0.015625;
-        out[21] += Rt[0] * aa[2] * 1.875;
-        out[21] += Rt[13] * aa[3] * 2.8125;
-        out[21] += Rt[22] * aa[4] * 0.46875;
-        out[21] += Rt[27] * aa[5] * 0.015625;
-        out[22] += Rt[8] * aa[3] * 0.9375;
-        out[22] += Rt[19] * aa[4] * 0.3125;
-        out[22] += Rt[26] * aa[5] * 0.015625;
-        out[23] += Rt[0] * aa[2] * 0.375;
-        out[23] += Rt[2] * aa[3] * 0.1875;
-        out[23] += Rt[13] * aa[3] * 0.375;
-        out[23] += Rt[15] * aa[4] * 0.1875;
-        out[23] += Rt[22] * aa[4] * 0.03125;
-        out[23] += Rt[24] * aa[5] * 0.015625;
-        out[24] += Rt[8] * aa[3] * 0.5625;
-        out[24] += Rt[10] * aa[4] * 0.09375;
-        out[24] += Rt[19] * aa[4] * 0.09375;
-        out[24] += Rt[21] * aa[5] * 0.015625;
-        out[25] += Rt[0] * aa[2] * 0.375;
-        out[25] += Rt[2] * aa[3] * 0.375;
-        out[25] += Rt[4] * aa[4] * 0.03125;
-        out[25] += Rt[13] * aa[3] * 0.1875;
-        out[25] += Rt[15] * aa[4] * 0.1875;
-        out[25] += Rt[17] * aa[5] * 0.015625;
-        out[26] += Rt[8] * aa[3] * 0.9375;
-        out[26] += Rt[10] * aa[4] * 0.3125;
-        out[26] += Rt[12] * aa[5] * 0.015625;
-        out[27] += Rt[0] * aa[2] * 1.875;
-        out[27] += Rt[2] * aa[3] * 2.8125;
-        out[27] += Rt[4] * aa[4] * 0.46875;
-        out[27] += Rt[6] * aa[5] * 0.015625;
+        out[0] = Rt[0] * aa[2] * 15 + Rt[49] * aa[3] * 45 + Rt[74] * aa[4] * 15 + Rt[83] * aa[5];
+        out[1] = Rt[34] * aa[3] * 15 + Rt[68] * aa[4] * 10 + Rt[82] * aa[5];
+        out[2] = Rt[29] * aa[3] * 15 + Rt[65] * aa[4] * 10 + Rt[81] * aa[5];
+        out[3] = Rt[0] * aa[2] * 3 + Rt[13] * aa[3] * 3 + Rt[49] * aa[3] * 6 + Rt[58] * aa[4] * 6 + Rt[74] * aa[4] + Rt[79] * aa[5];
+        out[4] = Rt[8] * aa[3] * 3 + Rt[55] * aa[4] * 6 + Rt[78] * aa[5];
+        out[5] = Rt[0] * aa[2] * 3 + Rt[2] * aa[3] * 3 + Rt[49] * aa[3] * 6 + Rt[51] * aa[4] * 6 + Rt[74] * aa[4] + Rt[76] * aa[5];
+        out[6] = Rt[34] * aa[3] * 9 + Rt[43] * aa[4] * 3 + Rt[68] * aa[4] * 3 + Rt[73] * aa[5];
+        out[7] = Rt[29] * aa[3] * 3 + Rt[40] * aa[4] * 3 + Rt[65] * aa[4] + Rt[72] * aa[5];
+        out[8] = Rt[34] * aa[3] * 3 + Rt[36] * aa[4] * 3 + Rt[68] * aa[4] + Rt[70] * aa[5];
+        out[9] = Rt[29] * aa[3] * 9 + Rt[31] * aa[4] * 3 + Rt[65] * aa[4] * 3 + Rt[67] * aa[5];
+        out[10] = Rt[0] * aa[2] * 3 + Rt[13] * aa[3] * 6 + Rt[22] * aa[4] + Rt[49] * aa[3] * 3 + Rt[58] * aa[4] * 6 + Rt[63] * aa[5];
+        out[11] = Rt[8] * aa[3] * 3 + Rt[19] * aa[4] + Rt[55] * aa[4] * 3 + Rt[62] * aa[5];
+        out[12] = Rt[0] * aa[2] + Rt[2] * aa[3] + Rt[13] * aa[3] + Rt[15] * aa[4] + Rt[49] * aa[3] + Rt[51] * aa[4] + Rt[58] * aa[4] + Rt[60] * aa[5];
+        out[13] = Rt[8] * aa[3] * 3 + Rt[10] * aa[4] + Rt[55] * aa[4] * 3 + Rt[57] * aa[5];
+        out[14] = Rt[0] * aa[2] * 3 + Rt[2] * aa[3] * 6 + Rt[4] * aa[4] + Rt[49] * aa[3] * 3 + Rt[51] * aa[4] * 6 + Rt[53] * aa[5];
+        out[15] = Rt[34] * aa[3] * 15 + Rt[43] * aa[4] * 10 + Rt[48] * aa[5];
+        out[16] = Rt[29] * aa[3] * 3 + Rt[40] * aa[4] * 6 + Rt[47] * aa[5];
+        out[17] = Rt[34] * aa[3] * 3 + Rt[36] * aa[4] * 3 + Rt[43] * aa[4] + Rt[45] * aa[5];
+        out[18] = Rt[29] * aa[3] * 3 + Rt[31] * aa[4] + Rt[40] * aa[4] * 3 + Rt[42] * aa[5];
+        out[19] = Rt[34] * aa[3] * 3 + Rt[36] * aa[4] * 6 + Rt[38] * aa[5];
+        out[20] = Rt[29] * aa[3] * 15 + Rt[31] * aa[4] * 10 + Rt[33] * aa[5];
+        out[21] = Rt[0] * aa[2] * 15 + Rt[13] * aa[3] * 45 + Rt[22] * aa[4] * 15 + Rt[27] * aa[5];
+        out[22] = Rt[8] * aa[3] * 15 + Rt[19] * aa[4] * 10 + Rt[26] * aa[5];
+        out[23] = Rt[0] * aa[2] * 3 + Rt[2] * aa[3] * 3 + Rt[13] * aa[3] * 6 + Rt[15] * aa[4] * 6 + Rt[22] * aa[4] + Rt[24] * aa[5];
+        out[24] = Rt[8] * aa[3] * 9 + Rt[10] * aa[4] * 3 + Rt[19] * aa[4] * 3 + Rt[21] * aa[5];
+        out[25] = Rt[0] * aa[2] * 3 + Rt[2] * aa[3] * 6 + Rt[4] * aa[4] + Rt[13] * aa[3] * 3 + Rt[15] * aa[4] * 6 + Rt[17] * aa[5];
+        out[26] = Rt[8] * aa[3] * 15 + Rt[10] * aa[4] * 10 + Rt[12] * aa[5];
+        out[27] = Rt[0] * aa[2] * 15 + Rt[2] * aa[3] * 45 + Rt[4] * aa[4] * 15 + Rt[6] * aa[5];
     }
 }
 
@@ -500,8 +330,8 @@ void _dot_aux(double& out, double *Rt, double *auxvec,
     }
 }
 
-template <int LK> __device__ inline
-void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
+template <int LK, int RT_SIZE> __device__ inline
+void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
                                int *shl_pair_offsets, uint32_t *bas_ij_idx,
                                int *pair_ij_loc, int *nsp_lookup
                                #ifdef USE_SYCL
@@ -581,7 +411,6 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     if (thread_id == 0) {
         order = lij + lk;
         nf3ij = (lij+1)*(lij+2)*(lij+3) / 6;
-        nf3ijkl = (order+1)*(order+2)*(order+3) / 6;
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
         int rk_ptr = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         rk[0] = env[rk_ptr+0];
@@ -594,13 +423,10 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
 
-    double *gamma_inc = phase + nf3k + sp_id;
-    double *Rt_buf = phase + nf3k + (order+1) * nsp_per_block;
+    double *gamma_inc = phase + sp_id;
+    double *Rt = phase + (order+1) * nsp_per_block + sp_id;
     const uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     const int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
-    if (thread_id < nf3k) {
-        phase[thread_id] = efg_phase[thread_id];
-    }
     for (int kp = 0; kp < kprim; ++kp) {
         __syncthreads();
         if (thread_id == 0) {
@@ -630,14 +456,6 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
             double xij = (ai * ri[0] + aj * rj[0]) / aij;
             double yij = (ai * ri[1] + aj * rj[1]) / aij;
             double zij = (ai * ri[2] + aj * rj[2]) / aij;
-            double *Rt, *buf;
-            if (order % 2 == 0) {
-                Rt = Rt_buf + sp_id;
-                buf = Rt + nf3ijkl * nsp_per_block;
-            } else {
-                buf = Rt_buf + sp_id;
-                Rt = buf + nf3ijkl * nsp_per_block;
-            }
             double xpq = xij - rk[0];
             double ypq = yij - rk[1];
             double zpq = zij - rk[2];
@@ -650,43 +468,67 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
                 }
                 boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, 0, nsp_per_block);
                 Rt[0] = gamma_inc[order*nsp_per_block];
+                if (order >= 1) {
+                    double _Rt_0 = Rt[0];
+                    Rt[1*nsp_per_block] = zpq * _Rt_0;
+                    Rt[2*nsp_per_block] = ypq * _Rt_0;
+                    Rt[3*nsp_per_block] = xpq * _Rt_0;
+                    Rt[0] = gamma_inc[(order-1)*nsp_per_block];
+                }
+                if (order >= 2) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsp_per_block];
+                    double _Rt_2 = Rt[2*nsp_per_block];
+                    double _Rt_3 = Rt[3*nsp_per_block];
+                    Rt[1*nsp_per_block] = zpq * _Rt_0;
+                    Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3*nsp_per_block] = ypq * _Rt_0;
+                    Rt[4*nsp_per_block] = ypq * _Rt_1;
+                    Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
+                    Rt[6*nsp_per_block] = xpq * _Rt_0;
+                    Rt[7*nsp_per_block] = xpq * _Rt_1;
+                    Rt[8*nsp_per_block] = xpq * _Rt_2;
+                    Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
+                    Rt[0] = gamma_inc[(order-2)*nsp_per_block];
+                }
+                if (order >= 3) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsp_per_block];
+                    double _Rt_2 = Rt[2*nsp_per_block];
+                    double _Rt_3 = Rt[3*nsp_per_block];
+                    double _Rt_4 = Rt[4*nsp_per_block];
+                    double _Rt_5 = Rt[5*nsp_per_block];
+                    double _Rt_6 = Rt[6*nsp_per_block];
+                    double _Rt_7 = Rt[7*nsp_per_block];
+                    double _Rt_8 = Rt[8*nsp_per_block];
+                    double _Rt_9 = Rt[9*nsp_per_block];
+                    Rt[1 *nsp_per_block] = zpq * _Rt_0;
+                    Rt[2 *nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3 *nsp_per_block] = zpq * _Rt_2 + _Rt_1 * 2;
+                    Rt[4 *nsp_per_block] = ypq * _Rt_0;
+                    Rt[5 *nsp_per_block] = ypq * _Rt_1;
+                    Rt[6 *nsp_per_block] = ypq * _Rt_2;
+                    Rt[7 *nsp_per_block] = ypq * _Rt_3 + _Rt_0;
+                    Rt[8 *nsp_per_block] = ypq * _Rt_4 + _Rt_1;
+                    Rt[9 *nsp_per_block] = ypq * _Rt_5 + _Rt_3 * 2;
+                    Rt[10*nsp_per_block] = xpq * _Rt_0;
+                    Rt[11*nsp_per_block] = xpq * _Rt_1;
+                    Rt[12*nsp_per_block] = xpq * _Rt_2;
+                    Rt[13*nsp_per_block] = xpq * _Rt_3;
+                    Rt[14*nsp_per_block] = xpq * _Rt_4;
+                    Rt[15*nsp_per_block] = xpq * _Rt_5;
+                    Rt[16*nsp_per_block] = xpq * _Rt_6 + _Rt_0;
+                    Rt[17*nsp_per_block] = xpq * _Rt_7 + _Rt_1;
+                    Rt[18*nsp_per_block] = xpq * _Rt_8 + _Rt_3;
+                    Rt[19*nsp_per_block] = xpq * _Rt_9 + _Rt_6 * 2;
+                    Rt[0] = gamma_inc[(order-3)*nsp_per_block];
+                }
             }
-            for (int n = 1; n <= order; ++n) {
+            for (int n = 4; n <= order; ++n) {
                 __syncthreads();
-                // swap input and output
-                double *tmp = buf;
-                buf = Rt;
-                Rt = tmp;
-                if (n == 1) {
-                    if (Rt_id == 0) {
-                        double _Rt_0 = buf[0];
-                        Rt[1*nsp_per_block] = zpq * _Rt_0;
-                        Rt[2*nsp_per_block] = ypq * _Rt_0;
-                        Rt[3*nsp_per_block] = xpq * _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
-                } else if (n == 2) {
-                    if (Rt_id == 0) {
-                        double _Rt_0 = buf[0];
-                        double _Rt_1 = buf[1*nsp_per_block];
-                        double _Rt_2 = buf[2*nsp_per_block];
-                        double _Rt_3 = buf[3*nsp_per_block];
-                        Rt[1*nsp_per_block] = zpq * _Rt_0;
-                        Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
-                        Rt[3*nsp_per_block] = ypq * _Rt_0;
-                        Rt[4*nsp_per_block] = ypq * _Rt_1;
-                        Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
-                        Rt[6*nsp_per_block] = xpq * _Rt_0;
-                        Rt[7*nsp_per_block] = xpq * _Rt_1;
-                        Rt[8*nsp_per_block] = xpq * _Rt_2;
-                        Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
-                } else {
-                    iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
-                    if (Rt_id == 0) {
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
+                iter_Rt_n<RT_SIZE>(Rt, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                if (Rt_id == 0) {
+                    Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                 }
             }
             __syncthreads();
@@ -694,31 +536,29 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
             if (pair_ij < shl_pair1) {
                 int ij_loc0 = pair_ij_loc[pair_ij];
                 double *dm = jk.dm + ij_loc0;
-                Rt = Rt_buf;
                 for (int i = Rt_id; i < nf3ij; i += Rt_stride) {
                     double dm_ij = dm[i];
 #pragma unroll
                     for (int k = 0; k < nf3k; k++) {
                         int off = k * nf3ij;
-                        double s = Rt[sp_id+p1_ij[off+i]*nsp_per_block];
-                        vj_xyz[k] += phase[k] * s * dm_ij;
+                        double s = Rt[p1_ij[off+i]*nsp_per_block];
+                        vj_xyz[k] += s * dm_ij;
                     }
                 }
             }
         }
+#pragma unroll
+        for (int k = 0; k < nf3k; k++) {
+            vj_xyz[k] *= efg_phase[k];
+        }
 
         __syncthreads();
         double vj_aux[nfk];
-#pragma unroll
-        for (int n = 0; n < nfk; ++n) {
-            vj_aux[n] = 0;
-        }
         _dot_Et<LK>(vj_aux, vj_xyz, ak);
         int *ao_loc = envs.ao_loc;
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
         int lane = thread_id % warpSize;
         int wid  = thread_id / warpSize;
-        double *shared = phase + nf3k;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
             double val = vj_aux[k];
@@ -726,12 +566,12 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
                 val += __shfl_down_sync(0xffffffff, val, offset);
             }
             if (lane == 0) {
-                shared[wid] = val;
+                phase[wid] = val;
             }
             __syncthreads();
 
             if (thread_id < 8) {
-                val = shared[lane];
+                val = phase[lane];
             }
             for (int offset = 4; offset > 0; offset >>= 1) {
                 val += __shfl_down_sync(0xff, val, offset);
@@ -757,25 +597,25 @@ void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
     int ksh = item.get_group_range(1) - item.get_group(1) - 1 + envs.nbas;
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unrolled_contract_int3c2e<0>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
-    case 1: unrolled_contract_int3c2e<1>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
-    case 2: unrolled_contract_int3c2e<2>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
-    case 3: unrolled_contract_int3c2e<3>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
-    case 4: unrolled_contract_int3c2e<4>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
-    case 5: unrolled_contract_int3c2e<5>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
-    case 6: unrolled_contract_int3c2e<6>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
+    case 0: unrolled_contract_int3c2e<0,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
+    case 1: unrolled_contract_int3c2e<1,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
+    case 2: unrolled_contract_int3c2e<2,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
+    case 3: unrolled_contract_int3c2e<3,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
+    case 4: unrolled_contract_int3c2e<4,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
+    case 5: unrolled_contract_int3c2e<5,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
+    case 6: unrolled_contract_int3c2e<6,30>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
     }
     #else
     int ksh = gridDim.x - blockIdx.x - 1 + envs.nbas;
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unrolled_contract_int3c2e<0>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 1: unrolled_contract_int3c2e<1>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 2: unrolled_contract_int3c2e<2>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 3: unrolled_contract_int3c2e<3>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 4: unrolled_contract_int3c2e<4>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 5: unrolled_contract_int3c2e<5>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
-    case 6: unrolled_contract_int3c2e<6>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 0: unrolled_contract_int3c2e<0,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 1: unrolled_contract_int3c2e<1,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 2: unrolled_contract_int3c2e<2,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 3: unrolled_contract_int3c2e<3,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 4: unrolled_contract_int3c2e<4,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 5: unrolled_contract_int3c2e<5,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 6: unrolled_contract_int3c2e<6,30>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
     }
     #endif
 }
@@ -783,15 +623,15 @@ void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
 // IJ_SIZE bounds the number of (Rt_id-strided) ij Hermite components handled
 // by a single thread; picked per LK to match the nsp_per_block/Rt_stride
 // combinations produced by the host-side sizing formula in j_engine_3c2e.py.
-template <int LK, int IJ_SIZE> __device__ inline
-void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
-                              int *shl_pair_offsets, int *ksh_offsets,
-                              uint32_t *bas_ij_idx, int *pair_ij_loc,
-                              int *aux_loc, int *nsp_lookup
-                              #ifdef USE_SYCL
-                              , sycl::nd_item<2> &item, char *shm_mem
-                              #endif
-                              )
+template <int LK, int IJ_SIZE, int RT_SIZE> __device__ inline
+void unroll_contract_auxvec(RysIntEnvVars& envs, JKMatrix& jk,
+                            int *shl_pair_offsets, int *ksh_offsets,
+                            uint32_t *bas_ij_idx, int *pair_ij_loc,
+                            int *aux_loc, int *nsp_lookup
+                            #ifdef USE_SYCL
+                            , sycl::nd_item<2> &item, char *shm_mem
+                            #endif
+                            )
 {
     #ifdef USE_SYCL
     int threadIdx_x = item.get_local_id(1);
@@ -810,7 +650,7 @@ void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
     };
 
     auto thread_block = item.get_group();
-    double *auxvec_cache = reinterpret_cast<double*>(shm_mem);
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
     auto &sv = *sycl::ext::oneapi::group_local_memory_for_overwrite<SharedVars>(thread_block);
     int &shl_pair0 = sv.shl_pair0;
     int &shl_pair1 = sv.shl_pair1;
@@ -832,7 +672,7 @@ void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
     __shared__ int shl_pair0, shl_pair1, ksh0, ksh1;
     __shared__ int order, nf3ij, nf3ijkl;
     __shared__ int nsp_per_block, Rt_stride;
-    extern __shared__ double auxvec_cache[];
+    extern __shared__ double shared_memory[];
     #endif
     constexpr int lk = LK;
     constexpr int nfk = (lk + 1) * (lk + 2) / 2;
@@ -858,7 +698,6 @@ void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
     if (thread_id == 0) {
         order = lij + lk;
         nf3ij = (lij+1)*(lij+2)*(lij+3) / 6;
-        nf3ijkl = (order+1)*(order+2)*(order+3) / 6;
         nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
         Rt_stride = blockDim_x / nsp_per_block;
     }
@@ -866,8 +705,9 @@ void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
 
-    double *gamma_inc = auxvec_cache + nf3k + sp_id;
-    double *Rt_buf = auxvec_cache + nf3k + (order+1) * nsp_per_block;
+    double *gamma_inc = shared_memory + sp_id;
+    double *auxvec_cache = shared_memory + (order+1) * nsp_per_block;
+    double *Rt = auxvec_cache + nf3k + sp_id;
     const uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     const int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     double *auxvec = jk.dm;
@@ -899,7 +739,8 @@ void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
             __syncthreads();
             int k_loc0 = aux_loc[ksh - envs.nbas];
             if (thread_id < nf3k) {
-                auxvec_cache[thread_id] = efg_phase[thread_id] * auxvec[k_loc0+thread_id];
+                auxvec_cache[thread_id] = efg_phase[thread_id] *
+                    auxvec[k_loc0+thread_id];
             }
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             double xpq = xij - rk[0];
@@ -909,14 +750,6 @@ void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             double ak = env[expk];
             double theta = aij * ak / (aij + ak);
-            double *Rt, *buf;
-            if (order % 2 == 0) {
-                Rt = Rt_buf + sp_id;
-                buf = Rt + nf3ijkl * nsp_per_block;
-            } else {
-                buf = Rt_buf + sp_id;
-                Rt = buf + nf3ijkl * nsp_per_block;
-            }
             if (Rt_id == 0) {
                 // auxvec is already scaled by the aux contraction coefficient
                 // via the host-side Et_dot_auxvec pre-processing step, so only
@@ -927,53 +760,76 @@ void unrolled_contract_auxvec(RysIntEnvVars envs, JKMatrix jk,
                 }
                 boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, 0, nsp_per_block);
                 Rt[0] = gamma_inc[order*nsp_per_block];
+                if (order >= 1) {
+                    double _Rt_0 = Rt[0];
+                    Rt[1*nsp_per_block] = zpq * _Rt_0;
+                    Rt[2*nsp_per_block] = ypq * _Rt_0;
+                    Rt[3*nsp_per_block] = xpq * _Rt_0;
+                    Rt[0] = gamma_inc[(order-1)*nsp_per_block];
+                }
+                if (order >= 2) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsp_per_block];
+                    double _Rt_2 = Rt[2*nsp_per_block];
+                    double _Rt_3 = Rt[3*nsp_per_block];
+                    Rt[1*nsp_per_block] = zpq * _Rt_0;
+                    Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3*nsp_per_block] = ypq * _Rt_0;
+                    Rt[4*nsp_per_block] = ypq * _Rt_1;
+                    Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
+                    Rt[6*nsp_per_block] = xpq * _Rt_0;
+                    Rt[7*nsp_per_block] = xpq * _Rt_1;
+                    Rt[8*nsp_per_block] = xpq * _Rt_2;
+                    Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
+                    Rt[0] = gamma_inc[(order-2)*nsp_per_block];
+                }
+                if (order >= 3) {
+                    double _Rt_0 = Rt[0];
+                    double _Rt_1 = Rt[1*nsp_per_block];
+                    double _Rt_2 = Rt[2*nsp_per_block];
+                    double _Rt_3 = Rt[3*nsp_per_block];
+                    double _Rt_4 = Rt[4*nsp_per_block];
+                    double _Rt_5 = Rt[5*nsp_per_block];
+                    double _Rt_6 = Rt[6*nsp_per_block];
+                    double _Rt_7 = Rt[7*nsp_per_block];
+                    double _Rt_8 = Rt[8*nsp_per_block];
+                    double _Rt_9 = Rt[9*nsp_per_block];
+                    Rt[1 *nsp_per_block] = zpq * _Rt_0;
+                    Rt[2 *nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                    Rt[3 *nsp_per_block] = zpq * _Rt_2 + _Rt_1 * 2;
+                    Rt[4 *nsp_per_block] = ypq * _Rt_0;
+                    Rt[5 *nsp_per_block] = ypq * _Rt_1;
+                    Rt[6 *nsp_per_block] = ypq * _Rt_2;
+                    Rt[7 *nsp_per_block] = ypq * _Rt_3 + _Rt_0;
+                    Rt[8 *nsp_per_block] = ypq * _Rt_4 + _Rt_1;
+                    Rt[9 *nsp_per_block] = ypq * _Rt_5 + _Rt_3 * 2;
+                    Rt[10*nsp_per_block] = xpq * _Rt_0;
+                    Rt[11*nsp_per_block] = xpq * _Rt_1;
+                    Rt[12*nsp_per_block] = xpq * _Rt_2;
+                    Rt[13*nsp_per_block] = xpq * _Rt_3;
+                    Rt[14*nsp_per_block] = xpq * _Rt_4;
+                    Rt[15*nsp_per_block] = xpq * _Rt_5;
+                    Rt[16*nsp_per_block] = xpq * _Rt_6 + _Rt_0;
+                    Rt[17*nsp_per_block] = xpq * _Rt_7 + _Rt_1;
+                    Rt[18*nsp_per_block] = xpq * _Rt_8 + _Rt_3;
+                    Rt[19*nsp_per_block] = xpq * _Rt_9 + _Rt_6 * 2;
+                    Rt[0] = gamma_inc[(order-3)*nsp_per_block];
+                }
             }
-            for (int n = 1; n <= order; ++n) {
+            for (int n = 4; n <= order; ++n) {
                 __syncthreads();
-                // swap input and output
-                double *tmp = buf;
-                buf = Rt;
-                Rt = tmp;
-                if (n == 1) {
-                    if (Rt_id == 0) {
-                        double _Rt_0 = buf[0];
-                        Rt[1*nsp_per_block] = zpq * _Rt_0;
-                        Rt[2*nsp_per_block] = ypq * _Rt_0;
-                        Rt[3*nsp_per_block] = xpq * _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
-                } else if (n == 2) {
-                    if (Rt_id == 0) {
-                        double _Rt_0 = buf[0];
-                        double _Rt_1 = buf[1*nsp_per_block];
-                        double _Rt_2 = buf[2*nsp_per_block];
-                        double _Rt_3 = buf[3*nsp_per_block];
-                        Rt[1*nsp_per_block] = zpq * _Rt_0;
-                        Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
-                        Rt[3*nsp_per_block] = ypq * _Rt_0;
-                        Rt[4*nsp_per_block] = ypq * _Rt_1;
-                        Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
-                        Rt[6*nsp_per_block] = xpq * _Rt_0;
-                        Rt[7*nsp_per_block] = xpq * _Rt_1;
-                        Rt[8*nsp_per_block] = xpq * _Rt_2;
-                        Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
-                } else {
-                    iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
-                    if (Rt_id == 0) {
-                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
-                    }
+                iter_Rt_n<RT_SIZE>(Rt, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                if (Rt_id == 0) {
+                    Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                 }
             }
             __syncthreads();
 
             if (pair_ij < shl_pair1) {
-                double *Rt_final = Rt_buf + sp_id;
 #pragma unroll
                 for (int n = 0, i = Rt_id; n < IJ_SIZE; ++n, i += Rt_stride) {
                     if (i >= nf3ij) break;
-                    _dot_aux<LK>(vj_xyz[n], Rt_final, auxvec_cache, p1_ij, nf3ij, i,
+                    _dot_aux<LK>(vj_xyz[n], Rt, auxvec_cache, p1_ij, nf3ij, i,
                                  nsp_per_block);
                 }
             }
@@ -1005,26 +861,26 @@ void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
     int ksh = ksh_offsets[ksh_block_id];
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unrolled_contract_auxvec<0,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
-    case 1: unrolled_contract_auxvec<1,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
-    case 2: unrolled_contract_auxvec<2,15>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
-    case 3: unrolled_contract_auxvec<3,11>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
-    case 4: unrolled_contract_auxvec<4, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
-    case 5: unrolled_contract_auxvec<5, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
-    case 6: unrolled_contract_auxvec<6, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 0: unroll_contract_auxvec<0,35,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 1: unroll_contract_auxvec<1,21,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 2: unroll_contract_auxvec<2,15,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 3: unroll_contract_auxvec<3,11,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 4: unroll_contract_auxvec<4, 8,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 5: unroll_contract_auxvec<5, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
+    case 6: unroll_contract_auxvec<6, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, item, shm_mem); break;
     }
     #else
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
     int ksh = ksh_offsets[ksh_block_id];
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unrolled_contract_auxvec<0,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 1: unrolled_contract_auxvec<1,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 2: unrolled_contract_auxvec<2,15>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 3: unrolled_contract_auxvec<3,11>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 4: unrolled_contract_auxvec<4, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 5: unrolled_contract_auxvec<5, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
-    case 6: unrolled_contract_auxvec<6, 8>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 0: unroll_contract_auxvec<0,35,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 1: unroll_contract_auxvec<1,21,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 2: unroll_contract_auxvec<2,15,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 3: unroll_contract_auxvec<3,11,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 4: unroll_contract_auxvec<4, 8,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 5: unroll_contract_auxvec<5, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 6: unroll_contract_auxvec<6, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
     }
     #endif
 }
@@ -1072,6 +928,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
                             uint32_t *bas_ij_idx, int *pair_ij_loc, int *aux_loc,
                             int *nsp_lookup, double omega)
 {
+    assert(n_dm == 1);
     JKMatrix jk = {vj, NULL, auxvec, n_dm, 0, omega};
     #ifdef USE_SYCL
     sycl::range<2> threads(1, THREADS);

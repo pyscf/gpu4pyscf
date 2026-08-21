@@ -68,7 +68,8 @@ __device__ static
 void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                     int pair_ij, int ish, int jsh,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
+                    int *swap,
+                    RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -91,8 +92,6 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
     uint32_t bas_ij = ish * nbas + jsh;
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -138,7 +137,8 @@ __device__ static
 void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                      int pair_ij, int ish, int jsh,
                      float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                     RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
+                     int *swap,
+                     RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -162,8 +162,6 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float *dm_cond = bounds.dm_cond;
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -211,7 +209,8 @@ __device__ static
 void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                     int pair_ij, int ish, int jsh,
                     float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                    RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
+                    int *swap,
+                    RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -235,8 +234,6 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float *dm_cond = bounds.dm_cond;
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -278,7 +275,8 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                        int pair_ij, int ish, int jsh,
                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                       RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
+                       int *swap,
+                       RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -329,8 +327,6 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
     uint32_t bas_ij = ish * nbas + jsh;
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -407,7 +403,8 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         int pair_ij, int ish, int jsh,
                         float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                        RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
+                        int *swap,
+                        RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -459,8 +456,6 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -540,7 +535,8 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                        int pair_ij, int ish, int jsh,
                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                       RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
+                       int *swap,
+                       RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -592,8 +588,6 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -667,7 +661,8 @@ __device__ static
 void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                            int pair_ij, int ish, int jsh,
                            float *q_cond_ij, float *q_cond_kl, float dm_penalty,
-                           RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
+                           int *swap,
+                           RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -690,8 +685,6 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
     float d_ij = dm_cond[ish * nbas + jsh];
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -740,7 +733,8 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                               int pair_ij, int ish, int jsh,
                               float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                               float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                              RysIntEnvVars &envs, BoundsInfo &bounds, double *shared_memory)
+                              int *swap,
+                              RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -797,8 +791,6 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -878,7 +870,8 @@ __device__
 static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                             int pair_ij, int ish, int jsh,
                             float *q_cond_ij, float *q_cond_kl,
-                            JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds, double *shared_memory)
+                            int *swap,
+                            JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -904,8 +897,6 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float d_ij = dm_cond[bas_ij];
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
@@ -951,7 +942,8 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                                int pair_ij, int ish, int jsh,
                                float *q_cond_ij, float *q_cond_kl,
                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                               JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds, double *shared_memory)
+                               int *swap,
+                               JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -1005,8 +997,6 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float theta_ij = omega2 * aij / (aij + omega2);
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
-
-    int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
