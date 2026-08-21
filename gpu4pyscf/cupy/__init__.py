@@ -263,6 +263,28 @@ else:
     cupy_fake.asarray = dpnp.asarray
     cupy_fake.array   = dpnp.array
 
+    # cupy.add.at — dpnp's ufuncs have no .at (unbuffered scatter-add with
+    # duplicate-index accumulation). Host round-trip keeps np.add.at
+    # semantics exactly; call sites (hessian, sem) use natm-scale arrays.
+    class _AddWithAt:
+        def __call__(self, *args, **kwargs):
+            return dpnp.add(*args, **kwargs)
+
+        def __getattr__(self, attr):
+            return getattr(dpnp.add, attr)
+
+        @staticmethod
+        def at(a, indices, b):
+            def _host(x):
+                if isinstance(x, tuple):
+                    return tuple(_host(i) for i in x)
+                return dpnp.asnumpy(x) if isinstance(x, dpnp.ndarray) else x
+            host = dpnp.asnumpy(a)
+            np.add.at(host, _host(indices), _host(b))
+            a[...] = host
+
+    cupy_fake.add = _AddWithAt()
+
     # =================================================================
     # .get() / .set() — CuPy-style host <-> device transfer
     # =================================================================
