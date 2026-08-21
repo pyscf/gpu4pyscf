@@ -30,6 +30,9 @@ template <int RT_SIZE> __device__ inline
 void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
                int nsq_per_block, int gout_id, int gout_stride)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int nf2 = (l + 1) * (l + 2) / 2;
     int nf3 = nf2 * (l + 3) / 3;
     int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
@@ -893,7 +896,8 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
                         int *shl_pair_offsets, uint32_t *bas_ij_idx,
                         int *pair_ij_loc, int *nsp_lookup, double omega)
 {
-    JKMatrix jk = {vj, NULL, dm, 1, 0, omega};
+    assert(n_dm == 1);
+    JKMatrix jk = {vj, NULL, dm, n_dm, 0, omega};
     #ifdef USE_SYCL
     sycl::range<2> threads(1, THREADS);
     sycl::range<2> blocks(nbatches_shl_pair, nksh);

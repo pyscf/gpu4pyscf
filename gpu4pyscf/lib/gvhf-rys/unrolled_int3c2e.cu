@@ -27,6 +27,9 @@
 __device__ inline
 void int3c2e_000(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -114,6 +117,9 @@ void int3c2e_000(KERNEL_ARGS)
 __device__ inline
 void int3c2e_100(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -212,6 +218,9 @@ void int3c2e_100(KERNEL_ARGS)
 __device__ inline
 void int3c2e_110(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -326,6 +335,9 @@ void int3c2e_110(KERNEL_ARGS)
 __device__ inline
 void int3c2e_200(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -447,6 +459,9 @@ void int3c2e_200(KERNEL_ARGS)
 __device__ inline
 void int3c2e_210(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -612,6 +627,9 @@ void int3c2e_210(KERNEL_ARGS)
 __device__ inline
 void int3c2e_220(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     constexpr int nst_per_block = 128;
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;
@@ -916,6 +934,9 @@ void int3c2e_220(KERNEL_ARGS)
 __device__ inline
 void int3c2e_001(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -1014,6 +1035,9 @@ void int3c2e_001(KERNEL_ARGS)
 __device__ inline
 void int3c2e_101(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -1129,6 +1153,9 @@ void int3c2e_101(KERNEL_ARGS)
 __device__ inline
 void int3c2e_111(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -1281,6 +1308,9 @@ void int3c2e_111(KERNEL_ARGS)
 __device__ inline
 void int3c2e_201(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -1428,6 +1458,9 @@ void int3c2e_201(KERNEL_ARGS)
 __device__ inline
 void int3c2e_211(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     constexpr int nst_per_block = 64;
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
@@ -1737,6 +1770,9 @@ void int3c2e_211(KERNEL_ARGS)
 __device__ inline
 void int3c2e_002(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -1842,6 +1878,9 @@ void int3c2e_002(KERNEL_ARGS)
 __device__ inline
 void int3c2e_102(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     int st_id = thread_id;
     constexpr int nst_per_block = THREADS;
     int nbas = envs.nbas;
@@ -1973,6 +2012,9 @@ void int3c2e_102(KERNEL_ARGS)
 __device__ inline
 void int3c2e_112(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     constexpr int nst_per_block = 64;
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
@@ -2220,6 +2262,9 @@ void int3c2e_112(KERNEL_ARGS)
 __device__ inline
 void int3c2e_202(KERNEL_ARGS)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     constexpr int nst_per_block = 128;
     int st_id = thread_id % 128;
     int gout_id = thread_id / 128;

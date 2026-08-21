@@ -166,9 +166,16 @@ void d_t_kernel(double *out, size_t out_stride,
                 double *cderi, int *pair_idx, int npairs, int nao,
                 int aux0, int aux1, int fill_triu)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int bx = item.get_group(1);
+    int by = item.get_group(0);
+    int thread_id = item.get_local_id(1);
+#else
     int bx = blockIdx.x;
     int by = blockIdx.y;
     int thread_id = threadIdx.x;
+#endif
     int threads = STRIDE * CBLKSIZE;
     int tx = thread_id % CBLKSIZE;
     int ty = thread_id / CBLKSIZE;
@@ -178,7 +185,12 @@ void d_t_kernel(double *out, size_t out_stride,
     size_t Npairs = npairs;
     size_t Nao = nao;
 
+#ifdef USE_SYCL
+    using buf_t = double[RBLKSIZE][CBLKSIZE+1];
+    buf_t& buf = *sycl::ext::oneapi::group_local_memory_for_overwrite<buf_t>(item.get_group());
+#else
     __shared__ double buf[RBLKSIZE][CBLKSIZE+1];
+#endif
     if (pair_start+tx < npairs) {
         for (int k = ty; k < min(RBLKSIZE, daux-aux_start); k += STRIDE) {
             buf[k][tx] = cderi[(aux_start+k)*Npairs+pair_start+tx];
@@ -207,9 +219,16 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
                   double2 *cderi, int *pair_idx, int npairs, int nao,
                   int aux0, int aux1)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int bx = item.get_group(1);
+    int by = item.get_group(0);
+    int thread_id = item.get_local_id(1);
+#else
     int bx = blockIdx.x;
     int by = blockIdx.y;
     int thread_id = threadIdx.x;
+#endif
     int threads = STRIDE * CBLKSIZE;
     int tx = thread_id % CBLKSIZE;
     int ty = thread_id / CBLKSIZE;
@@ -219,7 +238,12 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
     size_t Npairs = npairs;
     size_t Nao = nao;
 
+#ifdef USE_SYCL
+    using zbuf_t = double2[RBLKSIZE][CBLKSIZE+1];
+    zbuf_t& buf = *sycl::ext::oneapi::group_local_memory_for_overwrite<zbuf_t>(item.get_group());
+#else
     __shared__ double2 buf[RBLKSIZE][CBLKSIZE+1];
+#endif
     if (pair_start+tx < npairs) {
         for (int k = ty; k < min(RBLKSIZE, daux-aux_start); k += STRIDE) {
             buf[k][tx] = cderi[(aux_start+k)*Npairs+pair_start+tx];
@@ -348,6 +372,15 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
                              double *cderi, int *pair_idx, int npairs, int nao,
                              int aux0, int aux1, int fill_triu, int on_host)
 {
+#ifdef USE_SYCL
+    // Host USM allocations are directly device-accessible; no address mapping.
+    double *eri_gpu = cderi;
+    sycl::range<2> threads(1, CBLKSIZE * STRIDE);
+    sycl::range<2> blocks((aux1-aux0+RBLKSIZE-1)/RBLKSIZE, (npairs+CBLKSIZE-1)/CBLKSIZE);
+    stream.parallel_for<class _d_t_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      d_t_kernel(out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1, fill_triu);
+    });
+#else
     double *eri_gpu = cderi;
     if (on_host) {
         cudaError_t err = cudaHostGetDevicePointer(&eri_gpu, cderi, 0);
@@ -365,6 +398,7 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -372,6 +406,15 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
                                double2 *cderi, int *pair_idx, int npairs, int nao,
                                int aux0, int aux1, int fill_triu, int on_host)
 {
+#ifdef USE_SYCL
+    // Host USM allocations are directly device-accessible; no address mapping.
+    double2 *eri_gpu = cderi;
+    sycl::range<2> threads(1, CBLKSIZE * STRIDE);
+    sycl::range<2> blocks((aux1-aux0+RBLKSIZE-1)/RBLKSIZE, (npairs+CBLKSIZE-1)/CBLKSIZE);
+    stream.parallel_for<class _z_d_t_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      z_d_t_kernel(out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1);
+    });
+#else
     double2 *eri_gpu = cderi;
     if (on_host) {
         cudaError_t err = cudaHostGetDevicePointer(&eri_gpu, cderi, 0);
@@ -389,6 +432,7 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

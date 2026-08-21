@@ -454,7 +454,7 @@ while (1) {
                     if (task_id >= ntasks) {
                         continue;
                     }
-                    GXYZOffset goff = c_gxyz_offset[gout_id];
+                    GXYZOffset goff = gxyz_offsets[gout_id];
                     int *addr_i = idx_i + goff.ioff*3;
                     int *addr_j = idx_j + goff.joff*3;
                     int *addr_k = idx_k + goff.koff*3;
@@ -483,7 +483,7 @@ while (1) {
         __syncthreads();
 
         if (task_id < ntasks) {
-            GXYZOffset goff = c_gxyz_offset[gout_id];
+            GXYZOffset goff = gxyz_offsets[gout_id];
             int ioff = goff.ioff;
             int joff = goff.joff;
             int koff = goff.koff;

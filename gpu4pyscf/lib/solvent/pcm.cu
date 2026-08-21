@@ -411,7 +411,22 @@ static void _pcm_left_multiply_dS_one_atom(double* __restrict__ output, const do
                                            const double* __restrict__ coords, const double* __restrict__ charge_exp,
                                            const int n, const int g0, const int g1)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i = static_cast<int>( item.get_global_id(1) );
+    const int threadIdx_x = item.get_local_id(1);
+    const int threadIdx_y = item.get_local_id(0);
+    const int blockDim_y = item.get_local_range(0);
+
+    double (&sum_shared)[THREADS * THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS * THREADS]>(item.get_group());
+#else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int threadIdx_x = threadIdx.x;
+    const int threadIdx_y = threadIdx.y;
+    const int blockDim_y = blockDim.y;
+
+    __shared__ double sum_shared[THREADS * THREADS];
+#endif
     if (i >= n) {
         return;
     }
@@ -424,7 +439,7 @@ static void _pcm_left_multiply_dS_one_atom(double* __restrict__ output, const do
     double sum_x = 0.0;
     double sum_y = 0.0;
     double sum_z = 0.0;
-    for (int j = threadIdx.y + g0; j < g1; j += blockDim.y) {
+    for (int j = threadIdx_y + g0; j < g1; j += blockDim_y) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -459,42 +474,40 @@ static void _pcm_left_multiply_dS_one_atom(double* __restrict__ output, const do
         sum_z += dSz * right_vector_j;
     }
 
-    __shared__ double sum_shared[THREADS * THREADS];
-
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_x;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_x;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[        i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[        i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_y;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_y;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n     + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n     + i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_z;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_z;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n * 2 + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n * 2 + i] = sum_shared[threadIdx_x];
     }
 }
 
@@ -704,15 +717,29 @@ static void _pcm_contract_d2S_offdiagonal(double* __restrict__ output,
                                           const double* __restrict__ coords, const double* __restrict__ charge_exp,
                                           const int ngrids, const int natm)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i_atom = static_cast<int>( item.get_group(1) );
+    const int j_atom = static_cast<int>( item.get_group(0) );
+    const int threadIdx_x = item.get_local_id(1);
+    const int threadIdx_y = item.get_local_id(0);
+
+    double (&sum_shared)[n_thread_per_block * n_thread_per_block] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[n_thread_per_block * n_thread_per_block]>(item.get_group());
+#else
     const int i_atom = blockIdx.x;
     const int j_atom = blockIdx.y;
+    const int threadIdx_x = threadIdx.x;
+    const int threadIdx_y = threadIdx.y;
+
+    __shared__ double sum_shared[n_thread_per_block * n_thread_per_block];
+#endif
     const int i_grid_start = gridslice[i_atom * 2 + 0];
     const int i_grid_end = gridslice[i_atom * 2 + 1];
     const int j_grid_start = gridslice[j_atom * 2 + 0];
     const int j_grid_end = gridslice[j_atom * 2 + 1];
 
     double sandwiched_d2S[9] { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-    for (int i_grid = i_grid_start + threadIdx.x; i_grid < i_grid_end; i_grid += n_thread_per_block) {
+    for (int i_grid = i_grid_start + threadIdx_x; i_grid < i_grid_end; i_grid += n_thread_per_block) {
         const double ei = charge_exp[i_grid];
 
         const double rix = coords[3*i_grid];
@@ -721,7 +748,7 @@ static void _pcm_contract_d2S_offdiagonal(double* __restrict__ output,
 
         const double left_i = left_vector[i_grid];
 
-        for (int j_grid = j_grid_start + threadIdx.y; j_grid < j_grid_end; j_grid += n_thread_per_block) {
+        for (int j_grid = j_grid_start + threadIdx_y; j_grid < j_grid_end; j_grid += n_thread_per_block) {
             const double ej = charge_exp[j_grid];
             const double eij = ei * ej * rsqrt(ei*ei + ej*ej);
 
@@ -765,8 +792,7 @@ static void _pcm_contract_d2S_offdiagonal(double* __restrict__ output,
         }
     }
 
-    __shared__ double sum_shared[n_thread_per_block * n_thread_per_block];
-        const int tid = threadIdx.y * n_thread_per_block + threadIdx.x;
+    const int tid = threadIdx_y * n_thread_per_block + threadIdx_x;
 
     for (int i_xyz = 0; i_xyz < 9; i_xyz++) {
         __syncthreads();
@@ -996,6 +1022,13 @@ int pcm_left_multiply_ds_one_atom(const cudaStream_t stream, double *output, con
         return 1;
     }
     const int ntilex = (n + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    const sycl::range<2> threads(THREADS, THREADS);
+    const sycl::range<2> blocks(1, ntilex);
+    stream.parallel_for<class _pcm_left_multiply_dS_one_atom_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _pcm_left_multiply_dS_one_atom(output, right_vector, coords, charge_exp, n, g0, g1);
+    });
+    #else
     const dim3 threads(THREADS, THREADS);
     const dim3 blocks(ntilex, 1);
     _pcm_left_multiply_dS_one_atom<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n, g0, g1);
@@ -1003,6 +1036,7 @@ int pcm_left_multiply_ds_one_atom(const cudaStream_t stream, double *output, con
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -1070,6 +1104,13 @@ int pcm_contract_d2s_offdiagonal(const cudaStream_t stream, double *output,
                                  const int ngrids, const int natm)
 {
     constexpr int n_thread_per_block = 16; // 32 will cause "too many resources requested for launch", out of register
+    #ifdef USE_SYCL
+    const sycl::range<2> threads(n_thread_per_block, n_thread_per_block);
+    const sycl::range<2> blocks(natm, natm);
+    stream.parallel_for<class _pcm_contract_d2S_offdiagonal_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _pcm_contract_d2S_offdiagonal<n_thread_per_block>(output, left_vector, right_vector, gridslice, coords, charge_exp, ngrids, natm);
+    });
+    #else
     const dim3 threads(n_thread_per_block, n_thread_per_block);
     const dim3 blocks(natm, natm);
     _pcm_contract_d2S_offdiagonal<n_thread_per_block> <<<blocks, threads, 0, stream>>>
@@ -1080,6 +1121,7 @@ int pcm_contract_d2s_offdiagonal(const cudaStream_t stream, double *output,
         printf("pcm_contract_d2s_offdiagonal failed with error %d, error message: %s, ngrids = %d, natm = %d, n_thread_per_block = %d\n", err, cudaGetErrorString(err), ngrids, natm, n_thread_per_block);
         return 1;
     }
+    #endif
     return 0;
 }
 

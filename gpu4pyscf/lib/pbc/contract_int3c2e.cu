@@ -453,8 +453,6 @@ while (1) {
         fac = PI_FAC;
         if (ish_cell0 < jsh_cell0) {
             fac = 0;
-        } else if (ish_cell0 == jsh_cell0) {
-            fac *= .5;
         }
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
@@ -713,7 +711,7 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, PBCIntEnvVars *envs,
             head, npairs, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec: %s\n", cudaGetErrorString(err));
         return 1;
     }
 #endif
