@@ -61,37 +61,38 @@ def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     # matrix will significantly amplifies the error in eigenvectors of the
     # FC=SCe equation, especially when the basis functions are linear
     # dependent or the eigenvalues have small gaps.
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-6)
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-4)
     return opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts, sort_output)
 
 def int1e_kin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
     # precision to capture this effect.
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-4)
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-2)
     return opt.intor('PBCint1e_kin', 1, (2, 0), kpts, sort_output)
 
 def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-1)
+    # hermi=2 for anti-symmetric matrices
+    opt = _check_opt(cell, 2, kpts, bvk_kmesh)
     return opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts, sort_output)
 
 def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-2)
+    opt = _check_opt(cell, 2, kpts, bvk_kmesh)
     return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts, sort_output)
 
 def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-1)
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh)
     return opt.intor('PBCint1e_r2_origi', 1, (0, 2), kpts, sort_output)
 
 def int1e_r4_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-1)
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh)
     return opt.intor('PBCint1e_r4_origi', 1, (0, 4), kpts, sort_output)
 
 def int1e_r2_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-1)
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh)
     return opt.intor('PBCint1e_r2_origi_ip2', 3, (0, 3), kpts, sort_output)
 
 def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-1)
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh)
     return opt.intor('PBCint1e_r4_origi_ip2', 3, (0, 5), kpts, sort_output)
 
 def ovlp_strain_deriv(cell, dm, kpts=None):
@@ -113,6 +114,7 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh, scale_precision=1):
     if kpts is None or is_zero(kpts):
         bvk_kmesh = np.ones(3, dtype=int)
 
+    rcut = cell.rcut
     precision = cell.precision * scale_precision
     if scale_precision < 1:
         a, c, l = most_diffuse_pgto(cell)
@@ -146,6 +148,12 @@ class _Int1eOpt:
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
             Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+
+            rad = cell.rcut / bvkcell.vol**(1./3) + 1
+            surface = 4*np.pi * rad**2
+            lattice_sum_factor = surface
+            precision = cell.precision / lattice_sum_factor
+
         self.hermi = hermi
         self.bvk_kmesh = bvk_kmesh
         self.bvkcell = bvkcell
@@ -165,7 +173,7 @@ class _Int1eOpt:
             exps, coef = extract_pgto_params(self.bvkcell, 'diffuse')
             log_c = cp.log(cp.asarray(coef, dtype=np.float32))
             diffuse_exps = cp.asarray(exps, dtype=np.float32)
-            log_cutoff = math.log(cell.precision)
+            log_cutoff = math.log(precision)
             img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
             libpbc.bvk_ovlp_img_counts(
                 ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
@@ -177,7 +185,7 @@ class _Int1eOpt:
             bas_ij_cache, bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(
                 cell, mask, hermi)
         else:
-            mask = _shell_overlap_mask(cell, hermi, cell.precision, Ls)
+            mask = _shell_overlap_mask(cell, hermi, precision, Ls)
             bas_ij_cache, bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(
                 cell, mask, hermi)
         self.bas_ij_cache = bas_ij_cache
@@ -237,8 +245,8 @@ class _Int1eOpt:
             if ncells > 1: # corresponding to self.bvk_kmesh is None
                 mat = mat.sum(axis=0)
             mat = mat.reshape(comp, nao_cart, nao_cart)
-            if self.hermi == 1:
-                mat = hermi_triu(mat, hermi=1, inplace=True)
+            if self.hermi != 0:
+                mat = hermi_triu(mat, self.hermi, inplace=True)
             if sort_output:
                 out = cell.apply_CT_mat_C(mat, out=out)
             else:
@@ -261,9 +269,8 @@ class _Int1eOpt:
             mat = contract('lkz,lxpq->kxpqz', expLkz, mat)
             mat = mat.view(np.complex128)[:,:,:,:,0]
             mat = mat.reshape(nkpts*comp, nao_cart, nao_cart)
-            if self.hermi == 1:
-                assert comp == 1
-                mat = hermi_triu(mat, hermi=1, inplace=True)
+            if self.hermi != 0:
+                mat = hermi_triu(mat, self.hermi, inplace=True)
             if sort_output:
                 out = cell.apply_CT_mat_C(mat, out=out)
             else:
