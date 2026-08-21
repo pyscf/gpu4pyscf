@@ -266,12 +266,17 @@ else:
     # =================================================================
     # .get() / .set() — CuPy-style host <-> device transfer
     # =================================================================
-    def _dpnp_set(self, host_array):
+    def _dpnp_set(self, host_array, stream=None):
+        # `stream` accepted for CuPy API compatibility; dpnp assignments are
+        # ordered on the array's SYCL queue, so it is ignored.
         self[...] = host_array
 
 
-    def _dpnp_get(self, order='C'):
+    def _dpnp_get(self, stream=None, order='C', out=None, blocking=True):
         host = self.asnumpy()
+        if out is not None:
+            out[...] = host
+            return out
         # Preserve 0-d arrays: np.ascontiguousarray / asfortranarray force
         # ndim >= 1, turning a scalar `array(5)` into `array([5])`. CuPy's
         # .get() keeps the 0-d shape, and downstream code (e.g. using the
