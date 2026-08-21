@@ -193,6 +193,27 @@ else:
 
 
     # -----------------------------------------------------------------
+    # cupy.random.seed compatibility
+    #
+    # CuPy accepts any array-like seed -- pyscf's own tests call
+    # cupy.random.seed(np.asarray(1, dtype=np.uint64)) -- while
+    # dpnp.random.seed only takes a plain scalar and otherwise fails with
+    # "Cannot construct a dtype from an array". Coerce 0-d array-likes.
+    # -----------------------------------------------------------------
+    _dpnp_random_seed = dpnp.random.seed
+
+    def _seed(seed=None, *args, **kwargs):
+        if seed is not None and getattr(seed, "ndim", None) == 0:
+            seed = int(seed)
+        return _dpnp_random_seed(seed, *args, **kwargs)
+
+    _seed.__name__ = "seed"
+    _seed.__doc__ = getattr(_dpnp_random_seed, "__doc__", None)
+    dpnp.random.seed = _seed
+    cupy_fake.random = dpnp.random
+
+
+    # -----------------------------------------------------------------
     # cupy.cuda submodule — creates master queues, installs creation-API
     # wrappers on dpnp/dpt, installs the master queue cache (replacing
     # dpctl's process-global queue cache), installs in-place op drain.
@@ -272,6 +293,125 @@ else:
 
     dpnp_array.set = _dpnp_set
     dpnp_array.get = _dpnp_get
+
+
+    # =================================================================
+    # ndarray.view() — dpnp loses the buffer offset.
+    #
+    # dpnp_array._create_view() rebuilds the usm_ndarray with
+    #     dpt.usm_ndarray(shape, dtype, buffer=self._array_obj, strides=...)
+    # and never forwards `self._array_obj._element_offset`. dpctl treats
+    # `buffer=<usm_ndarray>` as the *whole* underlying USM allocation, so
+    # any array that does not start at the base of its allocation gets a
+    # view pointing at the wrong memory:
+    #
+    #     x = dpnp.arange(10.);  x[3:].view()  ->  [0. 1. 2. 3. 4. 5. 6.]
+    #
+    # NumPy/CuPy return [3. ... 9.]. This silently corrupts dpnp.einsum:
+    # a unary subscript with no summation (a pure permutation such as
+    # 'iabj->iajb', or even the identity 'abcd->abcd') takes the
+    # `returns_view` branch, which does `operands = [a.view() for a in
+    # operands]`, so einsum over any sliced operand read from the base of
+    # the parent buffer. tdscf.ris.get_ab() does exactly that with
+    # eri_mo[:nocc, nocc:, nocc:, :nocc] and produced a wrong A matrix.
+    #
+    # Not currently tracked upstream -- worth filing. Related and already
+    # fixed in this dpnp checkout: IntelPython/dpnp#2641 and #2781, the same
+    # class of bug for `.data.ptr` on views (verified fixed here: a sliced
+    # array's .data.ptr does carry the byte offset).
+    #
+    # Forward the offset. Guarded so re-imports don't re-wrap.
+    # =================================================================
+    if not getattr(dpnp_array._create_view, "__gpu4pyscf_patched__", False):
+        _orig_create_view = dpnp_array._create_view
+
+        def _create_view_keep_offset(self, array_class, shape, dtype, strides,
+                                     _orig=_orig_create_view):
+            usm_obj = self._array_obj
+            offset = getattr(usm_obj, "_element_offset", 0)
+            if not offset:
+                # Base of the allocation: upstream path is already correct.
+                return _orig(self, array_class, shape, dtype, strides)
+
+            if dtype is None:
+                dtype = self.dtype
+            itemsize = dpnp.dtype(dtype).itemsize
+            usm_view = dpt.usm_ndarray(
+                shape,
+                dtype=dtype,
+                buffer=usm_obj,
+                strides=(tuple(s // itemsize for s in strides)
+                         if strides else None),
+                offset=offset,
+            )
+
+            if array_class is dpnp_array:
+                return dpnp_array._create_from_usm_ndarray(usm_view)
+
+            res = array_class.__new__(array_class)
+            res._array_obj = usm_view
+            res._array_obj._set_namespace(dpnp)
+            if hasattr(res, "__array_finalize__"):
+                res.__array_finalize__(self)
+            return res
+
+        _create_view_keep_offset.__gpu4pyscf_patched__ = True
+        dpnp_array._create_view = _create_view_keep_offset
+
+
+    # =================================================================
+    # bool() on a size-1 array of ndim > 0.
+    #
+    # NumPy (and therefore CuPy) allow truth-testing any array whose size is
+    # 1, regardless of ndim: `bool(np.array([[5.0]]))` is True. dpnp only
+    # accepts 0-d and otherwise raises "TypeError: only 0-dimensional arrays
+    # can be converted to Python scalars".
+    #
+    # tdscf/math_helper.py:407 relies on the NumPy behaviour: `xy_norm` comes
+    # out of `cp.dot(x_tmp, x_tmp.T)` with shape (1, 1) and is then used as
+    # `if xy_norm > 1e-14:`.
+    #
+    # Note we do NOT relax __float__/__int__ -- NumPy 2 raises there for
+    # ndim > 0 and dpnp already matches, so the two agree.
+    # =================================================================
+    if not getattr(dpnp_array, "__gpu4pyscf_bool_patched__", False):
+        _orig_dpnp_bool = dpnp_array.__bool__
+
+        def __bool__(self):
+            if self.ndim != 0 and self.size == 1:
+                return bool(self.reshape(()))
+            return _orig_dpnp_bool(self)
+
+        dpnp_array.__bool__ = __bool__
+        dpnp_array.__gpu4pyscf_bool_patched__ = True
+
+
+    # =================================================================
+    # Pickling.
+    #
+    # cupy.ndarray is picklable -- it round-trips through host memory -- and
+    # pyscf leans on that: dft/tests/test_rks.py::test_rks_lda does
+    # `pickle.loads(pickle.dumps(mf))` to check that a converged mean-field
+    # object serializes. dpnp_array is a Cython extension type with a
+    # non-trivial __cinit__ and no __reduce__, so pickling it raises
+    # "TypeError: no default __reduce__ due to non-trivial __cinit__".
+    # Known upstream gap: IntelPython/dpnp#2602 "Cannot serialize arrays"
+    # (open feature request), so this shim stands until that lands.
+    #
+    # Round-trip through NumPy, and rebuild on the master queue so the
+    # restored array obeys the single-queue invariant that cuda.py enforces.
+    # Tags on a CPArrayWithTag are carried across too, matching CuPy, where
+    # the subclass __dict__ is part of the pickled state.
+    # =================================================================
+    if "__reduce__" not in dpnp_array.__dict__:
+
+        def __reduce__(self):
+            from gpu4pyscf.cupy.cuda import rebuild_dpnp_array
+            host = dpnp.asnumpy(self)
+            state = dict(getattr(self, "__dict__", None) or {})
+            return (rebuild_dpnp_array, (host, type(self), state))
+
+        dpnp_array.__reduce__ = __reduce__
 
 
     # =================================================================
@@ -542,8 +682,14 @@ else:
         All other methods are no-ops — dpnp has no user-managed memory pool.
         """
 
-        def free_all_blocks(self): pass
-        def free_all_free(self):   pass
+        def free_all_blocks(self):
+            # CuPy hands pooled device memory back to the driver here.
+            # The analogue is releasing the deferred-free batches.
+            from gpu4pyscf.cupy.cuda import release_deferred_frees
+            release_deferred_frees()
+
+        # Deprecated CuPy alias, kept for API parity.
+        free_all_free = free_all_blocks
         def set_limit(self, size=None, fraction=None): pass
         def get_limit(self):       return 0
         def n_free_blocks(self):   return 0
