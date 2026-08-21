@@ -17,7 +17,6 @@ __version__ = '1.8.1'
 from . import _patch_pyscf
 
 from . import lib, grad, hessian, solvent, scf, dft, tdscf, nac
-#from . import lib, grad, hessian, scf, dft, tdscf, nac
 
 # Overwrite the cupy memory allocator. Make memory pool manage small-sized
 # arrays only.
