@@ -15,7 +15,7 @@ set(GPU_SRCS
 
 if (USE_SYCL)
   set(C_SRCS sorting.c)
-  add_library(pbc SHARED ${GPU_SRCS})
+  add_library(pbc SHARED ${GPU_SRCS} ${C_SRCS})
 
   set_source_files_properties(${C_SRCS} PROPERTIES LANGUAGE C)
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)

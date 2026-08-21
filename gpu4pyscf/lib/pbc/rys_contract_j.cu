@@ -252,7 +252,9 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
     __shared__ int expi;
     __shared__ int expj;
 
-    const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
+    // c_gxyz_offset is a 256-entry __constant__; the launcher copies the
+    // chunk for this OFFSET into it before each launch, so no offset here.
+    const GXYZOffset *gxyz_offsets = p_gxyz_offsets;
     #endif
     int li = bounds.li;
     int lj = bounds.lj;
@@ -517,7 +519,7 @@ while (1) {
 }
 }
 
-extern GXYZOffset *PBC_make_gxyz_offset(BoundsInfo &bounds);
+extern GXYZOffset *PBC_make_gxyz_offset(GXYZOffset *goff, BoundsInfo &bounds);
 
 extern void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
                                  int shm_size, int gout_stride_max);
@@ -576,7 +578,8 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
     cudaMemset(head, 0, sizeof(int)*3);
 
     if (1) {
-        GXYZOffset* p_gxyz_offset = PBC_make_gxyz_offset(bounds);
+        GXYZOffset gxyz_offset[625];
+        GXYZOffset* p_gxyz_offset = PBC_make_gxyz_offset(gxyz_offset, bounds);
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
@@ -606,6 +609,10 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
               });
             });
             #else
+            checkCudaErrors(
+                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+OFFSET,
+                                   tile_chunk*sizeof(GXYZOffset),
+                                   0, cudaMemcpyHostToDevice));
             if (buflen > 48000) {
                 cudaFuncSetAttribute(rys_j_kernel<OFFSET>, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
                 cudaError_t err = cudaGetLastError();
@@ -620,7 +627,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                 *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                dm_penalty, pool, head + OFFSET/256,
+                dm_penalty, pool, head + OFFSET/256, p_gxyz_offset,
                 gout_pattern, reserved_shm_size);
             #endif
         };

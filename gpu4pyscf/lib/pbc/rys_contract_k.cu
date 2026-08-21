@@ -107,7 +107,9 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     __shared__ int expi;
     __shared__ int expj;
 
-    const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
+    // c_gxyz_offset is a 256-entry __constant__; the launcher copies the
+    // chunk for this OFFSET into it before each launch, so no offset here.
+    const GXYZOffset *gxyz_offsets = p_gxyz_offsets;
     #endif
     int *head = head_base + OFFSET/256;
 
@@ -382,7 +384,7 @@ while (1) {
 }
 }
 
-GXYZOffset *PBC_make_gxyz_offset(BoundsInfo &bounds)
+GXYZOffset *PBC_make_gxyz_offset(GXYZOffset *goff, BoundsInfo &bounds)
 {
 /*
     nfi = (li + 1) * (li + 2) // 2
@@ -397,7 +399,6 @@ GXYZOffset *PBC_make_gxyz_offset(BoundsInfo &bounds)
     copy = 256 // len(gxyz_offset) + 1
     return cp.vstack([cp.asarray(gxyz_offset)]*copy, dtype=np.int8)
 */
-    GXYZOffset goff[625];
     int nfi = bounds.nfi;
     int nfj = bounds.nfj;
     int nfk = bounds.nfk;
@@ -422,9 +423,8 @@ GXYZOffset *PBC_make_gxyz_offset(BoundsInfo &bounds)
     sycl_get_queue()->memcpy(s_pbc_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset)).wait();
     return nullptr;
     #else
-    checkCudaErrors(
-        cudaMemcpyToSymbol(c_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset),
-                           0, cudaMemcpyHostToDevice));
+    // c_gxyz_offset holds only 256 entries; the launchers copy each 256-tile
+    // chunk (goff+OFFSET) into it right before the corresponding launch.
     GXYZOffset *p_gxyz_offset;
     cudaGetSymbolAddress((void**)&p_gxyz_offset, c_gxyz_offset);
     return p_gxyz_offset;
@@ -559,7 +559,8 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl,
                            diffuse_exps, dm_penalty, pool, head, workers)) {
-        GXYZOffset* p_gxyz_offset = PBC_make_gxyz_offset(bounds);
+        GXYZOffset gxyz_offset[625];
+        GXYZOffset* p_gxyz_offset = PBC_make_gxyz_offset(gxyz_offset, bounds);
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
@@ -589,6 +590,10 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
               });
             });
             #else
+            checkCudaErrors(
+                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+OFFSET,
+                                   tile_chunk*sizeof(GXYZOffset),
+                                   0, cudaMemcpyHostToDevice));
             if (buflen > 48000) {
                 cudaFuncSetAttribute(rys_k_kernel<OFFSET>, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
                 cudaError_t err = cudaGetLastError();
