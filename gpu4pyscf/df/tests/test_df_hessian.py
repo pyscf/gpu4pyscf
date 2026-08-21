@@ -357,7 +357,11 @@ class KnownValues(unittest.TestCase):
         mo_occ = mf.mo_occ
         test_hessian_round2 = hobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ)
 
-        assert np.max(np.abs(test_hessian_round1 - test_hessian_round2)) < 2e-7
+        # np.abs() is a ufunc and dpnp sets __array_ufunc__ = None, so NumPy
+        # refuses a device operand (CuPy implements the protocol, so this used
+        # to work on CUDA only). Stay in the array's own namespace and pull a
+        # single scalar at the end, per gpu4pyscf#810.
+        assert abs(test_hessian_round1 - test_hessian_round2).max().item() < 2e-7
 
 if __name__ == "__main__":
     print("Full Tests for DF Hessian")
