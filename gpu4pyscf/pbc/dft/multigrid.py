@@ -699,36 +699,6 @@ def eval_nucG(cell, mesh):
     nucG *= tools.get_coulG(cell, Gv=Gv)
     return nucG
 
-def eval_nucG_SI_gradient(cell, mesh, rho_g):
-    ngrids = np.prod(mesh)
-    assert rho_g.shape == (ngrids,)
-
-    assert cell.dimension == 3
-    Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
-    b = cell.reciprocal_vectors()
-    coords = cell.atom_coords()
-    rb = cp.asarray(coords.dot(b.T))
-    SIx = cp.exp(-1j*rb[:,0,None] * basex)
-    SIy = cp.exp(-1j*rb[:,1,None] * basey)
-    SIz = cp.exp(-1j*rb[:,2,None] * basez)
-    dSI_prefactor = -1j * Gv.T * rho_g.conj()
-    charges = -cell.atom_charges()
-    coulG = tools.get_coulG(cell, Gv=Gv)
-
-    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
-
-    for i_atom in range(cell.natm):
-        SI = (SIx[i_atom,:,None,None] * SIy[i_atom,:,None] * SIz[i_atom]).ravel()
-        de[i_atom, :] = charges[i_atom] * (dSI_prefactor @ (coulG * SI))
-
-    grad_max_imag = cp.max(cp.abs(de.imag))
-    if grad_max_imag >= 1e-8:
-        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from nuclear repulsion term structure factor gradient")
-
-    de = de.real
-    de /= cell.vol
-    return de
-
 def get_nuc(ni, kpts=None):
     assert kpts is None or is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
@@ -876,48 +846,6 @@ def eval_vpplocG(cell, mesh, out=None):
 
     vlocG[0] += vlocG0
     return vlocG
-
-def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
-    ngrids = np.prod(mesh)
-    assert rho_g.shape == (ngrids,)
-    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-    coords = cp.asarray(cell.atom_coords())
-    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
-    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
-    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
-    dSI_prefactor = -1j * Gv.T * rho_g.conj()
-
-    charges = cell.atom_charges()
-
-    ngrids = np.prod(mesh)
-    vlocG = cp.zeros(ngrids, dtype=np.complex128)
-
-    de = cp.zeros([cell.natm, 3], dtype = cp.complex128)
-
-    for ia in range(cell.natm):
-        symb = cell.atom_symbol(ia)
-        if symb not in cell._pseudo:
-            continue
-
-        pp = cell._pseudo[symb]
-        rloc, nexp, cexp = pp[1:3+1]
-
-        vlocG.fill(0)
-        _append_vpplocG_one_atom_without_gamma(
-            ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, Gv_bases, SIx, SIy, SIz, vlocG)
-
-        vlocG0 = 2*np.pi*charges[ia]*rloc**2
-        vlocG[0] += vlocG0
-
-        de[ia, :] = dSI_prefactor @ vlocG
-
-    grad_max_imag = cp.max(cp.abs(de.imag))
-    if grad_max_imag >= 1e-8:
-        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from pseudopotential local term structure factor gradient")
-
-    de = de.real
-    de /= cell.vol
-    return de
 
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
