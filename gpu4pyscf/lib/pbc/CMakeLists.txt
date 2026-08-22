@@ -17,8 +17,10 @@ if (USE_SYCL)
   set(C_SRCS sorting.c)
   add_library(pbc SHARED ${GPU_SRCS} ${C_SRCS})
 
-  set_source_files_properties(${C_SRCS} PROPERTIES LANGUAGE C)
-  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  # icx rejects the project-wide -std=gnu99 (CMAKE_C_STANDARD 99) together
+  # with -fsycl, so plain-C sources are compiled as C++ here, matching
+  # gvhf-md/md_pairdata.c. sorting.c carries an extern "C" guard.
+  set_source_files_properties(${C_SRCS} ${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   set_target_properties(pbc PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(pbc PRIVATE -x c++ -nocudainc -nocudalib)
