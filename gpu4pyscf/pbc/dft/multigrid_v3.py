@@ -127,9 +127,9 @@ def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
             ctypes.c_double(weight))
         if err != 0:
             raise RuntimeError('contract_orth_aopair_dm kernel failed')
-        _takebak_4d(rhoG, (rhoR, rhoI), mesh)
+        _inv_take_fft_submesh(rhoG, (rhoR, rhoI), mesh)
         if with_tau:
-            _takebak_4d(tauG, (tauR, tauI), mesh)
+            _inv_take_fft_submesh(tauG, (tauR, tauI), mesh)
     return rhoG, tauG
 
 def _aft_eval_xc_matrix(ni, vxcG, out=None):
@@ -167,10 +167,10 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
 
         bas_ij_idx = bucket['bas_ij_idx']
 
-        sub_vrhoG = _take_4d(vrhoG, mesh)
+        sub_vrhoG = _take_fft_submesh(vrhoG, mesh)
         sub_vtauG = sub_vrhoG
         if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh)
+            sub_vtauG = _take_fft_submesh(vtauG, mesh)
         err = kern(
             ctypes.cast(vxc_mat.data.ptr, ctypes.c_void_p),
             ctypes.cast(sub_vrhoG.data.ptr, ctypes.c_void_p),
@@ -263,9 +263,9 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
-        _takebak_4d(rhoG, fft_in_place(rhoR).reshape(mesh), mesh)
+        _inv_take_fft_submesh(rhoG, fft_in_place(rhoR).reshape(mesh), mesh)
         if with_tau:
-            _takebak_4d(tauG, fft_in_place(tauR).reshape(mesh), mesh)
+            _inv_take_fft_submesh(tauG, fft_in_place(tauR).reshape(mesh), mesh)
 
     return rhoG, tauG
 
@@ -312,15 +312,15 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        # _take_4d does not always make a copy. In the last bucket, the contents
+        # _take_fft_submesh does not always make a copy. In the last bucket, the contents
         # of vrhoG will be overwritten by ifft_in_place
-        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
+        sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
         sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
         sub_vtauR = sub_vrhoR # placeholder
 
         if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
+            sub_vtauG = _take_fft_submesh(vtauG, mesh, work[:2])
             sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
             sub_vtauR[:] = ifft_in_place(sub_vtauG).real
 
@@ -381,15 +381,15 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        # _take_4d does not always make a copy. In the last bucket, the contents
-        # of vrhoG will be overwritten by ifft_in_place
-        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
+        # _take_fft_submesh does not always make a copy. In the last bucket, the
+        # contents of vrhoG will be overwritten by ifft_in_place
+        sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
         sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
         sub_vtauR = sub_vrhoR # placeholder
 
         if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
+            sub_vtauG = _take_fft_submesh(vtauG, mesh, work[:2])
             sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
             sub_vtauR[:] = ifft_in_place(sub_vtauG).real
 
@@ -450,15 +450,15 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        # _take_4d does not always make a copy. In the last bucket, the contents
-        # of vrhoG will be overwritten by ifft_in_place
-        sub_vrhoG = _take_4d(vrhoG, mesh, work[:2])
+        # _take_fft_submesh does not always make a copy. In the last bucket, the
+        # contents of vrhoG will be overwritten by ifft_in_place
+        sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
         sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
         sub_vtauR = sub_vrhoR # placeholder
 
         if vtauG is not None:
-            sub_vtauG = _take_4d(vtauG, mesh, work[:2])
+            sub_vtauG = _take_fft_submesh(vtauG, mesh, work[:2])
             sub_vtauR = ndarray(mesh, dtype=np.float64, buffer=work[3])
             sub_vtauR[:] = ifft_in_place(sub_vtauG).real
 
@@ -503,7 +503,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     '''Estimate the FFT energy cutoff and the spread of each orbital pair
     in real space'''
     cell = ni.sorted_cell
-    # Some orbitals may require high Ecut, sometimes higher than ni.ke_cutoff.
+    # Some orbitals may require high Ecut, sometimes higher than ke_max.
     # Use ke_max to limit the highest Ecut. This ensures that these orbital
     # pairs are included in the last bucket in _partition_ke_for_fft.
     Ecut_by_shell = _estimate_fft_Ecut_per_shell(cell, precision)
@@ -522,7 +522,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     # The ke_cut estimated from cell.precision is sufficient for converging the
     # Coulomb integrals. However, XC potential is not as smooth near the core
     # region. Apply an additional penalty to improve the accuracy of XC integrals.
-    undressed_threshold = cell.precision * 0.1
+    undressed_threshold = cell.precision * 1e-1
 
     err = libmgrid.gaussian_prod_grid_ranges(
         ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
@@ -590,7 +590,6 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     a = cell.lattice_vectors()
 
     mesh_max = np.asarray(ni.mesh, dtype=np.int32)
-    ke_max = min(ke_max, ni.ke_cutoff)
     mesh = ke_to_mesh(a, init_ke)
 
     ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
@@ -628,13 +627,12 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
         ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh).min()
     return buckets
 
-def _partition_ke_for_fft(ni, pair_idx, init_ke, precision, xctype, log):
+def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log):
     cell = ni.sorted_cell
     bvkcell = ni.bvkcell
 
     a = cell.lattice_vectors()
     mesh = ke_to_mesh(a, init_ke)
-    ke_max = ni.ke_cutoff
     mesh_final = ni.mesh
 
     vol = cell.vol
@@ -844,7 +842,7 @@ def fft_in_place(x):
 def ifft_in_place(x):
     return fft.ifftn(x, axes=(-3, -2, -1), overwrite_x=True)
 
-def _take_4d(a, mesh, out=None):
+def _take_fft_submesh(a, mesh, out=None):
     assert a.dtype == np.complex128
     assert a.ndim >= 3
     out_shape = mesh = tuple(mesh)
@@ -867,7 +865,7 @@ def _take_4d(a, mesh, out=None):
         raise RuntimeError('fft_take kernel failed')
     return out
 
-def _takebak_4d(out, a, mesh):
+def _inv_take_fft_submesh(out, a, mesh):
     if isinstance(a, cp.ndarray):
         assert a.dtype == np.complex128
     else:
@@ -1754,7 +1752,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
-    rhoG, tauG = _eval_density(ni, dm_sc[0], with_tau=xctype=='MGGA')
+    rhoG , tauG  = _eval_density(ni, dm_sc[0], with_tau=xctype=='MGGA')
     rhoGb, tauGb = _eval_density(ni, dm_sc[1], with_tau=xctype=='MGGA')
     n_electrons_a = rhoG[0,0,0].real.get()
     n_electrons_b = rhoGb[0,0,0].real.get()
@@ -1767,8 +1765,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         dm_sc = [None, None]
 
     density = cp.empty((2, nvar, ngrids))
-    _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[0])
-    _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=density[1])
+    _density_to_real_space(rhoG , tauG , Gv_bases, xctype, out=density[0])
+    _density_to_real_space(rhoGb, tauGb, Gv_bases, xctype, out=density[1])
     rhoG += rhoGb # rhoG now stores the spin-free density
     # release tauG's memory, keep rhoG. rhoG will be used as the workspace for
     # _get_coulomb_in_place
@@ -1858,10 +1856,16 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
     # efficient for small unit cells.
     enable_aft = True
 
-    # Mesh in the final bucket can be below the estimated cell.mesh.
+    # Mesh in the final bucket can be smaller the estimated cell.mesh.
     # Allow the overall mesh to be reduced to the one in the final bucket.
-    # This setting can potentially introduce more errors for small mesh.
-    allow_mesh_reduction = True
+    # - For energy and nuclear gradients computation, this setting can
+    #   potentially introduce errors.
+    # - Stain derivatives are very sensitive to the integration mesh. This
+    #   setting may lead to significantly larger errors (~1e-4 Eh).
+    # - During geometry or lattice optimization, self.mesh should be fixed
+    #   throughout the optimization to avoid discontinuities in the computed
+    #   forces and stress.
+    allow_mesh_reduction = False
 
     def __init__(self, cell):
         self.reset(cell)
@@ -1926,9 +1930,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         self.aft_buckets = None
         self.fft_buckets = None
 
-        # FIXME: ni.mesh and ni.ke_cutoff are coupled, might need only one of them
         mesh = self.mesh
-        self.ke_cutoff = max(0.1, mesh_to_ke(a, mesh).min())
+        ke_cutoff = self.ke_cutoff = max(0.1, mesh_to_ke(a, mesh).min())
 
         init_ke = mesh_to_ke(a, [16]*3).max()
         log.debug1('initial ke_cutoff = %g', init_ke)
@@ -1936,14 +1939,14 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         if self.enable_aft and is_orth_lattice and nimgs > 30:
             # Estimate Ecut for AFT integrals. These can be potentially handled by
             # aft_eval_* functions.
-            # Use self.ke_cutoff to limit the highest Ecut. This ensures to handle
+            # Use ke_cutoff to limit the highest Ecut. This ensures to handle
             # shell-pairs even if their Ecuts are higher than ke_cutoff.
             aft_Ecut = _aft_Ecut_estimation(
-                self, bas_ij_idx, self.ke_cutoff, precision, xctype)
+                self, bas_ij_idx, ke_cutoff, precision, xctype)
 
             # aft_final_ke based on system size
             final_ke_fac = max(nimgs / 40, 1.)
-            aft_final_ke = init_ke * final_ke_fac
+            aft_final_ke = min(init_ke * final_ke_fac, ke_cutoff)
             log.debug1('aft init_ke_cutoff = %g, final_ke_cutoff = %g (%.2fx)',
                        init_ke, aft_final_ke, final_ke_fac)
             self.aft_buckets = _partition_ke_for_aft(
@@ -1953,7 +1956,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             # the remaining pairs.
             if self.aft_buckets:
                 aft_ke_max = self.aft_buckets[-1]['ke_cutoff']
-                if aft_ke_max < self.ke_cutoff:
+                if aft_ke_max < ke_cutoff:
                     bas_ij_idx = bas_ij_idx[aft_Ecut > aft_ke_max]
                 else:
                     bas_ij_idx = None
@@ -1966,7 +1969,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             # Every bvkcell shell in bas_ij_idx needs to be unpacked to several
             # primitive shells in supmol.
             self.fft_buckets = _partition_ke_for_fft(
-                self, bas_ij_idx, init_ke, precision, xctype, log)
+                self, bas_ij_idx, init_ke, ke_cutoff, precision, xctype, log)
 
             nimgs = cell.nimgs
             Tx = np.arange(-nimgs[0], nimgs[0]+1, dtype=np.float64)
@@ -2243,8 +2246,6 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
                 Whether to include the contribution from the local part of
                 pseudo-potential or electron-nuclear Coulomb interactions
         '''
-        from gpu4pyscf.pbc.grad.rks_stress import _get_pp_nonloc_strain_derivatives
-
         cell = self.cell
         log = logger.new_logger(cell)
         t0 = log.init_timer()
@@ -2350,7 +2351,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             bas_ij_idx = _non_trivial_bvk_pairs(self, precision)
             init_ke = mesh_to_ke(cell.lattice_vectors(), [16]*3).max()
             fft_buckets = _partition_ke_for_fft(
-                self, bas_ij_idx, init_ke, precision, xctype, log)
+                self, bas_ij_idx, init_ke, self.ke_cutoff, precision, xctype, log)
 
         vxc *= weight
         vxc = vxc.reshape(n_dm, nvar, *mesh)

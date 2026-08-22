@@ -94,7 +94,13 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'lda,'
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts).to_gpu())
-        dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+        dat1 = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+        assert abs(dat1 - dat2).max() < 1e-6
+
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -102,12 +108,8 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
-
-        ref = dat
-        ni = MultiGridNumInt(cell).build()
-        dat = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
-        assert abs(dat - ref).max() < 1e-6
+            assert abs(dat1[i,j] - (exc1 - exc2)/2e-5) < 1e-8
+            assert abs(dat2[i,j] - (exc1 - exc2)/2e-5) < 1e-8
 
     def test_get_vxc_gga(self):
         a = np.eye(3) * 5
@@ -124,7 +126,13 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'pbe,'
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts).to_gpu())
-        dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+        dat1 = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+        assert abs(dat1 - dat2).max() < 1e-6
+
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -132,12 +140,8 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
-
-        ref = dat
-        ni = MultiGridNumInt(cell).build()
-        dat = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
-        assert abs(dat - ref).max() < 1e-6
+            assert abs(dat1[i,j] - (exc1 - exc2)/2e-5) < 1e-8
+            assert abs(dat2[i,j] - (exc1 - exc2)/2e-5) < 1e-8
 
     def test_get_vxc_mgga(self):
         a = np.eye(3) * 5
@@ -154,7 +158,13 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'm06,'
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts).to_gpu())
-        dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+        dat1 = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+        assert abs(dat1 - dat2).max() < 1e-6
+
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -162,12 +172,8 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
-
-        ref = dat
-        ni = MultiGridNumInt(cell).build()
-        dat = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
-        assert abs(dat - ref).max() < 1e-6
+            assert abs(dat1[i,j] - (exc1 - exc2)/2e-5) < 1e-8
+            assert abs(dat2[i,j] - (exc1 - exc2)/2e-5) < 1e-8
 
     def test_get_j(self):
         a = np.eye(3) * 5
@@ -295,6 +301,7 @@ class KnownValues(unittest.TestCase):
         ref = mf_grad.get_stress()
 
         mf = mf.multigrid_numint()
+        mf._numint.allow_mesh_reduction = False
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         assert abs(dat - ref).max() < 1e-6
@@ -318,7 +325,9 @@ class KnownValues(unittest.TestCase):
         xc = 'scan'
         kmesh = [3, 1, 1]
         mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
-        mf = mf.multigrid_numint().run()
+        mf = mf.multigrid_numint()
+        mf._numint.allow_mesh_reduction = False
+        mf.run()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
