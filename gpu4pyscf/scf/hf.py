@@ -229,11 +229,13 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     assert isinstance(dm0, cupy.ndarray)
 
     dm, dm0 = dm0, None
+    # Call get_veff before get_hcore. In PBC, the initialization for
+    # two-electron integrals can be reused by get_hcore, avoiding redundant
+    # initialization.
     vhf = mf.get_veff(mol, dm)
 
     h1e = cupy.asarray(mf.get_hcore())
     s1e = cupy.asarray(mf.get_ovlp())
-    t1 = log.timer_debug1('hcore', *t1)
 
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)

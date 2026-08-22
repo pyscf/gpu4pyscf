@@ -1822,12 +1822,13 @@ def get_veff_ip1(
         ni, xc_for_fock, dm_kpts, hermi, kpts, with_tau = (xc_type == "MGGA")
     )
 
+    veff_gradient /= len(kpts)
     if with_pseudo_vloc_orbital_derivative:
         veff_gradient += grad_pp
 
     t0 = log.timer("veff_gradient", *t0)
 
-    return veff_gradient
+    return veff_gradient.get()
 
 def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
     '''Strain derivatives for Coulomb and Exc with k-point samples

@@ -208,7 +208,7 @@ class KnownValues(unittest.TestCase):
         cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
                      basis=[[0, [1.5, 1]], [1, [.8, 1]]],
                      a=a, unit='Bohr', verbose=0)
-        xc = 'rscan'
+        xc = 'r2scan'
         kmesh = [3, 1, 1]
         mf = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
         mf = mf.multigrid_numint().run()

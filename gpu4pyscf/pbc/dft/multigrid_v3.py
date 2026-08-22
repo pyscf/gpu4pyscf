@@ -518,6 +518,12 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     if xctype == 'MGGA':
         li_inc = lj_inc = 1
 
+    # Higher resolution is required for orbitals centered on the same atom.
+    # The ke_cut estimated from cell.precision is sufficient for converging the
+    # Coulomb integrals. However, XC potential is not as smooth near the core
+    # region. Apply an additional penalty to improve the accuracy of XC integrals.
+    undressed_threshold = cell.precision * 0.1
+
     err = libmgrid.gaussian_prod_grid_ranges(
         ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
         ctypes.cast(pair_ke.data.ptr, ctypes.c_void_p),
@@ -527,7 +533,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
         ctypes.c_int(npairs),
         ctypes.c_int(li_inc), ctypes.c_int(lj_inc),
         ctypes.c_float(math.log(precision)),
-        ctypes.c_float(cell.precision),
+        ctypes.c_float(undressed_threshold),
         ctypes.c_float(ke_max))
     if err != 0:
         raise RuntimeError('grid range kernel failed')
@@ -1854,8 +1860,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
     # Mesh in the final bucket can be below the estimated cell.mesh.
     # Allow the overall mesh to be reduced to the one in the final bucket.
-    # This setting can potentially lead to more errors for small mesh.
-    allow_mesh_reduction = False
+    # This setting can potentially introduce more errors for small mesh.
+    allow_mesh_reduction = True
 
     def __init__(self, cell):
         self.reset(cell)

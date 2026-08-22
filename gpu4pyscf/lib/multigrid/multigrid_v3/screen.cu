@@ -160,8 +160,8 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
         float ish_ke = Ecut_by_shell[ish];
         float jsh_ke = Ecut_by_shell[jsh % nbas];
         float ke_two_centers = max(ish_ke, jsh_ke);
-        if (ri == rj) {
-            // finer resolution is required for orbitals located on the same center.
+        if (ri == rj && jL == 0) {
+            // Higher resolution is required for orbitals located on the same center.
             // Ecut ~= 2 * ke_two_centers
             // (Ecut/2/aij)**((li+lj)/2) * exp(-Ecut/(2*aij)) ~ cell.threshold
             //float log_factor = (li+lj)*.5f * logf(ke_two_centers/aij) -

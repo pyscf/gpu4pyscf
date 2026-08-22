@@ -292,7 +292,13 @@ class KnownValues(unittest.TestCase):
         kmesh = [3, 1, 1]
         mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().run()
         mf_grad = mf.Gradients()
+        ref = mf_grad.get_stress()
+
+        mf = mf.multigrid_numint()
+        mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
+        assert abs(dat - ref).max() < 1e-6
+
         mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
@@ -300,12 +306,6 @@ class KnownValues(unittest.TestCase):
             e1 = mf_scanner(cell1)
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
-
-        ref = dat
-        mf = mf.multigrid_numint()
-        mf_grad = mf.Gradients()
-        dat = mf_grad.get_stress()
-        assert abs(dat - ref).max() < 1e-6
 
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_vs_finite_difference(self):
