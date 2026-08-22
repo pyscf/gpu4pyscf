@@ -1,0 +1,296 @@
+name: SYCL CPU CI
+
+# Sanity-verifies the SYCL port on a CPU-only GitHub-hosted runner using the
+# Intel OpenCL CPU device (no GPU present, none needed). dpctl and dpnp are
+# built from source at their latest upstream (IntelPython) commits against the
+# same oneAPI toolkit, so the SYCL ABI stays in lockstep with what
+# gpu4pyscf/lib expects.
+#
+# NOTE: gpu4pyscf's local dev setup uses a sparse-solvers dpnp fork
+# (abagusetty/dpnp, feature-sparse-linalg-solvers). This CI deliberately
+# builds upstream IntelPython/dpnp instead, so a couple of sparse-dependent
+# tests may fail here — that is acceptable for this CI.
+#
+# Production builds AOT-compile for Intel PVC; that cannot run here, so the
+# build passes -DGPU4PYSCF_SYCL_AOT=OFF (see gpu4pyscf/lib/CMakeLists.txt) to
+# get a generic spir64 JIT build that the OpenCL CPU device can execute.
+#
+# Triggers:
+#   - workflow_dispatch (Actions tab)
+#   - push / pull_request targeting the sycl branch
+#   - an issue/PR comment containing "@sycl-runner"
+#     NOTE: GitHub only delivers issue_comment events to the copy of this file
+#     on the repository's DEFAULT branch. For the comment trigger to work,
+#     this workflow file must also exist on the default branch; the comment
+#     run always builds the sycl branch.
+#
+# The full test suite will not finish on a 4-core runner and is not the goal;
+# the smoke steps below are allowed to partially fail (continue-on-error) so a
+# broken kernel build or import regression is still caught early.
+
+on:
+  workflow_dispatch: {}
+  push:
+    # sycl-cpu-ci is the CI development branch itself, so workflow changes
+    # self-test on push without needing a PR.
+    branches: [sycl, sycl-cpu-ci]
+  pull_request:
+    branches: [sycl]
+  issue_comment:
+    types: [created]
+
+permissions:
+  # contents: write lets the always-run log step push build/test logs to a
+  # ci-logs-<run_id> branch, since API log download needs repo admin auth.
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sycl-cpu-ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  # Only the OpenCL CPU device may be visible to SYCL.
+  ONEAPI_DEVICE_SELECTOR: "opencl:cpu"
+  OMP_NUM_THREADS: "2"
+  SYCL_CACHE_PERSISTENT: "1"
+  SYCL_CACHE_DIR: "/tmp/sycl_cache"
+  CCACHE_DIR: "/home/runner/.ccache"
+  CCACHE_MAXSIZE: "3G"
+  VENV: "/home/runner/sycl-venv"
+  # The SYCL port is used via PYTHONPATH, not pip-installed: `pip install .`
+  # would run the CUDA setup.py, and the vendored cupy/cupyx shims live under
+  # <repo>/gpu4pyscf/, which must itself be on the path (same layout the
+  # production Aurora environment uses).
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/gpu4pyscf"
+
+jobs:
+  build-and-test:
+    # For comment events, only react to "@sycl-runner".
+    if: github.event_name != 'issue_comment' || contains(github.event.comment.body, '@sycl-runner')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+
+    steps:
+      - name: Acknowledge "@sycl-runner" comment
+        if: github.event_name == 'issue_comment'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket',
+            });
+
+      - name: Checkout gpu4pyscf
+        uses: actions/checkout@v4
+        with:
+          # Comment-triggered runs always build the sycl branch; push/PR/
+          # dispatch runs build the ref that triggered them.
+          ref: ${{ github.event_name == 'issue_comment' && 'sycl' || '' }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Intel oneAPI toolchain (compilers, MKL, TBB) and build tools
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+          sudo apt-get install -y \
+            intel-oneapi-compiler-dpcpp-cpp \
+            intel-oneapi-compiler-fortran \
+            intel-oneapi-mkl-devel \
+            intel-oneapi-tbb-devel \
+            intel-oneapi-libdpstd-devel \
+            intel-oneapi-runtime-opencl \
+            intel-oneapi-runtime-dpcpp-cpp \
+            ocl-icd-opencl-dev clinfo \
+            lld ninja-build cmake ccache
+
+      - name: Ensure an OpenCL CPU device exists
+        run: |
+          source /opt/intel/oneapi/setvars.sh --force
+          # The dpcpp runtime package ships the Intel CPU OpenCL runtime; if
+          # for some reason no CPU device is registered, fall back to the
+          # standalone oclcpuexp release the intel/llvm project publishes
+          # (same runtime dpctl's own CI uses).
+          if ! sycl-ls | grep -qi "opencl:cpu"; then
+            OCLCPUEXP_FN="oclcpuexp-2025.21.10.0.10_160000_rel.tar.gz"
+            DRIVER_PATH="2025-WW45"
+            wget -q "https://github.com/intel/llvm/releases/download/${DRIVER_PATH}/${OCLCPUEXP_FN}" \
+              -O /tmp/oclcpuexp.tar.gz
+            sudo mkdir -p /opt/intel/oclcpuexp
+            sudo tar -xzf /tmp/oclcpuexp.tar.gz -C /opt/intel/oclcpuexp
+            sudo mkdir -p /etc/OpenCL/vendors
+            echo "/opt/intel/oclcpuexp/x64/libintelocl.so" | sudo tee /etc/OpenCL/vendors/intel_expcpu.icd
+          fi
+          icpx --version
+          sycl-ls
+          sycl-ls | grep -qi "opencl:cpu"
+
+      - name: Resolve dpctl/dpnp upstream commits (cache keys)
+        id: stack
+        run: |
+          echo "dpctl_sha=$(git ls-remote https://github.com/IntelPython/dpctl HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "dpnp_sha=$(git ls-remote https://github.com/IntelPython/dpnp HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "oneapi_ver=$(dpkg-query -W -f='${Version}' intel-oneapi-compiler-dpcpp-cpp)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore dpctl/dpnp stack cache (venv + source builds)
+        id: stack-cache
+        # Explicit restore/save split: plain actions/cache only saves when the
+        # whole job succeeds, so iterating on later steps kept losing the
+        # ~45 min dpnp build. The save step below runs right after the builds.
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /home/runner/sycl-venv
+            /home/runner/dpctl
+            /home/runner/dpnp
+          key: sycl-stack-v1-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-dpctl${{ steps.stack.outputs.dpctl_sha }}-dpnp${{ steps.stack.outputs.dpnp_sha }}
+
+      - name: Create venv with Python build/runtime dependencies
+        if: steps.stack-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m venv "$VENV"
+          "$VENV/bin/pip" install --upgrade pip
+          "$VENV/bin/pip" install numpy cython setuptools wheel scikit-build cmake ninja \
+            versioneer pybind11 pytest pytest-timeout \
+            pyscf pyscf-dispersion h5py geometric
+
+      - name: Build dpctl from source (IntelPython/dpctl master)
+        if: steps.stack-cache.outputs.cache-hit != 'true'
+        run: |
+          source /opt/intel/oneapi/setvars.sh --force
+          source "$VENV/bin/activate"
+          set -o pipefail; mkdir -p /tmp/logs
+          # blob-less partial clone: full history+tags (versioneer needs `git
+          # describe` to produce a version satisfying dpnp's dpctl>=0.23.0dev0
+          # pin; a shallow clone yields 0+untagged, which pip rejects).
+          git clone --filter=blob:none https://github.com/IntelPython/dpctl /home/runner/dpctl
+          cd /home/runner/dpctl
+          { python scripts/build_locally.py --oneapi &&
+            pip install --no-build-isolation --no-deps . &&
+            cd /tmp && python -c "import dpctl; print('dpctl OK', dpctl.__version__)" ; } 2>&1 | tee /tmp/logs/20_dpctl_build.log
+          # NON-editable install on purpose: dpnp's Cython resolves dpctl.pxd
+          # by scanning sys.path for a real site-packages/dpctl/ directory; a
+          # PEP-660 editable install hides it behind an import hook.
+
+      - name: Build dpnp from source (IntelPython/dpnp master)
+        if: steps.stack-cache.outputs.cache-hit != 'true'
+        run: |
+          source /opt/intel/oneapi/setvars.sh --force
+          source "$VENV/bin/activate"
+          set -o pipefail; mkdir -p /tmp/logs
+          git clone --filter=blob:none https://github.com/IntelPython/dpnp /home/runner/dpnp
+          cd /home/runner/dpnp
+          { python scripts/build_locally.py --oneapi &&
+            pip install --no-build-isolation --no-deps . &&
+            cd /tmp && python -c "import dpnp; print('dpnp OK', dpnp.__version__)" ; } 2>&1 | tee /tmp/logs/30_dpnp_build.log
+
+      - name: Save dpctl/dpnp stack cache
+        if: steps.stack-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /home/runner/sycl-venv
+            /home/runner/dpctl
+            /home/runner/dpnp
+          key: sycl-stack-v1-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-dpctl${{ steps.stack.outputs.dpctl_sha }}-dpnp${{ steps.stack.outputs.dpnp_sha }}
+
+      - name: Restore ccache (gpu4pyscf C++/SYCL objects)
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/.ccache
+          key: sycl-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            sycl-ccache-${{ runner.os }}-
+
+      - name: Build gpu4pyscf (SYCL backend, JIT spir64, CPU-runnable)
+        env:
+          # For sub-builds (ExchCXX ExternalProject etc.) that would otherwise
+          # fall back to /usr/bin/cc, which cannot compile -fsycl code.
+          CC: icx
+          CXX: icpx
+          FC: ifx
+          CMAKE_CONFIGURE_ARGS: >-
+            -DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx
+            -DCMAKE_Fortran_COMPILER=ifx -DUSE_SYCL=ON
+            -DCMAKE_BUILD_TYPE=Release
+            -DGPU4PYSCF_SYCL_AOT=OFF
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: |
+          source /opt/intel/oneapi/setvars.sh --force
+          source "$VENV/bin/activate"
+          set -o pipefail; mkdir -p /tmp/logs
+          python setup_sycl.py build 2>&1 | tee /tmp/logs/40_gpu4pyscf_build.log
+          ccache -s || true
+
+      - name: Save ccache (even on failure, partial objects speed up retries)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: sycl-ccache-${{ runner.os }}-${{ github.sha }}
+
+      - name: Smoke test - imports and CPU SYCL device visibility
+        run: |
+          source /opt/intel/oneapi/setvars.sh --force
+          source "$VENV/bin/activate"
+          set -o pipefail; mkdir -p /tmp/logs
+          { python -c "import dpctl; print('dpctl', dpctl.__version__); [print(d) for d in dpctl.get_devices()]" &&
+            python -c "import dpnp; a = dpnp.arange(10); assert int(a.sum()) == 45; print('dpnp', dpnp.__version__, 'OK')" &&
+            python -c "import gpu4pyscf; print('gpu4pyscf import OK')" ; } 2>&1 | tee /tmp/logs/50_smoke.log
+
+      - name: scf unit tests (smoke, partial completion expected)
+        continue-on-error: true
+        timeout-minutes: 90
+        run: |
+          source /opt/intel/oneapi/setvars.sh --force
+          source "$VENV/bin/activate"
+          set -o pipefail; mkdir -p /tmp/logs
+          python -m pytest gpu4pyscf/scf/tests/ -v -x --timeout=900 \
+            --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/60_pytest_scf.log
+
+      - name: df unit tests (smoke, partial completion expected)
+        continue-on-error: true
+        timeout-minutes: 60
+        run: |
+          source /opt/intel/oneapi/setvars.sh --force
+          source "$VENV/bin/activate"
+          set -o pipefail; mkdir -p /tmp/logs
+          python -m pytest gpu4pyscf/df/tests/ -v -x --timeout=900 \
+            --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/70_pytest_df.log
+
+      - name: dft unit tests (smoke, partial completion expected)
+        continue-on-error: true
+        timeout-minutes: 60
+        run: |
+          source /opt/intel/oneapi/setvars.sh --force
+          source "$VENV/bin/activate"
+          set -o pipefail; mkdir -p /tmp/logs
+          python -m pytest gpu4pyscf/dft/tests/ -v -x --timeout=900 \
+            --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/80_pytest_dft.log
+
+      - name: Publish logs to a ci-logs branch (readable without API auth)
+        if: always()
+        run: |
+          mkdir -p /tmp/logs /tmp/ci-logs && cd /tmp/ci-logs
+          for f in /tmp/logs/*.log; do
+            [ -e "$f" ] && tail -n 1200 "$f" > "$(basename "$f")"
+          done
+          ls -la
+          git init -q -b main .
+          git config user.email "ci@github-runner" && git config user.name "sycl-cpu-ci logs"
+          git add -A
+          git commit -q -m "logs for run ${{ github.run_id }} (attempt ${{ github.run_attempt }}) sha ${{ github.sha }}" --allow-empty
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" HEAD:refs/heads/ci-logs-${{ github.run_id }}
