@@ -31,6 +31,13 @@ if (USE_SYCL)
 
   add_compile_definitions(USE_SYCL=1)
 
+  # Production builds AOT-compile device code for Intel PVC (spir64_gen +
+  # -device pvc). That cannot run anywhere without a PVC, so CPU-only CI
+  # (GitHub-hosted runners driving the OpenCL CPU device) passes
+  # -DGPU4PYSCF_SYCL_AOT=OFF to get a generic JIT (spir64) build instead.
+  # Default ON keeps production PVC builds byte-identical.
+  option(GPU4PYSCF_SYCL_AOT "AOT-compile SYCL device code for Intel PVC" ON)
+
   # Honor a user-supplied CMAKE_BUILD_TYPE (e.g. passed through
   # CMAKE_CONFIGURE_ARGS="-DCMAKE_BUILD_TYPE=RelWithDebInfo"). When nothing is
   # supplied, default to Release.
@@ -66,9 +73,13 @@ if (USE_SYCL)
     -fp-model=precise
     -fno-system-debug
     -fsycl-default-sub-group-size=32
-    -fsycl-targets=spir64_gen
-    "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
   )
+  if (GPU4PYSCF_SYCL_AOT)
+    add_compile_options(
+      -fsycl-targets=spir64_gen
+      "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
+    )
+  endif()
 
   # Host-side debug info WITHOUT propagating -g to the SYCL device backend.
   # Restrict -g to C and Fortran translation units (pure host code). SYCL
@@ -83,10 +94,20 @@ if (USE_SYCL)
     -fsycl
     -flink-huge-device-code
     -fsycl-max-parallel-link-jobs=4
-    -ftarget-register-alloc-mode=pvc:auto
-    -fsycl-targets=spir64_gen
-    "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
   )
+  if (GPU4PYSCF_SYCL_AOT)
+    add_link_options(
+      -ftarget-register-alloc-mode=pvc:auto
+      -fsycl-targets=spir64_gen
+      "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
+    )
+    # ExchCXX validates this against a GPU-only allowlist; an empty value
+    # disables its AOT pass entirely (generic spir64 JIT), which is what the
+    # CPU-only CI needs.
+    set(GPU4PYSCF_EXCHCXX_SYCL_TARGET intel_gpu_pvc)
+  else()
+    set(GPU4PYSCF_EXCHCXX_SYCL_TARGET "")
+  endif()
 
   # This needs to be built first than anything else
   add_subdirectory(gsycl)
@@ -303,8 +324,12 @@ if(BUILD_LIBXC)
         CMAKE_ARGS
         -DCMAKE_BUILD_TYPE=Release
         -DBUILD_SHARED_LIBS=ON
+        # ExternalProject does not inherit the parent's compiler choice; without
+        # this the inner configure falls back to /usr/bin/c++ (no -fsycl).
+        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
         -DEXCHCXX_ENABLE_SYCL=ON
-        -DEXCHCXX_SYCL_TARGET=intel_gpu_pvc
+        -DEXCHCXX_SYCL_TARGET=${GPU4PYSCF_EXCHCXX_SYCL_TARGET}
         -DEXCHCXX_ENABLE_TESTS=OFF
         -DEXCHCXX_ENABLE_LIBXC=OFF
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
