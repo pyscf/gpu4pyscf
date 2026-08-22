@@ -88,7 +88,8 @@ template<typename DeviceKernel>
 cutlass::Status grouped_gemm_kernel_run(int problem_count, cutlass::gemm::GemmCoord* problem_sizes,
                         typename DeviceKernel::ElementA** A, typename DeviceKernel::ElementB** B, typename DeviceKernel::ElementC** C, typename DeviceKernel::ElementC** D,
                         int64_t* lda, int64_t* ldb, int64_t* ldc, int64_t* ldd,
-                        typename DeviceKernel::EpilogueOutputOp::ElementCompute alpha, typename DeviceKernel::EpilogueOutputOp::ElementCompute beta) {
+                        typename DeviceKernel::EpilogueOutputOp::ElementCompute alpha, typename DeviceKernel::EpilogueOutputOp::ElementCompute beta,
+                        cudaStream_t stream) {
 
   int threadblock_count = DeviceKernel::sufficient();
 
@@ -107,18 +108,18 @@ cutlass::Status grouped_gemm_kernel_run(int problem_count, cutlass::gemm::GemmCo
   DeviceKernel gemm_op;
   cutlass::Status status = gemm_op.initialize(arguments,
                                               workspace.get(),
-                                              nullptr);     // CUDA stream
+                                              stream);      // CUDA stream
 
   if (status != cutlass::Status::kSuccess) {
     return status;
   }
 
-  status = gemm_op();
+  status = gemm_op(stream);
   return status;
 }
 
 template<typename DeviceKernel>
-void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num)
+void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num, cudaStream_t stream)
 {
   size_t total_size = sizeof(cutlass::gemm::GemmCoord) +
                       sizeof(typename DeviceKernel::ElementA*) +
@@ -202,8 +203,12 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
       reinterpret_cast<int64_t*>(device_data.get() + ldb_offset),
       reinterpret_cast<int64_t*>(device_data.get() + ldc_offset),
       reinterpret_cast<int64_t*>(device_data.get() + ldc_offset),
-      typename DeviceKernel::EpilogueOutputOp::ElementCompute(alpha), typename DeviceKernel::EpilogueOutputOp::ElementCompute(beta));
+      typename DeviceKernel::EpilogueOutputOp::ElementCompute(alpha), typename DeviceKernel::EpilogueOutputOp::ElementCompute(beta),
+      stream);
 
+  // device_data is a stack DeviceAllocation freed on scope exit, so the
+  // kernel has to finish before we leave.
+  cudaStreamSynchronize(stream);
   delete[] host_data;
 
   CUTLASS_CHECK(status);
@@ -218,12 +223,12 @@ int grouped_gemm(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, i
     if(compute_capability < 80)
     {
       using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_simt_dgemm_grouped_64x128_8x2_tt_align1_base>;
-      grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
+      grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num, stream);
     }
     else if(compute_capability >= 80)
     {
       using DeviceKernel = cutlass::gemm::device::GemmGrouped<cutlass_tensorop_d884gemm_grouped_64x128_16x3_tt_align1_base>;
-      grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num);
+      grouped_gemm_kernel_launch<DeviceKernel>(out, x, y, Ms, Ns, Ks, num, stream);
     }
     else
     {
