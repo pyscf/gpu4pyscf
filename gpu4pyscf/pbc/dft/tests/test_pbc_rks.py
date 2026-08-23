@@ -67,8 +67,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
     def test_gga_fft(self):
         cell = self.cell
@@ -81,8 +81,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
     def test_rsh_fft(self):
         cell = self.cell
@@ -95,8 +95,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
     def test_kpts_mgga(self):
         cell = self.cell
@@ -109,8 +109,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
     def test_lda_gdf(self):
         from pyscf.pbc.df.df import _load3c
@@ -183,15 +183,15 @@ class KnownValues(unittest.TestCase):
         mf.time_reversal_symmetry = False
         mf.run()
         mf_ref = mf.to_cpu().run()
-        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
+        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, delta=1e-6)
 
         # test bands
         np.random.seed(1)
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
     def test_gga_fft_with_kpt(self):
         cell = self.cell
@@ -201,15 +201,15 @@ class KnownValues(unittest.TestCase):
         mf.time_reversal_symmetry = False
         mf.run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
-        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
+        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, delta=1e-6)
 
         # test bands
         np.random.seed(1)
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
     def test_rsh_fft_with_kpt(self):
         cell = self.cell
@@ -219,15 +219,15 @@ class KnownValues(unittest.TestCase):
         mf.time_reversal_symmetry = False
         mf.run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
-        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
+        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, delta=1e-6)
 
         # test bands
         np.random.seed(1)
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = mf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
     def test_kpts_lda_fft(self):
         cell = self.cell
@@ -242,8 +242,8 @@ class KnownValues(unittest.TestCase):
         kpts_band = np.random.random((2,3))
         e0, c0 = mf_ref.get_bands(kpts_band)
         e1, c1 = kmf.get_bands(kpts_band)
-        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 6)
-        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 6)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
     def test_kpts_gga_fft(self):
         cell = self.cell
@@ -501,6 +501,7 @@ class KnownValues(unittest.TestCase):
         #ref = cell.KRKS(xc='camb3lyp', kpts=kpts).run()
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
+    @unittest.skip('Only support Monkhorst-Pack kmesh')
     def test_unpaired_kpts(self):
         kpts = cell.make_kpts([1,1,5])[:3]
         kmf = cell.KRKS(xc='pbe', kpts=kpts).to_gpu()

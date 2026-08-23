@@ -49,7 +49,7 @@ def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     single_kpt_band = (getattr(kpts_band, 'ndim', None) == 1)
     kpts_band = kpts_band.reshape(-1,3)
 
-    fock = cp.asarray(mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band))
+    fock = mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band)
     fock += mf.get_hcore(cell, kpts_band)
     s1e = mf.get_ovlp(cell, kpts_band)
     mo_energy, mo_coeff = eigh_with_canonical_orth(fock, s1e)

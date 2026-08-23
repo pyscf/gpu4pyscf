@@ -83,10 +83,12 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
     e_strain = strain_tensor_dispalcement(x, y, disp)
     cell1 = cell.set_geom_(r.dot(e_strain.T), inplace=False)
     cell1.a = a.dot(e_strain.T)
+    cell1.mesh = cell.mesh
 
     e_strain = strain_tensor_dispalcement(x, y, -disp)
     cell2 = cell.set_geom_(r.dot(e_strain.T), inplace=False)
     cell2.a = a.dot(e_strain.T)
+    cell2.mesh = cell.mesh
 
     if cell.space_group_symmetry:
         cell1.build(False, False)

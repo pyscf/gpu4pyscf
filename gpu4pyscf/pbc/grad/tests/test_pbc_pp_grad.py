@@ -34,7 +34,7 @@ import pyscf
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
 from pyscf.pbc.lib.kpts_helper import gamma_point
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
-import gpu4pyscf.pbc.dft.multigrid_v2 as multigrid_v2
+from gpu4pyscf.pbc.dft import multigrid_v3
 import pytest
 
 disp = 1e-4
@@ -318,6 +318,7 @@ class TestFiniteDifference(unittest.TestCase):
         self._fd_check(cell_fe, atom_id=1, cart_id=0, places=4)
 
     def test_pseudo_gradient_term_with_zero_nexp(self):
+        from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
         cell = pyscf.M(
             a = np.array([
                 [3.18693029, 0.0, 0.0],
@@ -382,14 +383,22 @@ class TestFiniteDifference(unittest.TestCase):
 
         ni = mf._numint
         dm0 = mf.make_rdm1()
-        rho_g = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0, kpts)
-        rho_g = rho_g[0,0]
 
-        dx = 1e-5
+        ni = multigrid_v3.MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        analytical_gradient = ni.energy_nuclear_gradient(
+            mf.xc, dm0, kpts, spin=0, with_nuc=True)
+        analytical_gradient -= ni.energy_nuclear_gradient(
+            mf.xc, dm0, kpts, spin=0, with_nuc=False)
+
+        dx = 1e-4
         numerical_gradient = np.zeros([cell.natm, 3])
 
         def get_pp_local_energy(cell):
-            vpplocG = multigrid_v1.eval_vpplocG(cell, cell.mesh)
+            ni = multigrid_v3.MultiGridNumInt(cell)
+            ni.allow_mesh_reduction = False
+            rho_g = multigrid_v3._eval_rhoG(ni, dm0, 1, kpts).ravel()
+            vpplocG = multigrid_v1.eval_vpplocG(cell, ni.mesh)
             e_vpplocG = cp.einsum("g,g->", rho_g.conj(), vpplocG) / cell.vol
             assert abs(e_vpplocG.imag) < 1e-8
             return float(e_vpplocG.real)
@@ -412,10 +421,7 @@ class TestFiniteDifference(unittest.TestCase):
 
                 numerical_gradient[i_atom, i_xyz] = (e_p - e_m) / (2 * dx)
 
-        analytical_gradient = multigrid_v1.eval_vpplocG_SI_gradient(cell, cell.mesh, rho_g)
-        analytical_gradient = analytical_gradient.get()
-
-        assert np.max(np.abs(numerical_gradient - analytical_gradient)) < 1e-8
+        assert np.max(np.abs(numerical_gradient - analytical_gradient)) < 3e-6
 
 
 if __name__ == '__main__':

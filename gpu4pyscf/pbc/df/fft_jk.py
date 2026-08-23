@@ -402,14 +402,18 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
     if kpts_band is kpts or kpts_band is None:
         return v_kpts.reshape(dm_kpts.shape)
     else:
+        nkpts_band = len(kpts_band)
+        nao = dm_kpts.shape[-1]
+        if dm_kpts.ndim == v_kpts.ndim:
+            assert v_kpts.shape[-3:] == (nkpts_band, nao, nao)
+            return v_kpts
+
         is_single_kpt = kpts is not None and kpts.ndim == 1
         if is_single_kpt:
             is_rhf = dm_kpts.ndim == 2
         else:
             assert dm_kpts.ndim >= 3
             is_rhf = dm_kpts.ndim == 3
-        nkpts_band = len(kpts_band)
-        nao = dm_kpts.shape[-1]
         if is_rhf:
             v_kpts = v_kpts.reshape(nkpts_band, nao, nao)
         else:  # KUHF dms

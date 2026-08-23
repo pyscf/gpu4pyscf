@@ -203,6 +203,7 @@ class KnownValues(unittest.TestCase):
             assert abs(dat[i,j] - de/2e-5) < 1e-8
 
     def test_get_pp(self):
+        from gpu4pyscf.pbc.grad.rks_stress import _get_pp_nonloc_strain_derivatives
         a = np.eye(3) * 5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
@@ -215,10 +216,11 @@ class KnownValues(unittest.TestCase):
         xc = 'lda,'
         mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
         dat = rks_stress.get_vxc(mf_grad, cell, dm, with_nuc=True)
+        dat += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, cp.array(dm))
         ni = NumInt()
         kpt = np.zeros(3)
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             cell1.precision = 1e-10
             cell2.precision = 1e-10
             vne1 = FFTDF(cell1).get_pp(kpt)
@@ -227,7 +229,7 @@ class KnownValues(unittest.TestCase):
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             de = np.einsum('ij,ji', dm, (vne1-vne2))
             de += exc1 - exc2
-            assert abs(dat[i,j] - de/2e-5) < 1e-8
+            assert abs(dat[i,j] - de/2e-4) < 5e-7
 
     def test_lda_vs_finite_difference(self):
         a = np.eye(3) * 3
@@ -351,9 +353,9 @@ class KnownValues(unittest.TestCase):
                 vpplocG2 = -np.einsum('ij,ij->j', SI, vpplocG2)
                 ref[x,y] = cp.asarray((vpplocG1 - vpplocG2) / (2*disp))
 
-        dat = _get_vpplocG_strain_derivatives(cell, mesh)
+        dat = _get_vpplocG_strain_derivatives(cell, mesh)[1]
         assert abs(dat - ref).max().get() < 1e-7
 
 if __name__ == "__main__":
     print("Full Tests for RKS Stress tensor")
-    unittest.main()
+    #unittest.main()

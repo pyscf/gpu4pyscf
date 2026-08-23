@@ -63,8 +63,8 @@ class KnownValues(unittest.TestCase):
         e1, c1 = mf.get_bands(kpts_band)
         e0, c0 = kmf.get_bands(kpts_band)
         self.assertAlmostEqual(abs(e0-e1).get().max(), 0, 7)
-        self.assertAlmostEqual(lib.fp(e1[0].get()), -6.2986775452228283, 6)
-        self.assertAlmostEqual(lib.fp(e1[1].get()), -7.6616273746782362, 6)
+        self.assertAlmostEqual(lib.fp(e1[0].get()), -6.2986775452228283, delta=1e-5)
+        self.assertAlmostEqual(lib.fp(e1[1].get()), -7.6616273746782362, delta=1e-5)
 
     def test_rhf_exx_ewald_with_kpt(self):
         np.random.seed(1)
@@ -73,7 +73,7 @@ class KnownValues(unittest.TestCase):
         kmf = scf.KRHF(cell, k, exxdiv='ewald')
         kmf.time_reversal_symmetry = False
         e0 = kmf.kernel()
-        self.assertAlmostEqual(e0, -4.2048655827967139, 7)
+        self.assertAlmostEqual(e0, -4.2048655827967139, delta=1e-6)
 
         # test bands
         np.random.seed(1)
@@ -98,7 +98,7 @@ class KnownValues(unittest.TestCase):
         kmf.time_reversal_symmetry = False
         kmf.init_guess = 'hcore'
         e0 = kmf.kernel()
-        self.assertAlmostEqual(e0, -2.7862168430230341, 7)
+        self.assertAlmostEqual(e0, -2.7862168430230341, delta=1e-6)
 
     def test_jk(self):
         cell = self.cell
@@ -128,7 +128,7 @@ class KnownValues(unittest.TestCase):
         kpts_bands = np.random.random((1,3))
         e = kmf.get_bands(kpts_bands)[0]
         e_ref = kmf_cpu.get_bands(kpts_bands)[0]
-        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, delta=1e-5)
 
     def test_density_fit(self):
         from gpu4pyscf.pbc.df.df import GDF

@@ -57,7 +57,7 @@ from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
-from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.pbc.dft import multigrid as multigrid_v1
 
 libmgrid = load_library('libmgrid_v3')
 NBAS_MAX = 16777216
@@ -273,6 +273,7 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
 # to maintain compatibility with the multigrid_v2 implementation.
 def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
     assert xctype == 'LDA'
+    assert not ni.allow_mesh_reduction
     dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1)
     n_dm, nkpts, nao = dm_sc.shape[:3]
     rhoG = cp.array([_eval_density(ni, dm_sc[i])[0] for i in range(n_dm)])
@@ -1390,7 +1391,7 @@ def _density_to_real_space(rhoG, tauG, Gv_bases, xctype, out=None):
     else:
         work = ndarray(mesh, dtype=np.complex128, buffer=tauG)
 
-    if xctype != 'LDA':
+    if xctype == 'GGA' or xctype == 'MGGA':
         Gx, Gy, Gz = Gv_bases
         for n in range(3):
             work = _apply_Gv_1j(rhoG, Gx[n], Gy[n], Gz[n], work)
@@ -1556,7 +1557,7 @@ def get_pp(ni, kpts=None):
     mesh = ni.mesh
     # Compute the vpplocG as
     # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
-    vpplocG = multigrid.eval_vpplocG(cell, mesh)
+    vpplocG = multigrid_v1.eval_vpplocG(cell, mesh)
     vpp = _eval_xc_mat(ni, vpplocG)
     vpp = _inverse_wannier_transform_fock(ni, vpp, kpts)
     t1 = log.timer_debug1("vpploc", *t0)
@@ -1697,6 +1698,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         kpts_band = kpts_band.reshape(-1, 3)
         kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
         ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
+        # ni.build may alter the mesh. vxc was created with mesh different to
+        # this new mesh.
+        ni.mesh = mesh
         veff = _eval_xc_mat(ni, xc_for_fock)
         veff = _inverse_wannier_transform_fock(ni, veff, kpts_band)
 
@@ -1824,6 +1828,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         kpts_band = kpts_band.reshape(-1, 3)
         kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
         ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
+        # ni.build may alter the mesh. vxc was created with mesh different to
+        # this new mesh.
+        ni.mesh = mesh
         veff_a = _eval_xc_mat(ni, vxc_a)
         veff_b = _eval_xc_mat(ni, vxc_b)
         veff = cp.stack([
@@ -1851,7 +1858,7 @@ def get_veff_ip1(
         xc_code, dm_kpts, kpts, with_j, with_pseudo_vloc_orbital_derivative)
     return grad * nkpts
 
-class MultiGridNumInt(multigrid.MultiGridNumIntBase):
+class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     # Enable analytical Fourier transforms (AFT), which are typically more
     # efficient for small unit cells.
     enable_aft = True
@@ -1860,20 +1867,21 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
     # Allow the overall mesh to be reduced to the one in the final bucket.
     # - For energy and nuclear gradients computation, this setting can
     #   potentially introduce errors.
-    # - Stain derivatives are very sensitive to the integration mesh. This
-    #   setting may lead to significantly larger errors (~1e-4 Eh).
-    # - During geometry or lattice optimization, self.mesh should be fixed
-    #   throughout the optimization to avoid discontinuities in the computed
-    #   forces and stress.
+    # - Stain derivatives are very sensitive to the integration mesh. During
+    #   geometry or lattice optimization, self.mesh should be fixed throughout the
+    #   optimization to avoid discontinuities in the computed forces and stress.
     allow_mesh_reduction = False
 
     def __init__(self, cell):
         self.reset(cell)
+        self.mesh = cell.mesh
 
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell
-            self.mesh = cell.mesh
+            # Preferable to preserve the mesh setting during geometry
+            # optimization
+            #self.mesh = cell.mesh
         self.bvkcell = None
         self.mg_envs = None
         self.supmol_img_coords = None
@@ -1920,7 +1928,8 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         # a penalty to encounter for lattice sum
         rad = cell.rcut / bvkcell.vol**(1./3) + 1
         surface = 4*np.pi * rad**2
-        lattice_sum_factor = surface
+        # Consider two layers near the surface
+        lattice_sum_factor = surface * 2
         log.debug1('lattice_sum_factor = %g', lattice_sum_factor)
         precision = cell.precision / lattice_sum_factor
         bas_ij_idx = _non_trivial_bvk_pairs(self, precision)
@@ -2263,7 +2272,17 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
-        if n_dm == 1: # RHF
+        if xctype == 'HF':
+            if n_dm == 2:
+                # XC contribution = 0. Only needs to consider Coulomb energy
+                dm_sc = dm_sc[0] + dm_sc[1]
+                n_dm = 1
+            rhoG, tauG = _eval_density(self, dm_sc)
+
+            sigma = cp.zeros((3, 3))
+            vxc = cp.zeros(ngrids)
+
+        elif n_dm == 1: # RHF
             assert spin is None or spin == 0
             rhoG, tauG = _eval_density(self, dm_sc, with_tau=xctype=='MGGA')
             density = _density_to_real_space(rhoG, tauG, Gv_bases, xctype)
@@ -2289,15 +2308,17 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             rho_sf[:] = density[0,0].real
             rho_sf[:] += density[1,0].real
 
-        exc, vxc = self.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xctype, spin=spin)[:2]
+        if xctype != 'HF':
+            exc, vxc = self.eval_xc_eff(
+                xc_code, density, deriv=1, xctype=xctype, spin=spin)[:2]
+            vxc *= weight
 
-        # grid weight response
-        sigma = rho_sf.dot(exc.ravel()) * weight * cp.eye(3)
+            # grid weight response
+            sigma = rho_sf.dot(exc.ravel()) * weight * cp.eye(3)
 
         if xctype == 'GGA' or xctype == 'MGGA':
-            # The response of grids wrt the lattice vectors introduces an extra
-            # term r_t in the Vxc integral:
+            # The response of grids wrt the lattice vectors introduces an
+            # extra term r_t in the Vxc integral:
             #     integrate[(\nabla_s rho) Vxc[r] r_t] .
             # When applying _vxc_to_reciprocal_space to Vxc, the Fourier
             # transform also needs to be performed on r_t, leading to an
@@ -2307,7 +2328,9 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             vxc = vxc.reshape(n_dm, nvar, ngrids)
             density = density.reshape(n_dm, nvar, ngrids)
             for s in range(n_dm):
-                sigma -= cp.einsum('xg,yg->xy', density[s,1:4], vxc[s,1:4]) * weight
+                sigma -= cp.einsum('xg,yg->xy', density[s,1:4], vxc[s,1:4])
+
+        vxc = vxc.reshape(n_dm, nvar, *mesh)
 
         density = exc = rho_sf = None
 
@@ -2315,7 +2338,7 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
         coulomb_on_g_mesh = cp.zeros_like(rhoG)
         if with_nuc:
             if cell._pseudo:
-                coulomb_on_g_mesh = multigrid.eval_vpplocG(cell, mesh, out=tauG).reshape(mesh)
+                coulomb_on_g_mesh = multigrid_v1.eval_vpplocG(cell, mesh, out=tauG).reshape(mesh)
                 grad, sigma1 = _pploc_derivatives(cell, mesh, rhoG, Gv_bases)
                 sigma += sigma1
             else:
@@ -2352,9 +2375,6 @@ class MultiGridNumInt(multigrid.MultiGridNumIntBase):
             init_ke = mesh_to_ke(cell.lattice_vectors(), [16]*3).max()
             fft_buckets = _partition_ke_for_fft(
                 self, bas_ij_idx, init_ke, self.ke_cutoff, precision, xctype, log)
-
-        vxc *= weight
-        vxc = vxc.reshape(n_dm, nvar, *mesh)
 
         if n_dm == 1: # RHF
             vxc = _vxc_to_reciprocal_space(vxc[0], coulomb_on_g_mesh, Gv_bases)
