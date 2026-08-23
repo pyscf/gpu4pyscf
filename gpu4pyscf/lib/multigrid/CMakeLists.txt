@@ -24,3 +24,7 @@ set_target_properties(mgrid_v2 PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
         CUDA_SEPARABLE_COMPILATION ON
 )
+
+if(ENABLE_FP32_MULTIGRID)
+  target_compile_definitions(mgrid_v2 PRIVATE GPU4PYSCF_ENABLE_FP32_MULTIGRID)
+endif()

@@ -39,6 +39,7 @@ int evaluate_xc_gradient_driver(
     const int *bas, const double *env, const int n_channels,
     const int is_non_orthogonal, const int use_float_precision) {
   if (use_float_precision) {
+#ifdef GPU4PYSCF_ENABLE_FP32_MULTIGRID
     if (is_non_orthogonal) {
       if (n_channels == 1) {
         return gpu4pyscf::gpbc::multi_grid::gradient::evaluate_xc_driver<float, 1,
@@ -94,6 +95,12 @@ int evaluate_xc_gradient_driver(
         return 1;
       }
     }
+#else
+    fprintf(stderr,
+            "single precision not available; rebuild with "
+            "-DENABLE_FP32_MULTIGRID=ON\n");
+    return 1;
+#endif
   } else {
     if (is_non_orthogonal) {
       if (n_channels == 1) {
