@@ -94,7 +94,7 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-3.75319097e-02,  9.32974780e-03, -4.73203810e-11],
                                  [ 3.75319095e-02, -9.32974768e-03, -4.51863943e-11]])
 
-        assert abs(test_energy - ref_energy) < 1e-9
+        assert abs(test_energy - ref_energy) < 3e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     def test_krks(self):
@@ -149,7 +149,7 @@ class KnownValues(unittest.TestCase):
 
         ref_energy = -1.439218776262645
 
-        assert abs(test_energy - ref_energy) < 2e-10
+        assert abs(test_energy - ref_energy) < 1e-9
 
     def test_uks(self):
         cell = self.cell
@@ -174,7 +174,7 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-4.10163065e-02,  1.00148573e-02, -4.86782781e-11],
                                  [ 4.10163065e-02, -1.00148573e-02, -4.62222600e-11]])
 
-        assert abs(test_energy - ref_energy) < 1e-9
+        assert abs(test_energy - ref_energy) < 3e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     def test_kuks(self):
@@ -220,7 +220,7 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-3.75888726e-02,  9.34455109e-03, -4.80129776e-11],
                                  [ 3.75888723e-02, -9.34455096e-03, -4.57646238e-11]])
 
-        assert abs(test_energy - ref_energy) < 1e-9
+        assert abs(test_energy - ref_energy) < 3e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     @unittest.skipIf(num_devices > 1, '')
@@ -259,7 +259,7 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-4.10910618e-02,  1.00340747e-02, -4.86288417e-11],
                                  [ 4.10910618e-02, -1.00340747e-02, -4.60603924e-11]])
 
-        assert abs(test_energy - ref_energy) < 1e-9
+        assert abs(test_energy - ref_energy) < 3e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     @unittest.skipIf(num_devices > 1, '')

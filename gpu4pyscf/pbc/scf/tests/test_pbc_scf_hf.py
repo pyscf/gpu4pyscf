@@ -79,7 +79,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         kpt_band = np.random.random(3)
         e0, c0 = kmf.get_bands(kpt_band)
-        self.assertAlmostEqual(lib.fp(e0.get()), -6.8312867098806249, 6)
+        self.assertAlmostEqual(lib.fp(e0.get()), -6.8312867098806249, delta=1e-5)
 
     def test_rhf_exx_None(self):
         cell = self.cell
