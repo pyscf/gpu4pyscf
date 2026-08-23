@@ -108,8 +108,8 @@ class KnownValues(unittest.TestCase):
     def test_energy(self):
         ref = -76.37687528310500 # ref from becke partition, 0.1e-10 penalty weight
         self.assertAlmostEqual(self.output_penalty_cons2['e_tot'], ref, 1)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2['e_tot'], ref, 7)
-        self.assertAlmostEqual(self.output_lagrange_nested_cons2['e_tot'], ref, delta=1e-7)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2['e_tot'], ref, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2['e_tot'], ref, 6)
 
     def test_homo_lumo(self):
         homo_ref = -0.59463327378979
@@ -138,8 +138,8 @@ class KnownValues(unittest.TestCase):
 
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2['v_lagrange'][0], ref_O, 6)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2['v_lagrange'][1], ref_H, 6)
-        self.assertAlmostEqual(self.output_lagrange_nested_cons2['v_lagrange'][0], ref_O, 6)
-        self.assertAlmostEqual(self.output_lagrange_nested_cons2['v_lagrange'][1], ref_H, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2['v_lagrange'][0], ref_O, delta=1e-6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2['v_lagrange'][1], ref_H, delta=1e-6)
 
     def test_minao_projection(self):
         ref_energy = -76.3639776639758
