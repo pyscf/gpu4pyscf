@@ -304,7 +304,13 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
                  cycle+1, e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
 
         if dump_chk:
-            mf.dump_chk(locals())
+            mf.dump_chk({
+                'mol': mol,
+                'mo_energy': mo_energy,
+                'mo_occ': mo_occ,
+                'mo_coeff': mo_coeff,
+                'e_tot': e_tot,
+            })
 
         if callable(callback):
             callback(locals())
@@ -318,6 +324,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     mf.cycles = cycle + 1
     if scf_conv and mf.level_shift is not None:
+        mo_coeff = mo_occ = mo_energy = fock = mf_diis = None
         # An extra diagonalization, to remove level shift
         mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
@@ -925,8 +932,8 @@ class SCF(pyscf_lib.StreamObject):
         return self
 
     def dump_chk(self, envs):
-        assert isinstance(envs, dict)
         if self.chkfile:
+            assert isinstance(envs, dict)
             chkfile.dump_scf(
                 self.mol, self.chkfile, envs['e_tot'],
                 cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),

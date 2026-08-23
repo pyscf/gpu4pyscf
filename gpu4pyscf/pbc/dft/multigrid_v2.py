@@ -1517,6 +1517,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
+    input_kpts = kpts
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1579,9 +1580,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if with_j:
         xc_for_fock[0] += coulomb_on_g_mesh
 
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1617,6 +1618,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
+    input_kpts = kpts
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1683,9 +1685,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if with_j:
         xc_for_fock[:, 0] += coulomb_on_g_mesh
 
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff

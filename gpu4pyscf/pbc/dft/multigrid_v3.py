@@ -1649,7 +1649,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         # dm_sc is represented in primitive bases (by sorted_cell). Its size can be
         # much larger than the input dm_kpts. Release its memory if remaining memory
         # is insufficient.
-        if (nvar+2)*ngrids*8 > get_avail_mem():
+        if (nvar+4)*ngrids*8 > get_avail_mem():
             dm_sc = None
 
         density = cp.empty((nvar, ngrids))
@@ -1763,7 +1763,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # dm_sc is represented in primitive bases (by sorted_cell). Its size can be
     # much larger than the input dm_kpts. Release its memory if remaining memory
     # is insufficient.
-    if (2*nvar+2)*ngrids*8 > get_avail_mem():
+    if (2*nvar+4)*ngrids*8 > get_avail_mem():
         dm_sc = [None, None]
 
     density = cp.empty((2, nvar, ngrids))

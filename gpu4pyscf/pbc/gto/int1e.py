@@ -76,7 +76,7 @@ def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     return opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts, sort_output)
 
 def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 2, kpts, bvk_kmesh)
+    opt = _check_opt(cell, 2, kpts, bvk_kmesh, 1e-2)
     return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts, sort_output)
 
 def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):

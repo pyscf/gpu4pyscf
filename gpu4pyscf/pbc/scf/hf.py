@@ -362,8 +362,8 @@ class SCF(mol_hf.SCF):
         raise NotImplementedError
 
     def dump_chk(self, envs):
-        mol_hf.SCF.dump_chk(self, envs)
         if self.chkfile:
+            mol_hf.SCF.dump_chk(self, envs)
             with lib.H5FileWrap(self.chkfile, 'a') as fh5:
                 fh5['scf/kpt'] = self.kpt
         return self

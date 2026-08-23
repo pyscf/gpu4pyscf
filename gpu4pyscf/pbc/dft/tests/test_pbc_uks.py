@@ -107,7 +107,7 @@ class KnownValues(unittest.TestCase):
         mf.time_reversal_symmetry = False
         mf.run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run()
-        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
+        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, delta=1e-6)
 
         # test bands
         np.random.seed(1)

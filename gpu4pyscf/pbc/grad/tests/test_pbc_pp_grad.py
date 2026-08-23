@@ -374,6 +374,7 @@ class TestFiniteDifference(unittest.TestCase):
 
         kmesh = [1,3,3]
         kpts = cell.make_kpts(kmesh)
+        nkpts = len(kpts)
         mf = cell.KRKS(xc = "pbe", kpts = kpts)
         mf.conv_tol = 1e-1
         mf = mf.to_gpu()
@@ -399,7 +400,7 @@ class TestFiniteDifference(unittest.TestCase):
             ni.allow_mesh_reduction = False
             rho_g = multigrid_v3._eval_rhoG(ni, dm0, 1, kpts).ravel()
             vpplocG = multigrid_v1.eval_vpplocG(cell, ni.mesh)
-            e_vpplocG = cp.einsum("g,g->", rho_g.conj(), vpplocG) / cell.vol
+            e_vpplocG = cp.einsum("g,g->", rho_g.conj(), vpplocG) / cell.vol / nkpts
             assert abs(e_vpplocG.imag) < 1e-8
             return float(e_vpplocG.real)
 
