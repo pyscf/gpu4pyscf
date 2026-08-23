@@ -1235,7 +1235,7 @@ def vec_dot(vec1, vec2):
     assert vec1.shape == vec2.shape
     n = vec1.size
 
-    fn_name = f'vec_dot_kernel_order'
+    fn_name = 'vec_dot_kernel_order'
     if fn_name not in _kernel_registery:
         kernel_code = (r'''
 extern "C" __global__

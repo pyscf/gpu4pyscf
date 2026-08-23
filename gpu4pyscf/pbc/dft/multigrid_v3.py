@@ -636,8 +636,6 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
     mesh = ke_to_mesh(a, init_ke)
     mesh_final = ni.mesh
 
-    vol = cell.vol
-
     ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
 
     supmol_bas_ij_idx = _bvk_pairs_to_supmol_pairs(
