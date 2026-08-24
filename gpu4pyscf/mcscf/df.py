@@ -21,6 +21,7 @@ from gpu4pyscf.df import df as gpu_df
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.mcscf.casci import _CASCI
+from gpu4pyscf.mcscf.casscf import _CASSCF, _ERIS
 
 
 def _get_with_df(mc, auxbasis=None, with_df=None):
@@ -69,9 +70,14 @@ class _DFCAS:
         return out
 
     def to_cpu(self):
-        out = cpu_mcscf.DFCASCI(
-            self._scf.to_cpu(), self.ncas, self.nelecas,
-            auxbasis=self.with_df.auxbasis, ncore=self.ncore)
+        if isinstance(self, _CASSCF):
+            out = cpu_mcscf.DFCASSCF(
+                self._scf.to_cpu(), self.ncas, self.nelecas,
+                auxbasis=self.with_df.auxbasis, ncore=self.ncore)
+        else:
+            out = cpu_mcscf.DFCASCI(
+                self._scf.to_cpu(), self.ncas, self.nelecas,
+                auxbasis=self.with_df.auxbasis, ncore=self.ncore)
         return utils.to_cpu(self, out=out)
 
 
@@ -82,11 +88,29 @@ class DFCASCI(_DFCAS, _CASCI):
         self.with_df = _get_with_df(self, auxbasis, with_df)
 
 
+class DFCASSCF(_DFCAS, _CASSCF):
+    def __init__(self, mf_or_mol, ncas, nelecas, auxbasis=None, ncore=None,
+                 frozen=None, with_df=None):
+        _CASSCF.__init__(self, mf_or_mol, ncas, nelecas, ncore, frozen)
+        self.with_df = _get_with_df(self, auxbasis, with_df)
+
+    def ao2mo(self, mo_coeff=None, hcore=None):
+        if mo_coeff is None:
+            mo_coeff = self.mo_coeff
+        ncore = self.ncore
+        nocc = ncore + self.ncas
+        mo_cas = mo_coeff[:, ncore:nocc]
+        paaa = self.with_df.ao2mo(
+            (mo_coeff, mo_cas, mo_cas, mo_cas), compact=False)
+        paaa = paaa.reshape(mo_coeff.shape[1], self.ncas,
+                            self.ncas, self.ncas)
+        return _ERIS(self, mo_coeff, paaa, hcore)
+
+
 def from_cpu(mc):
-    if isinstance(mc, cpu_mc1step.CASSCF):
-        raise NotImplementedError('GPU DF-CASSCF is not implemented')
-    out = DFCASCI(mc._scf, mc.ncas, mc.nelecas,
-                  auxbasis=mc.with_df.auxbasis, ncore=mc.ncore)
+    cls = DFCASSCF if isinstance(mc, cpu_mc1step.CASSCF) else DFCASCI
+    out = cls(mc._scf, mc.ncas, mc.nelecas,
+              auxbasis=mc.with_df.auxbasis, ncore=mc.ncore)
     for key, value in mc.__dict__.items():
         if key not in ('_scf', 'with_df', 'fcisolver'):
             if isinstance(value, numpy.ndarray):

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Copyright 2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,4 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .df import DFCASCI, DFCASSCF
+########################################
+#  Example of GPU DF-CASSCF
+########################################
+
+import pyscf
+
+from gpu4pyscf import mcscf, scf
+
+
+mol = pyscf.M(
+    atom='N 0 0 -0.7; N 0 0 0.7',
+    basis='cc-pvdz',
+)
+mf = scf.RHF(mol).density_fit().run()
+
+mc = mcscf.DFCASSCF(mf, 6, 6)
+mc.kernel()
