@@ -24,6 +24,7 @@ jobs:
         docker pull pyscf/gpu4pyscf-devel:pyscf-2.14
 
     - name: Test with pytest
+      timeout-minutes: 240
       run: |
         docker run --gpus all \
           --rm \
@@ -46,6 +47,7 @@ jobs:
         docker pull pyscf/gpu4pyscf-devel:pyscf-2.14
 
     - name: Test with pytest
+      timeout-minutes: 240
       run: |
         docker run --gpus all \
           --rm \

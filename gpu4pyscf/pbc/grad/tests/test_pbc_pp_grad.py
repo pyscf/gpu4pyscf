@@ -318,7 +318,7 @@ class TestFiniteDifference(unittest.TestCase):
         self._fd_check(cell_fe, atom_id=1, cart_id=0, places=4)
 
     def test_pseudo_gradient_term_with_zero_nexp(self):
-        from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
+        from gpu4pyscf.pbc.dft.multigrid_v3 import _pploc_derivatives, _get_Gv_bases
         cell = pyscf.M(
             a = np.array([
                 [3.18693029, 0.0, 0.0],
@@ -387,20 +387,16 @@ class TestFiniteDifference(unittest.TestCase):
 
         ni = multigrid_v3.MultiGridNumInt(cell)
         ni.allow_mesh_reduction = False
-        analytical_gradient = ni.energy_nuclear_gradient(
-            mf.xc, dm0, kpts, spin=0, with_nuc=True)
-        analytical_gradient -= ni.energy_nuclear_gradient(
-            mf.xc, dm0, kpts, spin=0, with_nuc=False)
+        Gv_bases = _get_Gv_bases(ni.mesh, cell.reciprocal_vectors())
+        rho_g = multigrid_v3._eval_rhoG(ni, dm0, 1, kpts).ravel()
+        analytical_gradient = _pploc_derivatives(cell, ni.mesh, rho_g, Gv_bases)[0].get()
 
         dx = 1e-4
         numerical_gradient = np.zeros([cell.natm, 3])
 
         def get_pp_local_energy(cell):
-            ni = multigrid_v3.MultiGridNumInt(cell)
-            ni.allow_mesh_reduction = False
-            rho_g = multigrid_v3._eval_rhoG(ni, dm0, 1, kpts).ravel()
             vpplocG = multigrid_v1.eval_vpplocG(cell, ni.mesh)
-            e_vpplocG = cp.einsum("g,g->", rho_g.conj(), vpplocG) / cell.vol / nkpts
+            e_vpplocG = cp.einsum("g,g->", rho_g.conj(), vpplocG) / cell.vol
             assert abs(e_vpplocG.imag) < 1e-8
             return float(e_vpplocG.real)
 
@@ -422,7 +418,7 @@ class TestFiniteDifference(unittest.TestCase):
 
                 numerical_gradient[i_atom, i_xyz] = (e_p - e_m) / (2 * dx)
 
-        assert np.max(np.abs(numerical_gradient - analytical_gradient)) < 3e-6
+        assert np.max(np.abs(numerical_gradient - analytical_gradient)) < 1e-8
 
 
 if __name__ == '__main__':
