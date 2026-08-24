@@ -26,6 +26,7 @@ jobs:
     - name: Test with pytest
       run: |
         docker run --gpus all \
+          --init \
           --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
@@ -48,6 +49,7 @@ jobs:
     - name: Test with pytest
       run: |
         docker run --gpus all \
+          --init \
           --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
@@ -55,4 +57,4 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.14 \
-          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && pip3 install pyscf==2.8 scipy==1.17 && source build.sh && pytest -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && pip3 install pyscf==2.8 scipy==1.17 && source build.sh && pytest -v -s -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
