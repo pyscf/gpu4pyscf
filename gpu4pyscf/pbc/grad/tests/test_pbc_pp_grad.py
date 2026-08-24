@@ -374,7 +374,6 @@ class TestFiniteDifference(unittest.TestCase):
 
         kmesh = [1,3,3]
         kpts = cell.make_kpts(kmesh)
-        nkpts = len(kpts)
         mf = cell.KRKS(xc = "pbe", kpts = kpts)
         mf.conv_tol = 1e-1
         mf = mf.to_gpu()
