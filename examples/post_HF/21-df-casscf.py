@@ -18,15 +18,23 @@
 ########################################
 
 import pyscf
+from pyscf import mcscf as cpu_mcscf
 
-from gpu4pyscf import mcscf, scf
+from gpu4pyscf import mcscf as gpu_mcscf
 
 
 mol = pyscf.M(
     atom='N 0 0 -0.7; N 0 0 0.7',
-    basis='cc-pvdz',
+    basis='6-31g*',
 )
-mf = scf.RHF(mol).density_fit().run()
+mf = mol.RHF().to_gpu().density_fit().run()
 
-mc = mcscf.DFCASSCF(mf, 6, 6)
-mc.kernel()
+mc_cpu = cpu_mcscf.DFCASSCF(mf.to_cpu(), 6, 6)
+e_cpu = mc_cpu.kernel()[0]
+
+mc_gpu = gpu_mcscf.DFCASSCF(mf.to_gpu(), 6, 6)
+e_gpu = mc_gpu.kernel()[0]
+
+print(f'CPU DF-CASSCF energy: {e_cpu:.12f}')
+print(f'GPU DF-CASSCF energy: {e_gpu:.12f}')
+print(f'CPU-GPU difference:   {e_gpu - e_cpu:.3e}')

@@ -65,6 +65,7 @@ def h1e_for_cas(casci, mo_coeff=None, ncas=None, ncore=None, hcore=None,
 
 
 class _CASCI(cpu_casci.CASCI):
+    _keys = cpu_casci.CASCI._keys.union({'timing'})
     canonicalization = False
 
     get_h1eff = h1e_for_cas

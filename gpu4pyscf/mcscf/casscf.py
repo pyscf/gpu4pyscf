@@ -236,7 +236,7 @@ def kernel(casscf, mo_coeff, tol=1e-7, conv_tol_grad=None, ci0=None,
 
 
 class _CASSCF(cpu_mc1step.CASSCF):
-    _keys = cpu_mc1step.CASSCF._keys.union({'denom_floor'})
+    _keys = cpu_mc1step.CASSCF._keys.union({'denom_floor', 'timing'})
     canonicalization = False
     denom_floor = 1e-8
     max_stepsize = .04
