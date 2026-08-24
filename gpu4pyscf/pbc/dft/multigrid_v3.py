@@ -600,7 +600,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
 
     ke_lower, ke_upper = 0, init_ke
     while ke_lower <= ke_max:
-        mesh = np.where(mesh < mesh_max, mesh, mesh_max)
+        mesh = np.minimum(mesh, mesh_max)
         filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
         if len(filtered_pairs) > 0:
             ish, jsh = divmod(filtered_pairs, NBAS_MAX)
@@ -648,7 +648,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
 
     ke_lower, ke_upper = 0, init_ke
     while ke_lower < ke_max:
-        mesh = np.where(mesh < mesh_final, mesh, mesh_final)
+        mesh = np.minimum(mesh, mesh_final)
         idx = cp.where((ke_lower < pair_ke) & (pair_ke <= ke_upper))[0]
         if len(idx) > 0:
             filtered_pairs = supmol_bas_ij_idx[idx]

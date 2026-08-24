@@ -324,9 +324,10 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     mf.cycles = cycle + 1
     if scf_conv and mf.level_shift is not None:
-        mo_coeff = mo_occ = mo_energy = fock = mf_diis = None
+        mo_coeff = mo_occ = mo_energy = mf_diis = None
         # An extra diagonalization, to remove level shift
         mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth)
+        fock = None
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm, dm_last = mf.make_rdm1(mo_coeff, mo_occ), dm
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
