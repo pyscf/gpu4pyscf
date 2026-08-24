@@ -41,23 +41,58 @@ from gpu4pyscf.df.hessian.rhf import (
     _int3c2e_ip1_evaluator, _bas_atom_labels, _aggregate_to_atoms,
     _factorize_j2c, _argsort_aux_by_atom, _allocate)
 
-def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
-                        verbose=None):
-    '''
-    Computes the first-order derivatives of the energy contributions from
-    J and K terms per atom.
+def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
+                        omega=None, lr_factor=None, sr_factor=None, verbose=None):
+    r'''Compute the second-order derivatives of the Coulomb and exchange
+    energies with respect to atomic positions.
+
+        j_factor * J - k_factor * K
+
+    Parameters
+    ----------
+    int3c2e_opt : gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt object
+        Handler for DF integrals computation.
+    dm : ndarray
+        Density matrix or (for UKS) a sequence of density matrices.
+    j_factor : float, optional
+        Scaling factor applied to the Coulomb (J) contribution.
+    k_factor : float, optional
+        Scaling factor applied to the exchange (K) contribution.
+    omega : float, optional
+        Range-separation parameter. Together with ``lr_factor`` and
+        ``sr_factor``, defines the range-separated Coulomb operator used in
+        exchange (K) matrix evaluation:
+            lr_factor * erf(omega * r) / r + sr_factor * erfc(omega * r) / r.
+    lr_factor : float, optional
+        Scaling factor for the long-range interaction,
+    sr_factor : float, optional
+        Scaling factor for the short-range interaction,
+
+    Notes
+    -----
+    When omega, lr_factor, and sr_factor parameters are specified, the K
+    contribution is evaluated using the attenuated Coulomb operator.
+
+    Returns
+    -------
+    Array of shape ``(natm, natm, 3, 3)``.
     '''
     assert dm.ndim == 3
     if k_factor == 0:
         from gpu4pyscf.df.hessian.rhf import _j_energy_per_atom
+        assert omega is None or omega == 0
         return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], verbose) * j_factor
+
+    if j_factor != 0 and (omega is not None and omega != 0):
+        raise RuntimeError(
+            'Cannot compute J contributions with range-separated Coulomb operator.')
 
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
     dm_factor_l = dm_factor_r = df_rhf_hess._factorize_dm(mol, dm)
     nao, nocc = dm_factor_l.shape[1:]
@@ -78,7 +113,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     batch_size = int(word_avail * 0.02) // nao_pair
     batch_size = max(largest_shell_nao, min(batch_size, naux))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega)
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
@@ -110,7 +146,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
     t0 = log.timer_debug1('contract dm', *t0)
 
-    metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, omega)
+    metric_w, metric_v = _factorize_j2c(
+        auxmol, aux_sorting, omega, lr_factor, sr_factor)
     dm_oo = contract('uv,unij->vnij', metric_v, j3c_oo)
     dm_oo /= metric_w[:,None,None,None]
     dm_oo = contract('uv,vnij->unij', metric_v, dm_oo, out=j3c_oo)
@@ -199,10 +236,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     # ...
     eval_ipaux = _int3c2e_ip1_evaluator(
         int3c2e_opt, int3c2e_scheme_ipaux(omega, 27), batch_size,
-        'fill_int3c2e_ipaux', omega)[0]
+        'fill_int3c2e_ipaux', omega, lr_factor, sr_factor)[0]
     eval_ip1 = _int3c2e_ip1_evaluator(
         int3c2e_opt, int3c2e_scheme_ip1(omega, 27), batch_size,
-        'fill_int3c2e_ip1', omega)[0]
+        'fill_int3c2e_ip1', omega, lr_factor, sr_factor)[0]
 
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((3, nao_pair, batch_size))
@@ -230,7 +267,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     t0 = log.timer_debug1('fill_int3c2e_ipaux', *t0)
 
     # note int2c2e_ip1 computs d/dr and d/dX = -d/dr
-    j2c_10 = int2c2e_ip1(auxmol, sort_output=False, omega=omega)
+    j2c_10 = int2c2e_ip1(auxmol, sort_output=False, omega=omega,
+                         lr_factor=lr_factor, sr_factor=sr_factor)
     j2c_10 *= -1
     j2c_10, tmp = cp.empty_like(j2c_10), j2c_10
     j2c_10[:,aux_sorting[:,None], aux_sorting] = tmp
@@ -256,7 +294,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
                       alpha=-k_factor, beta=j_factor, out=dm_aux)
     # (00|0)(2|0)(0|00)
     ejk_aux = df_rhf_hess._int2c2e_ip2_per_atom(
-        auxmol, dm_aux[aux_sorting[:,None], aux_sorting], omega)
+        auxmol, dm_aux[aux_sorting[:,None], aux_sorting], omega, lr_factor, sr_factor)
     ejk -= ejk_aux
 
     # (00|0)(1|0)(0|1)(0|00)
@@ -424,16 +462,14 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, omega=None,
     ejk += ejk_ao
     return ejk
 
-def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
-              verbose=None):
+def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
+              *, omega=None, lr_factor=None, sr_factor=None, verbose=None):
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    if omega is None:
-        omega = mol.omega
-
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
     ao_idx = mol.get_ao_idx()
     mo_coeff = mol.apply_C_dot(mo_coeff, axis=1)
     mo_coeff = mo_coeff[:,ao_idx]
@@ -481,7 +517,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     batch_size = min(batch_size, max(largest_shell_nao, naux))
 
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-        aux_batch_size=batch_size, reorder_aux=True, cart=True, omega=omega)
+        aux_batch_size=batch_size, reorder_aux=True, cart=True,
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
@@ -524,7 +561,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     aux_filling_order = np.empty(naux, dtype=int)
     aux_filling_order[aux_idx] = np.arange(naux)
 
-    metric_w, metric_v = _factorize_j2c(auxmol, aux_sorting, omega)
+    metric_w, metric_v = _factorize_j2c(
+        auxmol, aux_sorting, omega, lr_factor, sr_factor)
 
     nw = metric_v.shape[1]
     work = cp.empty((nw, 2, 8, nao))
@@ -545,7 +583,8 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     # (00|0)(1|0)(0|00)
     # int2c2e_ip1 computs d/dr. d/dX = -d/dr, the derivative of metric
     # introduces another -1. The overall factor is 1.
-    j2c_10 = int2c2e_ip1(auxmol, sort_output=False, omega=omega)
+    j2c_10 = int2c2e_ip1(auxmol, sort_output=False, omega=omega,
+                         lr_factor=lr_factor, sr_factor=sr_factor)
 
     # The first AO indices in j2c_10 should be grouped by atoms; The second
     # indices are sorted to match the aux indices in dm_3c
@@ -584,10 +623,10 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, omega=None,
     # (10|0)(0|0)(0|00)
     eval_ip1 = _int3c2e_ip1_evaluator(
         int3c2e_opt, int3c2e_scheme_ip1(omega, 27), batch_size,
-        'fill_int3c2e_ip1', omega)[0]
+        'fill_int3c2e_ip1', omega, lr_factor, sr_factor)[0]
     eval_ipaux = _int3c2e_ip1_evaluator(
         int3c2e_opt, int3c2e_scheme_ipaux(omega, 27), batch_size,
-        'fill_int3c2e_ipaux', omega)[0]
+        'fill_int3c2e_ipaux', omega, lr_factor, sr_factor)[0]
 
     work = cp.empty(max(
         nao**2*blksize + (3*pair_size_max + 6*nocc*nao) * batch_size,

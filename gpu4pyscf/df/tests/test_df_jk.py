@@ -50,7 +50,7 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_get_j(self):
-        cupy.random.seed(np.asarray(1, dtype=np.uint64))
+        cupy.random.seed(1)
         nao = mol.nao
         mf = gpu_scf.RHF(mol)
         mf = mf.density_fit(auxbasis='sto3g')

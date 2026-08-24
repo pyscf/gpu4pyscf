@@ -167,3 +167,24 @@ def splits_by_blocksize(cum, block_size):
         bound = cum[i] + block_size
     splits.append(len(cum) - 1)
     return splits
+
+def nearest_power2(n, return_leq=True):
+    '''nearest 2**x that is leq or geq than n.
+
+    Kwargs:
+        return_leq specifies that the return is less or equal than n.
+        Otherwise, the return is greater or equal than n.
+    '''
+    if isinstance(n, numpy.ndarray):
+        n = numpy.where(n > 1, n, 1)
+        if return_leq:
+            return 2 ** numpy.log2(n).astype(int)
+        else:
+            return 2 ** numpy.ceil(numpy.log2(n)).astype(int)
+
+    assert n > 0
+    n = max(int(n), 1)
+    if return_leq:
+        return 1 << (n.bit_length() - 1)
+    else:
+        return 1 << ((n-1).bit_length())
