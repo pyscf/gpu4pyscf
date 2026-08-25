@@ -167,11 +167,6 @@ class DF(lib.StreamObject):
             assert omega is None or omega == 0
             return df_jk.get_j(self, dm, hermi), None
 
-        # When lr_factor or sr_factor are specified, the DF cderi will be
-        # constructed using the aggregated Coulomb potential.
-        # Temporarily disable this feature for backward compatibility.
-        assert lr_factor is None and sr_factor is None
-
         with self.range_coulomb(omega) as dfobj:
             if getattr(dfobj, '_rsh_parameters', None):
                 assert dfobj._rsh_parameters == (omega, lr_factor, sr_factor)

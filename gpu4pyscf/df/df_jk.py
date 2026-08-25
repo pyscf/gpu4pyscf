@@ -95,6 +95,8 @@ class _DFHF:
     __name_mixin__ = 'DF'
     _keys = {'disp', 'screen_tol', 'with_df', 'only_dfj'}
 
+    range_separated_mode = 'mix_outside_kernel' # Other options are 'mix_inside_kernel'
+
     def __init__(self, mf, dfobj, only_dfj):
         self.__dict__.update(mf.__dict__)
         self._eri = None
@@ -116,10 +118,16 @@ class _DFHF:
         return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega)[0]
 
     def get_k(self, mol=None, dm=None, hermi=1,
-              omega=None, lr_factor=None, sr_factor=None):
+              omega=None, lr_factor=None, sr_factor=None, range_separated_mode='mix_outside_kernel'):
         if mol is None:
             mol = self.mol
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+
+        if range_separated_mode == 'mix_inside_kernel':
+            return self.get_jk(mol, dm, hermi, False, True, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[1]
+        else:
+            assert range_separated_mode == 'mix_outside_kernel'
+
         if sr_factor == 0:
             # Only LR
             vk = self.get_jk(mol, dm, hermi, False, True, omega=omega)[1]
@@ -321,14 +329,25 @@ class _DFHF:
                     vxc += vj
                 else:
                     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
-                    vj, vk = self.get_jk(mol, dm, hermi)
+
+                    if omega != 0:
+                        range_separated_mode = getattr(self, 'range_separated_mode', 'mix_outside_kernel')
+                        if range_separated_mode == 'mix_outside_kernel':
+                            vj, vk = self.get_jk(mol, dm, hermi)
+                            vk *= hyb
+                            vklr = self.get_k(mol, dm, hermi, omega=omega)
+                            vklr *= (alpha - hyb)
+                            vk += vklr
+                        elif range_separated_mode == 'mix_inside_kernel':
+                            vj = self.get_j(mol, dm, hermi)
+                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb, range_separated_mode=range_separated_mode)
+                        else:
+                            raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
+                    else: # omega == 0
+                        vj, vk = self.get_jk(mol, dm, hermi)
+                        vk *= hyb
                     vj = vj[0] + vj[1]
                     vxc += vj
-                    vk *= hyb
-                    if abs(omega) > 1e-10:
-                        vklr = self.get_k(mol, dm, hermi, omega=omega)
-                        vklr *= (alpha - hyb)
-                        vk += vklr
                     vxc -= vk
                     exc -= float(cupy.einsum('sij,sji->', dm, vk).real.get()) * .5
                 ecoul = float(cupy.einsum('sij,ji->', dm, vj).real.get()) * .5
@@ -354,13 +373,24 @@ class _DFHF:
                     vxc += vj
                 else:
                     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
-                    vj, vk = self.get_jk(mol, dm, hermi)
-                    vxc += vj
-                    vk *= hyb
+
                     if omega != 0:
-                        vklr = self.get_k(mol, dm, hermi, omega=abs(omega))
-                        vklr *= (alpha - hyb)
-                        vk += vklr
+                        range_separated_mode = getattr(self, 'range_separated_mode', 'mix_outside_kernel')
+                        if range_separated_mode == 'mix_outside_kernel':
+                            vj, vk = self.get_jk(mol, dm, hermi)
+                            vk *= hyb
+                            vklr = self.get_k(mol, dm, hermi, omega=abs(omega))
+                            vklr *= (alpha - hyb)
+                            vk += vklr
+                        elif range_separated_mode == 'mix_inside_kernel':
+                            vj = self.get_j(mol, dm, hermi)
+                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb, range_separated_mode=range_separated_mode)
+                        else:
+                            raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
+                    else: # omega == 0
+                        vj, vk = self.get_jk(mol, dm, hermi)
+                        vk *= hyb
+                    vxc += vj
                     vxc -= vk * .5
                     exc -= float(cupy.einsum('ij,ji->', dm, vk).real.get()) * .25
                 ecoul = float(cupy.einsum('ij,ji->', dm, vj).real.get()) * .5
@@ -400,23 +430,32 @@ class _DFHF:
                     vxc += vj
                 else:
                     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+                    range_separated_mode = getattr(self, 'range_separated_mode', 'mix_outside_kernel')
+
                     if omega == 0:
                         vj, vk = self.get_jk(mol, dm, hermi)
                         vk *= hyb
-                    elif alpha == 0:
-                        vj = self.get_j(mol, dm, hermi)
-                        vk = self.get_k(mol, dm, hermi, omega=-omega)
-                        vk *= hyb
-                    elif hyb == 0:
-                        vj = self.get_j(mol, dm, hermi)
-                        vk = self.get_k(mol, dm, hermi, omega=omega)
-                        vk *= alpha
                     else:
-                        vj, vk = self.get_jk(mol, dm, hermi)
-                        vk *= hyb
-                        vklr = self.get_k(mol, dm, hermi, omega=omega)
-                        vklr *= (alpha - hyb)
-                        vk += vklr
+                        if range_separated_mode == 'mix_outside_kernel':
+                            if alpha == 0:
+                                vj = self.get_j(mol, dm, hermi)
+                                vk = self.get_k(mol, dm, hermi, omega=-omega)
+                                vk *= hyb
+                            elif hyb == 0:
+                                vj = self.get_j(mol, dm, hermi)
+                                vk = self.get_k(mol, dm, hermi, omega=omega)
+                                vk *= alpha
+                            else:
+                                vj, vk = self.get_jk(mol, dm, hermi)
+                                vk *= hyb
+                                vklr = self.get_k(mol, dm, hermi, omega=omega)
+                                vklr *= (alpha - hyb)
+                                vk += vklr
+                        elif range_separated_mode == 'mix_inside_kernel':
+                            vj = self.get_j(mol, dm, hermi)
+                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb, range_separated_mode=range_separated_mode)
+                        else:
+                            raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
                     vxc += vj - vk
                     exc -= cupy.einsum('ij,ji->', dm, vk).real * .5
                     ecoul = cupy.einsum('ij,ji->', dm, vj).real * .5
