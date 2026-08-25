@@ -558,7 +558,12 @@ class KSCF(pbchf.SCF):
         if x is None:
             count = 0
             for k, k_conj in self.iter_kpt_pairs(time_reversal_symmetry, nkpts):
-                e, c = eigh(h_kpts[k], s_kpts[k], overwrite)
+                h_k = h_kpts[k]
+                s_k = s_kpts[k]
+                if k == k_conj: # for self-conjugate k-point
+                    h_k = cp.ascontiguousarray(h_k.real)
+                    s_k = cp.ascontiguousarray(s_k.real)
+                e, c = eigh(h_k, s_k, overwrite)
                 eig_kpts[k] = e
                 mo_coeff_kpts[k] = c
                 count += 1
@@ -571,7 +576,10 @@ class KSCF(pbchf.SCF):
             for k, k_conj in self.iter_kpt_pairs(time_reversal_symmetry, nkpts):
                 xk = x[k]
                 _, nmo_k = xk.shape
-                ek, ck = cp.linalg.eigh(xk.T.conj() @ h_kpts[k] @ xk)
+                fock = xk.T.conj() @ h_kpts[k] @ xk
+                if k == k_conj:
+                    fock = cp.ascontiguousarray(fock.real)
+                ek, ck = cp.linalg.eigh(fock)
                 eig_kpts[k, :nmo_k] = ek
                 mo_coeff_kpts[k, :, :nmo_k] = xk.dot(ck)
                 if nmo_k < nao:
