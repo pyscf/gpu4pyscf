@@ -25,6 +25,7 @@ from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.dft.gen_grid import Grids
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf.solvent.pcm import PCM
+from gpu4pyscf.scf.jk import _check_rsh_factors
 
 import cuest.bindings as ce
 
@@ -667,7 +668,7 @@ def cuest_compute_potentialint(mol, xyzs_device, Zs_device, cuest_handle, oeintp
 
     return potentialint_device
 
-def cuest_build_dfintplan(mol, cuest_handle, aobasis_handle, auxbasis_handle, aopairlist_handle, fitting_cutoff = 1e-12):
+def cuest_build_dfintplan(mol, cuest_handle, aobasis_handle, auxbasis_handle, aopairlist_handle, exchange_omega, long_range_exchange_fraction, short_range_exchange_fraction, fitting_cutoff = 1e-12):
     # The returned dfintplan handle and persistent workspace need to be freed outside this function
     log = logger.new_logger(mol, mol.verbose)
 
@@ -725,6 +726,40 @@ def cuest_build_dfintplan(mol, cuest_handle, aobasis_handle, auxbasis_handle, ao
             )
 
         log.info(f"CuEST: Set DF metric eigenvalue threshold to {fitting_cutoff_handle.value}")
+
+    exchange_fraction_handle = ce.data_double()
+    exchange_fraction_handle.value = short_range_exchange_fraction
+    cuest_check('Configure DFIntPlan Params exchange fraction',
+        ce.cuestParametersConfigure(
+            parametersType=ce.CuestParametersType.CUEST_DFINTPLAN_PARAMETERS,
+            parameters=dfintplan_parameters,
+            attribute=ce.CuestDFIntPlanParametersAttributes.CUEST_DFINTPLAN_PARAMETERS_EXCHANGE_FRACTION,
+            attributeValue=exchange_fraction_handle,
+            )
+        )
+
+    lrc_exchange_fraction_handle = ce.data_double()
+    lrc_exchange_fraction_handle.value = long_range_exchange_fraction - short_range_exchange_fraction
+    cuest_check('Configure DFIntPlan Params long-range exchange fraction',
+        ce.cuestParametersConfigure(
+            parametersType=ce.CuestParametersType.CUEST_DFINTPLAN_PARAMETERS,
+            parameters=dfintplan_parameters,
+            attribute=ce.CuestDFIntPlanParametersAttributes.CUEST_DFINTPLAN_PARAMETERS_LRC_EXCHANGE_FRACTION,
+            attributeValue=lrc_exchange_fraction_handle,
+            )
+        )
+
+    assert exchange_omega >= 0.0
+    lrc_exchange_omega_handle = ce.data_double()
+    lrc_exchange_omega_handle.value = exchange_omega
+    cuest_check('Configure DFIntPlan Params long-range exchange omega',
+        ce.cuestParametersConfigure(
+            parametersType=ce.CuestParametersType.CUEST_DFINTPLAN_PARAMETERS,
+            parameters=dfintplan_parameters,
+            attribute=ce.CuestDFIntPlanParametersAttributes.CUEST_DFINTPLAN_PARAMETERS_LRC_EXCHANGE_OMEGA,
+            attributeValue=lrc_exchange_omega_handle,
+            )
+        )
 
     persistent_workspace_descriptor = WorkspaceDescriptor()
     temporary_workspace_descriptor = WorkspaceDescriptor()
@@ -2568,16 +2603,15 @@ def cuest_compute_potential_gradeint(mol, densitymatrix_device, xyzs_device, Zs_
 
     return potential_orbital_gradient_device, potential_pointcharge_gradient_device
 
-def cuest_compute_coulomb_exchange_gradient(mol, densitymatrix_device, occorbitals_device, nocc, k_factor, cuest_handle, dfintplan_handle, maximum_workspace_bytes):
+def cuest_compute_coulomb_exchange_gradient(mol, densitymatrix_device, occorbitals_device, nocc, cuest_handle, dfintplan_handle, maximum_workspace_bytes):
     # The input D and mocc is assumed to be in cuest order and format
-    # k_factor is multiplied by -0.5 in this function, so it should not include the factor of -0.5 at invocation
     log = logger.new_logger(mol, mol.verbose)
 
     # The additional 0.5 factor is to cancel the factor of 2 on dm
     n_dm = len(nocc)
     assert n_dm in (1, 2)
     j_factor = 0.5
-    k_factor *= -0.25 * n_dm
+    k_factor = -0.25 * n_dm
 
     assert isinstance(densitymatrix_device, cp.ndarray)
     assert densitymatrix_device.shape == (mol.nao, mol.nao)
@@ -3542,6 +3576,12 @@ class HandleBundle:
     ecpintplan_handle = None
     ecpintplan_persistent_workspace = None
 
+    dfintplan_parameter_cache = {
+        "exchange_omega": None,
+        "long_range_exchange_fraction": None,
+        "short_range_exchange_fraction": None,
+    }
+
     def __init__(self, mf):
         mol = mf.mol
 
@@ -3698,7 +3738,7 @@ class HandleBundle:
             self.auxbasis_persistent_workspace = None
             self.auxbasis_handle = None
 
-    def build_dfintplan(self, mf):
+    def build_dfintplan(self, mf, omega, lr_factor, sr_factor):
         self.free_dfintplan()
 
         mol = mf.mol
@@ -3718,9 +3758,13 @@ class HandleBundle:
             time0 = time.time()
 
         self.dfintplan_handle, self.dfintplan_persistent_workspace = cuest_build_dfintplan(
-            mol, cuest_handle, aobasis_handle, auxbasis_handle, aopairlist_handle,
+            mol, cuest_handle, aobasis_handle, auxbasis_handle, aopairlist_handle, omega, lr_factor, sr_factor,
             fitting_cutoff = mf.density_fitting_cutoff
         )
+
+        self.dfintplan_parameter_cache["exchange_omega"] = omega
+        self.dfintplan_parameter_cache["long_range_exchange_fraction"] = lr_factor
+        self.dfintplan_parameter_cache["short_range_exchange_fraction"] = sr_factor
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
@@ -3737,6 +3781,20 @@ class HandleBundle:
                 )
             self.dfintplan_persistent_workspace = None
             self.dfintplan_handle = None
+
+        self.dfintplan_parameter_cache["exchange_omega"] = None
+        self.dfintplan_parameter_cache["long_range_exchange_fraction"] = None
+        self.dfintplan_parameter_cache["short_range_exchange_fraction"] = None
+
+    def check_dfintplan_parameter_consistency(self, omega, lr_factor, sr_factor):
+        consistent = True
+        if omega != self.dfintplan_parameter_cache["exchange_omega"]:
+            consistent = False
+        if lr_factor != self.dfintplan_parameter_cache["long_range_exchange_fraction"]:
+            consistent = False
+        if sr_factor != self.dfintplan_parameter_cache["short_range_exchange_fraction"]:
+            consistent = False
+        return consistent
 
     def build_moleculargrid(self, mf):
         self.free_moleculargrid()
@@ -4595,14 +4653,12 @@ class CuESTWrapper(lib.StreamObject):
         else:
             return cuest_to_pyscf_output_reorder_spherical(mol, Hcore_cuest_order)
 
-    def get_jk(self, mol = None, dm = None, hermi=1, with_j=True, with_k=True, direct_scf_tol=None, omega=None):
-        assert direct_scf_tol is None, "Direct SCF JK is not supported by cuEST yet"
+    def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
         assert omega is None, "Range separated JK is not supported by cuEST yet"
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
 
         if not self.turn_on_cuest_jk:
-            # Notice, get_jk() function from DF does not have direct_scf_tol input
-            return super().get_jk(mol = mol, dm = dm, hermi = hermi, with_j = with_j, with_k = with_k, omega = omega)
+            return super().get_jk(mol = mol, dm = dm, hermi = hermi, with_j = with_j, with_k = with_k, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
 
         mol = self.mol
         dms, dm = dm, None
@@ -4624,9 +4680,12 @@ class CuESTWrapper(lib.StreamObject):
 
         log = logger.new_logger(mol, mol.verbose)
 
+        omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+        omega = abs(omega)
+
         cuest_handle = self.handles.cuest_handle
-        if self.handles.dfintplan_handle is None:
-            self.handles.build_dfintplan(self)
+        if self.handles.dfintplan_handle is None or not self.handles.check_dfintplan_parameter_consistency(omega, lr_factor, sr_factor):
+            self.handles.build_dfintplan(self, omega, lr_factor, sr_factor)
         dfintplan_handle = self.handles.dfintplan_handle
 
         time_pre_post = 0
@@ -4748,11 +4807,11 @@ class CuESTWrapper(lib.StreamObject):
 
         return vj, vk
 
-    def get_j(self, mol = None, dm = None, hermi=1, with_j=True, with_k=True, direct_scf_tol=None, omega=None):
-        return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, direct_scf_tol=direct_scf_tol, omega=omega)[0]
+    def get_j(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
+        return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[0]
 
-    def get_k(self, mol = None, dm = None, hermi=1, with_j=True, with_k=True, direct_scf_tol=None, omega=None):
-        return self.get_jk(mol, dm, hermi, with_j=False, with_k=True, direct_scf_tol=direct_scf_tol, omega=omega)[1]
+    def get_k(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
+        return self.get_jk(mol, dm, hermi, with_j=False, with_k=True, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[1]
 
     def Gradients(self):
         # Attention: The self object has a composed class, and its first parent class is CuESTWrapper,
@@ -4780,7 +4839,7 @@ class CuESTWrapper(lib.StreamObject):
         raise NotImplementedError("CuESTWrapper does not support newton (soscf) method yet. "
                                   "In particular, DFT XC response function requires functional second derivative, and that is not available from CuEST.")
 
-    def df_mo_integral(self, Cleft, Cright):
+    def df_mo_integral(self, Cleft, Cright, omega=None, lr_factor=None, sr_factor=None):
         # Cleft is assumed to have shape (nao, n_left), where n_left can be nmo, nocc, nvir, or anything else other than zero. The same applies to Cright.
         # The output tensor order is (naux, n_left, n_right)
 
@@ -4788,12 +4847,15 @@ class CuESTWrapper(lib.StreamObject):
 
         log = logger.new_logger(mol, mol.verbose)
 
+        omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+        omega = abs(omega)
+
         cuest_handle = self.handles.cuest_handle
         if self.handles.auxbasis_handle is None:
             self.handles.build_auxbasis(self)
         auxbasis_handle = self.handles.auxbasis_handle
-        if self.handles.dfintplan_handle is None:
-            self.handles.build_dfintplan(self)
+        if self.handles.dfintplan_handle is None or not self.handles.check_dfintplan_parameter_consistency(omega, lr_factor, sr_factor):
+            self.handles.build_dfintplan(self, omega, lr_factor, sr_factor)
         dfintplan_handle = self.handles.dfintplan_handle
 
         time_pre_post = 0
@@ -4945,13 +5007,21 @@ class CuESTGradientWrapper(lib.StreamObject):
 
         return dh.get()
 
-    def get_jk_grad(self, dm, k_factor = 1.0):
-        if not self.base.turn_on_cuest_jk:
-            return super().jk_energy_per_atom(dm = dm, j_factor = 1.0, k_factor = k_factor, omega = None, verbose = None)
-
+    def get_jk_grad(self, dm, omega=None, lr_factor=None, sr_factor=None):
         mol = self.mol
 
         log = logger.new_logger(mol, mol.verbose)
+
+        omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+        omega = abs(omega)
+
+        if omega != 0.0:
+            raise NotImplementedError("JK gradient does not support range-separated hybrids yet")
+        assert sr_factor == lr_factor
+        k_factor = sr_factor
+
+        if not self.base.turn_on_cuest_jk:
+            return super().jk_energy_per_atom(dm = dm, j_factor = 1.0, k_factor = k_factor, omega = None, verbose = None)
 
         dms, dm = dm, None
         mo_coeffs = None
@@ -4971,8 +5041,8 @@ class CuESTGradientWrapper(lib.StreamObject):
         assert n_dm in (1, 2)
 
         cuest_handle = self.base.handles.cuest_handle
-        if self.base.handles.dfintplan_handle is None:
-            self.base.handles.build_dfintplan(self.base)
+        if self.base.handles.dfintplan_handle is None or not self.base.handles.check_dfintplan_parameter_consistency(omega, lr_factor, sr_factor):
+            self.base.handles.build_dfintplan(self.base, omega, lr_factor, sr_factor)
         dfintplan_handle = self.base.handles.dfintplan_handle
 
         time_pre_post = 0
@@ -5047,7 +5117,7 @@ class CuESTGradientWrapper(lib.StreamObject):
             time_pre_post += time1 - time0
             time0 = time1
 
-        djk = cuest_compute_coulomb_exchange_gradient(mol, dm_cuest_order, mocc, nocc, k_factor, cuest_handle, dfintplan_handle, self.base.maximum_workspace_bytes)
+        djk = cuest_compute_coulomb_exchange_gradient(mol, dm_cuest_order, mocc, nocc, cuest_handle, dfintplan_handle, self.base.maximum_workspace_bytes)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
@@ -5190,14 +5260,8 @@ class CuESTGradientWrapper(lib.StreamObject):
                 de += self.get_nlc_grad(dm)
 
             omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
-            with_k = mf._numint.libxc.is_hybrid_xc(mf.xc)
 
-            k_factor = 0.0
-            if with_k:
-                assert omega == 0, "Range-separated functional not supported in CuEST yet"
-                k_factor = hyb
-
-            de += self.get_jk_grad(dm, k_factor)
+            de += self.get_jk_grad(dm, omega = omega, lr_factor = alpha, sr_factor = hyb)
 
         return de
 

@@ -1255,13 +1255,303 @@ class KnownValues(unittest.TestCase):
         assert cp.max(cp.abs(test_J - ref_J)) < 1e-1 # The different auxasis leads to very different J and K
         assert cp.max(cp.abs(test_K - ref_K)) < 1e-1
 
+    def test_df_mo_arbitrary_reconstruct_j3c_for_k(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        omega = 0.3
+        lr_factor = 0.4
+        sr_factor = 0.5
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        auxmol = mf.with_df.auxmol
+        naux = auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
+        j2c_mr = int2c2e(auxmol, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        j2c_fr = int2c2e(auxmol, omega = 0)
+
+        from gpu4pyscf.df.int3c2e_bdiv import aux_e2
+        j3c_fr = aux_e2(mol, auxmol, omega = 0)
+        j3c_fr = j3c_fr.transpose(2, 0, 1)
+
+        fitting_cutoff = 1e-12
+
+        j2c_mr_lambda, j2c_mr_X = cp.linalg.eigh(j2c_mr)
+        j2c_mr_X = j2c_mr_X[:, j2c_mr_lambda >= fitting_cutoff]
+        j2c_mr_lambda = j2c_mr_lambda[j2c_mr_lambda >= 1e-12]
+        j2c_mr_half = cp.diag(cp.sqrt(j2c_mr_lambda)) @ j2c_mr_X.T
+
+        j2c_fr_lambda, j2c_fr_X = cp.linalg.eigh(j2c_fr)
+        j2c_fr_X = j2c_fr_X[:, j2c_fr_lambda >= 1e-12]
+        j2c_fr_lambda = j2c_fr_lambda[j2c_fr_lambda >= 1e-12]
+        j2c_fr_inv = j2c_fr_X @ cp.diag(1 / j2c_fr_lambda) @ j2c_fr_X.T
+
+        ref_j3c = cp.einsum("pq,qij->pij", j2c_mr_half @ j2c_fr_inv, j3c_fr)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        ref_J = cp.einsum("pij,pkl,kl->ij", ref_j3c, ref_j3c, dm)
+        ref_K = cp.einsum("pij,pkl,jl->ik", ref_j3c, ref_j3c, dm)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 2e-8
+        assert cp.max(cp.abs(test_K - ref_K)) < 2e-8
+
+        mo_i = cp.random.rand(nao, 11) * 2 - 1
+        mo_j = cp.random.rand(nao, 7) * 2 - 1
+        mo_k = cp.random.rand(nao, 5) * 2 - 1
+        mo_l = cp.random.rand(nao, 3) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
+
+    def test_df_mo_long_range_reconstruct_j3c_for_k(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        # LC-wPBE
+        omega = 0.4
+        lr_factor = 1.0
+        sr_factor = 0.0
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        auxmol = mf.with_df.auxmol
+        naux = auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
+        j2c_mr = int2c2e(auxmol, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        j2c_fr = int2c2e(auxmol, omega = 0)
+
+        from gpu4pyscf.df.int3c2e_bdiv import aux_e2
+        j3c_fr = aux_e2(mol, auxmol, omega = 0)
+        j3c_fr = j3c_fr.transpose(2, 0, 1)
+
+        fitting_cutoff = 1e-12
+
+        j2c_mr_lambda, j2c_mr_X = cp.linalg.eigh(j2c_mr)
+        j2c_mr_X = j2c_mr_X[:, j2c_mr_lambda >= fitting_cutoff]
+        j2c_mr_lambda = j2c_mr_lambda[j2c_mr_lambda >= 1e-12]
+        j2c_mr_half = cp.diag(cp.sqrt(j2c_mr_lambda)) @ j2c_mr_X.T
+
+        j2c_fr_lambda, j2c_fr_X = cp.linalg.eigh(j2c_fr)
+        j2c_fr_X = j2c_fr_X[:, j2c_fr_lambda >= 1e-12]
+        j2c_fr_lambda = j2c_fr_lambda[j2c_fr_lambda >= 1e-12]
+        j2c_fr_inv = j2c_fr_X @ cp.diag(1 / j2c_fr_lambda) @ j2c_fr_X.T
+
+        ref_j3c = cp.einsum("pq,qij->pij", j2c_mr_half @ j2c_fr_inv, j3c_fr)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        ref_J = cp.einsum("pij,pkl,kl->ij", ref_j3c, ref_j3c, dm)
+        ref_K = cp.einsum("pij,pkl,jl->ik", ref_j3c, ref_j3c, dm)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 3e-8
+        assert cp.max(cp.abs(test_K - ref_K)) < 3e-8
+
+        mo_i = cp.random.rand(nao, 11) * 2 - 1
+        mo_j = cp.random.rand(nao, 7) * 2 - 1
+        mo_k = cp.random.rand(nao, 5) * 2 - 1
+        mo_l = cp.random.rand(nao, 3) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 3e-7
+
+    def test_df_mo_short_range_reconstruct_j3c_for_k(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        # HSE06
+        omega = 0.11
+        lr_factor = 0.0
+        sr_factor = 0.25
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        auxmol = mf.with_df.auxmol
+        naux = auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
+        j2c_mr = int2c2e(auxmol, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        j2c_fr = int2c2e(auxmol, omega = 0)
+
+        from gpu4pyscf.df.int3c2e_bdiv import aux_e2
+        j3c_fr = aux_e2(mol, auxmol, omega = 0)
+        j3c_fr = j3c_fr.transpose(2, 0, 1)
+
+        fitting_cutoff = 1e-12
+
+        j2c_mr_lambda, j2c_mr_X = cp.linalg.eigh(j2c_mr)
+        j2c_mr_X = j2c_mr_X[:, j2c_mr_lambda >= fitting_cutoff]
+        j2c_mr_lambda = j2c_mr_lambda[j2c_mr_lambda >= 1e-12]
+        j2c_mr_half = cp.diag(cp.sqrt(j2c_mr_lambda)) @ j2c_mr_X.T
+
+        j2c_fr_lambda, j2c_fr_X = cp.linalg.eigh(j2c_fr)
+        j2c_fr_X = j2c_fr_X[:, j2c_fr_lambda >= 1e-12]
+        j2c_fr_lambda = j2c_fr_lambda[j2c_fr_lambda >= 1e-12]
+        j2c_fr_inv = j2c_fr_X @ cp.diag(1 / j2c_fr_lambda) @ j2c_fr_X.T
+
+        ref_j3c = cp.einsum("pq,qij->pij", j2c_mr_half @ j2c_fr_inv, j3c_fr)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        ref_J = cp.einsum("pij,pkl,kl->ij", ref_j3c, ref_j3c, dm)
+        ref_K = cp.einsum("pij,pkl,jl->ik", ref_j3c, ref_j3c, dm)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 2e-8
+        assert cp.max(cp.abs(test_K - ref_K)) < 2e-8
+
+        mo_i = cp.random.rand(nao, 11) * 2 - 1
+        mo_j = cp.random.rand(nao, 7) * 2 - 1
+        mo_k = cp.random.rand(nao, 5) * 2 - 1
+        mo_l = cp.random.rand(nao, 3) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
+
+    def test_df_mo_full_range_reconstruct_j3c_for_k(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        # B3LYP
+        omega = 0.0
+        lr_factor = 0.2
+        sr_factor = 0.2
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        auxmol = mf.with_df.auxmol
+        naux = auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
+        j2c_mr = int2c2e(auxmol, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        j2c_fr = int2c2e(auxmol, omega = 0)
+
+        from gpu4pyscf.df.int3c2e_bdiv import aux_e2
+        j3c_fr = aux_e2(mol, auxmol, omega = 0)
+        j3c_fr = j3c_fr.transpose(2, 0, 1)
+
+        fitting_cutoff = 1e-12
+
+        j2c_mr_lambda, j2c_mr_X = cp.linalg.eigh(j2c_mr)
+        j2c_mr_X = j2c_mr_X[:, j2c_mr_lambda >= fitting_cutoff]
+        j2c_mr_lambda = j2c_mr_lambda[j2c_mr_lambda >= 1e-12]
+        j2c_mr_half = cp.diag(cp.sqrt(j2c_mr_lambda)) @ j2c_mr_X.T
+
+        j2c_fr_lambda, j2c_fr_X = cp.linalg.eigh(j2c_fr)
+        j2c_fr_X = j2c_fr_X[:, j2c_fr_lambda >= 1e-12]
+        j2c_fr_lambda = j2c_fr_lambda[j2c_fr_lambda >= 1e-12]
+        j2c_fr_inv = j2c_fr_X @ cp.diag(1 / j2c_fr_lambda) @ j2c_fr_X.T
+
+        ref_j3c = cp.einsum("pq,qij->pij", j2c_mr_half @ j2c_fr_inv, j3c_fr)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        ref_J = cp.einsum("pij,pkl,kl->ij", ref_j3c, ref_j3c, dm)
+        ref_K = cp.einsum("pij,pkl,jl->ik", ref_j3c, ref_j3c, dm)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 2e-8
+        assert cp.max(cp.abs(test_K - ref_K)) < 2e-8
+
+        mo_i = cp.random.rand(nao, 11) * 2 - 1
+        mo_j = cp.random.rand(nao, 7) * 2 - 1
+        mo_k = cp.random.rand(nao, 5) * 2 - 1
+        mo_l = cp.random.rand(nao, 3) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
+
     def test_df_mo_pbe0_reconstruct_j3c_for_k(self):
         raise
 
     def test_df_mo_hse06_reconstruct_j3c_for_k(self):
         raise
 
-    def test_df_mo_wb97x_reconstruct_j3c_for_k(self):
+    def test_df_mo_wb97_reconstruct_j3c_for_k(self):
+        raise
+
+    def test_df_mo_wb97X_reconstruct_j3c_for_k(self):
         raise
 
     ### Gradient tests from here on
