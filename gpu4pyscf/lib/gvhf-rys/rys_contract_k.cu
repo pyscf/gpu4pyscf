@@ -502,6 +502,8 @@ while (1) {
 }
 }
 
+// Requires room for 256*3 entries: the tile count prod((nf+2)/3) reaches 625
+// at (4,4,4,4), and the launcher copies it out in chunks of 256.
 void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
 {
 /*
@@ -532,8 +534,10 @@ void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
         gxyz_offset[nf].loff = l;
         ++nf;
     } } } }
+    // n+m must be clamped too: nf need not divide 256, so the last round
+    // would otherwise write past entry 255.
     for (int n = nf; n < 256; n += nf) {
-        for (int m = 0; m < nf; ++m) {
+        for (int m = 0; m < nf && n+m < 256; ++m) {
             gxyz_offset[n+m] = gxyz_offset[m];
         }
     }
