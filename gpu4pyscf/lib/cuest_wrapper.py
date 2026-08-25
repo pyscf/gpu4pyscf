@@ -691,7 +691,7 @@ def cuest_build_dfintplan(mol, cuest_handle, aobasis_handle, auxbasis_handle, ao
         )
 
     if fitting_relative_conditioning_handle.value != 0:
-        log.info("In default cases the fitting cutoff is defined in relative sense. Set it to absolute sense.")
+        log.debug2("In default cases the fitting cutoff is defined in relative sense. Set it to absolute sense.")
         fitting_relative_conditioning_handle.value = 0
         cuest_check('Configure DFIntPlan Params fitting relative conditioning',
             ce.cuestParametersConfigure(
@@ -1136,11 +1136,11 @@ def pyscf_xc_to_cuest_functional(xc):
         "R2SCAN"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_R2SCAN  ,
         "SVWN"     : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_SVWN5   ,
         "B97MV"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_B97MV   ,
-        "LCWPBE"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_LCWPBE  ,
+        "HYB_GGA_XC_LC_WPBE_WHS" : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_LCWPBE  ,
         "WB97X"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_WB97X   ,
         "WB97XV"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_WB97XV  ,
         "WB97MV"   : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_WB97MV  ,
-        "LCWPBEH"  : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_LCWPBEH ,
+        "HYB_GGA_XC_LC_WPBEH_WHS" : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_LCWPBEH ,
         "CAMB3LYP" : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_CAMB3LYP,
         "HSE06"    : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_HSE06   ,
         "M06"      : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_M06     ,
@@ -4654,13 +4654,22 @@ class CuESTWrapper(lib.StreamObject):
             return cuest_to_pyscf_output_reorder_spherical(mol, Hcore_cuest_order)
 
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
-        assert omega is None, "Range separated JK is not supported by cuEST yet"
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
 
         if not self.turn_on_cuest_jk:
             return super().get_jk(mol = mol, dm = dm, hermi = hermi, with_j = with_j, with_k = with_k, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
 
         mol = self.mol
+        log = logger.new_logger(mol, mol.verbose)
+
+        if omega is not None and omega != 0:
+            if getattr(self, 'range_separated_mode', 'mix_outside_kernel') != 'mix_inside_kernel':
+                log.warn("Range-separated exchange mode changed to \"mix_inside_kernel\", which means the long-range and short-range parts are combined within each integral, "
+                         "instead of combined after j2c-j3c contraction is performed. We also warn here that cuEST adopts a non-trivial range-separated density fitting algorithm, "
+                         "where the j3c is always computed in full-range form, and j2c^-1 has the form j2c_fr^-1 j2c_mr j2c_fr^-1. As a result, for a range-separated functional "
+                         "DFT calculation, cuEST result does NOT match gpu4pyscf result by more than 1e-5 Hartree.")
+                self.range_separated_mode = 'mix_inside_kernel'
+
         dms, dm = dm, None
         mo_coeffs = None
         mo_occs   = None
@@ -4677,8 +4686,6 @@ class CuESTWrapper(lib.StreamObject):
         assert dms.ndim == 3
         assert dms.shape[-2:] == (mol.nao, mol.nao)
         n_dm = dms.shape[0]
-
-        log = logger.new_logger(mol, mol.verbose)
 
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
         omega = abs(omega)
@@ -4810,7 +4817,8 @@ class CuESTWrapper(lib.StreamObject):
     def get_j(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
         return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[0]
 
-    def get_k(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
+    def get_k(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None, range_separated_mode=None):
+        # range_separated_mode is intentionally ignored here
         return self.get_jk(mol, dm, hermi, with_j=False, with_k=True, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[1]
 
     def Gradients(self):
