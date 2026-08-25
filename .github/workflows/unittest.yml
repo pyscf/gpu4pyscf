@@ -26,6 +26,7 @@ jobs:
     - name: Test with pytest
       run: |
         docker run --gpus all \
+          --init \
           --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
@@ -48,6 +49,7 @@ jobs:
     - name: Test with pytest
       run: |
         docker run --gpus all \
+          --init \
           --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
