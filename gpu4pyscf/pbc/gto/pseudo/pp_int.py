@@ -38,43 +38,21 @@ def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
 
     hl_dims = np.asarray([len(hl) for hl in hl_blocks])
 
+    bvk_kmesh = kpts_to_kmesh(cell, kpts)
+    pcell = fakecell.copy(deep=False)
+
     def int_ket(_bas_fake, intor_name):
         if len(_bas_fake) == 0:
             return []
 
         kern_name, expected_comp, deriv_ij = kern_map[intor_name]
+        pcell._bas = _bas_fake
+        return int1e.CrossInt1e(pcell, cell, bvk_kmesh).intor(
+            kern_name, expected_comp, deriv_ij, kpts)
 
-        atm_m, bas_m, env_m = gto.conc_env(
-            cell._atm, cell._bas, cell._env,
-            fakecell._atm, _bas_fake, fakecell._env)
-
-        merged = cell.copy(deep=False)
-        merged._atm = np.asarray(atm_m, dtype=np.int32)
-        merged._bas = np.asarray(bas_m, dtype=np.int32)
-        merged._env = np.asarray(env_m, dtype=np.float64)
-        merged._built = True
-
-        bvk_kmesh = np.ones(3, dtype=int)
-        a, c, l = most_diffuse_pgto(merged)
-        precision = merged.precision * 1e-1
-        rcut = _estimate_rcut(a, l, c, precision)
-        with lib.temporary_env(merged, precision=precision, rcut=rcut):
-            opt = _Int1eOpt(merged, hermi=0, bvk_kmesh=bvk_kmesh)
-
-        mat = opt.intor(kern_name, expected_comp, deriv_ij, None, True).get()
-
-        ao_loc = gto.moleintor.make_loc(bas_m, 'int1e_ovlp_sph')
-        i0 = ao_loc[cell.nbas]
-        j1 = ao_loc[cell.nbas]
-
-        if expected_comp == 1:
-            return mat[i0:, :j1][np.newaxis].astype(np.complex128)
-        else:
-            return mat[:, i0:, :j1][np.newaxis].astype(np.complex128)
-
-    return (int_ket(fakecell._bas[hl_dims > 0], intors[0]),
+    return [int_ket(fakecell._bas[hl_dims > 0], intors[0]),
             int_ket(fakecell._bas[hl_dims > 1], intors[1]),
-            int_ket(fakecell._bas[hl_dims > 2], intors[2]))
+            int_ket(fakecell._bas[hl_dims > 2], intors[2])]
 
 
 def _contract_ppnl_gpu(cell, fakecell, hl_blocks, ppnl_half, comp=1, kpts=None):

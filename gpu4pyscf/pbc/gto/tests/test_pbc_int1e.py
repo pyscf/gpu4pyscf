@@ -359,3 +359,40 @@ def test_int1e_r4_origi_ip2():
     dat = int1e.int1e_r4_origi_ip2(cell)
     ref = cell.pbc_intor('int1e_r4_origi_ip2', comp=3)
     assert abs(dat.get() - ref).max() < 1e-10
+
+def test_cross_int1e():
+    from pyscf import gto
+    from pyscf.pbc import gto as pbcgto
+    a = np.eye(3) * 5.
+    np.random.seed(5)
+    a += np.random.rand(3, 3) - .5
+    cell1 = pyscf.M(
+        atom='He 1 1 1; He 2 1.5 2.4; He 3 3.5 0.2',
+        basis=[[0, [.5, 1]],
+               [1, [1.5, 1], [.5, 1]],
+              ], a=a, unit='Bohr', precision=1e-10)
+    cell2 = cell1.copy()
+    cell2.atom='He 1 0.5 0.4; He 0 0.5 0.2'
+    cell2.basis = [[2, [.8, 1]],
+                   [3, [.7, 1]]]
+    cell2.build(0, 0)
+
+    ref = pbcgto.intor_cross('int1e_ovlp', cell1, cell2)
+    opt = int1e.CrossInt1e(cell1, cell2, [1,1,1])
+    dat = opt.intor('PBCint1e_ovlp', 1, (0,0))
+    dat = opt.cell1.CT_dot_mat(opt.cell2.mat_dot_C(dat))
+    assert abs(dat.get() - ref).max() < 1e-12
+
+    kmesh = [3,2,1]
+    kpts = cell1.make_kpts(kmesh)
+    ref = pbcgto.intor_cross('int1e_ovlp', cell1, cell2, kpts=kpts)
+    dat = int1e.CrossInt1e(cell1, cell2, kmesh).intor('PBCint1e_ovlp', 1, (0,0), kpts=kpts)
+    dat = opt.cell1.apply_CT_dot(opt.cell2.apply_CT_dot(dat, axis=-1), axis=1)
+    assert abs(dat.get() - ref).max() < 1e-12
+
+    mol1 = cell1.to_mol()
+    mol2 = cell2.to_mol()
+    ref = gto.intor_cross('int1e_ovlp', mol1, mol2)
+    dat = int1e.CrossInt1e(mol1, mol2).intor('PBCint1e_ovlp', 1, (0,0))
+    dat = opt.cell1.CT_dot_mat(opt.cell2.mat_dot_C(dat))
+    assert abs(dat.get() - ref).max() < 1e-12

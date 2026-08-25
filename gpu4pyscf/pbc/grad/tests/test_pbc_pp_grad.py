@@ -148,7 +148,7 @@ class TestCrossBasisIntegrals(unittest.TestCase):
                 continue
             self.assertEqual(c.shape, g.shape,
                              f"Shape mismatch at level {lvl}: CPU {c.shape} vs GPU {g.shape}")
-            err = np.max(np.abs(g - c))
+            err = np.max(np.abs(g.get() - c))
             self.assertAlmostEqual(err, 0, places,
                                    f"Level {lvl} base integrals: max|err|={err:.2e}")
 

@@ -1010,13 +1010,13 @@ class SortedMole(Mole, SortedGTO):
         bas_ij_idx = []
         shl_pair_offsets = []
         sp0 = sp1 = 0
-        l = self.uniq_l_ctr[:,0]
         for (i, j), bas_ij in bas_ij_cache.items():
             bas_ij_idx.append(cp.asarray(bas_ij))
             sp0, sp1 = sp1, sp1 + len(bas_ij)
             if isinstance(nsp_per_block, (int, np.integer)):
                 batch_size = nsp_per_block
             else:
+                l = self.uniq_l_ctr[:,0]
                 batch_size = nsp_per_block[l[i], l[j]]
             shl_pair_offsets.append(cp.arange(
                 sp0, sp1, batch_size, dtype=np.int32))

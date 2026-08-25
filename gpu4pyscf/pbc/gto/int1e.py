@@ -146,13 +146,13 @@ class _Int1eOpt:
                 bvkcell = super_cell(cell, bvk_kmesh, wrap_around=True)
                 # PTR_BAS_COORD was not initialized in supe_rcell
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-            Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
+            Ls = asarray(bvkcell.get_lattice_Ls(rcut=bvkcell.rcut))
             Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
 
-            rad = cell.rcut / bvkcell.vol**(1./3) + 1
+            rad = bvkcell.rcut / bvkcell.vol**(1./3) + 1
             surface = 4*np.pi * rad**2
             lattice_sum_factor = surface
-            precision = cell.precision / lattice_sum_factor
+            precision = bvkcell.precision / lattice_sum_factor
 
         self.hermi = hermi
         self.bvk_kmesh = bvk_kmesh
@@ -167,28 +167,35 @@ class _Int1eOpt:
 
         if isinstance(cell, Mole):
             bas_ij_cache = cell.generate_shl_pairs(hermi)
-            bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(bas_ij_cache)
-        elif bvk_kmesh is not None:
-            nbas = cell.nbas
-            exps, coef = extract_pgto_params(self.bvkcell, 'diffuse')
-            log_c = cp.log(cp.asarray(coef, dtype=np.float32))
-            diffuse_exps = cp.asarray(exps, dtype=np.float32)
-            log_cutoff = math.log(precision)
-            img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
-            libpbc.bvk_ovlp_img_counts(
-                ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
-                ctypes.byref(self.int1e_envs),
-                ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
-                ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff), ctypes.c_int(hermi))
-            mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
-            bas_ij_cache, bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(
-                cell, mask, hermi)
         else:
-            mask = _shell_overlap_mask(cell, hermi, precision, Ls)
-            bas_ij_cache, bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(
-                cell, mask, hermi)
+            mask = _shell_overlap_mask(bvkcell, hermi, precision, Ls,
+                                       self.int1e_envs, bvk_ncells)
+            nbas = cell.nbas
+            l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
+            groups = len(cell.uniq_l_ctr)
+            if hermi == 1:
+                ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
+            else:
+                ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
+            img_offsets = cp.arange(bvk_ncells, dtype=np.int32) * nbas
+            bas_ij_cache = {}
+            for i, j in ij_tasks:
+                ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+                jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+                ish = cp.arange(ish0, ish1, dtype=np.int32)
+                jsh = cp.arange(jsh0, jsh1, dtype=np.int32)
+                ijsh = ish[:,None,None] * (nbas*bvk_ncells) + img_offsets[:,None] + jsh
+                if hermi == 1 and i == j:
+                    sub_mask = mask[ish0:ish1,:,jsh0:jsh1].transpose(0,2,1)
+                    # disable the off-diag blocks
+                    sub_mask[ish[:,None] < jsh] = False
+                    sub_mask = sub_mask.transpose(0,2,1)
+                else:
+                    sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
+                bas_ij_cache[i,j] = ijsh[sub_mask]
         self.bas_ij_cache = bas_ij_cache
+
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(bas_ij_cache)
         self.bas_ij_idx = bas_ij_idx
         self.shl_pair_offsets = shl_pair_offsets
 
@@ -197,14 +204,28 @@ class _Int1eOpt:
         return self.int1e_envs
 
     def intor(self, kern, comp, deriv_ij, kpts=None, sort_output=True,
-              out=None, buf=None):
+              out=None, buf=None, shls_slice=None):
         if comp == 1:
             gout_width = 36
         else:
             gout_width = 18
 
         cell = self.cell
-        nao_cart = cell.nao
+
+        if shls_slice is None:
+            nbas = cell.nbas
+            shls_slice = (0, nbas, 0, nbas)
+            ij_offset = 0
+            naoi = naoj = cell.nao
+        else:
+            assert not sort_output
+            ish0, ish1, jsh0, jsh1 = shls_slice
+            ao_loc = cell.ao_loc
+            i0 = int(ao_loc[ish0])
+            j0 = int(ao_loc[jsh0])
+            naoi = ao_loc[ish1] - i0
+            naoj = ao_loc[jsh1] - j0
+            ij_offset = i0 * naoj + j0
 
         if isinstance(self.cell, Mole) or self.bvk_kmesh is not None:
             # if kpts is None, compute integrals at gamma point
@@ -227,8 +248,8 @@ class _Int1eOpt:
         gout_stride, max_shm_size = _gout_stride_lookup_table(cell, deriv_ij, gout_width)
         nbatches_shl_pair = len(self.shl_pair_offsets) - 1
 
-        mat = ndarray((ncells, comp, nao_cart, nao_cart), buffer=buf)
-        mat[:] = 0
+        mat = ndarray((ncells, comp, naoi, naoj), buffer=buf)
+        mat.fill(0)
         drv = getattr(libpbc, kern)
         err = drv(
             ctypes.cast(mat.data.ptr, ctypes.c_void_p),
@@ -236,7 +257,8 @@ class _Int1eOpt:
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(self.bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(self.shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(naoi), ctypes.c_int(naoj), ctypes.c_size_t(ij_offset))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
 
@@ -244,7 +266,7 @@ class _Int1eOpt:
         if isinstance(cell, Mole) or is_gamma_point:
             if ncells > 1: # corresponding to self.bvk_kmesh is None
                 mat = mat.sum(axis=0)
-            mat = mat.reshape(comp, nao_cart, nao_cart)
+            mat = mat.reshape(comp, naoi, naoj)
             if self.hermi != 0:
                 mat = hermi_triu(mat, self.hermi, inplace=True)
             if sort_output:
@@ -268,7 +290,7 @@ class _Int1eOpt:
             expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
             mat = contract('lkz,lxpq->kxpqz', expLkz, mat)
             mat = mat.view(np.complex128)[:,:,:,:,0]
-            mat = mat.reshape(nkpts*comp, nao_cart, nao_cart)
+            mat = mat.reshape(nkpts*comp, naoi, naoj)
             if self.hermi != 0:
                 mat = hermi_triu(mat, self.hermi, inplace=True)
             if sort_output:
@@ -276,8 +298,7 @@ class _Int1eOpt:
             else:
                 out = mat
             if comp > 1:
-                nao = out.shape[-1]
-                out = out.reshape(nkpts, comp, nao, nao)
+                out = out.reshape((nkpts, comp) + out.shape[-2:])
             if is_single_kpt:
                 out = out[0]
         return out
@@ -344,34 +365,94 @@ class _Int1eOpt:
         '''
         return self.strain_deriv_intor(dm, 'PBCkin_strain_deriv', (3, 0), kpts)
 
-def _aggregate_shl_pairs(cell, mask, hermi=1):
-    nbas, ncells = mask.shape[:2]
-    # The effective shell pair = ish*nbas+jsh
-    bas_ij_cache = {}
-    l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
-    groups = len(cell.uniq_l_ctr)
-    if hermi == 1:
-        ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
-    else:
-        ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
-    img_offsets = cp.arange(ncells, dtype=np.int32) * nbas
-    for i, j in ij_tasks:
-        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-        jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-        ish = cp.arange(ish0, ish1, dtype=np.int32)
-        jsh = cp.arange(jsh0, jsh1, dtype=np.int32)
-        ijsh = ish[:,None,None] * (nbas*ncells) + img_offsets[:,None] + jsh
-        if hermi == 1 and i == j:
-            sub_mask = mask[ish0:ish1,:,jsh0:jsh1].transpose(0,2,1)
-            # disable the off-diag blocks
-            sub_mask[ish[:,None] < jsh] = False
-            sub_mask = sub_mask.transpose(0,2,1)
-        else:
-            sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
-        bas_ij_cache[i,j] = ijsh[sub_mask]
+class CrossInt1e(_Int1eOpt):
+    def __init__(self, cell1, cell2, bvk_kmesh=None):
+        self.cell1 = cell1 = SortedGTO.from_cell(cell1, decontract=True)
+        self.cell2 = cell2 = SortedGTO.from_cell(cell2, decontract=True)
+        self.cell = cell = cell12 = cell1 + cell2
 
-    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(bas_ij_cache)
-    return bas_ij_cache, bas_ij_idx, shl_pair_offsets
+        cell._bas[:,PTR_BAS_COORD] = cell._atm[cell._bas[:,ATOM_OF],PTR_COORD]
+        cell.uniq_l_ctr = np.vstack([cell1.uniq_l_ctr, cell2.uniq_l_ctr])
+
+        self.hermi = 0
+
+        bvk_ncells = 1
+        if isinstance(cell1, Mole):
+            assert isinstance(cell2, Mole)
+            bvk_kmesh = None
+            bvkcell = cell12
+            bvkmesh_Ls = Ls = cp.zeros((1, 3))
+        else:
+            if bvk_kmesh is None:
+                bvkmesh_Ls = cp.zeros((1, 3))
+            else:
+                bvkmesh_Ls = translation_vectors_for_kmesh(cell1, bvk_kmesh, True)
+            bvk_ncells = len(bvkmesh_Ls)
+            if bvk_ncells == 1:
+                bvkcell = cell12
+            else:
+                bvkcell = super_cell(cell12, bvk_kmesh, wrap_around=True)
+                # PTR_BAS_COORD was not initialized in supe_rcell
+                bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
+            Ls = asarray(bvkcell.get_lattice_Ls(rcut=bvkcell.rcut))
+            Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+
+            rad = bvkcell.rcut / bvkcell.vol**(1./3) + 1
+            surface = 4*np.pi * rad**2
+            lattice_sum_factor = surface
+            precision = bvkcell.precision / lattice_sum_factor
+
+        self.bvk_kmesh = bvk_kmesh
+        self.bvkcell = bvkcell
+        self.Ls = Ls
+        self.bvkmesh_Ls = bvkmesh_Ls
+
+        ao_loc = cell12.ao_loc
+        _env = _scale_sp_ctr_coeff(bvkcell)
+        self.int1e_envs = PBCIntEnvVars.new(
+            cell12.natm, cell12.nbas, bvk_ncells, len(Ls),
+            bvkcell._atm, bvkcell._bas, _env, ao_loc, Ls)
+
+        shls_slice = (0, cell1.nbas, cell1.nbas, cell12.nbas)
+        if isinstance(cell1, Mole):
+            mask = _shell_overlap_mask(
+                cell12, 0, envs=self.int1e_envs, shls_slice=shls_slice)
+            mask = mask[:,None]
+        else:
+            mask = _shell_overlap_mask(
+                bvkcell, 0, precision, Ls, self.int1e_envs, bvk_ncells,
+                shls_slice=shls_slice)
+
+        self.bas_ij_cache = bas_ij_cache = {}
+        nbas = cell12.nbas
+        img_offsets = cp.arange(bvk_ncells, dtype=np.int32) * nbas
+        l_ctr_offsets1 = np.append(0, np.cumsum(cell1.l_ctr_counts))
+        l_ctr_offsets2 = np.append(0, np.cumsum(cell2.l_ctr_counts))
+        for i in range(len(cell1.uniq_l_ctr)):
+            for j in range(len(cell2.uniq_l_ctr)):
+                ish0, ish1 = l_ctr_offsets1[i], l_ctr_offsets1[i+1]
+                jsh0, jsh1 = l_ctr_offsets2[j], l_ctr_offsets2[j+1]
+                ish = cp.arange(ish0, ish1, dtype=np.int32)
+                jsh = cp.arange(jsh0, jsh1, dtype=np.int32) + cell1.nbas
+                ijsh = ish[:,None,None] * (nbas*bvk_ncells) + img_offsets[:,None] + jsh
+                bas_ij_cache[i,j] = ijsh[mask[ish0:ish1,:,jsh0:jsh1]]
+
+        bas_ij_idx, shl_pair_offsets = cell1.aggregate_shl_pairs(bas_ij_cache)
+        self.bas_ij_idx = bas_ij_idx
+        self.shl_pair_offsets = shl_pair_offsets
+
+    def intor(self, kern, comp, deriv_ij, kpts=None, sort_output=True,
+              out=None, buf=None, shls_slice=None):
+        shls_slice = (0, self.cell1.nbas, self.cell1.nbas, self.cell.nbas)
+        out = super().intor(kern, comp, deriv_ij, kpts, False, out, buf,
+                             shls_slice)
+        if sort_output:
+            leading_shape = out.shape[:-2]
+            n1, n2 = out.shape[-2:]
+            tmp = self.cell2.apply_CT_dot(out.reshape(-1, n1, n2), axis=-1)
+            out = self.cell1.apply_CT_dot(tmp, axis=-2, out=out)
+            out = out.reshape(leading_shape + out.shape[1:3])
+        return out
 
 def _gout_stride_lookup_table(cell, deriv=None, gout_width=36):
     # gout_width should be identical to the setting in cuda kernel
@@ -400,29 +481,44 @@ def _gout_stride_lookup_table(cell, deriv=None, gout_width=36):
     max_shm_size = shm_size[:lmax+1,:lmax+1].max()
     return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
 
-def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None):
+def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None, envs=None,
+                        bvk_ncells=None, shls_slice=None):
     '''absmax(<i|j>) > precision for each shell pair'''
-    nbas = mol.nbas
     exps, cs = extract_pgto_params(mol, 'diffuse')
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(asarray(cs, dtype=np.float32)))
-    ao_loc = cp.arange(0)
-    with_images = Ls is not None
-    if Ls is None:
-        Ls = cp.zeros((1, 3))
+
+    ncells = bvk_ncells if bvk_ncells is not None else 1
+    nbas = mol.nbas // ncells # number of shells in unit cell
+    natm = mol.natm // ncells # number of atoms in unit cell
+
+    if shls_slice is None:
+        shls_slice = (0, nbas, 0, nbas)
+
+    i0, i1, j0, j1 = shls_slice
+    nbas1 = i1 - i0
+    nbas2 = j1 - j0
+    ovlp_mask = cp.zeros((nbas1,ncells,nbas2), dtype=bool)
+    if envs is None:
+        ao_loc = cp.zeros(1, dtype=np.int32)
+        if Ls is None:
+            Ls = cp.zeros((1, 3))
+        else:
+            Ls = asarray(Ls)
+        envs = PBCIntEnvVars.new(
+            natm, nbas, ncells, len(Ls), asarray(mol._atm),
+            asarray(mol._bas), asarray(_scale_sp_ctr_coeff(mol)), ao_loc, Ls)
     else:
-        Ls = asarray(Ls)
-    nimgs = len(Ls)
-    ovlp_mask = cp.zeros((nbas,nimgs,nbas), dtype=bool)
-    envs = PBCIntEnvVars.new(
-        mol.natm, mol.nbas, nimgs, nimgs, asarray(mol._atm),
-        asarray(mol._bas), asarray(_scale_sp_ctr_coeff(mol)), ao_loc, Ls)
+        assert envs.bvk_ncells == ncells
+
     libpbc.PBCovlp_mask_estimation(
         ctypes.cast(ovlp_mask.data.ptr, ctypes.c_void_p),
         ctypes.cast(exps.data.ptr, ctypes.c_void_p),
         ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(hermi),
-        ctypes.c_float(math.log(precision)))
-    if not with_images:
+        ctypes.c_float(math.log(precision)),
+        (ctypes.c_int*4)(*shls_slice),
+        ctypes.c_int(ncells))
+    if bvk_ncells is None:
         ovlp_mask = ovlp_mask[:,0]
     return ovlp_mask

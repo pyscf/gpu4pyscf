@@ -18,6 +18,7 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl
+from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl_gpu
 
 def vppnl_nuc_grad(cell, dm, kpts=None):
     '''Nuclear gradients of the non-local part of the GTH pseudo potential,
@@ -35,23 +36,10 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
     fakecell, hl_blocks = fake_cell_vnl(cell)
 
     intors_d = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
-    if gamma_point(kpts_lst):
-        from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl_gpu
-        ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
-        ppnl_half_ip2 = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
-    else:
-        from pyscf.pbc.gto.pseudo.pp_int import _int_vnl
-        ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
-        ppnl_half_ip2 = _int_vnl(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
+    ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
+    ppnl_half_ip2 = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
     if len(ppnl_half_ip2[0]) > 0:
-        for k in range(len(kpts_lst)):
-            ppnl_half_ip2[0][k] *= -1
-
-    # Move integral arrays to GPU
-    def _to_gpu(arrs):
-        return [cp.asarray(a) if len(a) > 0 else a for a in arrs]
-    ppnl_half = _to_gpu(ppnl_half)
-    ppnl_half_ip2 = _to_gpu(ppnl_half_ip2)
+        ppnl_half_ip2[0] *= -1
 
     nkpts = len(kpts_lst)
     nao = cell.nao_nr()
@@ -73,17 +61,18 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
             hl_gpu = cp.asarray(hl)
 
             ilp = cp.zeros((hl_dim, nd, nao), dtype=cp.complex128)
-            dilp = cp.zeros((hl_dim, 3, nd, nao), dtype=cp.complex128)
+            dilp = cp.zeros((3, hl_dim, nd, nao), dtype=cp.complex128)
             for i in range(hl_dim):
                 p0 = offset[i]
                 if len(ppnl_half[i]) > 0:
                     ilp[i] = ppnl_half[i][k, p0:p0+nd]
                 if len(ppnl_half_ip2[i]) > 0:
-                    dilp[i] = ppnl_half_ip2[i][k, :, p0:p0+nd]
+                    dilp[:,i] = ppnl_half_ip2[i][k, :, p0:p0+nd].conj()
                 offset[i] = p0 + nd
 
             # dppnl_k[d,p,q] = sum_{i,j,l} dilp[i,d,l,p].conj() * hl[i,j] * ilp[j,l,q]
-            dppnl_k = cp.einsum('idlp,ij,jlq->dpq', dilp.conj(), hl_gpu, ilp)
+            tmp = cp.einsum('ij,jlp->ilp', hl_gpu, ilp)
+            dppnl_k = cp.einsum('dilp,ilq->dpq', dilp, tmp)
             dppnl[k] += dppnl_k
 
             i_pp_atom = fakecell._bas[ib, 0]

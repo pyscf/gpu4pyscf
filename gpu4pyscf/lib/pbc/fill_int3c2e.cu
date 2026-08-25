@@ -1018,11 +1018,10 @@ void ovlp_img_counts_kernel(int *img_counts, PBCIntEnvVars envs,
         if (theta_ij_rr > REMOTE_THRESHOLD) {
             continue;
         }
-        float dr = sqrtf(rr_ij);
-        float dri = aj_aij * dr;
-        float drj = ai_aij * dr;
-        float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
-        float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
+        float dri = aj_aij * aj_aij * rr_ij;
+        float drj = ai_aij * ai_aij * rr_ij;
+        float dri_fac = .5f*li * logf(.5f*li/aij + dri + 1e-9f);
+        float drj_fac = .5f*lj * logf(.5f*lj/aij + drj + 1e-9f);
         float estimator = dri_fac + drj_fac - theta_ij_rr;
         if (estimator > log_cutoff) {
             counts++;

@@ -131,6 +131,10 @@ class TestGetPpNlKpts(unittest.TestCase):
         kpts = np.array([[0.1, 0.0, 0.0]])
         self._compare(cell_fe, kpts, places=12)
 
+    def test_iron_single_kpts(self):
+        kpts = cell_fe.make_kpts([2, 5, 1])
+        self._compare(cell_fe, kpts, places=10)
+
 
 if __name__ == "__main__":
     unittest.main()
