@@ -2606,6 +2606,94 @@ class KnownValues(unittest.TestCase):
 
         assert np.max(np.abs(test_dhcore - ref_dhcore)) < 5e-7
 
+    def test_rks_range_separated_veff_derivative_spherical_mo(self):
+        mol = self.mol_sph
+
+        nocc = mol.nelectron // 2
+        mo_coeff = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+        mo_occ = cp.array([2.0] * nocc + [0.0] * (mol.nao - nocc))
+        dm = mo_coeff @ cp.diag(mo_occ) @ mo_coeff.T
+        dm = tag_array(dm, mo_occ=mo_occ, mo_coeff=mo_coeff)
+
+        mf = RKS(mol, xc = "wB97X").density_fit(auxbasis = self.auxbasis)
+        mf.with_df.build()
+        mf.grids.atom_grid = (50, 194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.grids.build()
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+
+        ref_dvhf = gobj.energy_ee(mol, dm)
+
+        mf = apply_cuest_wrapper(mf)
+        gobj = mf.Gradients()
+
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
+
+        assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-2 * cp.max(dm)
+
+    def test_rks_range_separated_veff_derivative_spherical_dm(self):
+        mol = self.mol_sph
+
+        nocc = mol.nelectron // 2
+        mo_coeff = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+        mo_occ = cp.array([2.0] * nocc + [0.0] * (mol.nao - nocc))
+        dm = mo_coeff @ cp.diag(mo_occ) @ mo_coeff.T
+        # dm = tag_array(dm, mo_occ=mo_occ, mo_coeff=mo_coeff)
+
+        mf = RKS(mol, xc = "HYB_GGA_XC_LC_WPBE_WHS").density_fit(auxbasis = self.auxbasis)
+        mf.with_df.build()
+        mf.grids.atom_grid = (50, 194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.grids.build()
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+
+        ref_dvhf = gobj.energy_ee(mol, dm)
+
+        mf = apply_cuest_wrapper(mf)
+        gobj = mf.Gradients()
+
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
+
+        assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-2 * cp.max(dm)
+
+    def test_uks_range_separated_vv10_veff_derivative_spherical_mo(self):
+        mol = self.mol_sph
+
+        nocc = mol.nelectron // 2
+        mo_coeff = cp.random.rand(2, mol.nao, mol.nao) * 2 - 1
+        mo_occa = cp.array([1.0] * nocc + [0.0] * (mol.nao - nocc))
+        mo_occb = cp.array([1.0] * (nocc + 1) + [0.0] * (mol.nao - (nocc + 1)))
+        mo_occ = cp.vstack([mo_occa, mo_occb])
+        dm = cp.empty([2, mol.nao, mol.nao])
+        for i_dm in range(2):
+            dm[i_dm] = mo_coeff[i_dm] @ cp.diag(mo_occ[i_dm]) @ mo_coeff[i_dm].T
+        dm = tag_array(dm, mo_occ=mo_occ, mo_coeff=mo_coeff)
+
+        mf = UKS(mol, xc = "wB97XV").density_fit(auxbasis = self.auxbasis)
+        mf.with_df.build()
+        mf.grids.atom_grid = (50, 194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (50, 194)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.grids.build()
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+
+        ref_dvhf = gobj.energy_ee(mol, dm)
+
+        mf = apply_cuest_wrapper(mf)
+        gobj = mf.Gradients()
+
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
+
+        assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-2 * cp.max(dm)
+
     ### Integrated test from here on
 
     def test_rhf_spherical(self):
@@ -3210,13 +3298,11 @@ class KnownValues(unittest.TestCase):
         test_energy = mf.kernel()
         assert mf.converged
 
-        # gobj = mf.Gradients()
-        # test_gradient = gobj.kernel()
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
 
         assert abs(test_energy - ref_energy) <= 1e-5
-        # assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-17
-
-        raise NotImplementedError("Gradient not implemented yet")
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 2e-5
 
     def test_rks_range_separated_spherical_vv10(self):
         mf = RKS(self.mol_sph, xc = "wB97MV").density_fit(auxbasis = self.auxbasis)
@@ -3244,13 +3330,11 @@ class KnownValues(unittest.TestCase):
         test_energy = mf.kernel()
         assert mf.converged
 
-        # gobj = mf.Gradients()
-        # test_gradient = gobj.kernel()
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
 
         assert abs(test_energy - ref_energy) <= 2e-5
-        # assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-17
-
-        raise NotImplementedError("Gradient not implemented yet")
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-5
 
     def test_uks_range_separated_spherical(self):
         mf = UKS(self.mol_unrestricted, xc = "CAMB3LYP").density_fit(auxbasis = self.auxbasis)
@@ -3275,13 +3359,11 @@ class KnownValues(unittest.TestCase):
         test_energy = mf.kernel()
         assert mf.converged
 
-        # gobj = mf.Gradients()
-        # test_gradient = gobj.kernel()
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
 
         assert abs(test_energy - ref_energy) <= 1e-5
-        # assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-17
-
-        raise NotImplementedError("Gradient not implemented yet")
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-5
 
     def test_rks_geometry_optimiation(self):
         mol = pyscf.M(

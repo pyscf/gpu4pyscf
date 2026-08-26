@@ -5005,12 +5005,11 @@ class CuESTGradientWrapper(lib.StreamObject):
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        if omega != 0.0:
-            raise NotImplementedError("JK gradient does not support range-separated hybrids yet")
-        assert sr_factor == lr_factor
-        k_factor = sr_factor
-
         if not self.base.turn_on_cuest_jk:
+            if omega != 0.0:
+                raise NotImplementedError("JK gradient does not support range-separated hybrids yet")
+            assert sr_factor == lr_factor
+            k_factor = sr_factor
             return super().jk_energy_per_atom(dm = dm, j_factor = 1.0, k_factor = k_factor, omega = None, verbose = None)
 
         dms, dm = dm, None
@@ -5043,7 +5042,7 @@ class CuESTGradientWrapper(lib.StreamObject):
 
         numerical_zero = 1e-12
 
-        if k_factor != 0:
+        if sr_factor != 0 or lr_factor != 0:
             mocc_list = []
             for i_dm in range(n_dm):
                 if mo_coeffs is not None:
@@ -5087,7 +5086,7 @@ class CuESTGradientWrapper(lib.StreamObject):
             nocc = [mocc.shape[0] for mocc in mocc_list]
             mocc = cp.vstack(mocc_list)
         else:
-            nocc = [1] # cuest doesn't allow nocc==0 even if k_factor==0
+            nocc = [1] # cuest doesn't allow nocc==0 even if K contribution is 0
             mocc = cp.zeros((1, mol.nao))
 
         if n_dm == 1:
