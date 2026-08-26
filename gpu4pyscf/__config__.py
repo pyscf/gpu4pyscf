@@ -32,8 +32,12 @@ if props['totalGlobalMem'] < 16 * GB:
 mem_fraction = 0.9
 cupy.get_default_memory_pool().set_limit(fraction=mem_fraction)
 
-if props['sharedMemPerBlockOptin'] > 65536:
-    shm_size = props['sharedMemPerBlockOptin']
+# `sharedMemPerBlockOptin` is a CUDA opt-in attribute for requesting more than
+# the default dynamic shared memory; it is not reported by HIP/ROCm. Fall back to
+# the regular shared-memory (LDS) size when it is absent.
+shared_mem_optin = props.get('sharedMemPerBlockOptin', 0)
+if shared_mem_optin > 65536:
+    shm_size = shared_mem_optin
     # Resever space for system use
     shm_size -= 2048
 else:

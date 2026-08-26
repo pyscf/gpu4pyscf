@@ -17,5 +17,6 @@ add_library(gvhf_md SHARED
 set_target_properties(gvhf_md PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
   CUDA_SEPARABLE_COMPILATION ON)
+gpu4pyscf_configure_gpu_target(gvhf_md)
 
 target_link_libraries(gvhf_md OpenMP::OpenMP_C)

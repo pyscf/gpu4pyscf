@@ -15,7 +15,7 @@
  */
 
 #pragma once
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 extern __constant__ int16_t c_pair_idx[];
 extern __constant__ int c_pair_offsets[];
 #endif

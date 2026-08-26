@@ -14,10 +14,16 @@
 
 
 import ctypes
+from ctypes.util import find_library
+import cupy
 from cupy.cuda import device
 from cupy_backends.cuda.libs import cublas #NOQA
 
-libcublas = ctypes.CDLL('libcublas.so')
+# On ROCm/HIP, cuBLAS is provided by hipBLAS; load the appropriate library.
+if cupy.cuda.runtime.is_hip:
+    libcublas = ctypes.CDLL(find_library('hipblas') or 'libhipblas.so')
+else:
+    libcublas = ctypes.CDLL('libcublas.so')
 
 # This needs to be moved into functions, and lazy evaluate
 _handle = device.get_cublas_handle() #NOQA

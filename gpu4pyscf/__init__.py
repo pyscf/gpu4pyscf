@@ -14,6 +14,44 @@
 
 __version__ = '1.9.1'
 
+
+def _rocm_preload_torch():
+    """Work around a fatal LLVM clash between CuPy and PyTorch on ROCm/HIP.
+
+    On ROCm, CuPy's hipRTC kernel compiler and PyTorch each load AMD's LLVM-based
+    code-object manager (``libamd_comgr``). If CuPy is imported before torch, the
+    two register the same LLVM command-line options twice and abort the whole
+    process with::
+
+        Option 'spirv-expand-step' registered more than once!
+        LLVM ERROR: inconsistency in registered CommandLine options
+
+    e.g. when combining classical gpu4pyscf DFT with the Skala ML functional in a
+    single process. Importing torch first (when it is installed) makes its comgr
+    load first; CuPy then reuses it by soname. No effect on CUDA (CuPy uses NVRTC)
+    or when torch is absent. Disable with ``GPU4PYSCF_NO_TORCH_PRELOAD=1``.
+
+    NB: this must not import CuPy -- importing CuPy before torch is itself enough
+    to trigger the clash -- so ROCm is detected from the environment instead.
+    """
+    import os
+    if os.environ.get('GPU4PYSCF_NO_TORCH_PRELOAD'):
+        return
+    on_rocm = (os.path.exists('/dev/kfd')                       # AMD GPU kernel iface
+               or bool(os.environ.get('ROCM_PATH'))
+               or bool(os.environ.get('HIP_PATH')))
+    if not on_rocm:
+        return
+    try:
+        import importlib.util
+        if importlib.util.find_spec('torch') is not None:
+            import torch  # noqa: F401
+    except Exception:
+        pass
+
+
+_rocm_preload_torch()
+
 from . import _patch_pyscf
 
 from . import lib, grad, hessian, solvent, scf, dft, tdscf, nac
