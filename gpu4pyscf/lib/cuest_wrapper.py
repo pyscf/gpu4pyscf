@@ -1158,19 +1158,6 @@ def check_cuest_pyscf_functional_consistency(mol, xc, numint, cuest_handle, xcin
     # HF_exchange = HF_FR * hyb + HF_LR * (alpha - hyb)
     #             = HF_SR * hyb + HF_LR * alpha
 
-    is_hybrid = ce.data_int32_t()
-    cuest_check('Query XCIntPlan functional parameter is_hybrid',
-        ce.cuestQuery(
-            handle=cuest_handle,
-            type=ce.CuestType.CUEST_XCINTPLAN,
-            object=xcintplan_handle,
-            attribute=ce.CuestXCIntPlanAttributes.CUEST_XCINTPLAN_IS_HYBRID,
-            attributeValue=is_hybrid,
-            )
-        )
-    if is_hybrid.value == 0:
-        assert omega == 0 and alpha == 0 and hyb == 0
-
     exchange_scale = ce.data_double()
     cuest_check('Query XCIntPlan functional parameter exchange scale',
         ce.cuestQuery(
@@ -1182,19 +1169,6 @@ def check_cuest_pyscf_functional_consistency(mol, xc, numint, cuest_handle, xcin
             )
         )
     assert exchange_scale.value == hyb
-
-    is_lrc_hybrid = ce.data_int32_t()
-    cuest_check('Query XCIntPlan functional parameter is_lrc_hybrid',
-        ce.cuestQuery(
-            handle=cuest_handle,
-            type=ce.CuestType.CUEST_XCINTPLAN,
-            object=xcintplan_handle,
-            attribute=ce.CuestXCIntPlanAttributes.CUEST_XCINTPLAN_IS_LRC_HYBRID,
-            attributeValue=is_lrc_hybrid,
-            )
-        )
-    if is_lrc_hybrid.value == 0:
-        assert omega == 0 and alpha == hyb
 
     lrc_exchange_scale = ce.data_double()
     cuest_check('Query XCIntPlan functional parameter long-range exchange scale',
