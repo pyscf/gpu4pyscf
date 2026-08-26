@@ -4691,7 +4691,8 @@ class CuESTWrapper(lib.StreamObject):
         omega = abs(omega)
 
         cuest_handle = self.handles.cuest_handle
-        if self.handles.dfintplan_handle is None or not self.handles.check_dfintplan_parameter_consistency(omega, lr_factor, sr_factor):
+        if self.handles.dfintplan_handle is None or \
+            (with_k and not self.handles.check_dfintplan_parameter_consistency(omega, lr_factor, sr_factor)):
             self.handles.build_dfintplan(self, omega, lr_factor, sr_factor)
         dfintplan_handle = self.handles.dfintplan_handle
 
@@ -4810,7 +4811,7 @@ class CuESTWrapper(lib.StreamObject):
                     time0 = time1
             vk = vk.reshape(dm_original_shape)
 
-            log.debug(f"CuEST: time_JK_pre_and_post_processing = {time_pre_post} s, time_JK_kernel = {time_kernel} s")
+        log.debug(f"CuEST: time_JK_pre_and_post_processing = {time_pre_post} s, time_JK_kernel = {time_kernel} s")
 
         return vj, vk
 
