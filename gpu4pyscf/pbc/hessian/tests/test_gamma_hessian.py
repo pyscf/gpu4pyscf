@@ -126,12 +126,12 @@ class KnownValues(unittest.TestCase):
             atom, axis = divmod(column, 3)
             gradients = []
             for sign in (1.0, -1.0):
-                displaced_cell = self.cell.copy()
                 displaced_coords = reference_coords.copy()
                 displaced_coords[atom, axis] += sign * displacement
-                displaced_cell.set_geom_(
+                displaced_cell = self.cell.set_geom_(
                     displaced_coords,
                     unit="Angstrom",
+                    inplace=False,
                 )
 
                 mf_disp = dft.RKS(

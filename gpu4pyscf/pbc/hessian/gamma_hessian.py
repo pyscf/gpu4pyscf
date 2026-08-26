@@ -25,7 +25,6 @@ __all__ = [
     "GammaHessian",
 ]
 
-import copy
 import numpy as np
 from pyscf import lib
 from pyscf.data.nist import BOHR as BOHR_TO_ANGSTROM
@@ -93,18 +92,14 @@ class GammaHessian(lib.StreamObject):
         self.force_constants = None
         mf = self.mf
         cell = mf.cell
-        natm = cell.natm
-        original_coords = cell.atom_coords().copy() # Bohr
-        original_atom = copy.deepcopy(cell.atom)
-        original_lattice = copy.deepcopy(cell.a)    # Bohr
-        original_unit = cell.unit
+        original_coords = cell.atom_coords() # Bohr
 
         # default calculator is vasp, default unit in phonopy for vasp:
         #           | Distance   Atomic mass   Force         Force constants
         # -----------------------------------------------------------------
         # VASP      | Angstrom   AMU           eV/Angstrom   eV/Angstrom^2
         unitcell = PhonopyAtoms(
-            symbols=[cell.atom_symbol(i) for i in range(natm)],
+            symbols=cell.elements,
             cell=np.asarray(cell.lattice_vectors()) * BOHR_TO_ANGSTROM,
             positions=original_coords * BOHR_TO_ANGSTROM,
             masses=np.asarray(cell.atom_mass_list()),
@@ -135,61 +130,54 @@ class GammaHessian(lib.StreamObject):
 
         force_sets = []
         dm0 = mf.make_rdm1()
-        try:
-            for index, displaced in enumerate(displaced_cells, 1):
-                cell.set_geom_(displaced.positions, unit="Angstrom")
-                mf_disp = mf.copy().reset(cell)
-                logger.info(
+        for index, displaced in enumerate(displaced_cells, 1):
+            disp_cell = cell.set_geom_(displaced.positions, unit="Angstrom", inplace=False)
+            mf_disp = mf.copy().reset(disp_cell)
+            logger.info(
+                mf,
+                "Running displaced SCF and gradient %d/%d",
+                index,
+                len(displaced_cells),
+            )
+            mf_disp.kernel(dm0=dm0)
+            if not mf_disp.converged:
+                logger.warn(
                     mf,
-                    "Running displaced SCF and gradient %d/%d",
+                    "SCF did not converge for displaced structure %d/%d",
                     index,
                     len(displaced_cells),
                 )
-                mf_disp.kernel(dm0=dm0)
-                if not mf_disp.converged:
-                    logger.warn(
-                        mf,
-                        "SCF did not converge for displaced structure %d/%d",
-                        index,
-                        len(displaced_cells),
-                    )
-                    raise RuntimeError("SCF did not converge")
+                raise RuntimeError("SCF did not converge")
 
-                dm0 = mf_disp.make_rdm1()
-                grad = mf_disp.nuc_grad_method()
-                gradient = grad.kernel()
-                if hasattr(gradient, "get"):
-                    gradient = gradient.get()
-                force_sets.append(np.asarray(gradient) * GRAD_TO_FORCE)
+            dm0 = mf_disp.make_rdm1()
+            grad = mf_disp.nuc_grad_method()
+            gradient = grad.kernel()
+            if hasattr(gradient, "get"):
+                gradient = gradient.get()
+            force_sets.append(np.asarray(gradient) * GRAD_TO_FORCE)
 
-                del gradient, grad, mf_disp
+            del gradient, grad, mf_disp, disp_cell
 
-            self.force_sets = np.asarray(force_sets)
-            self.phonon.forces = self.force_sets
-            self.phonon.produce_force_constants()
-            if self.symmetrize:
-                self.phonon.symmetrize_force_constants()
+        self.force_sets = np.asarray(force_sets)
+        self.phonon.forces = self.force_sets
+        self.phonon.produce_force_constants()
+        if self.symmetrize:
+            self.phonon.symmetrize_force_constants()
 
-            qpoints = self.phonon.run_qpoints(
-                [[0.0, 0.0, 0.0]],
-                with_dynamical_matrices=True,
-            )
-            dyn_mat = np.asarray(qpoints.dynamical_matrices[0])
-            masses = np.repeat(self.phonon.primitive.masses, 3)
-            force_constants = (
-                dyn_mat * np.sqrt(masses[:, None] * masses[None, :])
-            )
-            self.force_constants = np.asarray(
-                np.real_if_close(force_constants) * EV_A2_TO_HA_BOHR2,
-                dtype=np.float64,
-            )
-            return self.force_constants
-        finally:
-            cell.set_geom_(
-                original_atom,
-                a=original_lattice,
-                unit=original_unit,
-            )
+        qpoints = self.phonon.run_qpoints(
+            [[0.0, 0.0, 0.0]],
+            with_dynamical_matrices=True,
+        )
+        dyn_mat = np.asarray(qpoints.dynamical_matrices[0])
+        masses = np.repeat(self.phonon.primitive.masses, 3)
+        force_constants = (
+            dyn_mat * np.sqrt(masses[:, None] * masses[None, :])
+        )
+        self.force_constants = np.asarray(
+            np.real_if_close(force_constants) * EV_A2_TO_HA_BOHR2,
+            dtype=np.float64,
+        )
+        return self.force_constants
 
     def phonon_modes(self, unit="cm-1"):
         """Diagonalize the Gamma dynamical matrix manually.
