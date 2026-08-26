@@ -220,6 +220,7 @@ class KnownValues(unittest.TestCase):
         ni = MultiGridNumInt(cell)
         ni.mesh = np.asarray(cell.mesh)
         ni.build('MGGA', gamma_point=False)
+        from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv
         dat = _rks_exc_strain_deriv(ni, xc, dm, kpts, with_j=False, with_nuc=False)
         assert abs(dat / cell.vol).max() < 1e-3
 
