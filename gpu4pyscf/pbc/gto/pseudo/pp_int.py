@@ -19,8 +19,10 @@ from pyscf import gto, lib
 from pyscf.pbc.gto.cell import _estimate_rcut
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
 from pyscf.pbc.lib.kpts_helper import gamma_point
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import most_diffuse_pgto
-from gpu4pyscf.pbc.gto.int1e import _Int1eOpt
+from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools import k2gamma
 
 
 def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
@@ -38,7 +40,7 @@ def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
 
     hl_dims = np.asarray([len(hl) for hl in hl_blocks])
 
-    bvk_kmesh = kpts_to_kmesh(cell, kpts)
+    bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
     pcell = fakecell.copy(deep=False)
 
     def int_ket(_bas_fake, intor_name):
@@ -54,47 +56,19 @@ def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
             int_ket(fakecell._bas[hl_dims > 1], intors[1]),
             int_ket(fakecell._bas[hl_dims > 2], intors[2])]
 
-
-def _contract_ppnl_gpu(cell, fakecell, hl_blocks, ppnl_half, comp=1, kpts=None):
-    '''GPU contraction of GTH non-local pseudopotential half-integrals.
-
-    Gamma-point only; the half-integrals are already image-summed so no
-    NeighborListOpt screening is needed. Returns NumPy.
-    '''
-    if kpts is None:
-        kpts_lst = np.zeros((1, 3))
-    else:
-        kpts_lst = np.reshape(kpts, (-1, 3))
-
-    nao = cell.nao_nr()
-
-    ppnl_half_gpu = [cp.asarray(a) if len(a) > 0 else a for a in ppnl_half]
-
-    ppnl = []
-    for k in range(len(kpts_lst)):
-        ppnl_k = cp.zeros((nao, nao), dtype=cp.float64)
-        offset = [0] * 3
-        for ib, hl in enumerate(hl_blocks):
-            l = fakecell.bas_angular(ib)
-            nd = 2 * l + 1
-            hl_dim = hl.shape[0]
-            hl_gpu = cp.asarray(hl)
-
-            ilp = cp.zeros((hl_dim, nd, nao), dtype=cp.float64)
-            for i in range(hl_dim):
-                p0 = offset[i]
-                if len(ppnl_half_gpu[i]) > 0:
-                    ilp[i] = ppnl_half_gpu[i][k, p0:p0+nd].real
-                offset[i] = p0 + nd
-
-            ppnl_k += cp.einsum('imp,ij,jmq->pq', ilp, hl_gpu, ilp)
-
-        ppnl.append(ppnl_k)
-
-    if kpts is None or np.shape(kpts) == (3,):
-        return ppnl[0]
-    return ppnl
-
+def _sorted_fake_cell_vnl(cell):
+    fakecell, hl_blocks = fake_cell_vnl(cell)
+    hl_dims = np.asarray([len(hl) for hl in hl_blocks])
+    ls = fakecell._bas[:,gto.ANG_OF]
+    # groupby [hl_dim, l]
+    label = np.stack((hl_dims, ls)).T
+    pattern, inv_idx, counts = np.unique(
+        label, return_inverse=True, return_counts=True, axis=0)
+    idx = np.argsort(inv_idx)
+    fakecell._bas = fakecell._bas[idx]
+    hl_blocks = [hl_blocks[i] for i in idx]
+    splits = np.append(0, counts).cumsum()
+    return fakecell, hl_blocks, pattern, splits
 
 def get_pp_nl_gpu(cell, kpts=None):
     if kpts is None:
@@ -103,33 +77,30 @@ def get_pp_nl_gpu(cell, kpts=None):
         kpts_lst = np.reshape(kpts, (-1, 3))
     nkpts = len(kpts_lst)
 
-    fakecell, hl_blocks = fake_cell_vnl(cell)
-    nao = cell.nao_nr()
+    # pattern stores the unique [hl_dim, l] combinations
+    fakecell, hl_blocks, pattern, splits = _sorted_fake_cell_vnl(cell)
 
-    if gamma_point(kpts_lst):
-        ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
-        return _contract_ppnl_gpu(cell, fakecell, hl_blocks, ppnl_half, kpts=kpts)
+    ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
 
-    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
-
-    ppnl_half_gpu = [cp.asarray(a) if len(a) > 0 else a for a in ppnl_half]
-
+    nao = cell.nao
     ppnl = cp.zeros((nkpts, nao, nao), dtype=cp.complex128)
-    for k in range(nkpts):
-        offset = [0] * 3
-        for ib, hl in enumerate(hl_blocks):
-            l = fakecell.bas_angular(ib)
-            nd = 2 * l + 1
-            hl_dim = hl.shape[0]
-            hl_gpu = cp.asarray(hl, dtype=cp.complex128)
 
-            ilp = cp.zeros((hl_dim, nd, nao), dtype=cp.complex128)
-            for i in range(hl_dim):
-                p0 = offset[i]
-                if len(ppnl_half_gpu[i]) > 0:
-                    ilp[i] = ppnl_half_gpu[i][k, p0:p0+nd]
-                offset[i] = p0 + nd
+    hl_offset = [0] * 3
+    for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
+        hl_dim, l = pattern[ii]
+        nd = 2 * l + 1
+        hl_block = cp.asarray(np.stack(hl_blocks[i0:i1]))
+        n_hl = len(hl_block)
 
-            ppnl[k] += cp.einsum('ilp,ij,jlq->pq', ilp.conj(), hl_gpu, ilp)
+        ilp = cp.empty((nkpts, n_hl, hl_dim, nd, nao), dtype=cp.complex128)
+        for i in range(hl_dim):
+            p0 = hl_offset[i]
+            p1 = p0 + n_hl * nd
+            ilp[:,:,i] = ppnl_half[i][:,p0:p1].reshape(nkpts, n_hl, nd, nao)
+            hl_offset[i] = p1
+
+        tmp = contract('nij,knjlq->knilq', hl_block, ilp)
+        ilp_conj = cp.conjugate(ilp, out=ilp)
+        contract('knilp,knilq->kpq', ilp_conj, tmp, beta=1, out=ppnl)
 
     return ppnl

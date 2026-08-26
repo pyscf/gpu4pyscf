@@ -1281,48 +1281,41 @@ def _recontract_basis(mol, decontract=False, diffuse_cutoff=None):
     recontract_bas = []
     pbas_idx_size = 0
     ptr_coef = 0
-    aoslices = mol.aoslice_by_atom()
-    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
-        if ib0 == ib1:
-            continue
-        key = tuple(mol._bas[ib0:ib1,PTR_COEFF])
+
+    for shell in mol._bas:
+        ia = shell[ATOM_OF]
+        key = int(shell[PTR_COEFF])
         if key not in bas_templates:
-            bas_of_ia = []
             recontract = []
             pidx_offset = 0
-            for shell in mol._bas[ib0:ib1]:
-                l = shell[ANG_OF]
-                nprim = shell[NPRIM_OF]
-                nctr = shell[NCTR_OF]
+            l = shell[ANG_OF]
+            nprim = shell[NPRIM_OF]
+            nctr = shell[NCTR_OF]
 
-                if not decontract:
-                    shells, p2c_bas, c = _split_shell(shell, _env)
-                    nprim = len(shells)
-                    p2c_bas[:,PTR_COEFF] += ptr_coef
-                    p2c_bas[:,PTR_PBAS_IDX] += pidx_offset
-                    recontract.append(p2c_bas)
-                else:
-                    shells, c = _optimize_contraction(shell, _env, diffuse_cutoff)
-                    nprim = len(shells)
-                    recontract.append(
-                        np.array([ia, l, nprim, nctr, pidx_offset, 0, ptr_coef, 0], dtype=np.int32))
-                bas_of_ia.append(shells)
-                ctr_coef.append(c.ravel())
-                pidx_offset += len(shells)
-                ptr_coef += c.size
+            if not decontract:
+                shells, recontract, c = _split_shell(shell, _env)
+                nprim = len(shells)
+                recontract[:,PTR_COEFF] += ptr_coef
+                recontract[:,PTR_PBAS_IDX] += pidx_offset
+            else:
+                shells, c = _optimize_contraction(shell, _env, diffuse_cutoff)
+                nprim = len(shells)
+                recontract = np.array([[ia, l, nprim, nctr, pidx_offset, 0, ptr_coef, 0]], dtype=np.int32)
+            ctr_coef.append(c.ravel())
+            pidx_offset += len(shells)
+            ptr_coef += c.size
+            bas_templates[key] = (shells, recontract)
 
-            bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract))
-
-        bas_of_ia, recontract = bas_templates[key]
-        bas_of_ia = bas_of_ia.copy()
-        bas_of_ia[:,ATOM_OF] = ia
-        _bas.append(bas_of_ia)
+        shells, recontract = bas_templates[key]
+        shells = shells.copy()
+        shells[:,ATOM_OF] = ia
+        _bas.append(shells)
 
         recontract = recontract.copy()
         recontract[:,ATOM_OF] = ia
         recontract[:,PTR_PBAS_IDX] += pbas_idx_size
         recontract_bas.append(recontract)
-        pbas_idx_size += len(bas_of_ia)
+        pbas_idx_size += len(shells)
 
     pmol = mol.copy(deep=False)
     pmol.cart = True

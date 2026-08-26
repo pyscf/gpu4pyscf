@@ -449,8 +449,8 @@ class CrossInt1e(_Int1eOpt):
         if sort_output:
             leading_shape = out.shape[:-2]
             n1, n2 = out.shape[-2:]
-            tmp = self.cell2.apply_CT_dot(out.reshape(-1, n1, n2), axis=-1)
-            out = self.cell1.apply_CT_dot(tmp, axis=-2, out=out)
+            tmp = self.cell2.apply_CT_dot(out.reshape(-1, n1, n2), axis=2)
+            out = self.cell1.apply_CT_dot(tmp, axis=1, out=out)
             out = out.reshape(leading_shape + out.shape[1:3])
         return out
 

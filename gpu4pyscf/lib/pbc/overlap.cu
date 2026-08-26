@@ -25,14 +25,6 @@
 #include "int3c2e.cuh"
 
 #define PI_POW_1_5       5.568327996831707845
-
-typedef struct {
-    int8_t iprim;
-    int8_t jprim;
-    int8_t nfi;
-    int8_t nfj;
-} PackedPGTO;
-
 #define GOUT_WIDTH      36
 #define GOUT_WIDTH_IP1  18
 #define REMOTE_THRESHOLD 50
@@ -1890,7 +1882,6 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef
         return;
     }
 
-    size_t pair_ji = j * bvk_njsh + i;
     int ish = ish_cell0;
     int jsh = jsh_cell0 + cell_id * nbas;
     int nimgs = envs.nimgs;
@@ -1931,7 +1922,9 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef
         if (log_ovlp > log_cutoff) {
             ovlp_mask[pair_ij] = 1;
             if (hermi) {
-                ovlp_mask[pair_ji] = 1;
+                int i = ish_cell0 - ish0;
+                int j = jsh_cell0 - jsh0;
+                ovlp_mask[(cell_id * nish + j) * (size_t)njsh + i] = 1;
             }
             break;
         }
