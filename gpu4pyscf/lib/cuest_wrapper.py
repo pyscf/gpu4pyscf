@@ -894,26 +894,28 @@ def cuest_compute_exchangematrix(mol, occorbitals_device, cuest_handle, dfintpla
             )
         )
 
-    dfk_int8_slice_count = ce.data_uint64_t()
-    dfk_int8_slice_count.value = additional_precision_control_parameters["CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT"]
-    cuest_check('Configure DF K Params int8 slice count',
-        ce.cuestParametersConfigure(
-            parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS,
-            parameters=compute_exchange_matrix_parameters,
-            attribute=ce.CuestDFSymmetricExchangeComputeParametersAttributes.CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT,
-            attributeValue=dfk_int8_slice_count,
+    if "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT" in additional_precision_control_parameters:
+        dfk_int8_slice_count = ce.data_uint64_t()
+        dfk_int8_slice_count.value = additional_precision_control_parameters["CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT"]
+        cuest_check('Configure DF K Params int8 slice count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS,
+                parameters=compute_exchange_matrix_parameters,
+                attribute=ce.CuestDFSymmetricExchangeComputeParametersAttributes.CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT,
+                attributeValue=dfk_int8_slice_count,
+                )
             )
-        )
-    dfk_int8_modulus_count = ce.data_uint64_t()
-    dfk_int8_modulus_count.value = additional_precision_control_parameters["CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT"]
-    cuest_check('Configure DF K Params int8 modulus count',
-        ce.cuestParametersConfigure(
-            parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS,
-            parameters=compute_exchange_matrix_parameters,
-            attribute=ce.CuestDFSymmetricExchangeComputeParametersAttributes.CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT,
-            attributeValue=dfk_int8_modulus_count,
+    if "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" in additional_precision_control_parameters:
+        dfk_int8_modulus_count = ce.data_uint64_t()
+        dfk_int8_modulus_count.value = additional_precision_control_parameters["CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT"]
+        cuest_check('Configure DF K Params int8 modulus count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS,
+                parameters=compute_exchange_matrix_parameters,
+                attribute=ce.CuestDFSymmetricExchangeComputeParametersAttributes.CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT,
+                attributeValue=dfk_int8_modulus_count,
+                )
             )
-        )
 
     temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -4487,7 +4489,17 @@ class CuESTWrapper(lib.StreamObject):
 
             self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq, self.turn_on_cuest_xc, self.turn_on_cuest_nlc)
 
+            omega, alpha, hyb = self._numint.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+
             # TODO: deal with zero-rho small_rho_cutoff
+
+            if omega != 0:
+                if getattr(self, 'range_separated_mode', 'mix_outside_kernel') != 'mix_inside_kernel':
+                    log.warn("Range-separated exchange mode changed to \"mix_inside_kernel\", which means the long-range and short-range parts are combined within each integral, "
+                            "instead of combined after j2c-j3c contraction is performed. We also warn here that cuEST adopts a non-trivial range-separated density fitting algorithm, "
+                            "where the j3c is always computed in full-range form, and j2c^-1 has the form j2c_fr^-1 j2c_mr j2c_fr^-1. As a result, for a range-separated functional "
+                            "DFT calculation, cuEST result does NOT match gpu4pyscf result by more than 1e-5 Hartree.")
+                    self.range_separated_mode = 'mix_inside_kernel'
 
         if getattr(self, "with_solvent", None) is not None:
             self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq, self.turn_on_cuest_pcm)
@@ -4500,8 +4512,8 @@ class CuESTWrapper(lib.StreamObject):
 
         ### Warning: you're at your own risk if you modify the following parameters.
         self.additional_precision_control_parameters = {
-            "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT" : 10,
-            "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" : 10,
+            # "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT" : 10,
+            # "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" : 10,
         }
 
         self._unsafe_for_change_keys = [
@@ -4637,12 +4649,7 @@ class CuESTWrapper(lib.StreamObject):
         log = logger.new_logger(mol, mol.verbose)
 
         if omega is not None and omega != 0:
-            if getattr(self, 'range_separated_mode', 'mix_outside_kernel') != 'mix_inside_kernel':
-                log.warn("Range-separated exchange mode changed to \"mix_inside_kernel\", which means the long-range and short-range parts are combined within each integral, "
-                         "instead of combined after j2c-j3c contraction is performed. We also warn here that cuEST adopts a non-trivial range-separated density fitting algorithm, "
-                         "where the j3c is always computed in full-range form, and j2c^-1 has the form j2c_fr^-1 j2c_mr j2c_fr^-1. As a result, for a range-separated functional "
-                         "DFT calculation, cuEST result does NOT match gpu4pyscf result by more than 1e-5 Hartree.")
-                self.range_separated_mode = 'mix_inside_kernel'
+            assert getattr(self, 'range_separated_mode', 'mix_outside_kernel') == 'mix_inside_kernel'
 
         dms, dm = dm, None
         mo_coeffs = None

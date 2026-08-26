@@ -1542,17 +1542,131 @@ class KnownValues(unittest.TestCase):
 
         assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
 
-    def test_df_mo_pbe0_reconstruct_j3c_for_k(self):
-        raise
+    def test_range_separated_jk_pbe0_get_veff(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
 
-    def test_df_mo_hse06_reconstruct_j3c_for_k(self):
-        raise
+        mf = RKS(mol, xc = "PBE0").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
 
-    def test_df_mo_wb97_reconstruct_j3c_for_k(self):
-        raise
+        nao = mol.nao
+        dm = cp.random.rand(nao, nao) * 2 - 1
+        dm = dm @ dm.T # symmetric positive definite
 
-    def test_df_mo_wb97X_reconstruct_j3c_for_k(self):
-        raise
+        ref_Fock_2e = mf.get_veff(dm = dm)
+
+        mf = RKS(mol, xc = "PBE0").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        mf = apply_cuest_wrapper(mf)
+
+        mf.handles.build_dfintplan(mf, 0.11, 0.0, 0.25) # Wrong parameters, will rebuild dfintplan
+
+        test_Fock_2e = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e - ref_Fock_2e)) < 1e-8
+
+    def test_range_separated_jk_hse06_get_veff(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = RKS(mol, xc = "HSE06").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        nao = mol.nao
+        dm = cp.random.rand(nao, nao) * 2 - 1
+        dm = dm @ dm.T # symmetric positive definite
+
+        ref_Fock_2e = mf.get_veff(dm = dm)
+
+        mf = RKS(mol, xc = "HSE06").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        mf = apply_cuest_wrapper(mf)
+
+        mf.handles.build_dfintplan(mf, 0.11, 0.0, 0.25) # Correct parameters
+        def raise_an_error(*args, **kwargs):
+            raise RuntimeError("Should not be called")
+        mf.handles.build_dfintplan = raise_an_error # Make sure dfintplan is not rebuilt
+
+        test_Fock_2e = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e - ref_Fock_2e)) < 5e-3 # Doesn't match well because of different range-separated DF algorithm
+
+    def test_range_separated_jk_lcwpbe_get_veff(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = RKS(mol, xc = "HYB_GGA_XC_LC_WPBE_WHS").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        nao = mol.nao
+        dm = cp.random.rand(nao, nao) * 2 - 1
+        dm = dm @ dm.T # symmetric positive definite
+
+        ref_Fock_2e = mf.get_veff(dm = dm)
+
+        mf = RKS(mol, xc = "HYB_GGA_XC_LC_WPBE_WHS").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        mf = apply_cuest_wrapper(mf)
+
+        test_Fock_2e = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e - ref_Fock_2e)) < 5e-3 # Doesn't match well because of different range-separated DF algorithm
+
+        def raise_an_error(*args, **kwargs):
+            raise RuntimeError("Should not be called")
+        mf.handles.build_dfintplan = raise_an_error # Make sure dfintplan is not rebuilt
+
+        test_Fock_2e_round2 = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e_round2 - test_Fock_2e)) < 1e-8
+
+    def test_range_separated_jk_wb97x_get_veff(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = UKS(mol, xc = "wB97X").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (99,590)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        nao = mol.nao
+        dm = cp.random.rand(2, nao, nao) * 2 - 1
+        dm[0] = dm[0] @ dm[0].T # symmetric positive definite
+        dm[1] = dm[1] @ dm[1].T # symmetric positive definite
+
+        ref_Fock_2e = mf.get_veff(dm = dm)
+
+        mf = UKS(mol, xc = "wB97X").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (99,590)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        mf = apply_cuest_wrapper(mf)
+
+        test_Fock_2e = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e - ref_Fock_2e)) < 1e-2 # Doesn't match well because of different range-separated DF algorithm
+
+        mf.handles.build_dfintplan(mf, 0.3, 0.4, 0.5) # Wrong parameters, will rebuild dfintplan
+
+        test_Fock_2e_round2 = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e_round2 - test_Fock_2e)) < 1e-8
 
     ### Gradient tests from here on
 
@@ -3073,6 +3187,102 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) <= 1e-5
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-5
 
+    def test_rks_range_separated_spherical(self):
+        mf = RKS(self.mol_sph, xc = "HSE06").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-12
+        # ref_energy = mf.kernel()
+        ref_energy = -151.45067590932848
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0074116043839396,  0.021443131795337 ,  0.0155725604674547],
+            [ 0.0348681132287065, -0.0253152666594154, -0.0222693716981843],
+            [-0.0199923558525441, -0.0092677296618848, -0.0110661897588653],
+            [-0.0222873617600952,  0.013139864525894 ,  0.0177630009896059],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        # gobj = mf.Gradients()
+        # test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-5
+        # assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-17
+
+        raise NotImplementedError("Gradient not implemented yet")
+
+    def test_rks_range_separated_spherical_vv10(self):
+        mf = RKS(self.mol_sph, xc = "wB97MV").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.conv_tol = 1e-12
+        # ref_energy = mf.kernel()
+        ref_energy = -151.55017095988154
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0081383287228691,  0.0196076375368328,  0.0159138960001456],
+            [ 0.0340640269148966, -0.0234386879629493, -0.0214609201247171],
+            [-0.0207748289132366, -0.0094169051332886, -0.0115629254416774],
+            [-0.0214275267245276,  0.0132479555594929,  0.0171099495662586],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        # gobj = mf.Gradients()
+        # test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 2e-5
+        # assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-17
+
+        raise NotImplementedError("Gradient not implemented yet")
+
+    def test_uks_range_separated_spherical(self):
+        mf = UKS(self.mol_unrestricted, xc = "CAMB3LYP").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (99,590)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-12
+        # ref_energy = mf.kernel()
+        ref_energy = -151.11766011558672
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0456692395736376,  0.0962668059440226,  0.0142745084244549],
+            [-0.0032481844643257, -0.0956858854833733, -0.0251330307906019],
+            [-0.0606130674029304, -0.017572223679199 , -0.0066693850109969],
+            [ 0.0181920122935919,  0.016991303218574 ,  0.0175279073771299],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        # gobj = mf.Gradients()
+        # test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-5
+        # assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-17
+
+        raise NotImplementedError("Gradient not implemented yet")
+
     def test_rks_geometry_optimiation(self):
         mol = pyscf.M(
             atom = '''
@@ -3306,6 +3516,44 @@ class KnownValues(unittest.TestCase):
 
         assert abs(test_energy - ref_energy) <= 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
+    def test_turn_off_everything_cuest_rks_range_separated(self):
+        mf = RKS(self.mol_sph, xc = "camb3lyp").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (30,110)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.conv_tol = 1e-12
+
+        # mf.range_separated_mode = "mix_inside_kernel"
+        # ref_energy = mf.kernel()
+        ref_energy = -151.54951113760575
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        # ref_gradient = np.array([
+        # ])
+
+        mf = apply_cuest_wrapper(mf)
+        mf.turn_on_cuest_hcore = False
+        mf.turn_on_cuest_jk = False
+        mf.turn_on_cuest_xc = False
+        mf.turn_on_cuest_nlc = False
+        mf.turn_on_cuest_pcm = False
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        # gobj = mf.Gradients()
+        # test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-10
+        # assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
+        raise NotImplementedError("Gradient not implemented yet")
 
     def test_turn_off_xc_rks(self):
         mf = RKS(self.mol_sph, xc = "PBE").density_fit(auxbasis = self.auxbasis)
