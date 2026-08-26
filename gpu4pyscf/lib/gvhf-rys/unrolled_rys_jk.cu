@@ -2,7 +2,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
-#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/create_tasks.cu"
 #include "gvhf-rys/unrolled_kernels.cuh"
 
@@ -38,7 +38,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -144,7 +144,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -221,7 +222,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -327,7 +328,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -445,7 +447,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -551,7 +553,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -716,7 +719,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -822,7 +825,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1138,7 +1142,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -1244,7 +1248,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1408,7 +1413,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -1514,7 +1519,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1830,7 +1836,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -1936,7 +1942,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2319,7 +2326,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -2425,7 +2432,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2586,7 +2594,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -2692,7 +2700,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2963,7 +2972,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -3069,7 +3078,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -3572,7 +3582,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -3678,7 +3688,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -4038,7 +4049,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -4148,7 +4159,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 4, gout_id);
                 if (gout_id == 0) {
                     Rpq[0*nsq_per_block] = xpq;
                     Rpq[1*nsq_per_block] = ypq;
@@ -5398,7 +5409,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -5504,7 +5515,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -5773,7 +5785,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -5879,7 +5891,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -6385,7 +6398,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -6495,7 +6508,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 4, gout_id);
                 if (gout_id == 0) {
                     Rpq[0*nsq_per_block] = xpq;
                     Rpq[1*nsq_per_block] = ypq;
@@ -8049,7 +8062,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -8159,7 +8172,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 4, gout_id);
                 if (gout_id == 0) {
                     Rpq[0*nsq_per_block] = xpq;
                     Rpq[1*nsq_per_block] = ypq;
@@ -9514,7 +9527,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -9620,7 +9633,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -9983,7 +9997,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -10093,7 +10107,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 4, gout_id);
                 if (gout_id == 0) {
                     Rpq[0*nsq_per_block] = xpq;
                     Rpq[1*nsq_per_block] = ypq;
@@ -11351,7 +11365,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -11457,7 +11471,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -11673,7 +11688,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -11779,7 +11794,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -12171,7 +12187,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -12281,7 +12297,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 4, gout_id);
                 if (gout_id == 0) {
                     Rpq[0*nsq_per_block] = xpq;
                     Rpq[1*nsq_per_block] = ypq;
@@ -13453,7 +13469,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -13559,7 +13575,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -14185,7 +14202,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -14291,7 +14308,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -14681,7 +14699,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -14791,7 +14809,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 4, gout_id);
                 if (gout_id == 0) {
                     Rpq[0*nsq_per_block] = xpq;
                     Rpq[1*nsq_per_block] = ypq;
@@ -15959,7 +15977,7 @@ while (1) {
                         q_cond_ij, q_cond_kl, dm_penalty,
                         (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
                            (int *)shared_memory, envs, bounds);
@@ -16065,7 +16083,8 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega,
+                                jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }

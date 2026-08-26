@@ -30,7 +30,7 @@
 // lattice sum over j and k for (ij|k)
 __global__ static
 void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs,
-                                uint32_t *img_pool, ShellTripletTaskInfo *task_pool,
+                                uint32_t *img_pool, ShellTripletTaskInfo *task_pool, double omega,
                                 uint32_t *bas_ij_idx, int *shl_pair_offsets,
                                 int *img_idx, uint32_t *sp_img_offsets,
                                 int *gout_stride_lookup, int nauxbas,
@@ -128,7 +128,7 @@ while (1) {
 
 while (shl_pair0 < shl_pair1) {
     int n_pairs = min(POOL_SIZE/ncells, shl_pair1 - shl_pair0);
-    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
+    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs, omega,
                          shl_pair0, shl_pair0+n_pairs, ksh_cell0, ksh_cell0+1,
                          li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
@@ -237,7 +237,6 @@ while (shl_pair0 < shl_pair1) {
                         double ypq = Rpq[1*nst_per_block];
                         double zpq = Rpq[2*nst_per_block];
                         double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                        double omega = env[PTR_RANGE_OMEGA];
                         rys_roots_rs(nroots, theta, rr, omega,
                                      rw, nst_per_block, gout_id, gout_stride);
                         for (int irys = 0; irys < nroots; ++irys) {
@@ -288,7 +287,7 @@ while (shl_pair0 < shl_pair1) {
 
 __global__ static
 void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars envs,
-                                    uint32_t *img_pool, ShellTripletTaskInfo *task_pool,
+                                    uint32_t *img_pool, ShellTripletTaskInfo *task_pool, double omega,
                                     uint32_t *bas_ij_idx, int *ksh_offsets,
                                     int *img_idx, uint32_t *sp_img_offsets,
                                     int *gout_stride_lookup, int nauxbas,
@@ -328,7 +327,6 @@ while (1) {
     int *ao_loc = envs.ao_loc;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
     if (thread_id == 0) {
         int bvk_nbas = envs.nbas * ncells;
@@ -402,7 +400,7 @@ while (1) {
 
 while (ksh0_cell0 < ksh1_cell0) {
     int nksh = min(POOL_SIZE/ncells, ksh1_cell0 - ksh0_cell0);
-    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
+    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs, omega,
                          pair_ij, pair_ij+1, ksh0_cell0, ksh0_cell0+nksh,
                          li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
@@ -549,7 +547,7 @@ while (ksh0_cell0 < ksh1_cell0) {
 extern "C" {
 int PBCcontract_int3c2e_dm(double *out, double *dm, PBCIntEnvVars *envs,
                            uint32_t *pool, ShellTripletTaskInfo *task_pool, int *head,
-                           int shm_size, int nbatches_shl_pair, int nauxbas,
+                           double omega, int shm_size, int nbatches_shl_pair, int nauxbas,
                            uint32_t *bas_ij_idx, int *shl_pair_offsets,
                            int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
@@ -560,7 +558,7 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, PBCIntEnvVars *envs,
     int workers = prop.multiProcessorCount;
     cudaMemset(head, 0, sizeof(int));
     contract_int3c2e_dm_kernel<<<workers, THREADS, shm_size>>>(
-            out, dm, *envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
+            out, dm, *envs, pool, task_pool, omega, bas_ij_idx, shl_pair_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
             head, nbatches_shl_pair);
@@ -574,7 +572,7 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, PBCIntEnvVars *envs,
 
 int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, PBCIntEnvVars *envs,
                                uint32_t *pool, ShellTripletTaskInfo *task_pool, int *head,
-                               int shm_size, int npairs, int nbatches_ksh, int nauxbas,
+                               double omega, int shm_size, int npairs, int nbatches_ksh, int nauxbas,
                                uint32_t *bas_ij_idx, int *ksh_offsets,
                                int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                                float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
@@ -585,7 +583,7 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, PBCIntEnvVars *envs,
     int workers = prop.multiProcessorCount;
     cudaMemset(head, 0, sizeof(int));
     contract_int3c2e_auxvec_kernel<<<workers, THREADS, shm_size>>>(
-            out, auxvec, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
+            out, auxvec, *envs, pool, task_pool, omega, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
             head, npairs, nbatches_ksh);

@@ -244,11 +244,10 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
 __device__ static
 void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
-                       int pair_ij, int ish, int jsh,
+                       int pair_ij, int ish, int jsh, double omega,
                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                       int *swap,
-                       RysIntEnvVars &envs, BoundsInfo &bounds)
+                       int *swap, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
@@ -293,7 +292,6 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float zij = zi + zpa;
     float s_ij = s_cond_ij[pair_ij];
     float skl_cutoff = cutoff - s_ij;
-    float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
     uint32_t bas_ij = ish * nbas + jsh;
@@ -370,11 +368,10 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
 __device__ static
 void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
-                        int pair_ij, int ish, int jsh,
+                        int pair_ij, int ish, int jsh, double omega,
                         float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                        int *swap,
-                        RysIntEnvVars &envs, BoundsInfo &bounds)
+                        int *swap, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
@@ -421,7 +418,6 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
     float skl_cutoff = cutoff - s_ij;
-    float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
@@ -499,7 +495,7 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
 __device__ static
 void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
-                       int pair_ij, int ish, int jsh,
+                       int pair_ij, int ish, int jsh, double omega,
                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                        int *swap,
@@ -550,7 +546,6 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
     float skl_cutoff = cutoff - s_ij;
-    float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
@@ -691,7 +686,7 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
 __device__ static
 void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
-                              int pair_ij, int ish, int jsh,
+                              int pair_ij, int ish, int jsh, double omega,
                               float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                               float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                               int *swap,
@@ -747,7 +742,6 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float s_ij = s_cond_ij[pair_ij];
     float d_ij = dm_cond[ish * nbas + jsh];
     float skl_cutoff = cutoff - s_ij;
-    float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 

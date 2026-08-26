@@ -113,7 +113,7 @@ while (1) {
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
                           q_cond_ij, q_cond_kl, dm_penalty,
                           s_cond_ij, s_cond_kl, diffuse_exps,
                           (int *)shared_memory, envs, bounds);
@@ -564,12 +564,12 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (omega >= 0) {
         _fill_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+        _fill_sr_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, omega,
                           q_cond_ij, q_cond_kl, dm_penalty,
                           s_cond_ij, s_cond_kl, diffuse_exps,
                           (int *)shared_memory, envs, bounds);

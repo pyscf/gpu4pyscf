@@ -14,13 +14,14 @@
     double *ejk, double *ejk_aux, double *dm, double *density_auxvec, \
     RysIntEnvVars& envs, int shl_pair0, int shl_pair1, \
     int ksh0, int ksh1, int iprim, int jprim, int kprim, \
-    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc, \
+    double omega, double lr_factor, double sr_factor, \
+    uint32_t *bas_ij_idx, int *ao_pair_loc, \
     int aux_offset, int naux, int nao, \
     int thread_id, double *shared_memory
 
 #define LAUNCH_KERNEL(KERNEL) \
     KERNEL(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim, \
-    omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, thread_id, shared_memory)
+    omega, lr_factor, sr_factor, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, thread_id, shared_memory)
 
 
 __device__ inline
@@ -158,7 +159,7 @@ void int3c2e_ip1_000(KERNEL_ARGS)
                 double zpq = zij - zk;
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (pair_ij < shl_pair1 && kidx < ksh1) {
@@ -369,7 +370,7 @@ void int3c2e_ip1_100(KERNEL_ARGS)
                 double zpq = zij - zk;
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (pair_ij < shl_pair1 && kidx < ksh1) {
@@ -642,7 +643,7 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                 double zpq = zij - zk;
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (pair_ij < shl_pair1 && kidx < ksh1) {
@@ -1095,7 +1096,7 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                 double zpq = zij - zk;
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (pair_ij < shl_pair1 && kidx < ksh1) {
@@ -1455,7 +1456,7 @@ void int3c2e_ip1_001(KERNEL_ARGS)
                 double zpq = zij - zk;
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (pair_ij < shl_pair1 && kidx < ksh1) {
@@ -1728,7 +1729,7 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                 double zpq = zij - zk;
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (pair_ij < shl_pair1 && kidx < ksh1) {
@@ -2176,7 +2177,7 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                 double zpq = zij - zk;
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (pair_ij < shl_pair1 && kidx < ksh1) {
@@ -2405,7 +2406,8 @@ __device__ inline
 int int3c2e_ip1_unrolled(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, double lr_factor, double sr_factor,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao, int thread_id, double *shared_memory)
 {
     int kij_type = lk*25 + li*5 + lj;
