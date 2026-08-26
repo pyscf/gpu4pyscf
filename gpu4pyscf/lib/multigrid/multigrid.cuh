@@ -79,7 +79,7 @@ typedef struct {
     uint8_t _padding;
 } Fold3Index;
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
 #endif

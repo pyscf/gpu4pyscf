@@ -12,23 +12,72 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required (VERSION 3.21 FATAL_ERROR) # Required by Libxc 7.1.2
-project (gpu4pyscf C CXX Fortran)
+cmake_minimum_required (VERSION 3.21 FATAL_ERROR) # Required by Libxc 7.1.2 and the first-class HIP language
+project (gpu4pyscf C CXX)
+
+# ---------------------------------------------------------------------------
+# GPU backend selection: NVIDIA CUDA (default) or AMD HIP/ROCm (-DUSE_HIP=ON).
+# The two paths are mutually exclusive and the CUDA path is left unchanged
+# (CUDA is enabled below, after its architectures are set).
+# Fortran is only needed by the optional solvent module and is enabled on
+# demand (see below), so neither backend requires a Fortran compiler unless
+# solvent is actually built.
+# ---------------------------------------------------------------------------
+option(USE_HIP "Build GPU kernels with AMD HIP/ROCm instead of NVIDIA CUDA" OFF)
+if(USE_HIP)
+  enable_language(HIP)
+endif()
 
 set(CMAKE_C_STANDARD "99")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Set architectures before enabling CUDA, which otherwise initializes its own default.
-# For better performance on A100, the option
-# -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
-if(DEFINED CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
-elseif(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real;90-real")
+# GPU architecture selection.
+if(USE_HIP)
+  # AMD GPU targets. Honour an explicit override -- either -DGPU_ARCHITECTURES=...
+  # or a pre-set CMAKE_HIP_ARCHITECTURES -- otherwise auto-detect the installed
+  # AMD GPU(s) with rocm_agent_enumerator. No specific gfx arch is hard-coded.
+  if(DEFINED GPU_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "${GPU_ARCHITECTURES}")
+  endif()
+  if(NOT CMAKE_HIP_ARCHITECTURES)
+    find_program(ROCM_AGENT_ENUMERATOR NAMES rocm_agent_enumerator
+                 HINTS ENV ROCM_PATH ENV HIP_PATH ENV ROCM_HOME PATH_SUFFIXES bin)
+    if(ROCM_AGENT_ENUMERATOR)
+      execute_process(COMMAND ${ROCM_AGENT_ENUMERATOR}
+                      OUTPUT_VARIABLE _rocm_agents
+                      OUTPUT_STRIP_TRAILING_WHITESPACE)
+      string(REPLACE "\n" ";" _rocm_agents "${_rocm_agents}")
+      set(_hip_archs "")
+      foreach(_agent ${_rocm_agents})
+        # skip the host/CPU agent (gfx000) and any blank lines
+        if(_agent MATCHES "^gfx" AND NOT _agent STREQUAL "gfx000")
+          list(APPEND _hip_archs "${_agent}")
+        endif()
+      endforeach()
+      list(REMOVE_DUPLICATES _hip_archs)
+      set(CMAKE_HIP_ARCHITECTURES "${_hip_archs}")
+    endif()
+  endif()
+  if(NOT CMAKE_HIP_ARCHITECTURES)
+    message(FATAL_ERROR
+      "USE_HIP is ON but no AMD GPU architecture could be determined. "
+      "Pass -DGPU_ARCHITECTURES=gfxXXXX (e.g. gfx90a, gfx942, gfx1100, gfx1151) "
+      "or set CMAKE_HIP_ARCHITECTURES.")
+  endif()
+  message("HIP_ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
+else()
+  # Set architectures before enabling CUDA, which otherwise initializes its own default.
+  # For better performance on A100, the option
+  # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
+  if(DEFINED CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
+  elseif(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real;90-real")
+  endif()
+  enable_language(CUDA)
+  message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 endif()
-enable_language(CUDA)
-message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
@@ -99,6 +148,40 @@ include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/deps/include)
 link_directories(${PROJECT_SOURCE_DIR}/deps/lib)
 
+if(USE_HIP)
+  # Place the CUDA->HIP compatibility stubs (cuda_runtime.h / cuda.h) ahead of
+  # the ROCm headers, and force-include the shim so the CUDA-authored .cu
+  # kernels build unmodified with hipcc.
+  include_directories(BEFORE ${PROJECT_SOURCE_DIR}/hip_compat)
+  # -Wno-register: the CUDA sources use the C++17-removed `register` keyword.
+  set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wno-register -include ${PROJECT_SOURCE_DIR}/hip_compat/gpu_runtime.h")
+endif()
+
+# Configure a GPU library target for the HIP backend: compile the target's .cu
+# sources as HIP and apply separable compilation + arch. On CUDA builds this is
+# a no-op, so each sub-project keeps its existing CUDA_* target properties
+# unchanged (those are simply inert when USE_HIP is ON).
+function(gpu4pyscf_configure_gpu_target target)
+  if(USE_HIP)
+    get_target_property(_gpu_srcs ${target} SOURCES)
+    foreach(_src ${_gpu_srcs})
+      if(_src MATCHES "\\.cu$")
+        set_source_files_properties(${_src} PROPERTIES LANGUAGE HIP)
+      endif()
+    endforeach()
+    # Relocatable device code so __device__/__constant__ globals declared in one
+    # translation unit and used in another link across the library (the CUDA
+    # build relies on CUDA_SEPARABLE_COMPILATION for the same reason). Set the
+    # flag explicitly at compile and link time -- HIP_SEPARABLE_COMPILATION alone
+    # does not reliably add -fgpu-rdc at compile time.
+    set_target_properties(${target} PROPERTIES
+      HIP_SEPARABLE_COMPILATION ON
+      HIP_ARCHITECTURES "${CMAKE_HIP_ARCHITECTURES}")
+    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>)
+    target_link_options(${target} PRIVATE -fgpu-rdc --hip-link)
+  endif()
+endfunction()
+
 #list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 set(C_LINK_TEMPLATE "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
@@ -107,7 +190,13 @@ set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LA
 option(ENABLE_MULTIGRID_V2 "Enable multigrid-v2 kernels" ON)
 option(ENABLE_FP32_MULTIGRID "Enable experimental FP32 multigrid-v2 collocation kernels" OFF)
 
-option(BUILD_CUTLASS "Using cutlass" ON)
+# CUTLASS is NVIDIA-only; default off on HIP (a CuPy fallback replaces the
+# grouped GEMM/dot kernels there).
+if(USE_HIP)
+  option(BUILD_CUTLASS "Using cutlass" OFF)
+else()
+  option(BUILD_CUTLASS "Using cutlass" ON)
+endif()
 if(BUILD_CUTLASS)
   include(ExternalProject)
   ExternalProject_Add(cutlass
@@ -129,19 +218,25 @@ add_subdirectory(gvhf)
 add_subdirectory(gdft)
 add_subdirectory(cupy_helper)
 add_subdirectory(sem)
-
-option(BUILD_SOLVENT "Using SMD solvent" ON)
-if(BUILD_SOLVENT)
-  add_subdirectory(solvent)
-endif()
-
 add_subdirectory(gvhf-rys)
 add_subdirectory(gvhf-md)
 add_subdirectory(pbc)
 add_subdirectory(multigrid)
 add_subdirectory(ecp)
 
-option(BUILD_LIBXC "Using libxc for DFT" ON)
+option(BUILD_SOLVENT "Using SMD solvent" ON)
+if(BUILD_SOLVENT)
+  enable_language(Fortran)   # solvent has Fortran sources (mnsol)
+  add_subdirectory(solvent)
+endif()
+
+# The bundled libxc build is CUDA-only (ENABLE_CUDA). Default off on HIP; a
+# HIP-enabled libxc is wired up in a later phase.
+if(USE_HIP)
+  option(BUILD_LIBXC "Using libxc for DFT" OFF)
+else()
+  option(BUILD_LIBXC "Using libxc for DFT" ON)
+endif()
 if(BUILD_LIBXC)
   include(ExternalProject)
   ExternalProject_Add(libxc

@@ -42,6 +42,12 @@ _kernel_registery = {}
 
 libcupy_helper = load_library('libcupy_helper')
 
+# The grouped_gemm/grouped_dot kernels are provided by CUTLASS, which is
+# NVIDIA-only and not built on ROCm/HIP (BUILD_CUTLASS=OFF). Detect whether the
+# compiled entry points are present; if not, fall back to a portable CuPy
+# implementation (see grouped_dot/grouped_gemm below).
+_has_cutlass_grouped = hasattr(libcupy_helper, 'grouped_dot')
+
 pinned_memory_pool = cupy.cuda.PinnedMemoryPool()
 cupy.cuda.set_pinned_memory_allocator(pinned_memory_pool.malloc)
 
@@ -52,6 +58,11 @@ def pin_memory(array):
     return ret
 
 def release_gpu_stack():
+    # Shrinks the per-thread device stack (cudaLimitStackSize) to reclaim memory.
+    # HIP/ROCm does not support this limit the same way (hipErrorUnknown), so it
+    # is a no-op there; skipping it only forgoes a memory optimization.
+    if cupy.cuda.runtime.is_hip:
+        return
     cupy.cuda.runtime.deviceSetLimit(0x00, 128)
 
 def print_mem_info():
@@ -987,6 +998,15 @@ def grouped_dot(As, Bs, Cs=None):
     assert As[0].flags.c_contiguous
     assert Bs[0].flags.c_contiguous
     groups = len(As)
+
+    if not _has_cutlass_grouped:
+        # Portable fallback (e.g. ROCm/HIP): einsum('ik,jk->ij', A, B) = A @ B.T
+        if Cs is None:
+            return [As[i] @ Bs[i].T for i in range(groups)]
+        for i in range(groups):
+            Cs[i][:] = As[i] @ Bs[i].T
+        return Cs
+
     Ms, Ns, Ks = [], [], []
     for a, b in zip(As, Bs):
         Ms.append(a.shape[0])
@@ -1055,6 +1075,15 @@ def grouped_gemm(As, Bs, Cs=None):
     assert As[0].flags.c_contiguous
     assert Bs[0].flags.c_contiguous
     groups = len(As)
+
+    if not _has_cutlass_grouped:
+        # Portable fallback (e.g. ROCm/HIP): einsum('ki,kj->ij', A, B) = A.T @ B
+        if Cs is None:
+            return [As[i].T @ Bs[i] for i in range(groups)]
+        for i in range(groups):
+            Cs[i][:] = As[i].T @ Bs[i]
+        return Cs
+
     Ms, Ns, Ks = [], [], []
     for a, b in zip(As, Bs):
         Ms.append(a.shape[1])
