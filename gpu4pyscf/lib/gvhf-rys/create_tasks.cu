@@ -244,10 +244,10 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
 __device__ static
 void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
-                       int pair_ij, int ish, int jsh, double omega,
+                       int pair_ij, int ish, int jsh,
                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                       int *swap, RysIntEnvVars &envs, BoundsInfo &bounds)
+                       int *swap, double omega, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
@@ -368,10 +368,10 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
 __device__ static
 void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
-                        int pair_ij, int ish, int jsh, double omega,
+                        int pair_ij, int ish, int jsh,
                         float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                        int *swap, RysIntEnvVars &envs, BoundsInfo &bounds)
+                        int *swap, double omega, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
@@ -495,11 +495,10 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
 __device__ static
 void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
-                       int pair_ij, int ish, int jsh, double omega,
+                       int pair_ij, int ish, int jsh,
                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                       int *swap,
-                       RysIntEnvVars &envs, BoundsInfo &bounds)
+                       int *swap, double omega, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
@@ -686,11 +685,10 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
 
 __device__ static
 void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
-                              int pair_ij, int ish, int jsh, double omega,
+                              int pair_ij, int ish, int jsh,
                               float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                               float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                              int *swap,
-                              RysIntEnvVars &envs, BoundsInfo &bounds)
+                              int *swap, double omega, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;

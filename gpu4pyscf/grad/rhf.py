@@ -32,7 +32,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt,
-    _nearest_power2, _TimingCollector)
+    _nearest_power2, _TimingCollector, _check_rsh_factors)
 from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedMole
 from gpu4pyscf.df.int3c2e_bdiv import (
     Int3c2eOpt, _int3c2e_ip1_evaluator, int3c2e_scheme, int3c2e_scheme_ip1)
@@ -77,6 +77,8 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
     n_dm, nao = dms.shape[:2]
     assert n_dm <= 2
+
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
     ao_loc = mol.ao_loc
     uniq_l_ctr = mol.uniq_l_ctr
@@ -135,6 +137,9 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
                 ctypes.c_double(j_factor), ctypes.c_double(k_factor),
                 ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(n_dm), ctypes.c_int(nao),
+                ctypes.c_double(omega),
+                ctypes.c_double(lr_factor),
+                ctypes.c_double(sr_factor),
                 rys_envs, (ctypes.c_int*2)(*scheme),
                 (ctypes.c_int*8)(*shls_slice),
                 ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
@@ -262,6 +267,8 @@ def _grad_nuc_without_ecp(mol, dm0):
     ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+sorted_mol.nbas, dtype=np.int32)
 
+    omega, lr_factor, sr_factor = 0., 1., 1.
+
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libvhf_rys.sum_ejk_int3c2e_ip1
     de = cp.zeros((mol.natm, 3))
@@ -273,6 +280,9 @@ def _grad_nuc_without_ecp(mol, dm0):
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
         ctypes.cast(charges.data.ptr, ctypes.c_void_p),
         ctypes.c_int(1),
+        ctypes.c_double(omega),
+        ctypes.c_double(lr_factor),
+        ctypes.c_double(sr_factor),
         ctypes.byref(int3c2e_envs),
         ctypes.c_int(shm_size_max),
         ctypes.c_int(len(shl_pair_offsets) - 1),

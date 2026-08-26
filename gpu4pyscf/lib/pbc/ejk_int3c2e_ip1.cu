@@ -28,8 +28,8 @@
 
 __global__ static
 void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
-                            PBCIntEnvVars envs, uint32_t *pool, ShellTripletTaskInfo *task_pool,
                             double omega,
+                            PBCIntEnvVars envs, uint32_t *pool, ShellTripletTaskInfo *task_pool,
                             uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                             int *img_idx, uint32_t *sp_img_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
@@ -115,7 +115,7 @@ while (1) {
         num_ijk_tasks = nksh * ncells * nshl_pairs;
     }
     __syncthreads();
-    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs, omega,
+    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, omega, envs,
                          shl_pair0, shl_pair1, ksh0_cell0, ksh1_cell0,
                          li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
@@ -383,8 +383,8 @@ while (1) {
 
 extern "C" {
 int PBCsr_ejk_int3c2e_ip1(double *ejk, double*ejk_aux, double *dm, double *density_auxvec,
-                          PBCIntEnvVars *envs, uint32_t *pool,
-                          ShellTripletTaskInfo *task_pool, int *head, double omega,
+                          double omega, PBCIntEnvVars *envs, uint32_t *pool,
+                          ShellTripletTaskInfo *task_pool, int *head,
                           int shm_size, int nbatches_shl_pair, int nbatches_ksh,
                           uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                           int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
@@ -397,7 +397,7 @@ int PBCsr_ejk_int3c2e_ip1(double *ejk, double*ejk_aux, double *dm, double *densi
     int workers = prop.multiProcessorCount;
     cudaMemset(head, 0, sizeof(int));
     ejk_int3c2e_ip1_kernel<<<workers, THREADS, shm_size>>>(
-            ejk, ejk_aux, dm, density_auxvec, *envs, pool, task_pool, omega,
+            ejk, ejk_aux, dm, density_auxvec, omega, *envs, pool, task_pool,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, nauxbas, naux,
             diffuse_exps, diffuse_coefs, log_cutoff,

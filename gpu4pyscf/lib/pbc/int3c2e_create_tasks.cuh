@@ -75,7 +75,7 @@ int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
 __device__ inline
 void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
                           ShellTripletTaskInfo *ijk_tasks_info,
-                          PBCIntEnvVars &envs, double omega, int shl_pair0, int shl_pair1,
+                          double omega, PBCIntEnvVars &envs, int shl_pair0, int shl_pair1,
                           int ksh0_cell0, int ksh1_cell0, int li, int lj, int lk, int nauxbas,
                           uint32_t *bas_ij_idx, int *img_idx, uint32_t *sp_img_offsets,
                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)

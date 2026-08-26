@@ -599,9 +599,9 @@ void int3c2e_101(KERNEL_ARGS)
 }
 
 __device__ inline
-int int3c2e_unrolled(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
+int int3c2e_unrolled(double *out, double omega, PBCIntEnvVars& envs, uint32_t *img_pool,
                      uint32_t *rem_task_idx, int num_ijk_tasks, int img_tile_size,
-                     ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool, double omega,
+                     ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool,
                      int shm_size, int iprim, int jprim, int kprim, int li, int lj, int lk,
                      uint32_t *bas_ij_idx, int *ao_pair_loc,
                      int ao_pair_offset, int aux_offset, int nauxbas, int naux, int to_sph,

@@ -42,10 +42,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -286,10 +286,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -595,10 +595,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -1056,10 +1056,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -1507,10 +1507,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -2166,10 +2166,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -3408,10 +3408,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -3716,10 +3716,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -4177,10 +4177,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -4857,10 +4857,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -5524,10 +5524,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -7776,10 +7776,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -8231,10 +8231,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -8906,10 +8906,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -10966,10 +10966,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -12224,10 +12224,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -12529,10 +12529,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -12987,10 +12987,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -13670,10 +13670,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -14337,10 +14337,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -16556,10 +16556,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -17012,10 +17012,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -17695,10 +17695,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -20083,10 +20083,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -22425,10 +22425,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -23095,10 +23095,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -25322,10 +25322,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -25771,10 +25771,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -26443,10 +26443,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -28446,10 +28446,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -29693,10 +29693,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -30363,10 +30363,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -32362,10 +32362,10 @@ while (1) {
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh, jk.omega,
+        _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;

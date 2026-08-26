@@ -12,16 +12,17 @@
 
 #define KERNEL_ARGS \
     double *ejk, double *ejk_aux, double *dm, double *density_auxvec, \
+    double omega, double lr_factor, double sr_factor, \
     RysIntEnvVars& envs, int shl_pair0, int shl_pair1, \
     int ksh0, int ksh1, int iprim, int jprim, int kprim, \
-    double omega, double lr_factor, double sr_factor, \
     uint32_t *bas_ij_idx, int *ao_pair_loc, \
     int aux_offset, int naux, int nao, \
     int thread_id, double *shared_memory
 
 #define LAUNCH_KERNEL(KERNEL) \
-    KERNEL(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim, \
-    omega, lr_factor, sr_factor, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, thread_id, shared_memory)
+    KERNEL(ejk, ejk_aux, dm, density_auxvec, omega, lr_factor, sr_factor, envs, \
+    shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim, \
+    bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, thread_id, shared_memory)
 
 
 __device__ inline
@@ -2404,9 +2405,9 @@ void int3c2e_ip1_002(KERNEL_ARGS)
 
 __device__ inline
 int int3c2e_ip1_unrolled(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
+                    double omega, double lr_factor, double sr_factor,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
-                    double omega, double lr_factor, double sr_factor,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao, int thread_id, double *shared_memory)
 {
