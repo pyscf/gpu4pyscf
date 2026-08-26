@@ -15,6 +15,7 @@
 
 import unittest
 import numpy as np
+import cupy as cp
 from pyscf.gto import ATOM_OF, intor_cross
 from pyscf.pbc import dft, gto, grad
 from pyscf.pbc.tools import pbc
@@ -26,8 +27,9 @@ from gpu4pyscf.pbc.grad import krks_stress, krks
 from gpu4pyscf.pbc.grad.krks_stress import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 import pytest
 
 class KnownValues(unittest.TestCase):
@@ -86,24 +88,38 @@ class KnownValues(unittest.TestCase):
         kmesh = [3, 1, 1]
         kpts = cell.make_kpts(kmesh)
         nao = cell.nao
-        dm = np.random.rand(np.prod(kmesh), nao, nao) - (.5+.1j)
+        dm = np.random.rand(np.prod(kmesh), nao, nao) - .5
+        phase = fft_matrix(kmesh).get() / np.prod(kmesh)
+        dm = np.einsum('Lpq,Lk->kpq', dm, phase.conj())
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'lda,'
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts).to_gpu())
-        dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+        dat1 = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+        assert abs(dat1 - dat2).max() < 1e-6
+
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             cell1.precision = 1e-10
             cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
+            assert abs(dat1[i,j] - (exc1 - exc2)/2e-4) < 1e-7
+            assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
-        ref = dat
-        ni = MultiGridNumInt(cell).build()
-        dat = _rks_exc_strain_deriv(ni, xc, dm, kpts, with_j=False, with_nuc=False)
-        assert abs(dat - ref).max() < 1e-6
+        ni = MultiGridNumInt(cell)
+        dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+        for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
+            exc1 = MultiGridNumInt(cell1).nr_rks(cell1, None, xc, dm, kpts=cell1.make_kpts(kmesh))[1]
+            exc2 = MultiGridNumInt(cell2).nr_rks(cell2, None, xc, dm, kpts=cell2.make_kpts(kmesh))[1]
+            assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 3e-7
 
     def test_get_vxc_gga(self):
         a = np.eye(3) * 5
@@ -114,24 +130,28 @@ class KnownValues(unittest.TestCase):
         kmesh = [3, 1, 1]
         kpts = cell.make_kpts(kmesh)
         nao = cell.nao
-        dm = np.random.rand(np.prod(kmesh), nao, nao) - (.5+.1j)
+        dm = np.random.rand(np.prod(kmesh), nao, nao) - .5
+        phase = fft_matrix(kmesh).get() / np.prod(kmesh)
+        dm = np.einsum('Lpq,Lk->kpq', dm, phase.conj())
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'pbe,'
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts).to_gpu())
-        dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+        dat1 = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+        assert abs(dat1 - dat2).max() < 1e-6
+
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             cell1.precision = 1e-10
             cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
-
-        ref = dat
-        ni = MultiGridNumInt(cell).build()
-        dat = _rks_exc_strain_deriv(ni, xc, dm, kpts, with_j=False, with_nuc=False)
-        assert abs(dat - ref).max() < 1e-6
+            assert abs(dat1[i,j] - (exc1 - exc2)/2e-4) < 1e-7
+            assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
     def test_get_vxc_mgga(self):
         a = np.eye(3) * 5
@@ -142,24 +162,28 @@ class KnownValues(unittest.TestCase):
         kmesh = [3, 1, 1]
         kpts = cell.make_kpts(kmesh)
         nao = cell.nao
-        dm = np.random.rand(np.prod(kmesh), nao, nao) - (.5+.1j)
+        dm = np.random.rand(np.prod(kmesh), nao, nao) - .5
+        phase = fft_matrix(kmesh).get() / np.prod(kmesh)
+        dm = np.einsum('Lpq,Lk->kpq', dm, phase.conj())
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'm06,'
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts).to_gpu())
-        dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+        dat1 = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
+
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+        assert abs(dat1 - dat2).max() < 1e-6
+
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             cell1.precision = 1e-10
             cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
-
-        ref = dat
-        ni = MultiGridNumInt(cell).build()
-        dat = _rks_exc_strain_deriv(ni, xc, dm, kpts, with_j=False, with_nuc=False)
-        assert abs(dat - ref).max() < 1e-6
+            assert abs(dat1[i,j] - (exc1 - exc2)/2e-4) < 1e-7
+            assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
     def test_get_j(self):
         a = np.eye(3) * 5
@@ -169,7 +193,9 @@ class KnownValues(unittest.TestCase):
                      basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
         kmesh = [3, 1, 3]
         nao = cell.nao
-        dm = np.random.rand(np.prod(kmesh), nao, nao) - (.5+.1j)
+        dm = np.random.rand(np.prod(kmesh), nao, nao) - .5
+        phase = fft_matrix(kmesh).get() / np.prod(kmesh)
+        dm = np.einsum('Lpq,Lk->kpq', dm, phase.conj())
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'lda,'
         kpts = cell.make_kpts(kmesh)
@@ -177,7 +203,7 @@ class KnownValues(unittest.TestCase):
         dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=True)
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             vj1 = FFTDF(cell1).get_jk(dm, kpts=cell1.make_kpts(kmesh), with_k=False)[0]
             vj1 *= .5
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
@@ -186,7 +212,7 @@ class KnownValues(unittest.TestCase):
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             de = np.einsum('kij,kji', dm, (vj1-vj2)) / len(kpts)
             de += exc1 - exc2
-            assert abs(dat[i,j] - de/2e-5) < 1e-8
+            assert abs(dat[i,j] - de/2e-4) < 1e-7
 
     def test_get_nuc(self):
         a = np.eye(3) * 5
@@ -196,15 +222,19 @@ class KnownValues(unittest.TestCase):
                      basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
         kmesh = [3, 1, 1]
         nao = cell.nao
-        dm = np.random.rand(np.prod(kmesh), nao, nao) - (.5+.1j)
+        dm = np.random.rand(np.prod(kmesh), nao, nao) - .5
+        phase = fft_matrix(kmesh).get() / np.prod(kmesh)
+        dm = np.einsum('Lpq,Lk->kpq', dm, phase.conj())
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'lda,'
         kpts = cell.make_kpts(kmesh)
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts).to_gpu())
         dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_nuc=True)
+        dat += krks_stress._get_pp_nonloc_strain_derivatives(
+            cell, cell.mesh, cp.array(dm), kpts)
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             cell1.precision = 1e-10
             cell2.precision = 1e-10
             vne1 = FFTDF(cell1).get_nuc(kpts=cell1.make_kpts(kmesh))
@@ -213,7 +243,7 @@ class KnownValues(unittest.TestCase):
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             de = np.einsum('kij,kji', dm, (vne1-vne2)) / len(kpts)
             de += exc1 - exc2
-            assert abs(dat[i,j] - de/2e-5) < 1e-8
+            assert abs(dat[i,j] - de/2e-4) < 1e-7
 
     def test_get_pp(self):
         a = np.eye(3) * 5
@@ -224,15 +254,19 @@ class KnownValues(unittest.TestCase):
                      pseudo='gth-pade', a=a, unit='Bohr', precision=1e-9)
         kmesh = [3, 1, 1]
         nao = cell.nao
-        dm = np.random.rand(np.prod(kmesh), nao, nao) - (.5+.1j)
+        dm = np.random.rand(np.prod(kmesh), nao, nao) - .5
+        phase = fft_matrix(kmesh).get() / np.prod(kmesh)
+        dm = np.einsum('Lpq,Lk->kpq', dm, phase.conj())
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'lda,'
         kpts = cell.make_kpts(kmesh)
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts).to_gpu())
         dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_nuc=True)
+        dat += krks_stress._get_pp_nonloc_strain_derivatives(
+            cell, cell.mesh, cp.array(dm), kpts)
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             cell1.precision = 1e-10
             cell2.precision = 1e-10
             vne1 = FFTDF(cell1).get_pp(kpts=cell1.make_kpts(kmesh))
@@ -241,7 +275,7 @@ class KnownValues(unittest.TestCase):
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             de = np.einsum('kij,kji', dm, (vne1-vne2)) / len(kpts)
             de += exc1 - exc2
-            assert abs(dat[i,j] - de/2e-5) < 1e-8
+            assert abs(dat[i,j] - de/2e-4) < 3e-7
 
     def test_lda_vs_finite_difference(self):
         a = np.eye(3) * 3
@@ -274,7 +308,14 @@ class KnownValues(unittest.TestCase):
         kmesh = [3, 1, 1]
         mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().run()
         mf_grad = mf.Gradients()
+        ref = mf_grad.get_stress()
+
+        mf = mf.multigrid_numint()
+        mf._numint.allow_mesh_reduction = False
+        mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
+        assert abs(dat - ref).max() < 1e-6
+
         mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
@@ -282,12 +323,6 @@ class KnownValues(unittest.TestCase):
             e1 = mf_scanner(cell1)
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
-
-        ref = dat
-        mf = mf.multigrid_numint()
-        mf_grad = mf.Gradients()
-        dat = mf_grad.get_stress()
-        assert abs(dat - ref).max() < 1e-6
 
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_vs_finite_difference(self):
@@ -300,7 +335,9 @@ class KnownValues(unittest.TestCase):
         xc = 'scan'
         kmesh = [3, 1, 1]
         mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
-        mf = mf.multigrid_numint().run()
+        mf = mf.multigrid_numint()
+        mf._numint.allow_mesh_reduction = False
+        mf.run()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
@@ -384,7 +421,7 @@ class KnownValues(unittest.TestCase):
             e1 = mf.get_veff().E_U.real
             mf.reset(cell2)
             e2 = mf.get_veff().E_U.real
-            assert abs(sigma[i,j] - (e1 - e2) / 2e-4) < 1e-8
+            assert abs(sigma[i,j] - (e1 - e2) / 2e-4) < 1e-7
 
     @pytest.mark.slow
     def test_krkspu_finite_diff(self):

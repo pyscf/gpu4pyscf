@@ -33,6 +33,9 @@ from gpu4pyscf.pbc.dft import KUKS as KUKS_gpu
 
 import pytest
 
+if multigrid.libgpbc is None:
+    raise unittest.SkipTest('multigrid v2 kernels not compiled')
+
 def setUpModule():
     global cell_orth, cell_nonorth, cell_he
     global kpts, dm, dm1
@@ -745,9 +748,7 @@ class KnownValues(unittest.TestCase):
         mf = KRKS_gpu(cell, xc = 'pbe', kpts = kpts)
         mf.conv_tol = 1e-10
 
-        # mf = mf.multigrid_numint()
-        # assert type(mf._numint) is multigrid.MultiGridNumInt
-
+        # mf._numint = multigrid.MultiGridNumInt(cell)
         # ref_energy = mf.kernel()
         # assert mf.converged
         # ref_gradient = mf.Gradients().kernel()
@@ -755,8 +756,7 @@ class KnownValues(unittest.TestCase):
         # print(repr(ref_gradient))
 
         with lib.temporary_env(multigrid, get_avail_mem=(lambda **kw: 2**28)):
-            mf = mf.multigrid_numint()
-            assert type(mf._numint) is multigrid.MultiGridNumInt
+            mf._numint = multigrid.MultiGridNumInt(cell)
 
             test_energy = mf.kernel()
             assert mf.converged
@@ -801,9 +801,7 @@ class KnownValues(unittest.TestCase):
         mf = KRKS_gpu(cell, xc = 'pbe', kpts = kpts)
         mf.conv_tol = 1e-10
 
-        # mf = mf.multigrid_numint()
-        # assert type(mf._numint) is multigrid.MultiGridNumInt
-
+        # mf._numint = multigrid.MultiGridNumInt(cell)
         # ref_energy = mf.kernel()
         # assert mf.converged
         # ref_gradient = mf.Gradients().kernel()
@@ -811,8 +809,7 @@ class KnownValues(unittest.TestCase):
         # print(repr(ref_gradient))
 
         with lib.temporary_env(multigrid, get_avail_mem=(lambda **kw: 2**28)):
-            mf = mf.multigrid_numint()
-            assert type(mf._numint) is multigrid.MultiGridNumInt
+            mf._numint = multigrid.MultiGridNumInt(cell)
 
             test_energy = mf.kernel()
             assert mf.converged
@@ -855,9 +852,7 @@ class KnownValues(unittest.TestCase):
         mf = KUKS_gpu(cell, xc = 'pbe', kpts = kpts)
         mf.conv_tol = 1e-10
 
-        # mf = mf.multigrid_numint()
-        # assert type(mf._numint) is multigrid.MultiGridNumInt
-
+        # mf._numint = multigrid.MultiGridNumInt(cell)
         # ref_energy = mf.kernel()
         # assert mf.converged
         # ref_gradient = mf.Gradients().kernel()
@@ -865,8 +860,7 @@ class KnownValues(unittest.TestCase):
         # print(repr(ref_gradient))
 
         with lib.temporary_env(multigrid, get_avail_mem=(lambda **kw: 2**25)):
-            mf = mf.multigrid_numint()
-            assert type(mf._numint) is multigrid.MultiGridNumInt
+            mf._numint = multigrid.MultiGridNumInt(cell)
 
             test_energy = mf.kernel()
             assert mf.converged
