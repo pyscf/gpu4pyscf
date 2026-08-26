@@ -30,7 +30,7 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.dft import uks as mol_uks
 from gpu4pyscf.pbc.dft import rks, krks
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.pbc.dft import multigrid
 
 
 def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
@@ -55,7 +55,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
-    if isinstance(ni, (multigrid_v2.MultiGridNumInt, multigrid.MultiGridNumInt)):
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
         n, exc, vxc = ni.nr_uks(
@@ -160,8 +160,7 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
         dm0 = None
 
         with_j = with_j and hermi != 2
-        j_in_xc = isinstance(ni, (multigrid_v2.MultiGridNumInt,
-                                  multigrid.MultiGridNumInt))
+        j_in_xc = isinstance(ni, multigrid.MultiGridNumIntBase)
 
         def vind(dm1):
             dm1_shape = dm1.shape

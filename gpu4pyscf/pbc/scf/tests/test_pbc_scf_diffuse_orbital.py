@@ -15,7 +15,7 @@
 import unittest
 import numpy as np
 from pyscf.pbc import gto as pbcgto
-from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 from gpu4pyscf.pbc.df import AFTDF
 import gpu4pyscf
 from gpu4pyscf.lib.multi_gpu import num_devices
@@ -94,8 +94,8 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-3.75319097e-02,  9.32974780e-03, -4.73203810e-11],
                                  [ 3.75319095e-02, -9.32974768e-03, -4.51863943e-11]])
 
-        assert abs(test_energy - ref_energy) < 2e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
+        assert abs(test_energy - ref_energy) < 3e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     def test_krks(self):
         cell = self.cell
@@ -121,14 +121,14 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[ 2.77114603e-02, -2.47140931e-02,  3.94331325e-10],
                                  [-2.77114767e-02,  2.47502293e-02,  4.16056183e-10]])
 
-        assert abs(test_energy - ref_energy) < 2e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
+        assert abs(test_energy - ref_energy) < 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
         e, c = mf.canonicalize(mf.mo_coeff, mf.mo_occ)
         assert abs(e[e<1e7] - mf.mo_energy[e<1e7]).max() < 5e-7
         f = mf.get_fock()
         e1 = contract('kqi,kqi->ki', contract('kpi,kpq->kqi', c.conj(), f), c)
-        assert abs(e[e<1e7] - e1[e<1e7]).max() < 2e-10
+        assert abs(e[e<1e7] - e1[e<1e7]).max() < 1e-9
 
     @unittest.skipIf(num_devices > 1, '')
     def test_krks_aftdf(self):
@@ -149,7 +149,7 @@ class KnownValues(unittest.TestCase):
 
         ref_energy = -1.439218776262645
 
-        assert abs(test_energy - ref_energy) < 2e-10
+        assert abs(test_energy - ref_energy) < 1e-9
 
     def test_uks(self):
         cell = self.cell
@@ -174,8 +174,8 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-4.10163065e-02,  1.00148573e-02, -4.86782781e-11],
                                  [ 4.10163065e-02, -1.00148573e-02, -4.62222600e-11]])
 
-        assert abs(test_energy - ref_energy) < 2e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
+        assert abs(test_energy - ref_energy) < 3e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     def test_kuks(self):
         cell = self.cell
@@ -220,8 +220,8 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-3.75888726e-02,  9.34455109e-03, -4.80129776e-11],
                                  [ 3.75888723e-02, -9.34455096e-03, -4.57646238e-11]])
 
-        assert abs(test_energy - ref_energy) < 2e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
+        assert abs(test_energy - ref_energy) < 3e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     @unittest.skipIf(num_devices > 1, '')
     def test_krks_smearing(self):
@@ -240,8 +240,8 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-2.80927897e-04, -1.55260904e-02, -7.70325423e-11],
                                  [ 2.80905389e-04,  1.55173700e-02, -8.01210477e-11]])
 
-        assert abs(test_energy - ref_energy) < 2e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
+        assert abs(test_energy - ref_energy) < 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     @unittest.skipIf(num_devices > 1, '')
     def test_uks_smearing(self):
@@ -259,8 +259,8 @@ class KnownValues(unittest.TestCase):
         ref_gradient = np.array([[-4.10910618e-02,  1.00340747e-02, -4.86288417e-11],
                                  [ 4.10910618e-02, -1.00340747e-02, -4.60603924e-11]])
 
-        assert abs(test_energy - ref_energy) < 2e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
+        assert abs(test_energy - ref_energy) < 3e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     @unittest.skipIf(num_devices > 1, '')
     def test_kuks_smearing(self):

@@ -243,7 +243,7 @@ S
         ni = numint.NumInt()
         ne, exc, vmat = ni.nr_uks(cell, grids, 'lda', dms, hermi=1, kpts=kpts[0])
         ref = ni.to_cpu().nr_uks(cell, grids.to_cpu(), 'lda', dms.get(), hermi=1, kpt=kpts[0])
-        self.assertAlmostEqual(abs(ne.get() - ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ne - ref[0]).max(), 0, 9)
         self.assertAlmostEqual(float(exc), ref[1], 9)
         self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
 
@@ -283,19 +283,19 @@ S
         ni = numint.KNumInt()
         ne, exc, vmat = ni.nr_uks(cell, grids, 'm06', dms, hermi=1, kpts=kpts)
         ref = ni.to_cpu().nr_uks(cell, grids.to_cpu(), 'm06', dms.get(), hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(ne.get() - ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ne - ref[0]).max(), 0, 9)
         self.assertAlmostEqual(exc, ref[1], 9)
         self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
 
         ne, exc, vmat = ni.nr_uks(cell, grids, 'blyp', dms, hermi=1, kpts=kpts)
         ref = ni.to_cpu().nr_uks(cell, grids.to_cpu(), 'blyp', dms.get(), hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(ne.get() - ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ne - ref[0]).max(), 0, 9)
         self.assertAlmostEqual(exc, ref[1], 9)
         self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
 
         ne, exc, vmat = ni.nr_uks(cell, grids, 'lda', dms, hermi=1, kpts=kpts)
         ref = ni.to_cpu().nr_uks(cell, grids.to_cpu(), 'lda', dms.get(), hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(ne.get() - ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ne - ref[0]).max(), 0, 9)
         self.assertAlmostEqual(exc, ref[1], 9)
         self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
 
@@ -418,14 +418,14 @@ S
         ni = numint.NumInt()
         ne, exc, vmat = ni.nr_uks(cell, grids, 'lda', dms[:,0], hermi=1, kpts=kpts[0])
         ref = ni.to_cpu().nr_uks(cell, grids.to_cpu(), 'lda', dms[:,0].get(), hermi=1, kpt=kpts[0])
-        self.assertAlmostEqual(abs(ne.get() - ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ne - ref[0]).max(), 0, 9)
         self.assertAlmostEqual(float(exc), ref[1], 9)
         self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
 
         ni = numint.KNumInt()
         ne, exc, vmat = ni.nr_uks(cell, grids, 'm06', dms, hermi=1, kpts=kpts)
         ref = ni.to_cpu().nr_uks(cell, grids.to_cpu(), 'm06', dms.get(), hermi=1, kpts=kpts)
-        self.assertAlmostEqual(abs(ne.get() - ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(abs(ne - ref[0]).max(), 0, 9)
         self.assertAlmostEqual(exc, ref[1], 9)
         self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
 

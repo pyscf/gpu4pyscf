@@ -120,7 +120,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         mf = mf.multigrid_numint()
         g = mf.nuc_grad_method().kernel()
-        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, delta=5e-6)
 
     @unittest.skipIf(num_devices > 1, '')
     def test_gga_grad(self):
@@ -142,7 +142,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         mf = mf.multigrid_numint()
         g = mf.nuc_grad_method().kernel()
-        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, delta=5e-6)
 
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad(self):

@@ -25,6 +25,7 @@ Validates:
 
 import unittest
 import numpy as np
+import cupy as cp
 import pyscf
 from pyscf.pbc.gto.pseudo.pp_int import (
     fake_cell_vnl, _int_vnl, _contract_ppnl, get_pp_nl)
@@ -76,7 +77,7 @@ class TestContractPpnl(unittest.TestCase):
         cpu = _contract_ppnl(cell, fakecell, hl_blocks, ppnl_half, kpts=kpts)
         gpu = _contract_ppnl_gpu(cell, fakecell, hl_blocks, ppnl_half, kpts=kpts)
 
-        err = np.max(np.abs(np.asarray(gpu) - np.asarray(cpu)))
+        err = np.max(np.abs(cp.asarray(gpu).get() - np.asarray(cpu)))
         self.assertAlmostEqual(err, 0, places, f"max|err|={err:.2e}")
 
     def test_carbon(self):
@@ -96,7 +97,7 @@ class TestGetPpNlGamma(unittest.TestCase):
         from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
         cpu = get_pp_nl(cell)
         gpu = get_pp_nl_gpu(cell)
-        err = np.max(np.abs(np.asarray(gpu) - np.asarray(cpu)))
+        err = np.max(np.abs(cp.asnumpy(gpu) - np.asarray(cpu)))
         self.assertAlmostEqual(err, 0, places, f"max|err|={err:.2e}")
 
     def test_carbon(self):
@@ -116,7 +117,7 @@ class TestGetPpNlKpts(unittest.TestCase):
         from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
         cpu = get_pp_nl(cell, kpts)
         gpu = get_pp_nl_gpu(cell, kpts)
-        err = np.max(np.abs(np.asarray(gpu) - np.asarray(cpu)))
+        err = np.max(np.abs(cp.asnumpy(gpu) - np.asarray(cpu)))
         self.assertAlmostEqual(err, 0, places, f"max|err|={err:.2e}")
 
     def test_silicon_single_kpt(self):
