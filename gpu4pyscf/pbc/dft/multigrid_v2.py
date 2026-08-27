@@ -2261,4 +2261,10 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     device = utils.device
 
     def to_cpu(self):
-        raise RuntimeError('Not available')
+        # No HIP libXC: on AMD the XC-on-CPU fallback (gpu4pyscf/dft/numint.py)
+        # calls to_cpu().eval_xc_eff(...) each SCF cycle. There is no CPU<->GPU
+        # bridge for the multigrid grid machinery, so return a lightweight CPU
+        # numint sufficient for that functional evaluation. See
+        # rocm/TO_IMPROVE.md item 5; removable once a HIP libXC keeps XC on GPU.
+        from pyscf.pbc.dft import numint as numint_cpu
+        return numint_cpu.NumInt()
