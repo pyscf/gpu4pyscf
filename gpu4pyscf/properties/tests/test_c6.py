@@ -19,19 +19,7 @@ from pyscf import lib, gto
 from gpu4pyscf import dft, tdscf
 from gpu4pyscf.properties import c6
 from gpu4pyscf.tdscf.tests.test_tdrks import diagonalize_tda
-
-
-def diagonalize_casida(a, b, nroots=4):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    b = b.reshape(nov, nov)
-    h = np.block([[a        , b       ],
-                  [-b.conj(),-a.conj()]])
-    e = np.linalg.eig(np.asarray(h))[0]
-    lowest_e = np.sort(e[e.real > 0].real)[:nroots]
-    lowest_e = lowest_e[lowest_e > 1e-3]
-    return lowest_e
+from gpu4pyscf.tdscf.tests.test_tdrks import diagonalize as diagonalize_casida
 
 
 class KnownValues(unittest.TestCase):

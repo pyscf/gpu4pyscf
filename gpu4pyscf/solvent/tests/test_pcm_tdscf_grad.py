@@ -21,7 +21,8 @@ import gpu4pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf
 from gpu4pyscf.solvent.tdscf.pcm import WithSolventTDSCFGradient
-from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize_tda
+from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize, diagonalize_tda
+from gpu4pyscf.grad.tests.test_tduhf_grad import diagonalize as diagonalize_u
 from gpu4pyscf.grad.tests.test_tduhf_grad import diagonalize_tda as diagonalize_tda_u
 
 atom = """
@@ -32,51 +33,6 @@ H       0.0000000000     0.7570000000     0.5870000000
 
 bas0 = "def2svp"
 bas1 = "631g"
-
-
-def diagonalize(a, b, nroots=5):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    b = b.reshape(nov, nov)
-    h = np.block([[a        , b       ],
-                     [-b.conj(),-a.conj()]])
-    e, xy = np.linalg.eig(np.asarray(h))
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
-
-
-def diagonalize_u(a, b, nroots=5):
-    a_aa, a_ab, a_bb = a
-    b_aa, b_ab, b_bb = b
-    nocc_a, nvir_a, nocc_b, nvir_b = a_ab.shape
-    a_aa = a_aa.reshape((nocc_a*nvir_a,nocc_a*nvir_a))
-    a_ab = a_ab.reshape((nocc_a*nvir_a,nocc_b*nvir_b))
-    a_bb = a_bb.reshape((nocc_b*nvir_b,nocc_b*nvir_b))
-    b_aa = b_aa.reshape((nocc_a*nvir_a,nocc_a*nvir_a))
-    b_ab = b_ab.reshape((nocc_a*nvir_a,nocc_b*nvir_b))
-    b_bb = b_bb.reshape((nocc_b*nvir_b,nocc_b*nvir_b))
-    a = np.block([[ a_aa  , a_ab],
-                     [ a_ab.T, a_bb]])
-    b = np.block([[ b_aa  , b_ab],
-                     [ b_ab.T, b_bb]])
-    abba = np.asarray(np.block([[a        , b       ],
-                                      [-b.conj(),-a.conj()]]))
-    e, xy = np.linalg.eig(abba)
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 
 def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):

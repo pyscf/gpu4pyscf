@@ -44,6 +44,10 @@ def diagonalize(a, b, nroots=5):
     b = np.block([[b_aa, b_ab], [b_ab.T, b_bb]])
     abba = np.asarray(np.block([[a, b], [-b.conj(), -a.conj()]]))
     e, xy = np.linalg.eig(abba)
+    assert np.max(np.abs(e.imag)) < 1e-14
+    assert np.max(np.abs(xy.imag)) < 1e-14
+    e = e.real
+    xy = xy.real
     sorted_indices = np.argsort(e)
 
     e_sorted = e[sorted_indices]
