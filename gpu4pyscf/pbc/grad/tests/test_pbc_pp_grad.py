@@ -388,7 +388,7 @@ class TestFiniteDifference(unittest.TestCase):
         ni.allow_mesh_reduction = False
         Gv_bases = _get_Gv_bases(ni.mesh, cell.reciprocal_vectors())
         rho_g = multigrid_v3._eval_rhoG(ni, dm0, 1, kpts).ravel()
-        analytical_gradient = _pploc_derivatives(cell, ni.mesh, rho_g, Gv_bases)[0].get()
+        analytical_gradient = _pploc_derivatives(cell, rho_g, Gv_bases)[0].get()
 
         dx = 1e-4
         numerical_gradient = np.zeros([cell.natm, 3])

@@ -1060,9 +1060,10 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.pbc.dft.multigrid import eval_vpplocG
         np.random.seed(8)
         cell = pyscf.M(
-            atom='C 0 0 0; C .2 .3 .7',
+            atom='C 0 0 0; O 1.2 1.7 .1; C .2 .3 .7; O 1.4 0.5 1.8',
             basis=[[0, [0.4, 1]]],
-            pseudo={'C': [[2, 2], 0.38, 4, [-8.8, 1.33, 0.85, 0.55]]},
+            pseudo={'C': [[2, 2], 0.38, 4, [-8.8, 1.33, 0.85, 0.55]],
+                    'O': [[2, 2], 0.8, 3, [1., 1.5, 0.3]]},
             a=np.eye(3) * 2.5 + np.random.rand(3,3)*.5)
         mesh = [11]*3
         Gv = cell.get_Gv(mesh)
@@ -1075,9 +1076,10 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.pbc.dft.multigrid_v3 import _pploc_derivatives, _get_Gv_bases
         np.random.seed(8)
         cell = pyscf.M(
-            atom='C 1.0 1.0 0; C .2 .3 .7',
+            atom='C 0 0 0; O 1.2 1.7 .1; C .2 .3 .7; O 1.4 0.5 1.8',
             basis=[[0, [0.4, 1]]],
-            pseudo={'C': [[2, 2], 0.38, 4, [-8.8, 1.33, 0.85, 0.55]]},
+            pseudo={'C': [[2, 2], 0.38, 4, [-8.8, 1.33, 0.85, 0.55]],
+                    'O': [[2, 2], 0.8, 3, [1., 1.5, 0.3]]},
             a=np.eye(3) * 2.5 + np.random.rand(3,3)*.5)
         mesh = [11]*3
         ngrids = np.prod(mesh)
@@ -1089,7 +1091,7 @@ class KnownValues(unittest.TestCase):
         sigma_ref = cp.einsum('g,xyg->xy', rhoG.conj(), vlocG1).real / cell.vol
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-        grad, sigma = _pploc_derivatives(cell, mesh, rhoG, Gv_bases)
+        grad, sigma = _pploc_derivatives(cell, rhoG, Gv_bases)
         assert abs(grad_ref - grad).max().get() < 1e-12
         assert abs(sigma_ref - sigma).max().get() < 1e-12
 
@@ -1109,7 +1111,7 @@ class KnownValues(unittest.TestCase):
         grad_ref, sigma_ref = eval_nucG_SI_gradient(cell, mesh, rhoG)
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-        grad, sigma = _ne_derivatives(cell, mesh, rhoG, Gv_bases)
+        grad, sigma = _ne_derivatives(cell, rhoG, Gv_bases)
         assert abs(grad_ref - grad).max().get() < 1e-12
         assert abs(sigma_ref - sigma).max().get() < 1e-12
 

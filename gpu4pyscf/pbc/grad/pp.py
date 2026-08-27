@@ -70,18 +70,18 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
             hl_offset[i] = p1
 
         tmp = contract('nij,knjlq->knilq', hl_block, ilp)
-        tmp = contract('knilq,kqp->knilp', tmp, dm_dmH)
+        ilp = contract('knilq,kqp->knilp', tmp, dm_dmH, out=ilp)
 
-        value = contract('kdnilp,knilp->nd', dilp, tmp)
+        value = contract('kdnilp,knilp->nd', dilp, ilp)
         np.add.at(grad, fakecell._bas[i0:i1, ATOM_OF], value.get())
 
-        dppnl -= contract('kdnilp,knilp->pd', dilp, tmp)
+        dppnl += contract('kdnilp,knilp->pd', dilp, ilp)
 
-    grad -= groupby(cell._bas[:,ATOM_OF], dppnl.get(), 'sum')
+    ao_loc = cell.ao_loc
+    atm_labels = np.repeat(cell._bas[:,ATOM_OF], ao_loc[1:]-ao_loc[:-1])
+    grad -= groupby(atm_labels, dppnl.get(), 'sum')
 
     grad_max_imag = np.max(np.abs(grad.imag))
     if grad_max_imag >= 1e-8:
         logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from pseudopotential non-local term gradient.")
-    grad = grad.real
-
-    return grad
+    return grad.real

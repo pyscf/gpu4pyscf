@@ -1109,8 +1109,19 @@ int nx, int ny, int nz)
     out /= cell.vol
     return out
 
-def _pploc_derivatives(cell, mesh, rhoG, Gv_bases):
+def _pploc_derivatives(cell, rhoG, Gv_bases):
     assert cell.dimension == 3
+    nx, ny, nz = mesh = [x.shape[1] for x in Gv_bases]
+    assert rhoG.size == nx * ny * nz
+
+    coords = cp.asarray(cell.atom_coords())
+    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
+    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
+    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
+
+    charges = cell.atom_charges()
+    charges_gpu = cp.array(charges, dtype=np.float64)
+
     fn_name = 'pploc_strain_derivatives'
     if fn_name not in _kernel_registery:
         kernel_code = r'''
@@ -1120,131 +1131,138 @@ void ''' + fn_name + '''(
 double *grad, double *strain, double *Gx, double *Gy, double *Gz,
 complex<double> *SIx, complex<double> *SIy, complex<double> *SIz,
 complex<double> *rhoG,
-int nx, int ny, int nz,
-int i_atom, double charge, double rloc,
-int nexp, double cexp0, double cexp1, double cexp2, double cexp3)
+int nx, int ny, int nz, int atom_batch_size,
+int *atom_ids, double *charges, double rloc, int nexp,
+double cexp0, double cexp1, double cexp2, double cexp3)
 {
     int tid = threadIdx.x;
     int idx = blockDim.x * blockIdx.x + tid;
     int stride = gridDim.x * blockDim.x;
     size_t nyz = ny * nz;
     size_t ng = nx * nyz;
-    double de[3] = {};
-    double sigma[9] = {};
-    for (size_t i_grid = idx; i_grid < ng; i_grid += stride) {
-        int ix = i_grid / nyz;
-        int iyz = i_grid - nyz * ix;
-        int iy = iyz / nz;
-        int iz = iyz - nz * iy;
-        double Gv[3];
-        double G2 = 0;
-        for (int n = 0; n < 3; n++) {
-            Gv[n] = Gx[nx*n+ix] + Gy[ny*n+iy] + Gz[nz*n+iz];
-            G2 += Gv[n] * Gv[n];
-        }
-        double rloc2 = rloc * rloc;
-        double rloc3 = rloc2 * rloc;
-        double G2_red = G2 * rloc2;
-        double expx = exp(-0.5 * G2_red);
-        double coef1 = 0.;
-        double coulG = 0;
-        if (G2 != 0) {
-            coulG = 12.566370614359172 / G2 * -charge;
-            coef1 = coulG * (2 / G2 + rloc2);
-        }
-
-        double cfacs = 0;
-        double dcfacs = 0;
-        if (nexp >= 1) cfacs += cexp0;
-        if (nexp >= 2) {
-            cfacs += cexp1 * (3 - G2_red);
-            dcfacs -= cexp1;
-        }
-        if (nexp >= 3) {
-            cfacs += cexp2 * (15 + G2_red * (G2_red - 10));
-            dcfacs += cexp2 * (-10 + 2*G2_red);
-        }
-        if (nexp >= 4) {
-            cfacs += cexp3 * (105 + G2_red * (G2_red * (21 - G2_red) - 105));
-            dcfacs += cexp3 * (-105 + 42*G2_red - 3*G2_red*G2_red);
-        }
-        double coef2 = 15.749609945722419 * rloc2 * rloc3 * (cfacs - 2 * dcfacs);
-
-        complex<double> SI_x = SIx[i_atom * nx + ix];
-        complex<double> SI_y = SIy[i_atom * ny + iy];
-        complex<double> SI_z = SIz[i_atom * nz + iz];
-        complex<double> SI = SI_x * SI_y * SI_z * expx;
-        complex<double> density = rhoG[i_grid];
-
-        double prod = density.real() * SI.real() + density.imag() * SI.imag();
-        prod *= coef1 + coef2;
-        for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            sigma[i*3+j] += prod * Gv[i] * Gv[j];
-        } }
-
-        // -1j*Gv.T*rhoG.conj().dot(coulG*SI)
-        prod = density.real() * SI.imag() - density.imag() * SI.real();
-        if (G2 == 0) {
-            prod *= 15.749609945722419 * rloc3 * cfacs;
-            double vlocG0 = 2 * 3.141592653589793 * charge * rloc2;
-            prod -= density.imag() * vlocG0;
-        } else {
-            prod *= coulG + 15.749609945722419 * rloc3 * cfacs;
-        }
-        de[0] += prod * Gv[0];
-        de[1] += prod * Gv[1];
-        de[2] += prod * Gv[2];
-    }
-    __shared__ double swap[32];
     int lane = tid % 32;
     int warp = tid / 32;
-    int num_warps = blockDim.x / 32;
+    constexpr int block = 8;
+    double sigma[9] = {};
+    for (int ia0 = 0; ia0 < atom_batch_size; ia0 += block) {
+        double de[block*3] = {};
+        for (size_t i_grid = idx; i_grid < ng; i_grid += stride) {
+            int ix = i_grid / nyz;
+            int iyz = i_grid - nyz * ix;
+            int iy = iyz / nz;
+            int iz = iyz - nz * iy;
+            double Gv[3];
+            double G2 = 0;
+            for (int n = 0; n < 3; n++) {
+                Gv[n] = Gx[nx*n+ix] + Gy[ny*n+iy] + Gz[nz*n+iz];
+                G2 += Gv[n] * Gv[n];
+            }
+            double rloc2 = rloc * rloc;
+            double rloc3 = rloc2 * rloc;
+            double G2_red = G2 * rloc2;
+            double expx = exp(-0.5 * G2_red);
+            double coef1 = 0.;
+            double coulG = 0;
+            if (G2 != 0) {
+                coulG = 12.566370614359172 / G2;
+                coef1 = coulG * (2 / G2 + rloc2);
+            }
+            double cfacs = 0;
+            double dcfacs = 0;
+            if (nexp >= 1) cfacs += cexp0;
+            if (nexp >= 2) {
+                cfacs += cexp1 * (3 - G2_red);
+                dcfacs -= cexp1;
+            }
+            if (nexp >= 3) {
+                cfacs += cexp2 * (15 + G2_red * (G2_red - 10));
+                dcfacs += cexp2 * (-10 + 2*G2_red);
+            }
+            if (nexp >= 4) {
+                cfacs += cexp3 * (105 + G2_red * (G2_red * (21 - G2_red) - 105));
+                dcfacs += cexp3 * (-105 + 42*G2_red - 3*G2_red*G2_red);
+            }
+            double coef2 = 15.749609945722419 * rloc2 * rloc3 * (cfacs - 2 * dcfacs);
+            complex<double> density = rhoG[i_grid];
+            double vlocG0 = 2 * 3.141592653589793 * rloc2;
+            vlocG0 *= density.imag();
+            double cfacs1 = 15.749609945722419 * rloc3 * cfacs;
+            for (int ia = 0; ia < block; ++ia) {
+                if (ia0 + ia >= atom_batch_size) break;
+                int i_atom = atom_ids[ia0+ia];
+                double charge = charges[i_atom];
+                complex<double> SI_x = SIx[i_atom * nx + ix];
+                complex<double> SI_y = SIy[i_atom * ny + iy];
+                complex<double> SI_z = SIz[i_atom * nz + iz];
+                complex<double> SI = SI_x * SI_y * SI_z * expx;
+                double prod = density.real() * SI.real() + density.imag() * SI.imag();
+                prod *= -charge * coef1 + coef2;
+                for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    sigma[i*3+j] += prod * Gv[i] * Gv[j];
+                } }
+                // -1j*Gv.T*rhoG.conj().dot(-Z*coulG*SI)
+                prod = density.real() * SI.imag() - density.imag() * SI.real();
+                if (G2 == 0) {
+                    prod = prod * cfacs1 - charge * vlocG0;
+                } else {
+                    prod *= cfacs1 - charge * coulG;
+                }
+                de[ia*3+0] += prod * Gv[0];
+                de[ia*3+1] += prod * Gv[1];
+                de[ia*3+2] += prod * Gv[2];
+            }
+        }
+        for (int ia = 0; ia < block; ++ia) {
+            if (ia0 + ia >= atom_batch_size) break;
+            for (int offset = 16; offset > 0; offset >>= 1) {
+                de[ia*3+0] += __shfl_down_sync(0xffffffff, de[ia*3+0], offset);
+                de[ia*3+1] += __shfl_down_sync(0xffffffff, de[ia*3+1], offset);
+                de[ia*3+2] += __shfl_down_sync(0xffffffff, de[ia*3+2], offset);
+            }
+            if (lane == 0) {
+                int i_atom = atom_ids[ia0+ia];
+                for (int n = 0; n < 3; n++) atomicAdd(grad+i_atom*3+n, de[ia*3+n]);
+            }
+        }
+    }
     for (int offset = 16; offset > 0; offset >>= 1) {
         for (int n = 0; n < 9; n++) {
             sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
         }
-        for (int n = 0; n < 3; n++) {
-            de[n] += __shfl_down_sync(0xffffffff, de[n], offset);
-        }
     }
     if (lane == 0) {
         for (int n = 0; n < 9; n++) atomicAdd(strain+n, sigma[n]);
-        for (int n = 0; n < 3; n++) atomicAdd(grad+i_atom*3+n, de[n]);
     }
 }'''
         _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
     kernel = _kernel_registery[fn_name]
-
-    nx, ny, nz = [x.shape[1] for x in Gv_bases]
-    assert rhoG.size == nx * ny * nz
-
-    coords = cp.asarray(cell.atom_coords())
-    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
-    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
-    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
-
-    charges = cell.atom_charges()
+    workers = gpu_specs['multiProcessorCount']
 
     grad = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
 
-    for ia in range(cell.natm):
-        symb = cell.atom_symbol(ia)
-        assert symb in cell._pseudo
+    elements = np.array([cell.atom_symbol(ia) for ia in range(cell.natm)])
+    uniq_elements, inv_idx, counts = np.unique(
+        elements, return_inverse=True, return_counts=True)
+    idx = np.argsort(inv_idx)
+    idx_gpu = cp.array(idx, dtype=np.int32)
+    splits = np.append(0, counts).cumsum()
+
+    for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
+        symb = uniq_elements[ii]
+        if symb not in cell._pseudo:
+            continue
 
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
-
         cexp = [cp.float64(x) for x in cexp] + [cp.float64(0.)] * 4
-        kernel_parameters = [
-            grad, sigma, Gv_bases[0], Gv_bases[1], Gv_bases[2],
-            SIx, SIy, SIz, rhoG,
-            cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
-            cp.int32(ia), cp.float64(charges[ia]), cp.float64(rloc),
-            cp.int32(nexp)] + cexp[:4]
-        workers = gpu_specs['multiProcessorCount']
-        kernel((workers*4,), (512,), kernel_parameters)
+
+        kernel((workers*4,), (256,), [
+            grad, sigma, Gv_bases[0], Gv_bases[1], Gv_bases[2], SIx, SIy, SIz, rhoG,
+            cp.int32(nx), cp.int32(ny), cp.int32(nz),
+            cp.int32(i1-i0), idx_gpu[i0:i1], charges_gpu, cp.float64(rloc),
+            cp.int32(nexp)] + cexp[:4])
 
     vol = cell.vol
     grad /= vol
@@ -1330,7 +1348,7 @@ int nx, int ny, int nz, int natm)
         _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
     kernel = _kernel_registery[fn_name]
 
-    nx, ny, nz = [x.shape[1] for x in Gv_bases]
+    nx, ny, nz = mesh = [x.shape[1] for x in Gv_bases]
     assert rhoG.size == nx * ny * nz
 
     coords = cp.asarray(cell.atom_coords())
@@ -1348,8 +1366,7 @@ int nx, int ny, int nz, int natm)
     kernel((workers*4,), (256,),
            [grad, sigma, Gv_bases[0], Gv_bases[1], Gv_bases[2],
             SIx, SIy, SIz, rhoG, charges,
-            cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
-            cp.int32(natm)])
+            cp.int32(nx), cp.int32(ny), cp.int32(nz), cp.int32(natm)])
 
     vol = cell.vol
     grad /= vol
@@ -2337,10 +2354,10 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         if with_nuc:
             if cell._pseudo:
                 coulomb_on_g_mesh = multigrid_v1.eval_vpplocG(cell, mesh, out=tauG).reshape(mesh)
-                grad, sigma1 = _pploc_derivatives(cell, mesh, rhoG, Gv_bases)
+                grad, sigma1 = _pploc_derivatives(cell, rhoG, Gv_bases)
                 sigma += sigma1
             else:
-                grad, sigma1 = _ne_derivatives(cell, mesh, rhoG, Gv_bases)
+                grad, sigma1 = _ne_derivatives(cell, rhoG, Gv_bases)
                 sigma += sigma1
                 ZSI = _get_ZSI(cell, mesh, out=tauG)
                 vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]

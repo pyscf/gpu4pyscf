@@ -723,139 +723,6 @@ def _get_Gv_bases(mesh, b):
 
 _kernel_registery = {}
 
-def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charge,
-                                           mesh, Gv_bases, SIx, SIy, SIz, vlocG):
-    # Result will be appended to vlocG
-
-    fn_name = "gth_loc_reciporcal_kernel"
-    if fn_name not in _kernel_registery:
-        kernel_code = r'''
-            #include <cupy/complex.cuh>
-            extern "C" __global__
-            void ''' + fn_name + '''(
-                const double* __restrict__ Gx, const double* __restrict__ Gy, const double* __restrict__ Gz,
-                const complex<double>* __restrict__ grids_SIx, const complex<double>* __restrict__ grids_SIy, const complex<double>* __restrict__ grids_SIz,
-                complex<double>* __restrict__ grids_vlocG,
-                const int nx, const int ny, const int nz, const int i_atom,
-                const double charge, const double rloc,
-                double cexp0, double cexp1, double cexp2, double cexp3, int nexp)
-            {
-                int idx = blockDim.x * blockIdx.x + threadIdx.x;
-                int stride = gridDim.x * blockDim.x;
-                size_t nyz = ny * nz;
-                size_t ng = nx * nyz;
-                for (size_t i_grid = idx; i_grid < ng; i_grid += stride) {
-                    int ix = i_grid / nyz;
-                    int iyz = i_grid - nyz * ix;
-                    int iy = iyz / nz;
-                    int iz = iyz - nz * iy;
-                    double G2 = 0.;
-                    for (int n = 0; n < 3; ++n) {
-                        double Gv = Gx[nx*n+ix] + Gy[ny*n+iy] + Gz[nz*n+iz];
-                        G2 += Gv * Gv;
-                    }
-                    double coulG = 0.;
-                    if (G2 != 0) coulG = 12.566370614359172 / G2;
-                    const double G2_red = G2 * rloc * rloc;
-                    const complex<double> SIx = grids_SIx[i_atom * nx + ix];
-                    const complex<double> SIy = grids_SIy[i_atom * ny + iy];
-                    const complex<double> SIz = grids_SIz[i_atom * nz + iz];
-                    const complex<double> SI = SIx * SIy * SIz * exp(-0.5 * G2_red);
-                    complex<double> vlocG = -charge * coulG * SI;
-
-                    double cfacs = 0;
-                    if (nexp >= 1) cfacs += cexp0;
-                    if (nexp >= 2) cfacs += cexp1 * (3 - G2_red);
-                    if (nexp >= 3) cfacs += cexp2 * (15 + G2_red * (G2_red - 10));
-                    if (nexp >= 4) cfacs += cexp3 * (105 + G2_red * (G2_red * (21 - G2_red) - 105));
-                    vlocG += 15.749609945722419 * rloc * rloc * rloc * cfacs * SI;
-
-                    grids_vlocG[i_grid] += vlocG;
-                }
-            }
-        '''
-        _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
-    kernel = _kernel_registery[fn_name]
-
-    ngrids = np.prod(mesh)
-    assert SIx.shape == (natm, mesh[0]) and SIx.dtype == cp.complex128 and SIx.flags.c_contiguous
-    assert SIy.shape == (natm, mesh[1]) and SIy.dtype == cp.complex128 and SIy.flags.c_contiguous
-    assert SIz.shape == (natm, mesh[2]) and SIz.dtype == cp.complex128 and SIz.flags.c_contiguous
-    assert vlocG.shape == (ngrids,) and vlocG.dtype == cp.complex128
-    assert ngrids < np.iinfo(np.int32).max
-
-    kernel_parameters = [Gv_bases[0], Gv_bases[1], Gv_bases[2],
-                         SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
-                         cp.int32(i_atom), cp.float64(charge), cp.float64(rloc)]
-
-    cexp = [cp.float64(x) for x in cexp] + [cp.float64(0.)] * 4
-    kernel_parameters.extend(cexp[:4])
-    kernel_parameters.append(cp.int32(nexp))
-
-    workers = gpu_specs['multiProcessorCount']
-    kernel((workers, ), (1024, ), kernel_parameters)
-
-    # SI = (SIx[i_atom,:,None,None] * SIy[i_atom,:,None] * SIz[i_atom]).ravel()
-    # G2_red = G2 * rloc**2
-    # SI *= cp.exp(-0.5*G2_red)
-    # vlocG -= charge * coulG * SI
-
-    # # Add the C1, C2, C3, C4 contributions
-    # cfacs = 0
-    # if nexp >= 1:
-    #     cfacs += cexp[0]
-    # if nexp >= 2:
-    #     cfacs += cexp[1] * (3 - G2_red)
-    # if nexp >= 3:
-    #     cfacs += cexp[2] * (15 - 10*G2_red + G2_red**2)
-    # if nexp >= 4:
-    #     cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
-    # vlocG += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
-
-    return vlocG
-
-def _eval_vpplocG(cell, mesh, out=None):
-    '''PRB, 58, 3641 Eq (5)
-    '''
-    assert cell.dimension == 3
-    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-    coords = cp.asarray(cell.atom_coords())
-    SIx = cp.exp(-1j * coords.dot(Gv_bases[0]))
-    SIy = cp.exp(-1j * coords.dot(Gv_bases[1]))
-    SIz = cp.exp(-1j * coords.dot(Gv_bases[2]))
-
-    charges = cell.atom_charges()
-
-    ngrids = np.prod(mesh)
-    vlocG = ndarray(ngrids, dtype=np.complex128, buffer=out)
-    vlocG.fill(0)
-    vlocG0 = 0
-
-    pp_blocks = []
-    for ia in range(cell.natm):
-        symb = cell.atom_symbol(ia)
-        if symb in cell._pseudo:
-            pp_blocks.append(cell._pseudo[symb])
-    pp_nexps = np.array([x[1] for x in pp_blocks])
-    uniq_nexps, inv_idx, counts = np.unique(
-        pp_nexps, return_inverse=True, return_counts=True)
-
-    for ia in range(cell.natm):
-        symb = cell.atom_symbol(ia)
-        if symb not in cell._pseudo:
-            continue
-
-        pp = cell._pseudo[symb]
-        rloc, nexp, cexp = pp[1:3+1]
-
-        vlocG0 += 2*np.pi*charges[ia]*rloc**2
-
-        _append_vpplocG_one_atom_without_gamma(
-            ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, Gv_bases, SIx, SIy, SIz, vlocG)
-
-    vlocG[0] += vlocG0
-    return vlocG
-
 def eval_vpplocG(cell, mesh, out=None):
     '''PRB, 58, 3641 Eq (5)
     '''
@@ -947,8 +814,9 @@ void ''' + fn_name + '''(
     elements = np.array([cell.atom_symbol(ia) for ia in range(cell.natm)])
     uniq_elements, inv_idx, counts = np.unique(
         elements, return_inverse=True, return_counts=True)
+    idx = np.argsort(inv_idx)
+    idx_gpu = cp.array(idx, dtype=np.int32)
     splits = np.append(0, counts).cumsum()
-    inv_idx_gpu = cp.asarray(inv_idx, dtype=np.int32)
 
     for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
         symb = uniq_elements[ii]
@@ -958,13 +826,14 @@ void ''' + fn_name + '''(
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
         cexp = [cp.float64(x) for x in cexp] + [cp.float64(0.)] * 4
+
         kernel((workers*2, ), (1024, ), [
             Gv_bases[0], Gv_bases[1], Gv_bases[2], SIx, SIy, SIz, vlocG,
             cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
-            cp.int32(i1-i0), inv_idx_gpu[i0:i1], charges, cp.float64(rloc),
+            cp.int32(i1-i0), idx_gpu[i0:i1], charges_gpu, cp.float64(rloc),
             cp.int32(nexp)] + cexp[:4])
 
-        vlocG0 += 2*np.pi * charges[inv_idx[i0:i1]].sum() *rloc**2
+        vlocG0 += 2*np.pi * charges[idx[i0:i1]].sum() * rloc**2
 
     vlocG[0] += vlocG0
     return vlocG

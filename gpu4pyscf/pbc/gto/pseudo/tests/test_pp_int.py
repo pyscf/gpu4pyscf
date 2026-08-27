@@ -53,6 +53,7 @@ def setUpModule():
         pseudo='gth-pade',
         unit='bohr',
         verbose=0,
+        precision=1e-10,
     )
 
     cell_fe = pyscf.M(
@@ -62,6 +63,7 @@ def setUpModule():
         pseudo='gth-pbe',
         unit='bohr',
         verbose=0,
+        precision=1e-10,
     )
 
 class TestGetPpNlGamma(unittest.TestCase):
@@ -96,7 +98,7 @@ class TestGetPpNlKpts(unittest.TestCase):
 
     def test_silicon_single_kpt(self):
         kpts = np.array([[0.1, 0.0, 0.0]])
-        self._compare(cell_si, kpts)
+        self._compare(cell_si, kpts, places=12)
 
     def test_silicon_kmesh(self):
         kpts = cell_si.make_kpts([2, 2, 2])
@@ -108,7 +110,7 @@ class TestGetPpNlKpts(unittest.TestCase):
 
     def test_iron_single_kpts(self):
         kpts = cell_fe.make_kpts([2, 5, 1])
-        self._compare(cell_fe, kpts, places=10)
+        self._compare(cell_fe, kpts, places=11)
 
 
 if __name__ == "__main__":
