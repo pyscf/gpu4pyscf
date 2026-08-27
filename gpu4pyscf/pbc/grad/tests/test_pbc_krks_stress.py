@@ -217,13 +217,26 @@ class KnownValues(unittest.TestCase):
         dm = np.eye(cell.nao)[None]
         xc = 'r2scan'
 
-        ni = MultiGridNumInt(cell)
-        ni.mesh = np.asarray(cell.mesh)
-        ni.build('MGGA', gamma_point=False)
-        # The following import is a bug of ruff
-        from gpu4pyscf.pbc.dft.multigrid_v2 import _rks_exc_strain_deriv
-        dat = _rks_exc_strain_deriv(ni, xc, dm, kpts, with_j=False, with_nuc=False)
+        from gpu4pyscf.pbc.dft.multigrid_v2 import (
+            MultiGridNumInt as MultiGridNumIntV2,
+            _rks_exc_strain_deriv,
+        )
+        ni_v2 = MultiGridNumIntV2(cell)
+        ni_v2.mesh = np.asarray(cell.mesh)
+        ni_v2.build('MGGA', gamma_point=False)
+        dat = _rks_exc_strain_deriv(
+            ni_v2, xc, dm, kpts, with_j=False, with_nuc=False)
         assert abs(dat / cell.vol).max() < 1e-3
+
+        # V3 evaluates strain derivatives analytically without rebuilding
+        # neighboring images for displaced cells.
+        for enable_aft in (True, False):
+            ni_v3 = MultiGridNumInt(cell)
+            ni_v3.enable_aft = enable_aft
+            ni_v3.mesh = np.asarray(cell.mesh)
+            dat = ni_v3.energy_strain_gradient(
+                xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+            assert abs(dat / cell.vol).max() < 1e-3
 
     def test_get_j(self):
         a = np.eye(3) * 5
