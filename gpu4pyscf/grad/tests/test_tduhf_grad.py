@@ -61,7 +61,7 @@ def diagonalize_tda(a, nroots=5):
     a_ab = a_ab.reshape((nocc_a * nvir_a, nocc_b * nvir_b))
     a_bb = a_bb.reshape((nocc_b * nvir_b, nocc_b * nvir_b))
     a = np.block([[a_aa, a_ab], [a_ab.T, a_bb]])
-    e, xy = np.linalg.eig(a)
+    e, xy = np.linalg.eigh(a)
     sorted_indices = np.argsort(e)
 
     e_sorted = e[sorted_indices]

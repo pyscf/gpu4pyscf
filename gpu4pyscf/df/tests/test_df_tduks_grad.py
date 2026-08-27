@@ -20,6 +20,7 @@ import pytest
 from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
+from gpu4pyscf.df.tests.test_df_tduhf_grad import diagonalize_tda
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -63,24 +64,6 @@ def diagonalize(a, b, nroots=5):
     b = np.block([[b_aa, b_ab], [b_ab.T, b_bb]])
     abba = np.asarray(np.block([[a, b], [-b.conj(), -a.conj()]]))
     e, xy = np.linalg.eig(abba)
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
-
-
-def diagonalize_tda(a, nroots=5):
-    a_aa, a_ab, a_bb = a
-    nocc_a, nvir_a, nocc_b, nvir_b = a_ab.shape
-    a_aa = a_aa.reshape((nocc_a * nvir_a, nocc_a * nvir_a))
-    a_ab = a_ab.reshape((nocc_a * nvir_a, nocc_b * nvir_b))
-    a_bb = a_bb.reshape((nocc_b * nvir_b, nocc_b * nvir_b))
-    a = np.block([[a_aa, a_ab], [a_ab.T, a_bb]])
-    e, xy = np.linalg.eig(a)
     sorted_indices = np.argsort(e)
 
     e_sorted = e[sorted_indices]

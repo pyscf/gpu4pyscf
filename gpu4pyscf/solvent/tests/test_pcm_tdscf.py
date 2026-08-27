@@ -18,21 +18,7 @@ import cupy as cp
 from pyscf import lib, gto
 from gpu4pyscf.tdscf import rhf, rks
 from gpu4pyscf import tdscf
-
-
-def diagonalize_tda(a, nroots=5):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    e, xy = np.linalg.eig(np.asarray(a))
-    sorted_indices = np.argsort(e)
-    
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-    
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize_tda
 
 
 def diagonalize(a, b, nroots=5):

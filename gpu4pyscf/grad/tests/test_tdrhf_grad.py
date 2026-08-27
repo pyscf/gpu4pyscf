@@ -53,7 +53,7 @@ def diagonalize_tda(a, nroots=5):
     nocc, nvir = a.shape[:2]
     nov = nocc * nvir
     a = a.reshape(nov, nov)
-    e, xy = np.linalg.eig(np.asarray(a))
+    e, xy = np.linalg.eigh(np.asarray(a))
     sorted_indices = np.argsort(e)
 
     e_sorted = e[sorted_indices]
