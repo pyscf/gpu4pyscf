@@ -19,6 +19,7 @@ __all__ = [
 import ctypes
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 import scipy.linalg
 from pyscf import lib
 from pyscf.gto import mole
@@ -369,14 +370,14 @@ class X2C1E_GSCF(_X2C_SCF):
 
 
 def _sqrt(a, tol=1e-14):
-    e, v = cp.linalg.eigh(a)
+    e, v = eigh_std(a)
     idx = cp.where(e > tol)[0]
     v = v[:,idx]
     e = e[idx]
     return (v*cp.sqrt(e)).dot(v.conj().T)
 
 def _invsqrt(a, tol=1e-14):
-    e, v = cp.linalg.eigh(a)
+    e, v = eigh_std(a)
     idx = cp.where(e > tol)[0]
     v = v[:,idx]
     e = e[idx]
@@ -400,7 +401,7 @@ def _get_r(s, snesc):
     # R^dag \tilde{S} R = S
     # R = S^{-1/2} [S^{-1/2}\tilde{S}S^{-1/2}]^{-1/2} S^{1/2}
     # Eq.(193) or (223) in 10.1080/00268971003781571
-    w, v = cp.linalg.eigh(s)
+    w, v = eigh_std(s)
     idx = cp.where(w > 1e-14)[0]
     v = v[:,idx]
     w_sqrt = cp.sqrt(w[idx])
@@ -408,7 +409,7 @@ def _get_r(s, snesc):
 
     snesc = v.conj().T.dot(snesc).dot(v)
     r_mid = w_invsqrt[:,None] * snesc * w_invsqrt
-    w1, v1 = cp.linalg.eigh(r_mid)
+    w1, v1 = eigh_std(r_mid)
     idx1 = cp.where(w1 > 1e-14)[0]
     v1 = v1[:,idx1]
     r_mid = (v1/cp.sqrt(w1[idx1])).dot(v1.conj().T)
@@ -435,11 +436,11 @@ def _x2c1e_xmatrix(t, v, w, s, c):
         cs = a[nao:,nao:]
         x = cp.linalg.solve(cl.T, cs.T).T  # B = XA
     except (cp.linalg.LinAlgError, CuSolverError):
-        d, t = cp.linalg.eigh(m)
+        d, t = eigh_std(m)
         idx = cp.where(d > LINEAR_DEP_THRESHOLD)[0]
         t = t[:,idx] / cp.sqrt(d[idx])
         tht = t.conj().T.dot(h).dot(t)
-        e, a = cp.linalg.eigh(tht)
+        e, a = eigh_std(tht)
         a = cp.dot(t, a)
         idx = cp.where(e > -c**2)[0]
         cl = a[:nao,idx]
@@ -468,18 +469,18 @@ def _x2c1e_get_hcore(t, v, w, s, c):
         # cs = a[nao:,nao:]
         e = e[nao:]
     except (cp.linalg.LinAlgError, CuSolverError):
-        d, t = cp.linalg.eigh(m)
+        d, t = eigh_std(m)
         idx = cp.where(d > LINEAR_DEP_THRESHOLD)[0]
         t = t[:,idx] / cp.sqrt(d[idx])
         tht = t.conj().T.dot(h).dot(t)
-        e, a = cp.linalg.eigh(tht)
+        e, a = eigh_std(tht)
         a = cp.dot(t, a)
         idx = cp.where(e > -c**2)[0]
         cl = a[:nao,idx]
         # cs = a[nao:,idx]
         e = e[idx]
 
-    w, u = cp.linalg.eigh(cl.conj().T.dot(s).dot(cl))
+    w, u = eigh_std(cl.conj().T.dot(s).dot(cl))
     idx = cp.where(w > 1e-14)[0]
     u = u[:,idx]
     # Adopt (2) here because X is not appeared in Eq (2).

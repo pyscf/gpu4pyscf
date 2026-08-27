@@ -16,6 +16,7 @@
 import ctypes
 import contextlib
 import cupy
+from gpu4pyscf.lib.cusolver import eigh_std
 import numpy as np
 import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
@@ -749,7 +750,7 @@ def _decompose_j2c(auxmol, aux_sorting=None,
             cd_low, aux_coef.T, lower=True, overwrite_b=True).T
         tag = 'cd'
     except RuntimeError:
-        w, v = cp.linalg.eigh(j2c)
+        w, v = eigh_std(j2c)
         idx = cp.where(w > LINEAR_DEP_THR)[0]
         logger.debug1(auxmol, 'discard %d small eigenvectors for auxiliary dimension',
                       w.size - len(idx))

@@ -22,6 +22,7 @@ __all__ = [
 
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf import lib
 from pyscf.pbc.scf import hf as hf_cpu
 from gpu4pyscf.lib import logger, utils
@@ -71,7 +72,7 @@ def eigh_with_canonical_orth(h, s):
         x = mol_hf.canonical_orthogonalization(s[k])
         nmo_k = x.shape[1]
         xhx = x.conj().T.dot(h[k]).dot(x)
-        e, c = cp.linalg.eigh(xhx)
+        e, c = eigh_std(xhx)
         mo_energy[k,:nmo_k] = e
         mo_coeff[k,:,:nmo_k] = x.dot(c)
         if nmo_k < nao:

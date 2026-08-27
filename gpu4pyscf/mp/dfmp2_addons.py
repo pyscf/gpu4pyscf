@@ -28,6 +28,7 @@ import gpu4pyscf
 import numpy as np
 import scipy
 import cupy
+from gpu4pyscf.lib.cusolver import eigh_std
 import cupy as cp
 
 import cupyx.scipy.linalg
@@ -423,7 +424,7 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=
     # Eigen decomposition
     if alg.lower().startswith('eig'):
         log.debug('j2c decomposition by eigen')
-        e, u = cp.linalg.eigh(j2c)
+        e, u = eigh_std(j2c)
         cond = abs(e).max() / abs(e).min()
         keep = e > thresh_lindep
         rkeep = e < -thresh_lindep
