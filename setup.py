@@ -18,6 +18,7 @@ import sys
 import subprocess
 import re
 import glob
+import shutil
 
 from setuptools import setup, find_packages
 from setuptools.command.build_py import build_py
@@ -43,6 +44,59 @@ def get_cuda_version():
         return major_version + '1'
     return major_version + 'x'
 
+# ---------------------------------------------------------------------------
+# GPU backend selection: NVIDIA CUDA (default) or AMD HIP/ROCm.
+# The CUDA path is unchanged; the HIP path is only taken when explicitly
+# requested (USE_HIP=1) or auto-detected on a ROCm-only machine (no nvcc).
+# ---------------------------------------------------------------------------
+def _env_flag(name):
+    """True/False for an explicitly set env var, or None if it is unset."""
+    val = os.getenv(name)
+    if val is None:
+        return None
+    return val.strip().lower() in ('1', 'on', 'true', 'yes')
+
+def find_rocm_path():
+    """Best-effort location of a ROCm/HIP install (env first, then hipconfig)."""
+    for var in ('ROCM_PATH', 'ROCM_HOME', 'HIP_PATH'):
+        path = os.getenv(var)
+        if path and os.path.isdir(path):
+            return path
+    hipconfig = shutil.which('hipconfig')
+    if hipconfig:
+        try:
+            return subprocess.check_output([hipconfig, '-p']).decode('utf-8').strip()
+        except Exception:
+            pass
+    return None
+
+def use_hip():
+    """Select the AMD HIP/ROCm backend instead of NVIDIA CUDA.
+
+    An explicit ``USE_HIP`` environment variable (1/0) always wins. Otherwise
+    the backend is auto-detected: CUDA when ``nvcc`` is on PATH, else HIP when a
+    ROCm install is found. On machines with a CUDA toolkit the default (CUDA) is
+    unchanged.
+    """
+    flag = _env_flag('USE_HIP')
+    if flag is not None:
+        return flag
+    if shutil.which('nvcc'):
+        return False
+    return find_rocm_path() is not None
+
+def get_rocm_version():
+    """ROCm major-version tag for the package name, e.g. '7x'. Best-effort."""
+    out = ''
+    hipconfig = shutil.which('hipconfig')
+    if hipconfig:
+        try:
+            out = subprocess.check_output([hipconfig, '--version']).decode('utf-8')
+        except Exception:
+            out = ''
+    m = re.search(r'(\d+)\.', out) or re.search(r'(\d+)\.\d+', find_rocm_path() or '')
+    return (m.group(1) if m else 'x') + 'x'
+
 def get_version():
     topdir = os.path.abspath(os.path.join(__file__, '..'))
     module_path = os.path.join(topdir, 'gpu4pyscf')
@@ -59,6 +113,8 @@ def get_version():
 
 VERSION = get_version()
 
+USE_HIP = use_hip()
+
 
 class CMakeBuildPy(build_py):
     def run(self):
@@ -71,6 +127,8 @@ class CMakeBuildPy(build_py):
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
         cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=OFF']
+        if USE_HIP:
+            cmd.extend(self._setup_hip_build())
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
             cmd.extend(configure_args.split(' '))
@@ -87,6 +145,38 @@ class CMakeBuildPy(build_py):
             self.spawn(cmd)
 
         super().run()
+
+    def _setup_hip_build(self):
+        """Environment and CMake flags for an AMD HIP/ROCm build.
+
+        Mirrors rocm/build_gpu4pyscf.sh so ``pip install`` reproduces the
+        script's build: export the ROCm paths and select the HIP language via
+        -DUSE_HIP=ON. The GPU architecture is auto-detected by CMake
+        (rocm_agent_enumerator); override with GPU_ARCHITECTURES=gfxXXXX.
+        """
+        rocm_path = find_rocm_path()
+        if not rocm_path:
+            raise RuntimeError(
+                "USE_HIP is set but no ROCm installation was found. "
+                "Set ROCM_PATH (or put hipconfig on PATH).")
+        os.environ.setdefault('ROCM_PATH', rocm_path)
+        os.environ.setdefault('ROCM_HOME', rocm_path)
+        os.environ.setdefault('HIP_PATH', rocm_path)
+        os.environ.setdefault('HIP_PLATFORM', 'amd')
+        bindir = os.path.join(rocm_path, 'bin')
+        os.environ['PATH'] = bindir + os.pathsep + os.environ.get('PATH', '')
+        libdirs = os.pathsep.join(os.path.join(rocm_path, d) for d in ('lib', 'lib64'))
+        os.environ['LD_LIBRARY_PATH'] = libdirs + os.pathsep + os.environ.get('LD_LIBRARY_PATH', '')
+
+        args = ['-DUSE_HIP=ON']
+        hip_compiler = os.getenv('CMAKE_HIP_COMPILER',
+                                 os.path.join(rocm_path, 'llvm', 'bin', 'clang++'))
+        if os.path.exists(hip_compiler):
+            args.append(f'-DCMAKE_HIP_COMPILER={hip_compiler}')
+        gpu_arch = os.getenv('GPU_ARCHITECTURES')
+        if gpu_arch:
+            args.append(f'-DGPU_ARCHITECTURES={gpu_arch}')
+        return args
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
@@ -111,13 +201,32 @@ try:
 except ImportError:
     pass
 
-package_name = NAME
-if 'sdist' in sys.argv:
-    CUDA_VERSION = '12x'
+if USE_HIP and 'sdist' not in sys.argv:
+    # AMD ROCm/HIP build. CuPy for ROCm and (optionally) PyTorch-ROCm are
+    # provided by the environment -- there is no cupy-rocm / gpu4pyscf-libxc-rocm
+    # wheel to depend on -- so only the backend-agnostic requirements are declared.
+    package_name = NAME + '-rocm' + get_rocm_version()
+    install_requires = [
+        'pyscf>=2.8.0',
+        'geometric',
+        'packaging',
+    ]
 else:
-    CUDA_VERSION = get_cuda_version()
-    if os.getenv('GPU4PYSCF_BUILD_CUDA_WHEEL'):
-        package_name = NAME + '-cuda' + CUDA_VERSION
+    # NVIDIA CUDA build, and the backend-agnostic sdist source release.
+    package_name = NAME
+    if 'sdist' in sys.argv:
+        CUDA_VERSION = '12x'
+    else:
+        CUDA_VERSION = get_cuda_version()
+        if os.getenv('GPU4PYSCF_BUILD_CUDA_WHEEL'):
+            package_name = NAME + '-cuda' + CUDA_VERSION
+    install_requires = [
+        'pyscf>=2.8.0',
+        f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
+        'geometric',
+        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}>=0.8.1',
+        'packaging',
+    ]
 
 setup(
     name=package_name,
@@ -139,11 +248,5 @@ setup(
     ],
     cmdclass={'build_py': CMakeBuildPy},
     extras_require={'dispersion': ['pyscf-dispersion>=1.7.0']},
-    install_requires=[
-        'pyscf>=2.8.0',
-        f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
-        'geometric',
-        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}>=0.8.1',
-        'packaging',
-    ]
+    install_requires=install_requires,
 )
