@@ -976,7 +976,7 @@ def cond(a, sympos=False, verbose=logger.WARN):
 
     else:
         if sympos:
-            s = cupy.linalg.eigvalsh(a)
+            s = cusolver.eigh_std(a)[0]
             if s[0] > 0:
                 return s[-1] / s[0]
             else:
@@ -1464,7 +1464,7 @@ def eigh(a, b=None, overwrite=False):
             e = asarray(e)
             c = asarray(c)
             return e, c
-        return cupy.linalg.eigh(a)
+        return cusolver.eigh_std(a)
 
     if a.shape[0] > cusolver.MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:

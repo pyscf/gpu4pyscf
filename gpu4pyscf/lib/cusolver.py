@@ -133,6 +133,50 @@ _dn('Zhegvd').argtypes = [
     ctypes.c_void_p   # *devInfo
 ]
 
+# Standard (non-generalized) symmetric/hermitian eigensolver: syevd/heevd
+# (divide-and-conquer). Signatures identical on cuSOLVER and hipSOLVER Dn.
+for _name in ('Dsyevd', 'Zheevd'):
+    _dn(_name + '_bufferSize').restype = int
+    _dn(_name).restype = int
+    _dn(_name + '_bufferSize').argtypes = [
+        ctypes.c_void_p,  # handle
+        ctypes.c_int,     # jobz
+        ctypes.c_int,     # uplo
+        ctypes.c_int,     # n
+        ctypes.c_void_p,  # *A
+        ctypes.c_int,     # lda
+        ctypes.c_void_p,  # *w
+        ctypes.c_void_p   # *lwork
+    ]
+    _dn(_name).argtypes = [
+        ctypes.c_void_p,  # handle
+        ctypes.c_int,     # jobz
+        ctypes.c_int,     # uplo
+        ctypes.c_int,     # n
+        ctypes.c_void_p,  # *A
+        ctypes.c_int,     # lda
+        ctypes.c_void_p,  # *w
+        ctypes.c_void_p,  # *work
+        ctypes.c_int,     # lwork
+        ctypes.c_void_p   # *devInfo
+    ]
+
+
+# hipSOLVER's Dn eigensolvers (syevd/heevd) leave the *shared* cusolver handle
+# in a state that makes cupy's own subsequent cusolver calls (e.g.
+# cupy.linalg.solve -> getrs) fail with rocblas_status_memory_error. syevd below
+# therefore uses its own dedicated handle and never touches cupy's shared handle.
+# (Irrelevant on CUDA, where eigh_std routes to cupy.linalg.eigh and syevd is
+# unused.)
+_dn('Create').restype = int
+_dn('Create').argtypes = [ctypes.c_void_p]
+_dn('SetStream').restype = int
+_dn('SetStream').argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_syevd_handle = ctypes.c_void_p()
+if _dn('Create')(ctypes.byref(_syevd_handle)) != 0:
+    raise RuntimeError('failed to create dedicated cusolver handle for syevd')
+
+
 def eigh(h, s, overwrite=False):
     '''Solve the generalized Hermitian eigenproblem with positive-definite s.
     '''
@@ -217,6 +261,63 @@ def eigh(h, s, overwrite=False):
     if info != 0:
         raise LinAlgError(f'eigh failed to converge (devInfo={info})')
     return w, A.T
+
+def syevd(a, overwrite=False):
+    '''Standard symmetric/hermitian eigenproblem via cuSOLVER/hipSOLVER syevd/heevd
+    (divide-and-conquer). Eigenvectors are returned; UPLO is 'L'. Mirrors the
+    layout/return of cupy.linalg.eigh (ascending eigenvalues, columns are vectors).
+    '''
+    assert a.dtype in (np.float64, np.complex128)
+    n = a.shape[0]
+    if a.dtype == np.complex128 and a.flags.c_contiguous:
+        # heevd expects F-order. For a hermitian matrix stored C-contiguous,
+        # .conj() yields the F-ordered representation (same as the sygvd path).
+        A = a.conj()
+    elif overwrite:
+        A = a
+    else:
+        A = a.copy()
+    _handle = _syevd_handle
+    _dn('SetStream')(_handle, ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+    w = cupy.zeros(n)
+
+    if a.dtype == np.float64:
+        buffn, fn = _dn('Dsyevd_bufferSize'), _dn('Dsyevd')
+    else:
+        buffn, fn = _dn('Zheevd_bufferSize'), _dn('Zheevd')
+
+    key = ('syevd', a.dtype, n)
+    if key in _buffersize:
+        lwork = _buffersize[key]
+    else:
+        lwork = ctypes.c_int(0)
+        status = buffn(_handle, CUSOLVER_EIG_MODE_VECTOR, _FILL_MODE_LOWER,
+                       n, A.data.ptr, n, w.data.ptr, ctypes.byref(lwork))
+        if status != 0:
+            raise LinAlgError("failed in syevd buffer size")
+        lwork = lwork.value
+        _buffersize[key] = lwork
+
+    work = cupy.empty(lwork, dtype=a.dtype)
+    devInfo = cupy.empty(1, dtype=np.int32)
+    status = fn(_handle, CUSOLVER_EIG_MODE_VECTOR, _FILL_MODE_LOWER,
+                n, A.data.ptr, n, w.data.ptr, work.data.ptr, lwork, devInfo.data.ptr)
+    if status != 0:
+        raise LinAlgError("failed in syevd kernel")
+    return w, A.T
+
+def eigh_std(a):
+    '''Drop-in for cupy.linalg.eigh (standard symmetric/hermitian eigendecomposition).
+
+    On ROCm/HIP, cupy.linalg.eigh falls back to the Jacobi solver (syevj) because
+    its divide-and-conquer binding is unimplemented there; syevj is ~15-80x slower
+    for large matrices and can even OOM. Route HIP through hipSOLVER's syevd/heevd
+    (divide-and-conquer) instead. On NVIDIA/CUDA, cupy.linalg.eigh already uses the
+    fast syevd, so it is left byte-for-byte unchanged.
+    '''
+    if cupy.cuda.runtime.is_hip:
+        return syevd(a)
+    return cupy.linalg.eigh(a)
 
 def cholesky(A):
     n = len(A)

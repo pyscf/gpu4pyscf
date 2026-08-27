@@ -24,6 +24,7 @@ import cupy as cp
 import numpy as np
 from gpu4pyscf.scf import hf as gpu_hf
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cusolver import eigh_std
 from gpu4pyscf.sem.integral import fock
 from gpu4pyscf.sem.scf import diis
 from gpu4pyscf import lib
@@ -354,7 +355,7 @@ class RHF(gpu_hf.RHF):
         
         h1e = self.get_hcore(mol)
         
-        mo_energy, mo_coeff = cp.linalg.eigh(h1e)
+        mo_energy, mo_coeff = eigh_std(h1e)
         mo_occ = self.get_occ(mo_energy, mo_coeff)
         
         return self.make_rdm1(mo_coeff, mo_occ)
@@ -374,7 +375,7 @@ class RHF(gpu_hf.RHF):
         For PM6 (ZDO approximation), the overlap matrix S is the identity matrix.
         Therefore, we bypass the expensive generalized eigenvalue solver.
         """
-        mo_energy, mo_coeff = cp.linalg.eigh(h)
+        mo_energy, mo_coeff = eigh_std(h)
         return mo_energy, mo_coeff
 
     _eigh = eig

@@ -24,6 +24,7 @@ import functools
 import itertools
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
 from pyscf.pbc import tools
@@ -219,7 +220,7 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
         f_k = sandwich_dot(fock[k], c_k)
         idx = cp.where(occmask[k])[0]
         if len(idx) > 0:
-            e, c = cp.linalg.eigh(f_k[idx[:,None],idx])
+            e, c = eigh_std(f_k[idx[:,None],idx])
             mo_coeff[k][:,idx] = c_k[:,idx].dot(c)
             mo_energy[k,idx] = e
 
@@ -236,7 +237,7 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
                     break
             idx = idx[:i+1]
             sub_fock = sub_fock[:i+1,:i+1]
-            e, c = cp.linalg.eigh(sub_fock)
+            e, c = eigh_std(sub_fock)
             mo_coeff[k][:,idx] = c_k[:,idx].dot(c)
             mo_energy[k,idx] = e
     return mo_energy, mo_coeff
@@ -594,7 +595,7 @@ class KSCF(pbchf.SCF):
                 fock = xk.T.conj() @ h_kpts[k] @ xk
                 if k == k_conj:
                     fock = cp.ascontiguousarray(fock.real)
-                ek, ck = cp.linalg.eigh(fock)
+                ek, ck = eigh_std(fock)
                 eig_kpts[k, :nmo_k] = ek
                 mo_coeff_kpts[k, :, :nmo_k] = xk.dot(ck)
                 if nmo_k < nao:

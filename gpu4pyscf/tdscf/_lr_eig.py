@@ -18,6 +18,7 @@ functions are provided in future PySCF release.
 '''
 
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 import sys
 import numpy as np
 import scipy.linalg
@@ -153,7 +154,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
         xt = None
 
         if x0sym is None:
-            w, v = cp.linalg.eigh(heff)
+            w, v = eigh_std(heff)
         else:
             # Diagonalize within eash symmetry sectors
             row1 = len(xs)
@@ -164,7 +165,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
             for ir in np.unique(cp.asnumpy(xs_ir)):
                 idx = cp.where(xs_ir == ir)[0]
                 i0, i1 = i1, i1 + idx.size
-                w_sub, v_sub = cp.linalg.eigh(heff[idx[:,None],idx])
+                w_sub, v_sub = eigh_std(heff[idx[:,None],idx])
                 w[i0:i1] = w_sub
                 v[idx,i0:i1] = v_sub
                 v_ir.append([ir] * idx.size)
@@ -974,7 +975,7 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, nroots):
 
     G = cp.linalg.cholesky(GGT)
     if cp.any(cp.isnan(G)):
-        eig, eigv = cp.linalg.eigh(GGT)
+        eig, eigv = eigh_std(GGT)
         if eig[0] < -1e-4:
             error_msg = (
                 "GGT matrix is not positive definite.\n"
@@ -989,7 +990,7 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, nroots):
     d_apb_d = cp.einsum('i,ij,j->ij', d_mh, a+b, d_mh)
     M = cp.dot(G.T, cp.dot(L_inv, cp.dot(d_apb_d, cp.dot(L_inv.T, G))))
 
-    omega2, Z = cp.linalg.eigh(M)
+    omega2, Z = eigh_std(M)
     if cp.any(omega2 <= 0):
         idx = cp.nonzero(omega2 > 0)[0]
         omega2 = omega2[idx[:nroots]]
@@ -1030,7 +1031,7 @@ def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, X_new, Y_new, lindep=1e-12):
     # s21 is symmetric
     s21  = X_new.T.dot(Y_new)
     s21 += Y_new.T.dot(X_new)
-    e, c = cp.linalg.eigh(s11)
+    e, c = eigh_std(s11)
     mask = e > lindep
     e = e[mask]
     if e.size == 0:
@@ -1042,7 +1043,7 @@ def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, X_new, Y_new, lindep=1e-12):
     n = csc.shape[0]
     lindep_sqrt = lindep**.5
     for i in range(n):
-        w, u = cp.linalg.eigh(csc[i:,i:])
+        w, u = eigh_std(csc[i:,i:])
         mask = 1 - abs(w) > lindep_sqrt
         if cp.any(mask):
             c = c[:,i:]
@@ -1056,11 +1057,11 @@ def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, X_new, Y_new, lindep=1e-12):
 
     if e[0] < 1e-6 or 1-abs(w[0]) < 1e-3:
         # Rerun the orthogonalization to reduce numerical errors
-        e, c = cp.linalg.eigh(c_orth.T.dot(s11).dot(c_orth))
+        e, c = eigh_std(c_orth.T.dot(s11).dot(c_orth))
         c *= e**-.5
         c_orth = c_orth.dot(c)
         csc = c_orth.T.dot(s21).dot(c_orth)
-        w, u = cp.linalg.eigh(csc)
+        w, u = eigh_std(csc)
         c_orth = c_orth.dot(u)
     mask = 1 - abs(w) > lindep_sqrt
     w = w[mask]
@@ -1289,7 +1290,7 @@ def Davidson(matrix_vector_product,
         '''
         t0 = log.init_timer()
         if gram_schmidt:
-            omega, x = cp.linalg.eigh(sub_A)
+            omega, x = eigh_std(sub_A)
         else:
             s_holder = math_helper.gen_VW(s_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
             overlap_s = s_holder[:size_new,:size_new]
