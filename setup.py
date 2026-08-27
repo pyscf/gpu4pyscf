@@ -95,7 +95,15 @@ def get_rocm_version():
         except Exception:
             out = ''
     m = re.search(r'(\d+)\.', out) or re.search(r'(\d+)\.\d+', find_rocm_path() or '')
-    return (m.group(1) if m else 'x') + 'x'
+    return (m.group(1) + 'x') if m else 'x'
+
+def _hip_missing(summary, *hints):
+    """Build an actionable error for a missing HIP/ROCm build prerequisite."""
+    lines = ['', summary]
+    lines += [f'  * {h}' for h in hints]
+    lines.append('To build the NVIDIA/CUDA backend instead, set USE_HIP=0.')
+    lines.append('')
+    return RuntimeError('\n'.join(lines))
 
 def get_version():
     topdir = os.path.abspath(os.path.join(__file__, '..'))
@@ -151,14 +159,18 @@ class CMakeBuildPy(build_py):
 
         Mirrors rocm/build_gpu4pyscf.sh so ``pip install`` reproduces the
         script's build: export the ROCm paths and select the HIP language via
-        -DUSE_HIP=ON. The GPU architecture is auto-detected by CMake
-        (rocm_agent_enumerator); override with GPU_ARCHITECTURES=gfxXXXX.
+        -DUSE_HIP=ON. The GPU architecture is auto-detected (rocm_agent_enumerator);
+        override with GPU_ARCHITECTURES=gfxXXXX. Missing prerequisites raise an
+        actionable error before CMake runs.
         """
         rocm_path = find_rocm_path()
         if not rocm_path:
-            raise RuntimeError(
-                "USE_HIP is set but no ROCm installation was found. "
-                "Set ROCM_PATH (or put hipconfig on PATH).")
+            raise _hip_missing(
+                "AMD HIP/ROCm build selected, but no ROCm installation was found.",
+                "set ROCM_PATH to your ROCm root (the directory with bin/hipconfig),",
+                "or put 'hipconfig' on PATH,",
+                "or install ROCm: https://rocm.docs.amd.com")
+
         os.environ.setdefault('ROCM_PATH', rocm_path)
         os.environ.setdefault('ROCM_HOME', rocm_path)
         os.environ.setdefault('HIP_PATH', rocm_path)
@@ -168,15 +180,48 @@ class CMakeBuildPy(build_py):
         libdirs = os.pathsep.join(os.path.join(rocm_path, d) for d in ('lib', 'lib64'))
         os.environ['LD_LIBRARY_PATH'] = libdirs + os.pathsep + os.environ.get('LD_LIBRARY_PATH', '')
 
-        args = ['-DUSE_HIP=ON']
-        hip_compiler = os.getenv('CMAKE_HIP_COMPILER',
-                                 os.path.join(rocm_path, 'llvm', 'bin', 'clang++'))
-        if os.path.exists(hip_compiler):
-            args.append(f'-DCMAKE_HIP_COMPILER={hip_compiler}')
+        # HIP (clang++) compiler: honour CMAKE_HIP_COMPILER, else the ROCm LLVM
+        # clang++, else amdclang++ on PATH. Fail early with guidance -- CMake's
+        # own "no CMAKE_HIP_COMPILER could be found" error is cryptic.
+        hip_compiler = os.getenv('CMAKE_HIP_COMPILER') \
+            or os.path.join(rocm_path, 'llvm', 'bin', 'clang++')
+        if not os.path.exists(hip_compiler):
+            hip_compiler = shutil.which('amdclang++') or hip_compiler
+        if not os.path.exists(hip_compiler):
+            raise _hip_missing(
+                f"HIP compiler not found (looked for '{hip_compiler}').",
+                "install the ROCm LLVM/clang toolchain,",
+                "or set CMAKE_HIP_COMPILER to a HIP-capable clang++ "
+                "(e.g. $ROCM_PATH/llvm/bin/clang++)")
+        args = ['-DUSE_HIP=ON', f'-DCMAKE_HIP_COMPILER={hip_compiler}']
+
+        # GPU architecture: an explicit override wins; otherwise pre-flight the
+        # auto-detection so a missing enumerator / invisible GPU gives a clear
+        # message here instead of a mid-configure CMake fatal error.
         gpu_arch = os.getenv('GPU_ARCHITECTURES')
         if gpu_arch:
             args.append(f'-DGPU_ARCHITECTURES={gpu_arch}')
+        elif not os.getenv('CMAKE_HIP_ARCHITECTURES'):
+            if not self._detect_hip_archs(rocm_path):
+                raise _hip_missing(
+                    "Could not determine the AMD GPU architecture automatically.",
+                    "pass GPU_ARCHITECTURES=gfxXXXX "
+                    "(e.g. gfx90a, gfx942, gfx1100, gfx1151),",
+                    "or make 'rocm_agent_enumerator' available with a GPU visible")
         return args
+
+    @staticmethod
+    def _detect_hip_archs(rocm_path):
+        """Installed AMD GPU gfx targets via rocm_agent_enumerator (best-effort)."""
+        enumerator = shutil.which('rocm_agent_enumerator') \
+            or os.path.join(rocm_path, 'bin', 'rocm_agent_enumerator')
+        if not os.path.exists(enumerator):
+            return []
+        try:
+            out = subprocess.check_output([enumerator]).decode('utf-8')
+        except Exception:
+            return []
+        return [a for a in out.split() if a.startswith('gfx') and a != 'gfx000']
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
