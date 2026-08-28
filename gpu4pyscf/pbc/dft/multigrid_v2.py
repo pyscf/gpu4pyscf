@@ -2015,8 +2015,32 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
                                      rho1_sf, grids, with_j, with_nuc)
     return out
 
+_MULTIGRID_HIP_WARNED = False
+
+def _warn_multigrid_on_hip():
+    '''Advise against multigrid on ROCm/HIP (once per process).
+
+    On AMD the multigrid collocation kernels are currently slow -- frequently
+    slower than the default FFTDF path (the vxc->Fock collocation dominates the
+    runtime) -- and can hard-hang the GPU for sharp / short-range GTH
+    pseudopotentials (e.g. the semicore Mg pseudo in MgO). The internal
+    get_hcore optimization already falls back to FFTDF on HIP; this only warns
+    when a user explicitly selects multigrid. See rocm/TO_IMPROVE.md.
+    '''
+    global _MULTIGRID_HIP_WARNED
+    if _MULTIGRID_HIP_WARNED or not cp.cuda.runtime.is_hip:
+        return
+    _MULTIGRID_HIP_WARNED = True
+    warnings.warn(
+        'multigrid (v2) on ROCm/HIP: the collocation kernels are currently slow '
+        '(often slower than the default FFTDF path) and can hard-hang the GPU '
+        'for sharp / short-range GTH pseudopotentials (e.g. the semicore Mg '
+        'pseudo in MgO). The default FFTDF path is recommended on AMD. '
+        'See rocm/TO_IMPROVE.md.')
+
 class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def __init__(self, cell):
+        _warn_multigrid_on_hip()
         self.cell = cell
         self.mesh = cell.mesh
         self.tasks = None

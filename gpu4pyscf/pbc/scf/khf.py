@@ -439,10 +439,17 @@ class KSCF(pbchf.SCF):
 
         if isinstance(self._numint, multigrid.MultiGridNumIntBase):
             ni = self._numint
-        elif cell.dimension == 3 and np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
+        elif (cell.dimension == 3 and np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE
+                and not cp.cuda.runtime.is_hip):
             # Automatic MultiGrid nuclear potentials are only available in 3D.
             # In the pseudo and all-electron mixed case, MultiGridNumInt is
             # still more efficient if Ecut is not too high.
+            # On ROCm/HIP the multigrid pseudopotential collocation kernel
+            # hard-hangs the GPU for sharp / short-range GTH pseudos (e.g. MgO's
+            # semicore Mg: HW Exception "GPU Hang", core dump), so skip this
+            # opportunistic optimization there and use FFTDF get_pp instead --
+            # hcore is built once, so the cost is negligible. See
+            # rocm/TO_IMPROVE.md item 3. The CUDA path is unchanged.
             ni = multigrid_v3.MultiGridNumInt(cell)
         else:
             ni = self.with_df
