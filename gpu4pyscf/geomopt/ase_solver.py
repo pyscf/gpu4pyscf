@@ -64,6 +64,7 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
 
     atoms = pyscf_to_ase_atoms(cell)
     atoms.calc = PySCF(method=method, method_factory=method_factory)
+    # fixing the center of mass of a subset of atoms
     if is_pbc and target != 'lattice':
         atoms.set_constraint(FixCom())
 
@@ -78,6 +79,7 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
     if logfile is None:
         logfile = '-' # stdout
 
+    # TODO: for cell optimization, optimizer can be cell awared BFGS.
     opt = BFGS(atoms, logfile=logfile)
     converged = opt.run(fmax=fmax, steps=max_steps)
 
