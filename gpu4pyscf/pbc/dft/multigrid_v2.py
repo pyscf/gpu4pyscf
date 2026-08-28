@@ -2025,7 +2025,7 @@ def _warn_multigrid_on_hip():
     runtime) -- and can hard-hang the GPU for sharp / short-range GTH
     pseudopotentials (e.g. the semicore Mg pseudo in MgO). The internal
     get_hcore optimization already falls back to FFTDF on HIP; this only warns
-    when a user explicitly selects multigrid. See rocm/TO_IMPROVE.md.
+    when a user explicitly selects multigrid.
     '''
     global _MULTIGRID_HIP_WARNED
     if _MULTIGRID_HIP_WARNED or not cp.cuda.runtime.is_hip:
@@ -2035,8 +2035,7 @@ def _warn_multigrid_on_hip():
         'multigrid (v2) on ROCm/HIP: the collocation kernels are currently slow '
         '(often slower than the default FFTDF path) and can hard-hang the GPU '
         'for sharp / short-range GTH pseudopotentials (e.g. the semicore Mg '
-        'pseudo in MgO). The default FFTDF path is recommended on AMD. '
-        'See rocm/TO_IMPROVE.md.')
+        'pseudo in MgO). The default FFTDF path is recommended on AMD.')
 
 class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def __init__(self, cell):
@@ -2288,7 +2287,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         # No HIP libXC: on AMD the XC-on-CPU fallback (gpu4pyscf/dft/numint.py)
         # calls to_cpu().eval_xc_eff(...) each SCF cycle. There is no CPU<->GPU
         # bridge for the multigrid grid machinery, so return a lightweight CPU
-        # numint sufficient for that functional evaluation. See
-        # rocm/TO_IMPROVE.md item 5; removable once a HIP libXC keeps XC on GPU.
+        # numint sufficient for that functional evaluation. Removable once a
+        # HIP libXC keeps XC on the GPU.
         from pyscf.pbc.dft import numint as numint_cpu
         return numint_cpu.NumInt()

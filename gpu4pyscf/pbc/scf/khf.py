@@ -422,8 +422,8 @@ class KSCF(pbchf.SCF):
             # hard-hangs the GPU for sharp / short-range GTH pseudos (e.g. MgO's
             # semicore Mg: HW Exception "GPU Hang", core dump), so skip this
             # opportunistic optimization there and use FFTDF get_pp instead --
-            # hcore is built once, so the cost is negligible. See
-            # rocm/TO_IMPROVE.md item 3. The CUDA path is unchanged.
+            # hcore is built once, so the cost is negligible. The CUDA path is
+            # unchanged.
             ni = multigrid_v3.MultiGridNumInt(cell)
         else:
             ni = self.with_df
