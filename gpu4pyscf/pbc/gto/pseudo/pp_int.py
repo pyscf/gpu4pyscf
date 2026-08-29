@@ -20,7 +20,7 @@ from pyscf.pbc.gto.cell import _estimate_rcut
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.gto.mole import most_diffuse_pgto
+from gpu4pyscf.gto.mole import most_diffuse_pgto, SortedGTO
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools import k2gamma
 
@@ -40,6 +40,7 @@ def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
 
     hl_dims = np.asarray([len(hl) for hl in hl_blocks])
 
+    cell = SortedGTO.from_cell(cell, decontract=True)
     bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
     pcell = fakecell.copy(deep=False)
 

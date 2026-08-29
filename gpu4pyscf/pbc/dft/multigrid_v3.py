@@ -1674,10 +1674,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         # *(1./weight) because rhoR is scaled by weight in _eval_density. If
         # computing rhoR with IFFT, the weight factor is not needed.
         density *= 1/weight
-        t0 = log.timer_debug1("density", *t0)
 
         rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
         rho_sf[:] = density[0].real
+        t0 = log.timer_debug1("density", *t0)
 
         # eval_xc_eff supports float64 only
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
@@ -1794,11 +1794,11 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # *(1./weight) because rhoR is scaled by weight in _eval_density. If
     # computing rhoR with IFFT, the weight factor is not needed.
     density *= 1./weight
-    t0 = log.timer_debug1("density", *t0)
 
     rho_sf = ndarray(ngrids, dtype=np.float64, buffer=rhoGb)
     rho_sf[:] = density[0,0].real
     rho_sf[:] += density[1,0].real
+    t0 = log.timer_debug1("density", *t0)
 
     # eval_xc_eff supports float64 only
     xc_for_energy, xc_for_fock = ni.eval_xc_eff(
@@ -2322,14 +2322,16 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
             rho_sf[:] = density[0,0].real
             rho_sf[:] += density[1,0].real
+        t0 = log.timer_debug1("density", *t0)
 
         if xctype != 'HF':
             exc, vxc = self.eval_xc_eff(
                 xc_code, density, deriv=1, xctype=xctype, spin=spin)[:2]
             vxc *= weight
+            t0 = log.timer_debug1("eval_xc_eff", *t0)
 
             # grid weight response
-            sigma = rho_sf.dot(exc.ravel()) * weight * cp.eye(3)
+            sigma = vec_dot(rho_sf, exc.ravel()) * weight * cp.eye(3)
 
         if xctype == 'GGA' or xctype == 'MGGA':
             # The response of grids wrt the lattice vectors introduces an
@@ -2375,6 +2377,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             coulomb_on_g_mesh += coulomb_on_g_mesh1
             coulomb_on_g_mesh1 = None
         rhoG = tauG = None
+        t0 = log.timer_debug1("with_j and with_nuc", *t0)
 
         # Reconstruct fft_buckets if aft_buckets is initialized. In this case,
         # self.fft_buckets miss orbital pairs with low Ecut.
@@ -2409,7 +2412,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             grad += grad1
             sigma += sigma1
 
-        t0 = log.timer("xc derivatives", *t0)
+        t0 = log.timer("xc integration", *t0)
         return grad.get(), sigma.get()
 
     to_cpu = NotImplemented

@@ -977,7 +977,7 @@ class SortedMole(Mole, SortedGTO):
     def shell_overlap_mask(self, hermi=1, precision=1e-16):
         '''absmax(<i|j>) > precision for each shell pair'''
         from gpu4pyscf.pbc.gto.int1e import _shell_overlap_mask
-        return _shell_overlap_mask(self, hermi, precision)
+        return _shell_overlap_mask(self, hermi, precision)[:,0]
 
     def generate_shl_pairs(self, hermi=1, mask=None):
         if mask is None:
@@ -1086,8 +1086,8 @@ class RysIntEnvVars(ctypes.Structure):
 
 class PBCIntEnvVars(ctypes.Structure):
     _fields_ = [
-        ('natm', ctypes.c_int),
-        ('nbas', ctypes.c_int),
+        ('natm', ctypes.c_int), # number of atoms in unit cell
+        ('nbas', ctypes.c_int), # number of shells in unit cell
         ('atm', ctypes.c_void_p),
         ('bas', ctypes.c_void_p),
         ('env', ctypes.c_void_p),

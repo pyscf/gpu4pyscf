@@ -68,7 +68,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     # derivatives of the two-electron contribution
     e2_grad = mf_grad.energy_ee(dm0, kpts)
-    t1 = log.timer('gradients of 2e part', *t0)
+    t1 = log.timer_debug1('gradients of 2e part', *t0)
 
     ni = mf._numint
     if isinstance(ni, multigrid.MultiGridNumIntBase):
@@ -87,7 +87,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
         dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0, kpts = kpts)
         dh1e += dh1e_pp_nonlocal
 
-    log.timer('gradients of 1e part', *t1)
+    log.timer_debug1('gradients of 1e part', *t1)
 
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)

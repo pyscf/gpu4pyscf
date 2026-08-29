@@ -179,8 +179,11 @@ class Gradients(GradientsBase):
         if getattr(mf, 'with_x2c', None):
             raise NotImplementedError('X2C gradients')
 
+        log = logger.new_logger(cell)
+        t0 = log.init_timer()
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
         de = self.energy_ee(dm0)
+        t1 = log.timer_debug1('gradients of 2e part', *t0)
 
         ni = mf._numint
         if isinstance(ni, multigrid.MultiGridNumIntBase):
@@ -198,6 +201,7 @@ class Gradients(GradientsBase):
 
         if cell._pseudo:
             de += vppnl_nuc_grad(cell, dm0)
+        t1 = log.timer_debug1('gradients of 1e part', *t1)
 
         dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ)
         s1 = int1e.int1e_ipovlp(cell)

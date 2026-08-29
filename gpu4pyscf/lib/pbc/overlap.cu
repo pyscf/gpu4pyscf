@@ -1863,7 +1863,7 @@ void kin_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
 __global__ static
 void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef,
                                  PBCIntEnvVars envs, int hermi, float log_cutoff,
-                                 int ish0, int ish1, int jsh0, int jsh1)
+                                 double *bvkmesh_Ls, int ish0, int ish1, int jsh0, int jsh1)
 {
     size_t pair_ij = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
     int nish = ish1 - ish0;
@@ -1871,7 +1871,6 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef
     if (pair_ij >= (size_t)nish * njsh * envs.bvk_ncells) {
         return;
     }
-    int nbas = envs.nbas;
     int bvk_njsh = envs.bvk_ncells * njsh;
     int i = pair_ij / bvk_njsh;
     int j = pair_ij - bvk_njsh * i;
@@ -1882,10 +1881,7 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef
         return;
     }
 
-    int ish = ish_cell0;
-    int jsh = jsh_cell0 + cell_id * nbas;
     int nimgs = envs.nimgs;
-    int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1900,11 +1896,17 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef
     float log_ci = log_coef[ish_cell0];
     float log_cj = log_coef[jsh_cell0];
     float log_cicj = log_ci + log_cj;
-    double *ri = env + atm[bas[ish*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
-    double *rj = env + atm[bas[jsh*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
-    float xjxi = rj[0] - ri[0];
-    float yjyi = rj[1] - ri[1];
-    float zjzi = rj[2] - ri[2];
+    double *ri = env + bas[ish_cell0*BAS_SLOTS + PTR_BAS_COORD];
+    double *rj = env + bas[jsh_cell0*BAS_SLOTS + PTR_BAS_COORD];
+    float xi = ri[0];
+    float yi = ri[1];
+    float zi = ri[2];
+    float xj = rj[0] + bvkmesh_Ls[cell_id*3+0];
+    float yj = rj[1] + bvkmesh_Ls[cell_id*3+1];
+    float zj = rj[2] + bvkmesh_Ls[cell_id*3+2];
+    float xjxi = xj - xi;
+    float yjyi = yj - yi;
+    float zjzi = zj - zi;
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f * logf(aij);
 
@@ -2102,18 +2104,19 @@ int PBCkin_strain_deriv(double *out, double *dm,
 
 void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
                              PBCIntEnvVars *envs, int hermi, float log_cutoff,
-                             int *shls_slice, int ncells)
+                             double *bvkmesh_Ls, int *shls_slice)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
     int jsh0 = shls_slice[2];
     int jsh1 = shls_slice[3];
+    int ncells = envs->bvk_ncells;
     size_t nish = ish1 - ish0;
     size_t njsh = jsh1 - jsh0;
     size_t npairs = nish * ncells * njsh;
     int nbatches = (npairs + 255) / 256;
     ovlp_mask_estimation_kernel<<<nbatches, 256>>>(
-            ovlp_mask, exps, log_coeff, *envs, hermi, log_cutoff,
+            ovlp_mask, exps, log_coeff, *envs, hermi, log_cutoff, bvkmesh_Ls,
             ish0, ish1, jsh0, jsh1);
 }
 }

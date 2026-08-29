@@ -20,11 +20,12 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc.gto import Cell
 from pyscf.pbc.gto.cell import _estimate_rcut
-from pyscf.pbc.tools.pbc import super_cell, _build_supcell_
+from pyscf.pbc.tools.pbc import super_cell, _build_supcell_, get_lattice_Ls
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.gto.mole import extract_pgto_params
-from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, hermi_triu
+from gpu4pyscf.lib.cupy_helper import (
+    contract, asarray, ndarray, hermi_triu, dist_matrix)
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
@@ -146,8 +147,8 @@ class _Int1eOpt:
                 bvkcell = super_cell(cell, bvk_kmesh, wrap_around=True)
                 # PTR_BAS_COORD was not initialized in the super_cell function
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-            Ls = asarray(bvkcell.get_lattice_Ls(rcut=bvkcell.rcut))
-            Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+            Ls = _bvkcell_lattice_sum_Ls(bvkcell)
+            Ls = Ls[np.linalg.norm(Ls-.5, axis=1).argsort()]
 
             rad = bvkcell.rcut / bvkcell.vol**(1./3) + 1
             surface = 4*np.pi * rad**2
@@ -168,8 +169,8 @@ class _Int1eOpt:
         if isinstance(cell, Mole):
             bas_ij_cache = cell.generate_shl_pairs(hermi)
         else:
-            mask = _shell_overlap_mask(bvkcell, hermi, precision, Ls,
-                                       self.int1e_envs, bvk_ncells)
+            mask = _shell_overlap_mask(cell, hermi, precision, Ls,
+                                       self.int1e_envs, bvkmesh_Ls)
             nbas = cell.nbas
             l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
             groups = len(cell.uniq_l_ctr)
@@ -236,7 +237,7 @@ class _Int1eOpt:
             # build supmol for evaluating integrals <cell-0|super-mol>, which
             # can be transformed to integrals at arbitrary k-points
             supmol = cell.copy(deep=False)
-            supmol = _build_supcell_(supmol, cell, self.Ls.get())
+            supmol = _build_supcell_(supmol, cell, cp.asnumpy(self.Ls))
             supmol._bas[:,PTR_BAS_COORD] = supmol._atm[supmol._bas[:,ATOM_OF],PTR_COORD]
             ncells = len(self.Ls)
             Ls = cp.zeros((1, 3))
@@ -284,7 +285,7 @@ class _Int1eOpt:
             kpts = asarray(kpts.reshape(-1, 3))
             nkpts = len(kpts)
             if self.bvk_kmesh is None:
-                expLk = cp.exp(1j*self.Ls.dot(kpts.T))
+                expLk = cp.exp(1j*asarray(self.Ls).dot(kpts.T))
             else:
                 expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
             expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
@@ -381,7 +382,8 @@ class CrossInt1e(_Int1eOpt):
             assert isinstance(cell2, Mole)
             bvk_kmesh = None
             bvkcell = cell12
-            bvkmesh_Ls = Ls = cp.zeros((1, 3))
+            bvkmesh_Ls = Ls = np.zeros((1, 3))
+            precision = 1e-14
         else:
             if bvk_kmesh is None:
                 bvkmesh_Ls = cp.zeros((1, 3))
@@ -394,8 +396,8 @@ class CrossInt1e(_Int1eOpt):
                 bvkcell = super_cell(cell12, bvk_kmesh, wrap_around=True)
                 # PTR_BAS_COORD was not initialized in supe_rcell
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-            Ls = asarray(bvkcell.get_lattice_Ls(rcut=bvkcell.rcut))
-            Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+            Ls = _bvkcell_lattice_sum_Ls(bvkcell)
+            Ls = Ls[np.linalg.norm(Ls-.5, axis=1).argsort()]
 
             rad = bvkcell.rcut / bvkcell.vol**(1./3) + 1
             surface = 4*np.pi * rad**2
@@ -414,14 +416,9 @@ class CrossInt1e(_Int1eOpt):
             bvkcell._atm, bvkcell._bas, _env, ao_loc, Ls)
 
         shls_slice = (0, cell1.nbas, cell1.nbas, cell12.nbas)
-        if isinstance(cell1, Mole):
-            mask = _shell_overlap_mask(
-                cell12, 0, envs=self.int1e_envs, shls_slice=shls_slice)
-            mask = mask[:,None]
-        else:
-            mask = _shell_overlap_mask(
-                bvkcell, 0, precision, Ls, self.int1e_envs, bvk_ncells,
-                shls_slice=shls_slice)
+        mask = _shell_overlap_mask(
+            cell12, 0, precision, Ls, self.int1e_envs, bvkmesh_Ls,
+            shls_slice=shls_slice)
 
         self.bas_ij_cache = bas_ij_cache = {}
         nbas = cell12.nbas
@@ -481,24 +478,27 @@ def _gout_stride_lookup_table(cell, deriv=None, gout_width=36):
     max_shm_size = shm_size[:lmax+1,:lmax+1].max()
     return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
 
-def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None, envs=None,
-                        bvk_ncells=None, shls_slice=None):
-    '''absmax(<i|j>) > precision for each shell pair'''
-    exps, cs = extract_pgto_params(mol, 'diffuse')
+def _shell_overlap_mask(cell, hermi=1, precision=1e-14, Ls=None, envs=None,
+                        bvkmesh_Ls=None, shls_slice=None):
+    '''mask[i,bvkL,j] = absmax(<i|bvkL+j>) > precision'''
+    exps, cs = extract_pgto_params(cell, 'diffuse')
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(asarray(cs, dtype=np.float32)))
 
-    ncells = bvk_ncells if bvk_ncells is not None else 1
-    nbas = mol.nbas // ncells # number of shells in unit cell
-    natm = mol.natm // ncells # number of atoms in unit cell
-
     if shls_slice is None:
+        nbas = cell.nbas
         shls_slice = (0, nbas, 0, nbas)
-
     i0, i1, j0, j1 = shls_slice
     nbas1 = i1 - i0
     nbas2 = j1 - j0
+
+    if bvkmesh_Ls is None:
+        bvkmesh_Ls = cp.zeros((1, 3))
+    else:
+        bvkmesh_Ls = cp.asarray(bvkmesh_Ls)
+    ncells = len(bvkmesh_Ls)
     ovlp_mask = cp.zeros((nbas1,ncells,nbas2), dtype=bool)
+
     if envs is None:
         ao_loc = cp.zeros(1, dtype=np.int32)
         if Ls is None:
@@ -506,8 +506,8 @@ def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None, envs=None,
         else:
             Ls = asarray(Ls)
         envs = PBCIntEnvVars.new(
-            natm, nbas, ncells, len(Ls), asarray(mol._atm),
-            asarray(mol._bas), asarray(_scale_sp_ctr_coeff(mol)), ao_loc, Ls)
+            cell.natm, cell.nbas, ncells, len(Ls), asarray(cell._atm),
+            asarray(cell._bas), asarray(_scale_sp_ctr_coeff(cell)), ao_loc, Ls)
     else:
         assert envs.bvk_ncells == ncells
 
@@ -517,8 +517,17 @@ def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None, envs=None,
         ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(hermi),
         ctypes.c_float(math.log(precision)),
-        (ctypes.c_int*4)(*shls_slice),
-        ctypes.c_int(ncells))
-    if bvk_ncells is None:
-        ovlp_mask = ovlp_mask[:,0]
+        ctypes.cast(bvkmesh_Ls.data.ptr, ctypes.c_void_p),
+        (ctypes.c_int*4)(*shls_slice))
     return ovlp_mask
+
+def _bvkcell_lattice_sum_Ls(bvkcell, rcut=None):
+    if rcut is None:
+        rcut = bvkcell.rcut
+    Ls = get_lattice_Ls(bvkcell, rcut=rcut, discard=False)
+    if len(Ls) > 1:
+        r = asarray(bvkcell.atom_coords())
+        dist_max = dist_matrix(r, r).max().get()
+        Ls_mask = np.linalg.norm(Ls, axis=1) < rcut + dist_max
+        Ls = Ls[Ls_mask]
+    return np.asarray(Ls, order='C')
