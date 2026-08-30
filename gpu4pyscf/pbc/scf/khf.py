@@ -477,6 +477,7 @@ class KSCF(pbchf.SCF):
             fock = self.get_hcore(self.cell, self.kpts) + self.get_veff(self.cell, dm1)
         return get_grad(mo_coeff_kpts, mo_occ_kpts, fock)
 
+    @functools.lru_cache
     def iter_kpt_pairs(self, time_reversal_symmetry=None, nkpts=None):
         '''
         Iterate over time-reversal-related k-point pairs.
@@ -502,7 +503,7 @@ class KSCF(pbchf.SCF):
 
         kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=False)
         if nkpts == np.prod(kmesh):
-            return [x[:2] for x in kk_adapted_iter(kmesh)]
+            return [x[:2] for x in kk_adapted_iter(kmesh, return_pair_index=False)]
         else:
             return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
 
