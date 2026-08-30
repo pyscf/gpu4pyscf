@@ -1832,6 +1832,36 @@ def get_veff_ip1(
 
     return veff_gradient.get()
 
+def _neighboring_image_translations(ni):
+    lattice_vectors = asarray(ni.cell.lattice_vectors())
+    # Preserve the image topology referenced by the cached pair and block indices.
+    return [
+        cp.rint(cp.linalg.solve(lattice_vectors.T, pair['neighboring_images'].T).T).astype(cp.int32)
+        for pair in ni.sorted_gaussian_pairs
+    ]
+
+def _copy_numint_for_strained_cell(ni, cell, image_translations):
+    atom_coords = asarray(cell.atom_coords().ravel())
+    atm = ni.sorted_gaussian_pairs[0]['atm']
+    atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
+    lattice_vectors = cell.lattice_vectors()
+    lattice_vectors_gpu = asarray(lattice_vectors)
+    pairs = []
+    for pair0, translations in zip(ni.sorted_gaussian_pairs, image_translations):
+        pair = pair0.copy()
+        env = pair['env'].copy()
+        env[atom_coords_address] = atom_coords
+        pair['env'] = env
+        pair['is_non_orthogonal'] = 1
+        pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None] # update the mesh.
+        pair['neighboring_images'] = translations @ lattice_vectors_gpu
+        pairs.append(pair)
+
+    ni_copy = ni.copy()
+    ni_copy.cell = cell
+    ni_copy.sorted_gaussian_pairs = pairs
+    return ni_copy
+
 def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
     '''Strain derivatives for Coulomb and Exc with k-point samples
 
@@ -1864,26 +1894,7 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
     rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(nvar, ngrids)
     rho0 *= ngrids / cell.vol
 
-    ni_copy = ni.copy()
-    def update_pairs_info(cell1):
-        r = asarray(cell1.atom_coords().ravel())
-        atm = ni.sorted_gaussian_pairs[0]['atm']
-        atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
-        lattice_vectors = cell1.lattice_vectors()
-        neighboring_images = asarray(gto.eval_gto.get_lattice_Ls(cell1))
-        pairs = []
-        for pair in ni.sorted_gaussian_pairs:
-            pair = pair.copy()
-            pairs.append(pair)
-            env = pair['env'].copy()
-            env[atom_coords_address] = r
-            pair['env'] = env
-            pair['is_non_orthogonal'] = 1
-            pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None]
-            pair['neighboring_images'] = neighboring_images
-        ni_copy.cell = cell1
-        ni_copy.sorted_gaussian_pairs = pairs
-
+    image_translations = _neighboring_image_translations(ni)
     disp = 1e-4
     scaled_kpts = kpts.dot(cell.lattice_vectors().T)
     rho1 = cp.empty((3, 3, nvar, ngrids))
@@ -1893,12 +1904,12 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
             kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
             kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
 
-            update_pairs_info(cell1)
+            ni_copy = _copy_numint_for_strained_cell(ni, cell1, image_translations)
             rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
             rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
             rho_plus *= ngrids / cell1.vol
 
-            update_pairs_info(cell2)
+            ni_copy = _copy_numint_for_strained_cell(ni, cell2, image_translations)
             rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
             rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
             rho_minus *= ngrids / cell2.vol
@@ -1947,26 +1958,7 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
     rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(2, nvar, ngrids)
     rho0 *= ngrids / cell.vol
 
-    ni_copy = ni.copy()
-    def update_pairs_info(cell1):
-        r = asarray(cell1.atom_coords().ravel())
-        atm = ni.sorted_gaussian_pairs[0]['atm']
-        atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
-        lattice_vectors = cell1.lattice_vectors()
-        neighboring_images = asarray(gto.eval_gto.get_lattice_Ls(cell1))
-        pairs = []
-        for pair in ni.sorted_gaussian_pairs:
-            pair = pair.copy()
-            pairs.append(pair)
-            env = pair['env'].copy()
-            env[atom_coords_address] = r
-            pair['env'] = env
-            pair['is_non_orthogonal'] = 1
-            pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None]
-            pair['neighboring_images'] = neighboring_images
-        ni_copy.cell = cell1
-        ni_copy.sorted_gaussian_pairs = pairs
-
+    image_translations = _neighboring_image_translations(ni)
     disp = 1e-4
     scaled_kpts = kpts.dot(cell.lattice_vectors().T)
     rho1 = cp.empty((3, 3, 2, nvar, ngrids))
@@ -1976,12 +1968,12 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
             kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
             kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
 
-            update_pairs_info(cell1)
+            ni_copy = _copy_numint_for_strained_cell(ni, cell1, image_translations)
             rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
             rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
             rho_plus *= ngrids / cell1.vol
 
-            update_pairs_info(cell2)
+            ni_copy = _copy_numint_for_strained_cell(ni, cell2, image_translations)
             rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
             rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
             rho_minus *= ngrids / cell2.vol
