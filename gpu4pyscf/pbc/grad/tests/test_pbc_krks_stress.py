@@ -185,6 +185,59 @@ class KnownValues(unittest.TestCase):
             assert abs(dat1[i,j] - (exc1 - exc2)/2e-4) < 1e-7
             assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
+    def test_multigrid_image_boundary_strain_deriv(self):
+        # The structure is from t-HfO2, all elements are changed to H.
+        cell = gto.Cell()
+        cell.atom = [
+            ('H', (1.767935803700000, 1.767935803726000, 2.595423152457000)),
+            ('H', (-0.000000000170000, -0.000000000413000, -0.000000000009000)),
+            ('H', (-0.000000000217000, 1.767935803226000, 3.539517351764000)),
+            ('H', (1.767935803466000, -0.000000000847000, 4.246760404410000)),
+            ('H', (1.767935803449000, -0.000000000675000, 1.651328953277000)),
+            ('H', (-0.000000000265000, 1.767935803396000, 0.944085900686000)),
+        ]
+        cell.a = [
+            [3.535871610000000, 0.000000000293102, -0.000000000005598],
+            [0.000000000293102, 3.535871610000000, -0.000000000129270],
+            [-0.000000000007998, -0.000000000189320, 5.190846310000000],
+        ]
+        cell.unit = 'Angstrom'
+        cell.basis = [[0, [1.0, 1.0]]]
+        cell.rcut = 34.71833632109211
+        cell.precision = 1e-10
+        cell.mesh = [15, 15, 21]
+        cell.build()
+
+        cell_plus, cell_minus = _finite_diff_cells(cell, 0, 0, disp=1e-4)
+        assert len(gto.eval_gto.get_lattice_Ls(cell_plus)) == 946
+        # The minus will have one extra image.
+        assert len(gto.eval_gto.get_lattice_Ls(cell_minus)) == 947
+
+        kpts = cell.make_kpts([1, 1, 1], with_gamma_point=True)
+        dm = np.eye(cell.nao)[None]
+        xc = 'r2scan'
+
+        from gpu4pyscf.pbc.dft.multigrid_v2 import (
+            MultiGridNumInt as MultiGridNumIntV2,
+            _rks_exc_strain_deriv,
+        )
+        ni_v2 = MultiGridNumIntV2(cell)
+        ni_v2.mesh = np.asarray(cell.mesh)
+        ni_v2.build('MGGA', gamma_point=False)
+        dat = _rks_exc_strain_deriv(
+            ni_v2, xc, dm, kpts, with_j=False, with_nuc=False)
+        assert abs(dat / cell.vol).max() < 1e-3
+
+        # V3 evaluates strain derivatives analytically without rebuilding
+        # neighboring images for displaced cells.
+        for enable_aft in (True, False):
+            ni_v3 = MultiGridNumInt(cell)
+            ni_v3.enable_aft = enable_aft
+            ni_v3.mesh = np.asarray(cell.mesh)
+            dat = ni_v3.energy_strain_gradient(
+                xc, dm, kpts, spin=0, with_j=False, with_nuc=False)
+            assert abs(dat / cell.vol).max() < 1e-3
+
     def test_get_j(self):
         a = np.eye(3) * 5
         np.random.seed(5)

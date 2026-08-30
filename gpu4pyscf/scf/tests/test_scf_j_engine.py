@@ -13,9 +13,10 @@
 # limitations under the License.
 
 import unittest
+import cupy as cp
 import numpy as np
 import pyscf
-from pyscf import lib
+from pyscf import dft, lib
 from gpu4pyscf.scf import j_engine, jk
 from pyscf.scf.hf import get_jk
 
@@ -53,6 +54,33 @@ def test_j_engine():
     ref = get_jk(mol, dm, hermi=1, with_k=False)[0]
     assert abs(vj1 - ref).max() < 5e-9
     assert abs(lib.fp(vj1) - -3491.404124194866) < 1e-9
+
+def test_j_engine_one_density_tail():
+    """Exercise the one-DM (fd|ps) tail with 2 pairs and 8 ij threads.
+
+    Inactive ij lanes must participate in block-wide reductions without reading
+    past the corresponding pair-location entries.
+    """
+    mol = pyscf.M(
+        atom='''
+        O  0.000000  0.000000  0.000000
+        H  0.758602  0.000000  0.504284
+        H  0.758602  0.000000 -0.504284
+        ''',
+        basis='def2-tzvp',
+        charge=1,
+        spin=1,
+        verbose=0,
+    )
+    spin_dm = dft.UKS(mol).get_init_guess()
+    dm = spin_dm[0] + spin_dm[1]
+
+    # Give pair_loc a distinct CUDA allocation boundary so a memory checker can
+    # detect tail reads that spare capacity in CuPy's memory pool may hide.
+    with cp.cuda.using_allocator(None):
+        vj = j_engine.get_j(mol, dm).get()
+    ref = get_jk(mol, dm, with_k=False)[0]
+    assert abs(vj - ref).max() < 1e-9
 
 def test_j_engine_8fold_symmetry():
     mol = pyscf.M(

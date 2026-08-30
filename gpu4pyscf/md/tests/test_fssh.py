@@ -224,7 +224,7 @@ H    0.444   1.381   0.000
 
         ref = np.array([-78.11999512, -78.12371063, -78.12418365])
         energies = extract_energies(fssh.filename)
-        assert abs(ref - energies).max() < 2e-8
+        assert abs(ref - energies).max() < 3e-6 # Attention: By default ris use single precision
 
     def test_fssh_kTDC(self):
         mol = pyscf.M(

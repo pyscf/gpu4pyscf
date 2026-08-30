@@ -149,7 +149,9 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
             rsdf_omega = 0.3
             int3c2e_opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh).build()
             hermi = 1
-            ej = _jk_energy_per_atom(int3c2e_opt, dm[0]+dm[1], kpts, hermi, j_factor, 0)
+            ej = _jk_energy_per_atom(
+                int3c2e_opt, dm[0]+dm[1], kpts, hermi, j_factor, 0,
+                linear_dep_threshold=with_df.linear_dep_threshold)
             j_factor = 0
 
         with_rsjk = mf.rsjk
@@ -191,7 +193,8 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
             int3c2e_opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh).build()
             hermi = 1
             return _jk_energy_per_atom(
-                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega)
+                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega,
+                linear_dep_threshold=with_df.linear_dep_threshold)
 
         def get_k_lr(k_factor, omega, exxdiv):
             with AFTDF(cell).range_coulomb(omega) as mydf:

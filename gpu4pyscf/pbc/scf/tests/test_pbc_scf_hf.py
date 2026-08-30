@@ -130,6 +130,70 @@ class KnownValues(unittest.TestCase):
         e_ref = kmf_cpu.get_bands(kpts_bands)[0]
         self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, delta=1e-5)
 
+    def test_eig_self_conjugate_kpts(self):
+        cell = self.cell
+        kpts = cell.make_kpts(
+            [2, 2, 1], wrap_around=True, with_gamma_point=True)
+        kmf = scf.KRHF(cell, kpts=kpts)
+        kpt_pairs = list(kmf.iter_kpt_pairs())
+        self.assertEqual(len(kpt_pairs), len(kpts))
+        self.assertTrue(all(k == k_conj for k, k_conj in kpt_pairs))
+
+        nkpts = len(kpts)
+        nao = cell.nao
+        h = np.tile(np.diag(np.linspace(-2., 2., nao)), (nkpts, 1, 1))
+        h = h.astype(np.complex128)
+        for k in range(nkpts):
+            h[k, 0, -1] = (k + 1) * .2j
+            h[k, -1, 0] = -(k + 1) * .2j
+        h = cp.asarray(h)
+        s = cp.tile(cp.eye(nao, dtype=np.complex128), (nkpts, 1, 1))
+        x = kmf.check_linear_dependency(s)
+        occ = cp.zeros((nkpts, nao))
+        occ[:, :nao//2] = 2
+
+        for x_orth in (None, x):
+            with self.subTest(x_orth=x_orth is not None):
+                e, c = kmf.eig(h, s, x=x_orth)
+                dm = kmf.make_rdm1(c, occ)
+                self.assertLess(float(abs(c.imag).max()), 1e-14)
+                self.assertLess(float(abs(dm.imag).max()), 1e-14)
+                self.assertLess(
+                    float(abs(e - cp.diag(h[0].real)).max()), 1e-14)
+
+        _, c = kmf.eig(h, s, x=x, time_reversal_symmetry=False)
+        dm = kmf.make_rdm1(c, occ)
+        self.assertGreater(float(abs(dm.imag).max()), 1e-3)
+
+    def test_eig_conjugate_kpt_pairs(self):
+        cell = self.cell
+        kpts = cell.make_kpts(
+            [2, 2, 1], wrap_around=True, with_gamma_point=False)
+        kmf = scf.KRHF(cell, kpts=kpts)
+        kpt_pairs = list(kmf.iter_kpt_pairs())
+        self.assertEqual(len(kpt_pairs), len(kpts) // 2)
+        self.assertTrue(all(k != k_conj for k, k_conj in kpt_pairs))
+
+        nkpts = len(kpts)
+        nao = cell.nao
+        h = np.empty((nkpts, nao, nao), dtype=np.complex128)
+        h_real = np.diag(np.linspace(-2., 2., nao))
+        for i, (k, k_conj) in enumerate(kpt_pairs):
+            h_k = h_real.astype(np.complex128)
+            h_k[0, -1] = (i + 1) * .2j
+            h_k[-1, 0] = -(i + 1) * .2j
+            h[k] = h_k
+            h[k_conj] = h_k.conj()
+
+        h = cp.asarray(h)
+        s = cp.tile(cp.eye(nao, dtype=np.complex128), (nkpts, 1, 1))
+        e, c = kmf.eig(h, s)
+        for k, k_conj in kpt_pairs:
+            self.assertLess(float(abs(e[k_conj] - e[k]).max()), 1e-14)
+            self.assertLess(
+                float(abs(c[k_conj] - c[k].conj()).max()), 1e-14)
+        self.assertGreater(float(abs(c.imag).max()), 1e-3)
+
     def test_density_fit(self):
         from gpu4pyscf.pbc.df.df import GDF
         L = 4.

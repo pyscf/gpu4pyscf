@@ -32,7 +32,7 @@ def cal_exact_sf_tda_gradient(mf, extype=1, collinear='mcol', collinear_samples=
 
     Casida_matrix = np.block([[A_abab_2d, np.zeros_like(B_abba_2d)], [-np.zeros_like(B_baab_2d), -A_baba_2d]])
 
-    eigenvals, eigenvecs = np.linalg.eig(Casida_matrix)
+    eigenvals, eigenvecs = np.linalg.eigh(Casida_matrix)
     idx = eigenvals.real.argsort()
     eigenvals = eigenvals[idx]
     eigenvecs = eigenvecs[:, idx]
@@ -95,6 +95,10 @@ def cal_exact_sf_tddft_gradient(mf, extype=1, collinear='mcol', collinear_sample
     Casida_matrix = np.block([[A_abab_2d, B_abba_2d], [-B_baab_2d, -A_baba_2d]])
 
     eigenvals, eigenvecs = np.linalg.eig(Casida_matrix)
+    assert np.max(np.abs(eigenvals.imag)) < 1e-14
+    assert np.max(np.abs(eigenvecs.imag)) < 1e-14
+    eigenvals = eigenvals.real
+    eigenvecs = eigenvecs.real
     idx = eigenvals.real.argsort()
     eigenvals = eigenvals[idx]
     eigenvecs = eigenvecs[:, idx]
