@@ -26,7 +26,11 @@
 #define WARP_SIZE       32
 #endif
 #define WARPS           8
-#define FT_AO_THREADS   (WARP_SIZE*4)
+// Block size for ft_ao_bdiv_kernel. Fixed at 128 (= WARP_SIZE*4 on wave32) rather
+// than WARP_SIZE*4 so it does not grow to 256 on wave64, which would double the
+// static shared `g` array to 86 KB and exceed the 64 KB LDS limit. CUDA is
+// unchanged (WARP_SIZE==32 -> 128).
+#define FT_AO_THREADS   128
 #define NG_PER_BLOCK    32
 #define AUXL            6
 #define AUXNF           ((AUXL+1)*(AUXL+2)/2)

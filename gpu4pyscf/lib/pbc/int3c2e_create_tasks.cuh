@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -356,7 +357,9 @@ __device__ inline
 int warp_max(int val)
 {
     for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
-        val = max(val, __shfl_down_sync(0xffffffff, val, offset));
+        // ~0 masks in all lanes of the wavefront (32 or 64). A 32-bit
+        // 0xffffffff would drop lanes 32-63 on wave64; on CUDA ~0 is 0xffffffff.
+        val = max(val, __shfl_down_sync(~0, val, offset));
     }
     return val;
 }
@@ -373,8 +376,12 @@ void block_max(int val, int& out)
         buf[warp_id] = val;
     }
     __syncthreads();
+    // Only nwarps (= blockDim.x / warpSize) warps wrote buf; that is WARPS on
+    // wave32 but WARPS/2 on wave64. Fill the unwritten slots with the max-identity
+    // so the fixed WARPS-wide reduction below does not fold in stale data.
+    int nwarps = blockDim.x / warpSize;
     if (thread_id < WARPS) {
-        val = buf[thread_id];
+        val = (thread_id < nwarps) ? buf[thread_id] : INT_MIN;
     }
     for (int offset = WARPS / 2; offset > 0; offset >>= 1) {
         val = max(val, __shfl_down_sync(0xff, val, offset));
