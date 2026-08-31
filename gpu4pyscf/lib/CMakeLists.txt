@@ -155,6 +155,19 @@ if(USE_HIP)
   include_directories(BEFORE ${PROJECT_SOURCE_DIR}/hip_compat)
   # -Wno-register: the CUDA sources use the C++17-removed `register` keyword.
   set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wno-register -include ${PROJECT_SOURCE_DIR}/hip_compat/gpu_runtime.h")
+
+  # Development/validation switch: force 64-wide wavefronts. On RDNA (wave32 by
+  # default, e.g. gfx1151) -mwavefrontsize64 runs the kernels in wave64 mode so
+  # the wavefront-agnostic (CDNA) code path can be validated on an RDNA dev GPU;
+  # -DWARP_SIZE=64 sets the matching compile-time constant (warpSize is not
+  # constexpr, so shared-memory tiling needs the literal). CDNA is wave64
+  # regardless -- this is NOT for shipping; a multi-arch build derives WARP_SIZE
+  # per arch. Default OFF keeps the validated wave32 build byte-for-byte.
+  option(USE_WAVE64 "Force wave64 wavefronts (RDNA dev-validation of wave64 kernels)" OFF)
+  if(USE_WAVE64)
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mwavefrontsize64 -DWARP_SIZE=64 -DGPU4PYSCF_WAVE64=1")
+    message("USE_WAVE64: forcing 64-wide wavefronts (-mwavefrontsize64 -DWARP_SIZE=64)")
+  endif()
 endif()
 
 # Configure a GPU library target for the HIP backend: compile the target's .cu
