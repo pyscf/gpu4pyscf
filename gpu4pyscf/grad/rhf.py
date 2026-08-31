@@ -90,11 +90,13 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
     diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
     n_groups = len(uniq_l_ctr)
-    tasks = ((i, j, k, l)
+    tasks = [(i, j, k, l)
              for i in range(n_groups)
              for j in range(i+1)
              for k in range(i+1)
-             for l in range(k+1))
+             for l in range(k+1)]
+    schemes = {t: _ejk_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
+    tasks = iter(tasks)
 
     def proc():
         device_id = cp.cuda.device.get_device_id()
@@ -120,7 +122,8 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
-        for i, j, k, l in tasks:
+        for task in tasks:
+            i, j, k, l = task
             shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
             pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
             pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
@@ -129,7 +132,7 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
             if npairs_ij == 0 or npairs_kl == 0:
                 continue
             llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            scheme = schemes[task]
             err = kern(
                 ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                 ctypes.c_double(j_factor), ctypes.c_double(k_factor),
