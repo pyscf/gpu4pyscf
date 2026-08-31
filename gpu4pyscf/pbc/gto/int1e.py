@@ -326,7 +326,10 @@ class _Int1eOpt:
         if is_gamma_point:
             assert dm.dtype == np.float64
         else:
-            expLk = cp.exp(1j * asarray(self.Ls).dot(asarray(kpts).T))
+            if self.bvk_kmesh is None:
+                expLk = cp.exp(1j*asarray(self.Ls).dot(kpts.T))
+            else:
+                expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
             dm = contract('Lk,kpq->Lpq', expLk, dm)
             expLk = None
             dm = dm.real
@@ -347,8 +350,7 @@ class _Int1eOpt:
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(self.shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(self.bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(int(is_gamma_point)))
+            ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
         sigma = sigma.get()
