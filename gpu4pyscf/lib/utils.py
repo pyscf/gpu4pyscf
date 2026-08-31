@@ -188,3 +188,26 @@ def nearest_power2(n, return_leq=True):
         return 1 << (n.bit_length() - 1)
     else:
         return 1 << ((n-1).bit_length())
+
+def indices_within_groups(counts):
+    '''
+    Generate zero-based indices within groups of specified sizes.
+
+    Parameters
+    ----------
+    counts : array_like of int
+        Number of elements in each group.
+
+    Returns
+    -------
+    numpy.ndarray
+        One-dimensional array containing consecutive zero-based indices
+        for each group.
+
+    Examples
+    --------
+    >>> indices_within_groups([3, 2, 4])
+    array([0, 1, 2, 0, 1, 0, 1, 2, 3])
+    '''
+    offsets = numpy.append(0, numpy.cumsum(counts))
+    return numpy.arange(offsets[-1]) - numpy.repeat(offsets[:-1], counts)

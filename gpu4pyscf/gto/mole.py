@@ -22,7 +22,7 @@ from pyscf import gto
 from pyscf.pbc import gto as pbcgto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
-from gpu4pyscf.lib.utils import load_library
+from gpu4pyscf.lib.utils import load_library, indices_within_groups
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import block_diag, asarray, ndarray
@@ -355,9 +355,22 @@ def extract_pgto_params(mol, op='diffuse'):
     if op != 'diffuse' and op != 'compact':
         raise RuntimeError(f'Unsupported operation {op}')
 
-    e = np.hstack(mol.bas_exps())
-    c = np.hstack([abs(mol._libcint_ctr_coeff(i)).max(axis=1)
-                   for i in range(mol.nbas)])
+    #:e = np.hstack(mol.bas_exps())
+    nprim = mol._bas[:,NPRIM_OF]
+    ptr = np.repeat(mol._bas[:,PTR_EXP], nprim)
+    e = mol._env[ptr + indices_within_groups(nprim)]
+
+    #:c = np.hstack([abs(mol._libcint_ctr_coeff(i)).max(axis=1)
+    #:               for i in range(mol.nbas)])
+    nctr = mol._bas[:,NCTR_OF]
+    sizes = nprim * nctr
+    ptr = np.repeat(mol._bas[:,PTR_COEFF], sizes)
+    idx = indices_within_groups(sizes)
+    offsets = np.append(0, np.cumsum(nprim)[:-1])
+    out_idx = np.repeat(offsets, sizes) + idx % np.repeat(nprim, sizes)
+    c = np.full(len(e), -np.inf)
+    np.maximum.at(c, out_idx, abs(mol._env[ptr + idx]))
+
     l = np.repeat(mol._bas[:,ANG_OF], mol._bas[:,NPRIM_OF])
     basis_id = np.repeat(np.arange(mol.nbas), mol._bas[:,NPRIM_OF])
     if isinstance(mol, pbcgto.Cell):
@@ -1130,8 +1143,12 @@ def _scale_sp_ctr_coeff(mol):
     fac = ((ls[idx]*2+1) / (4*np.pi)) ** .5
     nprim = mol._bas[idx,NPRIM_OF]
     nctr = mol._bas[idx,NCTR_OF]
-    for p, n, f in zip(ptr, nprim*nctr, fac):
-        _env[p:p+n] *= f
+    #:for p, n, f in zip(ptr, nprim*nctr, fac):
+    #:    _env[p:p+n] *= f
+    sizes = nprim * nctr
+    ptr = np.repeat(ptr, sizes)
+    fac = np.repeat(fac, sizes)
+    _env[ptr + indices_within_groups(sizes)] *= fac
     return _env
 
 PTR_PBAS_IDX = 4

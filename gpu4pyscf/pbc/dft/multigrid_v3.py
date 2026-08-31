@@ -1111,7 +1111,7 @@ int nx, int ny, int nz)
 
 def _pploc_derivatives(cell, rhoG, Gv_bases):
     assert cell.dimension == 3
-    nx, ny, nz = mesh = [x.shape[1] for x in Gv_bases]
+    nx, ny, nz = [x.shape[1] for x in Gv_bases]
     assert rhoG.size == nx * ny * nz
 
     coords = cp.asarray(cell.atom_coords())
@@ -1269,7 +1269,7 @@ double cexp0, double cexp1, double cexp2, double cexp3)
     sigma /= vol
     return grad, sigma
 
-def _ne_derivatives(cell, mesh, rhoG, Gv_bases):
+def _ne_derivatives(cell, rhoG, Gv_bases):
     '''Contributions of nuclus-electron interactions'''
     assert cell.dimension == 3
     fn_name = 'ne_derivatives'
@@ -1348,7 +1348,7 @@ int nx, int ny, int nz, int natm)
         _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
     kernel = _kernel_registery[fn_name]
 
-    nx, ny, nz = mesh = [x.shape[1] for x in Gv_bases]
+    nx, ny, nz = [x.shape[1] for x in Gv_bases]
     assert rhoG.size == nx * ny * nz
 
     coords = cp.asarray(cell.atom_coords())

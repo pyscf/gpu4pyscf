@@ -79,6 +79,7 @@ def setUpModule():
 
 def tearDownModule():
     global cell_orth, cell_nonorth, cell_he
+    cell_orth.stdout.close()
     del cell_orth, cell_nonorth, cell_he
 
 def _get_vpplocG_derivatives(cell, mesh, rhoG):
