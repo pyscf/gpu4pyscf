@@ -1083,7 +1083,6 @@ class KnownValues(unittest.TestCase):
                     'O': [[2, 2], 0.8, 3, [1., 1.5, 0.3]]},
             a=np.eye(3) * 2.5 + np.random.rand(3,3)*.5)
         mesh = [11]*3
-        ngrids = np.prod(mesh)
 
         rho = cp.array(np.random.rand(*mesh))
         rhoG = cp.fft.ifft(rho).ravel()
@@ -1104,7 +1103,6 @@ class KnownValues(unittest.TestCase):
             basis=[[0, [0.4, 1]]],
             a=np.eye(3) * 2.5 + np.random.rand(3,3)*.5)
         mesh = [11]*3
-        ngrids = np.prod(mesh)
 
         rho = cp.array(np.random.rand(*mesh))
         rhoG = cp.fft.ifft(rho).ravel()
