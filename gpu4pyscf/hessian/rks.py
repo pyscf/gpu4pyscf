@@ -233,7 +233,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
             mo_coeff_mask = mo_coeff[mask,:]
             rho = numint.eval_rho2(_sorted_mol, ao[0], mo_coeff_mask, mo_occ, mask, xctype, buf=aow_buf, out=rho)
             vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype, spin=0)[1][0]
-            wv = cupy.multiply(weight, vxc, out=vxc)
+            wv = cupy.multiply(weight, vxc)
             aow  = cupy.ndarray((nao_sub, blk_size), memptr=aow_buf.data)
             aow = numint._scale_ao(ao[0], wv, out=aow)
             vtmp = contract('bik,lk->bil', ao[4:10], aow, out=vtmp)
@@ -262,7 +262,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
             mo_coeff_mask = mo_coeff[mask,:]
             rho = numint.eval_rho2(_sorted_mol, ao[:4], mo_coeff_mask, mo_occ, mask, xctype, buf=aow_buf, out=rho)
             vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype, spin=0)[1]
-            wv = cupy.multiply(weight, vxc, out=vxc)
+            wv = cupy.multiply(weight, vxc)
             aow  = cupy.ndarray((nao_sub, blk_size), memptr=aow_buf.data)
             aow = numint._scale_ao(ao[:4], wv[:4], out=aow)
 
@@ -297,7 +297,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
             mo_coeff_mask = mo_coeff[mask,:]
             rho = numint.eval_rho2(_sorted_mol, ao[:10], mo_coeff_mask, mo_occ, mask, xctype, buf=aow_buf, out=rho)
             vxc = ni.eval_xc_eff(mf.xc, rho, 1, xctype=xctype, spin=0)[1]
-            wv = cupy.multiply(weight, vxc, out=vxc)
+            wv = cupy.multiply(weight, vxc)
             wv[4] *= .5  # for the factor 1/2 in tau
             aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
             numint._scale_ao(ao[:4], wv[:4], out=aow[0])
@@ -460,8 +460,8 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 t1 = log.timer_debug2('eval rho', *t1)
                 vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
-                wv1 = cupy.multiply(weight, vxc[0], out=vxc[0])
-                wf = cupy.multiply(weight, fxc[0,0], out=fxc[0,0])
+                wv1 = cupy.multiply(weight, vxc[0])
+                wf = cupy.multiply(weight, fxc[0,0])
                 aow  = cupy.ndarray((3, nao, blk_size), memptr=aow_buf.data)
                 for i in range(1, 4):
                     numint._scale_ao(ao1[i], wv1, out=aow[i-1])
@@ -477,7 +477,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                     wv = contract('xig,ig->xg', ao1[1:,p0:p1,:], ao_dm0[p0:p1,:], out=wv)
                     wv *= 2
                     # aow ~ rho1 ~ d/dR1
-                    wv = cupy.multiply(wf, wv, out=wv)
+                    wv = cupy.multiply(wf, wv)
                     for i in range(3):
                         numint._scale_ao(ao_dm_mask[0], wv[i], out=aow[i])
                     vmat_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
@@ -517,8 +517,8 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 t1 = log.timer_debug2('eval rho', *t1)
                 vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
-                wv1 = cupy.multiply(weight, vxc, out=vxc)
-                wf = cupy.multiply(weight, fxc, out=fxc)
+                wv1 = cupy.multiply(weight, vxc)
+                wf = cupy.multiply(weight, fxc)
                 wv1[0] *= .5
                 aow  = cupy.ndarray((3, nao, blk_size), memptr=aow_buf.data)
                 aow = rks_grad._make_dR_dao_w(ao, wv1, out=aow)
@@ -577,8 +577,8 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 t1 = log.timer_debug2('eval rho', *t1)
                 vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
-                wv1 = cupy.multiply(weight, vxc, out=vxc)
-                wf = cupy.multiply(weight, fxc, out=fxc)
+                wv1 = cupy.multiply(weight, vxc)
+                wf = cupy.multiply(weight, fxc)
                 wv1[0] *= .5
                 wv1[4] *= .25
                 aow  = cupy.ndarray((3, nao, blk_size), memptr=aow_buf.data)
@@ -1309,8 +1309,8 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 t1 = log.timer_debug2('eval rho', *t1)
                 vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
-                wv1 = cupy.multiply(weight, vxc[0], out=vxc[0])
-                wf = cupy.multiply(weight, fxc[0,0], out=fxc[0,0])
+                wv1 = cupy.multiply(weight, vxc[0])
+                wf = cupy.multiply(weight, fxc[0,0])
 
                 numint._scale_ao(ao1[0], wv1, out=aow[0])
                 v_ip = rks_grad._d1_dot_(ao1[1:4], aow[0].T, beta=1.0, out=v_ip)
@@ -1319,8 +1319,8 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 for ia in range(natm):
                     p0, p1 = aoslices[ia][2:]
                 # First order density = rho1 * 2.  *2 is not applied because + c.c. in the end
-                    rho1 = contract('xig,ig->xg', ao1[1:,p0:p1,:], ao_dm0[p0:p1,:], out=wv)
-                    wv = cupy.multiply(wf, rho1,  out=wv)
+                    rho1 = contract('xig,ig->xg', ao1[1:,p0:p1,:], ao_dm0[p0:p1,:])
+                    wv = cupy.multiply(wf, rho1, out=wv)
                     for i in range(3):
                         numint._scale_ao(ao1[0], wv[i],  out=aow[i])
                         numint._scale_ao(mo[0], wv[i], out=mow[i])
@@ -1357,16 +1357,16 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 t1 = log.timer_debug2('eval rho', *t1)
                 vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t1)
-                wv = cupy.multiply(weight, vxc, out=vxc)
+                wv = cupy.multiply(weight, vxc)
                 wv[0] *= .5
-                wf = cupy.multiply(weight, fxc, out=fxc)
+                wf = cupy.multiply(weight, fxc)
                 v_ip = rks_grad._gga_grad_sum_(ao1, wv,  accumulate=True, buf=aow, out=v_ip)
                 mo = contract('xig,ip->xpg', ao1, mocc, out=mo)
                 ao_dm0 =  contract('ik,pil->pkl', dm0, ao1[:4], out=ao_dm0)
                 for ia in range(natm):
                     dR_rho1 = _make_dR_rho1(ao1, ao_dm0, ia, aoslices, xctype,
                                             buf=wv[0], out=dR_rho1)
-                    wv2 = contract('xyg,sxg->syg', wf, dR_rho1, out=dR_rho1)
+                    wv2 = contract('xyg,sxg->syg', wf, dR_rho1)
                     wv2[:,0] *= .5
                     for i in range(3):
                         numint._scale_ao(ao1[:4], wv2[i,:4],  out=aow[i])
@@ -1406,8 +1406,8 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 t1 = log.timer_debug2('eval rho', *t1)
                 vxc, fxc = ni.eval_xc_eff(mf.xc, rho, 2, xctype=xctype, spin=0)[1:3]
                 t1 = log.timer_debug2('eval vxc', *t0)
-                wv = cupy.multiply(weight, vxc, out=vxc)
-                wf = cupy.multiply(weight, fxc, out=fxc)
+                wv = cupy.multiply(weight, vxc)
+                wf = cupy.multiply(weight, fxc)
                 wv[0] *= .5
                 wv[4] *= .5  # for the factor 1/2 in tau
                 v_ip = rks_grad._gga_grad_sum_(ao1, wv,  accumulate=True, buf=aow, out=v_ip)
@@ -1417,7 +1417,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 for ia in range(natm):
                     dR_rho1 = _make_dR_rho1(ao1, ao_dm0, ia, aoslices, xctype,
                                             buf=wv[0], out=dR_rho1)
-                    wv2 = contract('xyg,sxg->syg', wf, dR_rho1, out=dR_rho1)
+                    wv2 = contract('xyg,sxg->syg', wf, dR_rho1)
                     wv2[:,0] *= .5
                     wv2[:,4] *= .25
                     for i in range(3):
@@ -3540,7 +3540,7 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
             # precompute fxc_w
             fxc_w = cupy.ndarray((ncomp, ncomp, blk_size), memptr=fxc_w_buf.data)
             fxc_w = cupy.multiply(fxc[:,:,p0:p1], weights, out=fxc_w)
-            wv = contract('axg,xyg->ayg', rho1, fxc_w, out=rho1)
+            wv = contract('axg,xyg->ayg', rho1, fxc_w)
 
             for i in range(nset):
                 if xctype == 'LDA':

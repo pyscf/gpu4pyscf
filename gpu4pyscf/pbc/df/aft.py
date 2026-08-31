@@ -38,7 +38,7 @@ from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
-                                       get_avail_mem, asarray)
+                                       get_avail_mem, asarray, ndarray)
 
 KE_SCALING = aft_cpu.KE_SCALING
 
@@ -404,7 +404,7 @@ def _fake_nuc(cell, with_pseudo=True):
     fakenuc.rcut = 0.1
     return fakenuc
 
-def _get_ZSI(cell, mesh=None):
+def _get_ZSI(cell, mesh=None, out=None):
     '''
     Calculate the product of nuclear charges and structure factor
 
@@ -422,5 +422,7 @@ def _get_ZSI(cell, mesh=None):
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
     SIx *= Z[:,None]
-    ZG = cp.einsum('qx,qy,qz->xyz', SIx, SIy, SIz).ravel()
+    rho_xy = SIx[:,:,None] * SIy[:,None,:]
+    out = ndarray(mesh, dtype=np.complex128, buffer=out)
+    ZG = contract('qxy,qz->xyz', rho_xy, SIz, out=out).ravel()
     return ZG

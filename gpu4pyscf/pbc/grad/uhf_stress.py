@@ -22,8 +22,8 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import uhf as uhf_grad
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells, ewald
-from gpu4pyscf.pbc.grad.rhf_stress import get_nuc, get_veff
+from gpu4pyscf.pbc.grad.rhf_stress import (
+    get_nuc, get_veff, _get_pp_nonloc_strain_derivatives, ewald)
 
 def kernel(mf_grad):
     '''Compute the energy derivatives for strain tensor (e_ij)
@@ -59,8 +59,10 @@ def kernel(mf_grad):
     dm0_sf = dm0[0] + dm0[1]
     dme0_sf = dme0[0] + dme0[1]
     sigma -= int1e.ovlp_strain_deriv(cell, dme0_sf)
-    sigma += int1e.kin_strain_deriv(cell, dm0)
+    sigma += int1e.kin_strain_deriv(cell, dm0_sf)
     sigma += get_nuc(mf_grad, cell, dm0_sf)
+    if cell._pseudo:
+        sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0_sf)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     sigma += get_veff(mf_grad, cell, dm0)

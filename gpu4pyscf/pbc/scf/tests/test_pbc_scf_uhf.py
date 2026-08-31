@@ -71,7 +71,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(pop), -0.04691820429296646, 5)
 
         np.random.seed(1)
-        kpts_bands = np.random.random((1,3))
+        kpts_bands = np.random.random((4,3))
         e = mf.get_bands(kpts_bands)[0]
         e_ref = mf_cpu.get_bands(kpts_bands)[0]
         self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 6)

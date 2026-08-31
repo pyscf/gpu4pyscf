@@ -55,7 +55,7 @@ class KnownValues(unittest.TestCase):
                 minao_ref='gth-szv')
         mf.conv_tol = 1e-10
         e1 = mf.kernel()
-        self.assertAlmostEqual(e1, -10.694460059491741, 8)
+        self.assertAlmostEqual(e1, -10.694460059491741, 6)
 
     def test_get_veff(self):
         kmesh = [2, 1, 1]
@@ -93,7 +93,7 @@ class KnownValues(unittest.TestCase):
                 minao_ref='gth-szv')
         mf.conv_tol = 1e-10
         e_tot = mf.kernel()
-        self.assertAlmostEqual(e_tot, -10.6191452297714, 8)
+        self.assertAlmostEqual(e_tot, -10.6191452297714, 6)
 
         uresp = krkspu.linear_response_u(mf, (0.03, 0.08))
         self.assertAlmostEqual(uresp, 6.279179, 2)

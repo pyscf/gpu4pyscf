@@ -1026,3 +1026,30 @@ def test_uhf_ejk_ip1_kpts_with_long_range1():
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
         assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 1e-6
+
+
+def test_metric_solver_with_linear_dependency():
+    rng = np.random.default_rng(12)
+    a = rng.standard_normal((3, 3)) + 1j*rng.standard_normal((3, 3))
+    vectors = np.linalg.qr(a)[0]
+    eigenvalues = np.array([2., 1e-12, -.5])
+    j2c = vectors @ np.diag(eigenvalues) @ vectors.conj().T
+    rhs = rng.standard_normal((3, 2)) + 1j*rng.standard_normal((3, 2))
+
+    solve_j2c = rhf._gen_metric_solver(
+        cp.asarray(j2c), 1e-10, dimension=2)
+    result = solve_j2c(cp.asarray(rhs)).get()
+
+    keep = np.array([0, 2])
+    expected = vectors[:,keep] @ np.diag(1/eigenvalues[keep])
+    expected = expected @ vectors[:,keep].conj().T @ rhs
+    assert abs(result - expected).max() < 1e-12
+
+
+def test_task_pool_batch_size_includes_bvk_cells():
+    nksh_per_batch = np.array([12, 36, 24])
+    batch_size = rhf._get_shl_pair_batch_size(
+        nksh_per_batch, bvk_ncells=4)
+
+    assert batch_size == 64 # 16383 // (36 * 4) = 113, nearest smaller power of 2 is 64
+    assert batch_size * nksh_per_batch.max() * 4 <= int3c2e.POOL_SIZE # 64 * 36 * 4 <= 16384

@@ -74,6 +74,8 @@ def kernel(mf_grad):
     sigma -= int1e.ovlp_strain_deriv(cell, dme0, kpts)
     sigma += int1e.kin_strain_deriv(cell, dm0, kpts)
     sigma += get_nuc(mf_grad, cell, dm0, kpts)
+    if cell._pseudo:
+        sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0, kpts)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     sigma += get_veff(mf_grad, cell, dm0, kpts)
@@ -171,7 +173,6 @@ def get_nuc(mf_grad, cell, dm, kpts):
         vpplocR = pbctools.ifft(vpplocG_0, mesh).real
         Ene = contract('xyg,g->xy', rho1, vpplocR).real.get()
         Ene += contract('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
-        Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm, kpts)
     else:
         Gv = cell.get_Gv(mesh)
         coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)

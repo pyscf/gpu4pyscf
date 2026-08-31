@@ -405,7 +405,13 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
             if npairs_ij == 0 or npairs_kl == 0:
                 continue
             llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            uniq_l_ctr_ijkl = uniq_l_ctr[[i, j, k, l]]
+            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr_ijkl)
+
+            uniq_l_ijkl = uniq_l_ctr_ijkl[:, 0]
+            nf_ijkl = np.prod((uniq_l_ijkl + 1) * (uniq_l_ijkl + 2) // 2)
+            assert scheme[0] * nf_ijkl <= dd_cache_maxsize
+
             err = kern(
                 ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                 ctypes.cast(_j_factor.data.ptr, ctypes.c_void_p), j_factor.ctypes,

@@ -45,6 +45,8 @@ jobs:
     - name: Run RKS tests
       run: |
         docker run --gpus all \
+          --init \
+          --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
@@ -65,6 +67,8 @@ jobs:
     - name: Run UKS tests
       run: |
         docker run --gpus all \
+          --init \
+          --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
@@ -85,6 +89,8 @@ jobs:
     - name: Run TDDFT tests
       run: |
         docker run --gpus all \
+          --init \
+          --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
@@ -104,6 +110,8 @@ jobs:
     - name: Run ECP tests
       run: |
         docker run --gpus all \
+          --init \
+          --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
@@ -124,6 +132,8 @@ jobs:
     - name: Run properties tests
       run: |
         docker run --gpus all \
+          --init \
+          --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \

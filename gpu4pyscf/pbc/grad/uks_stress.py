@@ -23,7 +23,7 @@ from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
-from gpu4pyscf.pbc.dft.multigrid_v2 import _uks_exc_strain_deriv, MultiGridNumInt
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 from gpu4pyscf.pbc.grad import uks as uks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -54,7 +54,8 @@ def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
 
     # TODO: with_nuc should be disabled for all-electron calculations
     if isinstance(ni, MultiGridNumInt):
-        sigma = _uks_exc_strain_deriv(ni, mf.xc, dm[:,None], None, with_j, with_nuc)
+        sigma = ni.energy_strain_gradient(mf.xc, dm[:,None], spin=1,
+                                          with_j=with_j, with_nuc=with_nuc)
     elif isinstance(ni, NumInt):
         sigma = get_vxc(mf_grad, cell, dm, with_j, with_nuc)
     else:
@@ -230,7 +231,6 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
             vpplocR = pbctools.ifft(vpplocG_0, mesh).real
             Ene = contract('xyg,g->xy', rho1, vpplocR).real.get()
             Ene += contract('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
-            Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm.sum(axis=0))
         else:
             # SI corresponds to Fourier components of the fractional atomic
             # positions within the cell. It does not respond to the strain
@@ -273,23 +273,17 @@ def kernel(mf_grad):
     log.debug('Computing stress tensor')
 
     cell = mf.cell
-    dm0 = mf.make_rdm1().sum(axis=0)
+    dm0 = mf.make_rdm1()
+    dm0_sf = dm0[0] + dm0[1]
     dme0 = mf_grad.make_rdm1e().sum(axis=0)
     sigma = ewald(cell)
     sigma -= int1e.ovlp_strain_deriv(cell, dme0)
-
-    disp = 1e-5
-    for x in range(3):
-        for y in range(3):
-            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            t1 = int1e.int1e_kin(cell1)
-            t2 = int1e.int1e_kin(cell2)
-            t1 = cp.einsum('ij,ji->', t1, dm0)
-            t2 = cp.einsum('ij,ji->', t2, dm0)
-            sigma[x,y] += (t1 - t2) / (2*disp)
+    sigma += int1e.kin_strain_deriv(cell, dm0_sf)
+    if cell._pseudo:
+        # pploc contribution is evaluated in get_veff
+        sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0_sf)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
-    dm0 = mf.make_rdm1()
     sigma += get_veff(mf_grad, cell, dm0, with_j=True, with_nuc=True)
     t0 = log.timer_debug1('Vxc and Coulomb derivatives', *t0)
 

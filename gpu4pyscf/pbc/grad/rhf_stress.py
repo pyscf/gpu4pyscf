@@ -22,9 +22,10 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import rhf as rhf_grad
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.grad.rks_stress import ewald
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df import aft, aft_jk
+from gpu4pyscf.pbc.grad.rks_stress import (
+    _get_pp_nonloc_strain_derivatives, ewald)
 
 ALIGNED = 256
 
@@ -61,6 +62,8 @@ def kernel(mf_grad):
     sigma -= int1e.ovlp_strain_deriv(cell, dme0)
     sigma += int1e.kin_strain_deriv(cell, dm0)
     sigma += get_nuc(mf_grad, cell, dm0)
+    if cell._pseudo:
+        sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     sigma += get_veff(mf_grad, cell, dm0)

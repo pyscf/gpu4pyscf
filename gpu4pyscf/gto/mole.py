@@ -691,17 +691,20 @@ class SortedGTO:
             recontract_coef = cp.asarray(self.recontract_coef)
             recontract_bas = cp.asarray(self.recontract_bas)
             recontraction_idx = cp.asarray(self.recontraction_idx)
-            err = kern(
-                ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-                ctypes.cast(recontract_coef.data.ptr, ctypes.c_void_p),
-                ctypes.cast(recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(recontraction_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
-                ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
-                ctypes.c_int(ncol), ctypes.c_int(counts))
-            assert err == 0
+            # CUDA grid.z is limited to 65535; these slices are zero-copy views.
+            for p0 in range(0, counts, 65535):
+                p1 = min(p0 + 65535, counts)
+                err = kern(
+                    ctypes.cast(out[p0:p1].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(mat[p0:p1].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(recontract_coef.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(recontract_bas.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(recontraction_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
+                    ctypes.c_int(ncol), ctypes.c_int(p1 - p0))
+                assert err == 0
 
         if mat.dtype == np.complex128:
             out = out.view(np.complex128)

@@ -396,13 +396,13 @@ class FTOpt:
                 nao_pair = ao_pair_offsets[batch_id+1] - ao_pair_offset
                 out = ndarray((nao_pair, nGv), dtype=np.complex128, buffer=out)
                 if not cart:
-                    out[:] = 0.
+                    out.fill(0)
             else:
                 pair_blocks = len(shl_pair_offsets) - 1
                 _shl_pair_offsets = shl_pair_offsets
                 ao_pair_offset = 0
                 out = ndarray((nao, bvk_ncells, nao, nGv), dtype=np.complex128, buffer=out)
-                out[:] = 0.
+                out.fill(0)
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),

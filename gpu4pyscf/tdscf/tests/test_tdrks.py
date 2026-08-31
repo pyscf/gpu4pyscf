@@ -37,7 +37,7 @@ def diagonalize_tda(a, nroots=5):
     nocc, nvir = a.shape[:2]
     nov = nocc * nvir
     a = a.reshape(nov, nov)
-    e = np.linalg.eig(np.asarray(a))[0]
+    e = np.linalg.eigh(np.asarray(a))[0]
     lowest_e = np.sort(e[e.real > 0].real)[:nroots]
     lowest_e = lowest_e[lowest_e > 1e-3]
     return lowest_e

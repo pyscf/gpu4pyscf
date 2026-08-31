@@ -379,7 +379,10 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         {
             double *vj_cache = Rp_cache + t_id;
             int task_ij = task_ij0 + tx;
-            int ij_loc0 = pair_ij_loc[task_ij];
+            int ij_loc0 = 0;
+            if (task_ij < npairs_ij) {
+                ij_loc0 = pair_ij_loc[task_ij];
+            }
 #pragma unroll
             for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
                 if (i >= nf3ij+gout_id) break;

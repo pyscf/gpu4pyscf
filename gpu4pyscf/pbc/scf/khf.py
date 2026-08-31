@@ -259,7 +259,7 @@ def get_rho(mf, dm=None, grids=None, kpts=None):
     '''Compute density in real space
     '''
     from gpu4pyscf.pbc.dft import UniformGrids
-    from gpu4pyscf.pbc.dft import numint, multigrid, multigrid_v2
+    from gpu4pyscf.pbc.dft import numint, multigrid
     if dm is None:
         dm = mf.make_rdm1()
     if getattr(dm[0], 'ndim', None) != 2:  # KUHF
@@ -270,7 +270,7 @@ def get_rho(mf, dm=None, grids=None, kpts=None):
     ni = mf._numint
     if ni is None:
         ni = numint.KNumInt()
-    if isinstance(ni, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
         assert grids is None or isinstance(grids, UniformGrids)
         if grids is not None and any(grids.mesh != ni.mesh):
             ni = ni.copy().reset()
@@ -372,8 +372,8 @@ class KSCF(pbchf.SCF):
         # MultiGridNumInt integrator to evaluate Coulomb integrals, skipping the
         # self.with_df code path.
         if isinstance(self.with_df, df.FFTDF) and self._numint is None:
-            from gpu4pyscf.pbc.dft import multigrid_v2
-            self._numint = multigrid_v2.MultiGridNumInt(self.cell)
+            from gpu4pyscf.pbc.dft import multigrid_v3
+            self._numint = multigrid_v3.MultiGridNumInt(self.cell)
 
         if self.verbose >= logger.WARN:
             self.check_sanity()
@@ -392,19 +392,19 @@ class KSCF(pbchf.SCF):
         return int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
 
     def get_hcore(self, cell=None, kpts=None):
-        from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+        from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
         if cell is None: cell = self.cell
         if kpts is None:
             kpts = self.kpts
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
-        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+        if isinstance(self._numint, multigrid.MultiGridNumIntBase):
             ni = self._numint
-        elif np.prod(cell.mesh) < 500**3:
+        elif np.prod(cell.mesh) < 1000**3:
             # In the pseudo and all-electron mixed case, MultiGridNumInt is
             # still more efficient if Ecut is not too high.
-            ni = multigrid_v2.MultiGridNumInt(cell)
+            ni = multigrid_v3.MultiGridNumInt(cell)
         else:
             ni = self.with_df
         if cell.pseudo:
@@ -558,7 +558,12 @@ class KSCF(pbchf.SCF):
         if x is None:
             count = 0
             for k, k_conj in self.iter_kpt_pairs(time_reversal_symmetry, nkpts):
-                e, c = eigh(h_kpts[k], s_kpts[k], overwrite)
+                h_k = h_kpts[k]
+                s_k = s_kpts[k]
+                if k == k_conj: # for self-conjugate k-point
+                    h_k = cp.ascontiguousarray(h_k.real)
+                    s_k = cp.ascontiguousarray(s_k.real)
+                e, c = eigh(h_k, s_k, overwrite)
                 eig_kpts[k] = e
                 mo_coeff_kpts[k] = c
                 count += 1
@@ -571,7 +576,10 @@ class KSCF(pbchf.SCF):
             for k, k_conj in self.iter_kpt_pairs(time_reversal_symmetry, nkpts):
                 xk = x[k]
                 _, nmo_k = xk.shape
-                ek, ck = cp.linalg.eigh(xk.T.conj() @ h_kpts[k] @ xk)
+                fock = xk.T.conj() @ h_kpts[k] @ xk
+                if k == k_conj:
+                    fock = cp.ascontiguousarray(fock.real)
+                ek, ck = cp.linalg.eigh(fock)
                 eig_kpts[k, :nmo_k] = ek
                 mo_coeff_kpts[k, :, :nmo_k] = xk.dot(ck)
                 if nmo_k < nao:
@@ -664,8 +672,8 @@ class KSCF(pbchf.SCF):
     smearing = pbchf.SCF.smearing
 
     def dump_chk(self, envs):
-        mol_hf.SCF.dump_chk(self, envs)
         if self.chkfile:
+            mol_hf.SCF.dump_chk(self, envs)
             with lib.H5FileWrap(self.chkfile, 'a') as fh5:
                 fh5['scf/kpts'] = cp.asnumpy(self.kpts)
         return self

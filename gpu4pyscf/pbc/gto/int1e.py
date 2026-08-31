@@ -76,7 +76,7 @@ def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     return opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts, sort_output)
 
 def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 2, kpts, bvk_kmesh)
+    opt = _check_opt(cell, 2, kpts, bvk_kmesh, 1e-2)
     return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts, sort_output)
 
 def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
@@ -144,7 +144,7 @@ class _Int1eOpt:
                 bvkcell = cell
             else:
                 bvkcell = super_cell(cell, bvk_kmesh, wrap_around=True)
-                # PTR_BAS_COORD was not initialized in supe_rcell
+                # PTR_BAS_COORD was not initialized in the super_cell function
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
             Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]

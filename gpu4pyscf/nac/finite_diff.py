@@ -18,21 +18,7 @@ from gpu4pyscf import scf, dft
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import ris
 from scipy.optimize import linear_sum_assignment
-
-
-def diagonalize_tda(a, nroots=5):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    e, xy = np.linalg.eig(np.asarray(a))
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize_tda
 
 
 def change_sign(s12_ao, mo_coeff_b ,mo_coeff):

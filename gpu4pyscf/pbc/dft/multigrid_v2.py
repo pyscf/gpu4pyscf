@@ -43,13 +43,16 @@ from gpu4pyscf.lib.cupy_helper import (
 
 __all__ = ['MultiGridNumInt']
 
-libgpbc = load_library("libmgrid_v2")
-libgpbc.evaluate_density_driver.restype = ctypes.c_int
-libgpbc.evaluate_xc_driver.restype = ctypes.c_int
-libgpbc.evaluate_xc_gradient_driver.restype = ctypes.c_int
-libgpbc.count_non_trivial_pairs.restype = ctypes.c_int
-libgpbc.screen_gaussian_pairs.restype = ctypes.c_int
-libgpbc.count_pairs_on_blocks.restype = ctypes.c_int
+try:
+    libgpbc = load_library("libmgrid_v2")
+    libgpbc.evaluate_density_driver.restype = ctypes.c_int
+    libgpbc.evaluate_xc_driver.restype = ctypes.c_int
+    libgpbc.evaluate_xc_gradient_driver.restype = ctypes.c_int
+    libgpbc.count_non_trivial_pairs.restype = ctypes.c_int
+    libgpbc.screen_gaussian_pairs.restype = ctypes.c_int
+    libgpbc.count_pairs_on_blocks.restype = ctypes.c_int
+except OSError:
+    libgpbc = None
 
 
 def complex_type(dtype):
@@ -1468,10 +1471,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     dm_kpts = cp.asarray(dm_kpts, order="C")
-    dms = _format_dms(dm_kpts, kpts)
-    nset = dms.shape[0]
     mesh = ni.mesh
-    ngrids = np.prod(mesh)
 
     density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts)
     Gv = get_Gv(cell, mesh)
@@ -1480,13 +1480,6 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     coulomb_on_g_mesh = cp.einsum(
         "ng, g -> ng", density[:, 0], coulomb_kernel_on_g_mesh
     )
-    weight = cell.vol / ngrids
-
-    density = density.reshape(-1, *mesh)
-    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
-    # computing rhoR with IFFT, the weight factor is not needed.
-    density = ifft_in_place(density).real.reshape(nset, -1, ngrids)
-    density /= weight
 
     #if kpts_band is not None:
     #    ni = ni.copy().reset().build()
@@ -1524,6 +1517,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
+    input_kpts = kpts
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1586,9 +1580,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if with_j:
         xc_for_fock[0] += coulomb_on_g_mesh
 
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1624,6 +1618,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
+    input_kpts = kpts
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1690,9 +1685,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if with_j:
         xc_for_fock[:, 0] += coulomb_on_g_mesh
 
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1755,6 +1750,20 @@ def get_veff_ip1(
     ngrids = np.prod(mesh)
     density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
 
+    if with_pseudo_vloc_orbital_derivative:
+        from gpu4pyscf.pbc.dft.multigrid_v3 import (
+            _get_Gv_bases, _pploc_derivatives, _ne_derivatives)
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+        if nset == 1:
+            rhoG = density[0,0]
+        else:
+            rhoG = density[:,0].sum(axis=0)
+        if cell._pseudo:
+            grad_pp = _pploc_derivatives(cell, mesh, rhoG, Gv_bases)[0]
+        else:
+            grad_pp = _ne_derivatives(cell, mesh, rhoG, Gv_bases)[0]
+        rhoG = None
+
     Gv = get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
     coulomb_on_g_mesh = cp.einsum(
@@ -1815,9 +1824,43 @@ def get_veff_ip1(
         ni, xc_for_fock, dm_kpts, hermi, kpts, with_tau = (xc_type == "MGGA")
     )
 
+    veff_gradient /= len(kpts)
+    if with_pseudo_vloc_orbital_derivative:
+        veff_gradient += grad_pp
+
     t0 = log.timer("veff_gradient", *t0)
 
-    return veff_gradient
+    return veff_gradient.get()
+
+def _neighboring_image_translations(ni):
+    lattice_vectors = asarray(ni.cell.lattice_vectors())
+    # Preserve the image topology referenced by the cached pair and block indices.
+    return [
+        cp.rint(cp.linalg.solve(lattice_vectors.T, pair['neighboring_images'].T).T).astype(cp.int32)
+        for pair in ni.sorted_gaussian_pairs
+    ]
+
+def _copy_numint_for_strained_cell(ni, cell, image_translations):
+    atom_coords = asarray(cell.atom_coords().ravel())
+    atm = ni.sorted_gaussian_pairs[0]['atm']
+    atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
+    lattice_vectors = cell.lattice_vectors()
+    lattice_vectors_gpu = asarray(lattice_vectors)
+    pairs = []
+    for pair0, translations in zip(ni.sorted_gaussian_pairs, image_translations):
+        pair = pair0.copy()
+        env = pair['env'].copy()
+        env[atom_coords_address] = atom_coords
+        pair['env'] = env
+        pair['is_non_orthogonal'] = 1
+        pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None] # update the mesh.
+        pair['neighboring_images'] = translations @ lattice_vectors_gpu
+        pairs.append(pair)
+
+    ni_copy = ni.copy()
+    ni_copy.cell = cell
+    ni_copy.sorted_gaussian_pairs = pairs
+    return ni_copy
 
 def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nuc=False):
     '''Strain derivatives for Coulomb and Exc with k-point samples
@@ -1851,26 +1894,7 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
     rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(nvar, ngrids)
     rho0 *= ngrids / cell.vol
 
-    ni_copy = ni.copy()
-    def update_pairs_info(cell1):
-        r = asarray(cell1.atom_coords().ravel())
-        atm = ni.sorted_gaussian_pairs[0]['atm']
-        atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
-        lattice_vectors = cell1.lattice_vectors()
-        neighboring_images = asarray(gto.eval_gto.get_lattice_Ls(cell1))
-        pairs = []
-        for pair in ni.sorted_gaussian_pairs:
-            pair = pair.copy()
-            pairs.append(pair)
-            env = pair['env'].copy()
-            env[atom_coords_address] = r
-            pair['env'] = env
-            pair['is_non_orthogonal'] = 1
-            pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None]
-            pair['neighboring_images'] = neighboring_images
-        ni_copy.cell = cell1
-        ni_copy.sorted_gaussian_pairs = pairs
-
+    image_translations = _neighboring_image_translations(ni)
     disp = 1e-4
     scaled_kpts = kpts.dot(cell.lattice_vectors().T)
     rho1 = cp.empty((3, 3, nvar, ngrids))
@@ -1880,12 +1904,12 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
             kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
             kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
 
-            update_pairs_info(cell1)
+            ni_copy = _copy_numint_for_strained_cell(ni, cell1, image_translations)
             rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
             rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
             rho_plus *= ngrids / cell1.vol
 
-            update_pairs_info(cell2)
+            ni_copy = _copy_numint_for_strained_cell(ni, cell2, image_translations)
             rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
             rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
             rho_minus *= ngrids / cell2.vol
@@ -1934,26 +1958,7 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
     rho0 = ifft_in_place(rho0.reshape(-1,*mesh)).real.reshape(2, nvar, ngrids)
     rho0 *= ngrids / cell.vol
 
-    ni_copy = ni.copy()
-    def update_pairs_info(cell1):
-        r = asarray(cell1.atom_coords().ravel())
-        atm = ni.sorted_gaussian_pairs[0]['atm']
-        atom_coords_address = (cp.asarray(atm[:,PTR_COORD,None]) + cp.arange(3)).ravel()
-        lattice_vectors = cell1.lattice_vectors()
-        neighboring_images = asarray(gto.eval_gto.get_lattice_Ls(cell1))
-        pairs = []
-        for pair in ni.sorted_gaussian_pairs:
-            pair = pair.copy()
-            pairs.append(pair)
-            env = pair['env'].copy()
-            env[atom_coords_address] = r
-            pair['env'] = env
-            pair['is_non_orthogonal'] = 1
-            pair['dxyz_dabc'] = lattice_vectors / pair['mesh'][:,None]
-            pair['neighboring_images'] = neighboring_images
-        ni_copy.cell = cell1
-        ni_copy.sorted_gaussian_pairs = pairs
-
+    image_translations = _neighboring_image_translations(ni)
     disp = 1e-4
     scaled_kpts = kpts.dot(cell.lattice_vectors().T)
     rho1 = cp.empty((3, 3, 2, nvar, ngrids))
@@ -1963,12 +1968,12 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
             kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
             kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
 
-            update_pairs_info(cell1)
+            ni_copy = _copy_numint_for_strained_cell(ni, cell1, image_translations)
             rho_plus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts1, xctype)
             rho_plus = ifft_in_place(rho_plus.reshape(-1, *mesh)).real
             rho_plus *= ngrids / cell1.vol
 
-            update_pairs_info(cell2)
+            ni_copy = _copy_numint_for_strained_cell(ni, cell2, image_translations)
             rho_minus = evaluate_density_on_g_mesh(ni_copy, dm_kpts, kpts2, xctype)
             rho_minus = ifft_in_place(rho_minus.reshape(-1, *mesh)).real
             rho_minus *= ngrids / cell2.vol
@@ -1987,7 +1992,7 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
                                      rho1_sf, grids, with_j, with_nuc)
     return out
 
-class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
+class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def __init__(self, cell):
         self.cell = cell
         self.mesh = cell.mesh
@@ -2169,6 +2174,59 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         return rho, vxc, fxc
 
     cache_xc_kernel = NotImplemented
+
+    def energy_nuclear_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                                with_j=False, with_nuc=False):
+        '''Computes the nuclear gradients of Exc along with additional
+        contributions from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        hermi = 1
+        return get_veff_ip1(self, xc_code, dm_kpts, hermi, kpts, with_j, with_nuc)
+
+    def energy_strain_gradient(self, xc_code, dm_kpts, kpts=None, spin=None,
+                               with_j=False, with_nuc=False):
+        '''Computes the strain derivatives of Exc along with additional
+        contributions from the Coulomb and pseudopotential terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        if spin is None:
+            dms = _format_dms(dm_kpts, kpts)
+            spin = 0 if len(dms) == 1 else 1
+        if spin == 0:
+            sigma = _rks_exc_strain_deriv(self, xc_code, dm_kpts, kpts, with_j, with_nuc)
+        else:
+            sigma = _uks_exc_strain_deriv(self, xc_code, dm_kpts, kpts, with_j, with_nuc)
+        return sigma
+
+    def energy_derivatives(self, xc_code, dm_kpts, kpts=None, spin=None,
+                           with_j=False, with_nuc=False):
+        '''Computes the nuclear gradients and strain derivatives of Exc
+        along with additional contributions from the Coulomb and pseudopotential
+        terms.
+
+        Kwargs:
+            with_j :
+                Whether to include the electron-electron Coulomb interactions
+            with_nuc :
+                Whether to include the contribution from the local part of
+                pseudo-potential or electron-nuclear Coulomb interactions
+        '''
+        grad = self.energy_nuclear_gradient(xc_code, dm_kpts, kpts, spin, with_j, with_nuc)
+        sigma = self.energy_strain_gradient(xc_code, dm_kpts, kpts, spin, with_j, with_nuc)
+        return grad, sigma
 
     to_gpu = utils.to_gpu
     device = utils.device

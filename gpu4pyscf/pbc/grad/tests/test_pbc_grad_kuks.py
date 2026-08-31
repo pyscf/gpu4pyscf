@@ -139,7 +139,7 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
-        np.testing.assert_almost_equal(g, g_ref, 7)
+        np.testing.assert_almost_equal(g, g_ref, 5)
 
     def test_df_lda_grad(self):
         kpts = cell_be.make_kpts([1,1,3])

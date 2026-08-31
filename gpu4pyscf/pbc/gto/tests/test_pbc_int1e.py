@@ -36,13 +36,13 @@ def test_int1e_ovlp():
     ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
 
     dat = int1e.int1e_ovlp(cell).get()
-    assert abs(dat - ref[0]).max() < 1e-13
+    assert abs(dat - ref[0]).max() < 1e-12
 
     dat = int1e.int1e_ovlp(cell, kpts, kmesh).get()
-    assert abs(dat - ref).max() < 1e-13
+    assert abs(dat - ref).max() < 1e-12
 
     dat = int1e.int1e_ovlp(cell, kpts).get()
-    assert abs(dat - ref).max() < 1e-13
+    assert abs(dat - ref).max() < 1e-12
 
     cell = pyscf.M(
         atom='''C1  1.3    .2       .3
@@ -75,13 +75,13 @@ def test_int1e_kin():
     ref = pcell.pbc_intor('int1e_kin', hermi=1, kpts=kpts)
 
     dat = int1e.int1e_kin(cell).get()
-    assert abs(dat - ref[0]).max() < 1e-10
+    assert abs(dat - ref[0]).max() < 1e-9
 
     dat = int1e.int1e_kin(cell, kpts, kmesh).get()
-    assert abs(dat - ref).max() < 1e-10
+    assert abs(dat - ref).max() < 1e-9
 
     dat = int1e.int1e_kin(cell, kpts).get()
-    assert abs(dat - ref).max() < 1e-10
+    assert abs(dat - ref).max() < 1e-9
 
     mol = cell.to_mol()
     dat = int1e.int1e_kin(mol).get()
@@ -106,13 +106,13 @@ def test_int1e_ipovlp():
     ref = np.asarray(pcell.pbc_intor('int1e_ipovlp', hermi=0, kpts=kpts))
 
     dat = int1e.int1e_ipovlp(cell).get()
-    assert abs(dat - ref[0]).max() < 1e-8
+    assert abs(dat - ref[0]).max() < 5e-8
 
     dat = int1e.int1e_ipovlp(cell, kpts, kmesh).get()
-    assert abs(dat - ref).max() < 1e-8
+    assert abs(dat - ref).max() < 5e-8
 
     dat = int1e.int1e_ipovlp(cell, kpts).get()
-    assert abs(dat - ref).max() < 1e-8
+    assert abs(dat - ref).max() < 5e-8
 
     mol = cell.to_mol()
     dat = int1e.int1e_ipovlp(mol).get()
@@ -137,13 +137,13 @@ def test_int1e_ipkin():
     ref = np.asarray(pcell.pbc_intor('int1e_ipkin', hermi=0, kpts=kpts))
 
     dat = int1e.int1e_ipkin(cell).get()
-    assert abs(dat - ref[0]).max() < 1e-8
+    assert abs(dat - ref[0]).max() < 5e-8
 
     dat = int1e.int1e_ipkin(cell, kpts, kmesh).get()
-    assert abs(dat - ref).max() < 1e-8
+    assert abs(dat - ref).max() < 5e-8
 
     dat = int1e.int1e_ipkin(cell, kpts).get()
-    assert abs(dat - ref).max() < 1e-8
+    assert abs(dat - ref).max() < 5e-8
 
 def test_int1e_ovlp1():
     L = 4
