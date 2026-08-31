@@ -323,70 +323,6 @@ else:
 
 
     # =================================================================
-    # ndarray.view() — dpnp loses the buffer offset.
-    #
-    # dpnp_array._create_view() rebuilds the usm_ndarray with
-    #     dpt.usm_ndarray(shape, dtype, buffer=self._array_obj, strides=...)
-    # and never forwards `self._array_obj._element_offset`. dpctl treats
-    # `buffer=<usm_ndarray>` as the *whole* underlying USM allocation, so
-    # any array that does not start at the base of its allocation gets a
-    # view pointing at the wrong memory:
-    #
-    #     x = dpnp.arange(10.);  x[3:].view()  ->  [0. 1. 2. 3. 4. 5. 6.]
-    #
-    # NumPy/CuPy return [3. ... 9.]. This silently corrupts dpnp.einsum:
-    # a unary subscript with no summation (a pure permutation such as
-    # 'iabj->iajb', or even the identity 'abcd->abcd') takes the
-    # `returns_view` branch, which does `operands = [a.view() for a in
-    # operands]`, so einsum over any sliced operand read from the base of
-    # the parent buffer. tdscf.ris.get_ab() does exactly that with
-    # eri_mo[:nocc, nocc:, nocc:, :nocc] and produced a wrong A matrix.
-    #
-    # Not currently tracked upstream -- worth filing. Related and already
-    # fixed in this dpnp checkout: IntelPython/dpnp#2641 and #2781, the same
-    # class of bug for `.data.ptr` on views (verified fixed here: a sliced
-    # array's .data.ptr does carry the byte offset).
-    #
-    # Forward the offset. Guarded so re-imports don't re-wrap.
-    # =================================================================
-    if not getattr(dpnp_array._create_view, "__gpu4pyscf_patched__", False):
-        _orig_create_view = dpnp_array._create_view
-
-        def _create_view_keep_offset(self, array_class, shape, dtype, strides,
-                                     _orig=_orig_create_view):
-            usm_obj = self._array_obj
-            offset = getattr(usm_obj, "_element_offset", 0)
-            if not offset:
-                # Base of the allocation: upstream path is already correct.
-                return _orig(self, array_class, shape, dtype, strides)
-
-            if dtype is None:
-                dtype = self.dtype
-            itemsize = dpnp.dtype(dtype).itemsize
-            usm_view = dpt.usm_ndarray(
-                shape,
-                dtype=dtype,
-                buffer=usm_obj,
-                strides=(tuple(s // itemsize for s in strides)
-                         if strides else None),
-                offset=offset,
-            )
-
-            if array_class is dpnp_array:
-                return dpnp_array._create_from_usm_ndarray(usm_view)
-
-            res = array_class.__new__(array_class)
-            res._array_obj = usm_view
-            res._array_obj._set_namespace(dpnp)
-            if hasattr(res, "__array_finalize__"):
-                res.__array_finalize__(self)
-            return res
-
-        _create_view_keep_offset.__gpu4pyscf_patched__ = True
-        dpnp_array._create_view = _create_view_keep_offset
-
-
-    # =================================================================
     # bool() on a size-1 array of ndim > 0.
     #
     # NumPy (and therefore CuPy) allow truth-testing any array whose size is
@@ -779,6 +715,23 @@ else:
 
 
     # =================================================================
+    # cupy.RawKernel / cupy.RawModule — runtime kernel compilation.
+    #
+    # Backed by dpctl.program.create_kernel_bundle_from_sycl_source (the
+    # DPC++ `kernel_compiler` extension). The CUDA kernel sources already
+    # embedded in gpu4pyscf compile unmodified once rawkernel.py's
+    # compatibility prelude is prepended -- see that module for the
+    # __global__ / threadIdx / dimension-order mapping, the __shared__
+    # rewrite, and the one unsupported construct (dynamic shared memory).
+    # =================================================================
+    from . import rawkernel as _rawkernel_mod
+    cupy_fake.RawKernel = _rawkernel_mod.RawKernel
+    cupy_fake.RawModule = _rawkernel_mod.RawModule
+    sys.modules["cupy.rawkernel"] = _rawkernel_mod
+    sys.modules["gpu4pyscf.cupy.rawkernel"] = _rawkernel_mod
+
+
+    # =================================================================
     # sys.modules aliasing — make `cupy`, `gpu4pyscf.cupy`, and their
     # `.cuda` submodules all resolve to the SAME module objects.
     #
@@ -814,12 +767,24 @@ for _fname in (
     "rfft2",    "irfft2",
     "rfftn",    "irfftn",
     "hfft",     "ihfft",
-    "fftfreq",  "rfftfreq",
     "fftshift", "ifftshift",
 ):
     _fn = getattr(dpnp.fft, _fname, None)
     if _fn is not None:
         setattr(_fft_mod, _fname, _fn)
+
+# fftfreq / rfftfreq -- dpnp demands `n` be a plain Python int and raises
+# ValueError for a numpy integer (np.int32/np.int64), which CuPy/NumPy accept.
+# Callers here commonly pass mesh sizes taken from `np.asarray(mesh)`, so
+# coerce rather than push the constraint onto every call site.
+for _fname in ("fftfreq", "rfftfreq"):
+    _fn = getattr(dpnp.fft, _fname, None)
+    if _fn is not None:
+        def _make_freq(_orig):
+            def _freq(n, *args, **kwargs):
+                return _orig(int(n), *args, **kwargs)
+            return _freq
+        setattr(_fft_mod, _fname, _make_freq(_fn))
 
 cupy_fake.fft = _fft_mod
 sys.modules["cupy.fft"] = _fft_mod

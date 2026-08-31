@@ -366,7 +366,7 @@ S
         test_coords = []
         for frag_grids in grids.loop_grids():
             test_coords.append(frag_grids.coords)
-            assert np.max(np.abs(frag_grids.weights - ref_weight)) < 1e-14
+            assert cp.max(cp.abs(frag_grids.weights - ref_weight)) < 1e-14
         test_coords = cp.vstack(test_coords).get()
 
         ref_coords = ref_coords[np.lexsort((ref_coords[:, 2], ref_coords[:, 1], ref_coords[:, 0])), :]

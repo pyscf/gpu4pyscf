@@ -1292,7 +1292,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0,
                 Ecut_threshold /= 2
                 continue
 
-            n_radius = int(np.ceil(r_active.max() / dh))
+            n_radius = int(cp.ceil(r_active.max() / dh))
             n_radius = max(n_radius, 4)
             sub_tasks = sub_tasks_for_l(mesh, n_radius, mask)
             tasks.append(sub_tasks)
@@ -1307,7 +1307,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0,
         if cp.any(remaining_mask):
             # TODO: Using a regular FFTDF task than the MG algorithm?
             dh = (cell_len / mesh).min()
-            n_radius = int(np.ceil(radius[remaining_mask].max() / dh))
+            n_radius = int(cp.ceil(radius[remaining_mask].max() / dh))
             n_radius = max(n_radius, 4)
             sub_tasks = sub_tasks_for_l(mesh, n_radius, remaining_mask)
             tasks.append(sub_tasks)
