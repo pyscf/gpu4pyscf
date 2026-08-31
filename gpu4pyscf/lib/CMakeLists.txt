@@ -156,17 +156,51 @@ if(USE_HIP)
   # -Wno-register: the CUDA sources use the C++17-removed `register` keyword.
   set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wno-register -include ${PROJECT_SOURCE_DIR}/hip_compat/gpu_runtime.h")
 
-  # Development/validation switch: force 64-wide wavefronts. On RDNA (wave32 by
-  # default, e.g. gfx1151) -mwavefrontsize64 runs the kernels in wave64 mode so
-  # the wavefront-agnostic (CDNA) code path can be validated on an RDNA dev GPU;
-  # -DWARP_SIZE=64 sets the matching compile-time constant (warpSize is not
-  # constexpr, so shared-memory tiling needs the literal). CDNA is wave64
-  # regardless -- this is NOT for shipping; a multi-arch build derives WARP_SIZE
-  # per arch. Default OFF keeps the validated wave32 build byte-for-byte.
+  # Wavefront width. WARP_SIZE is a *global* compile-time constant -- the host
+  # launch config and the device shared-memory tiling must agree on it, so it is
+  # fixed per build rather than per-arch inside a fat binary. It is derived from
+  # the target GPU architecture(s): GCN/CDNA (gfx8xx/gfx9xx, e.g. MI2xx/MI3xx) run
+  # 64-wide wavefronts; RDNA and newer (gfx10xx/11xx/12xx) run 32-wide. clang
+  # exposes no usable compile-time wavefront macro (__AMDGCN_WAVEFRONT_SIZE__ is
+  # absent in this toolchain and would be device-pass only, so it cannot reach the
+  # host launch/shared-byte code), hence we classify the arch string here. Leaving
+  # WARP_SIZE unset makes the headers default to 32 -- byte-for-byte the original
+  # wave32/CUDA build.
+  set(_wave64_archs "")
+  set(_wave32_archs "")
+  foreach(_a IN LISTS CMAKE_HIP_ARCHITECTURES)
+    if(_a MATCHES "^gfx[89]")   # gfx8xx / gfx9xx = GCN/CDNA = wave64
+      list(APPEND _wave64_archs "${_a}")
+    else()                      # gfx10xx / 11xx / 12xx (RDNA+) = wave32
+      list(APPEND _wave32_archs "${_a}")
+    endif()
+  endforeach()
+
+  # Manual override: force wave64 even on RDNA, to validate the wave64 code path
+  # on an RDNA dev GPU (e.g. gfx1151). -mwavefrontsize64 switches RDNA into wave64
+  # mode; on native-wave64 CDNA it is a harmless no-op.
   option(USE_WAVE64 "Force wave64 wavefronts (RDNA dev-validation of wave64 kernels)" OFF)
   if(USE_WAVE64)
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mwavefrontsize64 -DWARP_SIZE=64 -DGPU4PYSCF_WAVE64=1")
     message("USE_WAVE64: forcing 64-wide wavefronts (-mwavefrontsize64 -DWARP_SIZE=64)")
+  elseif(_wave64_archs AND _wave32_archs)
+    # A single global WARP_SIZE cannot serve both families in one fat binary.
+    # Force all arches to wave64 for correctness (-mwavefrontsize64); the wave32
+    # arch(es) then run non-native wave64 (slower). Build one family at a time
+    # (-DGPU_ARCHITECTURES=...) for a native, faster binary.
+    message(WARNING
+      "Mixed wave32 (${_wave32_archs}) and wave64 (${_wave64_archs}) GPU archs in one "
+      "build. Forcing wave64 for correctness (-mwavefrontsize64 -DWARP_SIZE=64); the "
+      "wave32 arch(es) will run non-native. Set -DGPU_ARCHITECTURES to a single family "
+      "for a native, faster build.")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mwavefrontsize64 -DWARP_SIZE=64 -DGPU4PYSCF_WAVE64=1")
+  elseif(_wave64_archs)
+    # Native GCN/CDNA: set the matching compile-time constant. No -mwavefrontsize64
+    # needed -- these arches are wave64 in hardware.
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -DWARP_SIZE=64 -DGPU4PYSCF_WAVE64=1")
+    message("Wavefront: wave64 for GCN/CDNA arch(es) ${_wave64_archs} (WARP_SIZE=64)")
+  else()
+    message("Wavefront: wave32 for RDNA arch(es) ${_wave32_archs} (WARP_SIZE=32, default)")
   endif()
 endif()
 
