@@ -17,12 +17,19 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifndef USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
+
+#ifdef USE_SYCL
+#define CONCAT_(a,b) a##b
+#define CONCAT(a,b)  CONCAT_(a,b)
+#endif
 
 #define TILE            4
 #define WARP_SIZE       32
@@ -40,11 +47,25 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
 {
     constexpr int threads = THREADS;
     constexpr int WARPS = THREADS / WARP_SIZE;
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+    int tile_id0 = item.get_group(0) * tiles_per_block;
+    auto thread_block = item.get_group();
+    int &a_upper = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &b_upper = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &c_upper = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double &start_position_x = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    double &start_position_y = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    double &start_position_z = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    auto &density_value = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[TILE*TILE*TILE*WARPS]>(thread_block);
+#else
     int thread_id = threadIdx.x;
     int tile_id0 = blockIdx.x * tiles_per_block;
     __shared__ int a_upper, b_upper, c_upper;
     __shared__ double start_position_x, start_position_y, start_position_z;
     __shared__ double density_value[TILE*TILE*TILE*WARPS];
+#endif
 
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
@@ -305,6 +326,23 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
 }
 
 extern "C" {
+#ifdef USE_SYCL
+#define eval_density_kernel_case(li, lj, slice_i, slice_j, non_orth) \
+    case (li * LMAX1 + lj): { \
+        sycl::range<1> sycl_threads(THREADS); \
+        sycl::range<1> sycl_grids(block_grid); \
+        sycl_get_queue()->parallel_for<class CONCAT(eval_density_kernel_mgv3_sycl_##li##_##lj##_##slice_i##_##slice_j##_##non_orth##_, __LINE__)> \
+            (sycl::nd_range<1>(sycl_grids * sycl_threads, sycl_threads), [=](auto item) [[intel::kernel_args_restrict]] { \
+                eval_density_kernel<li,lj,slice_i,slice_j,non_orth>( \
+                    density, dm, *envs, supmol_img_coords, factor, \
+                    shl_pair_offsets, dressed_bas_ij_idx, \
+                    grid_tile_index, n_contributing_tiles, tiles_per_block, \
+                    a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
+                    mesh_a, mesh_b, mesh_c, negligible); \
+            }).wait(); \
+    } \
+    break
+#else
 #define eval_density_kernel_case(li, lj, slice_i, slice_j, non_orth) \
     case (li * LMAX1 + lj): \
         eval_density_kernel<li,lj,slice_i,slice_j,non_orth><<<block_grid, THREADS>>>( \
@@ -314,6 +352,7 @@ extern "C" {
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c, negligible); \
     break
+#endif
 
 int evaluate_density(double *density, double *placeholder,
                      double *dm, PBCIntEnvVars *envs,

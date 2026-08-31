@@ -17,6 +17,8 @@
 #include <gint/cuda_alloc.cuh>
 #include <gint/gint.h>
 #include <stdio.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #include "evaluation.cuh"
 #include "gradient.cuh"

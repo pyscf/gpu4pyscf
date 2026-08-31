@@ -17,20 +17,16 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda_runtime.h>
 #include "multigrid.cuh"
 #include "cart2xyz.cu"
 #include "loader.cu"
 
 template <int L> __device__ static
-void _eval_rho_orth_kernel(double *cache, double *rho, double *dm, MGridEnvVars envs,
+void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
                            MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
     int thread_id = threadIdx.x;
-#endif
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int npairs_this_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
@@ -86,10 +82,11 @@ void _eval_rho_orth_kernel(double *cache, double *rho, double *dm, MGridEnvVars 
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     // TODO: multiple dms
-    dm_to_dm_xyz<L>(cache, dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
+    dm_to_dm_xyz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
 
     double r1[L+1];
     double dmx_gyz[L+1];
+    extern __shared__ double cache[];
 
     int ngridx = ngrid_span;
     int ngridy = ngrid_span;
@@ -208,35 +205,23 @@ void _eval_rho_orth_kernel(double *cache, double *rho, double *dm, MGridEnvVars 
 
 template <int L> __global__
 void eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
-                          MGridBounds bounds, double *pool, uint32_t *batch_head
-                          #ifdef USE_SYCL
-                          , sycl::nd_item<1> &item, char* shm_mem
-                          #endif
-                          )
+                          MGridBounds bounds, double *pool, uint32_t *batch_head)
 {
-#ifdef USE_SYCL
-    int thread_id = item.get_local_id(0);
-    int b_id = item.get_group(0);
-    auto &pair_idx0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<uint32_t>(item.get_group());
-    double *cache = reinterpret_cast<double*>(shm_mem);
-#else
     int thread_id = threadIdx.x;
     int b_id = blockIdx.x;
-    extern __shared__ double cache[];
-    __shared__ uint32_t pair_idx0;
-#endif
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
     int nf3 = nf2*(L+3)/3;
     pool += (xs_size*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE * b_id;
 
+    __shared__ uint32_t pair_idx0;
     if (thread_id == 0) {
         pair_idx0 = atomicAdd(batch_head, WARP_SIZE);
     }
     __syncthreads();
     while (pair_idx0 < bounds.nshl_pair) {
-        _eval_rho_orth_kernel<L>(cache, rho, dm, envs, bounds, pool, pair_idx0);
+        _eval_rho_orth_kernel<L>(rho, dm, envs, bounds, pool, pair_idx0);
         if (thread_id == 0) {
             pair_idx0 = atomicAdd(batch_head, WARP_SIZE);
         }
@@ -266,32 +251,19 @@ int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
         nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
-
-    #ifdef USE_SYCL
-#define LAUNCH_EVAL_RHO(L) \
-    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-        sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen(L, &bounds)), cgh); \
-        cgh.parallel_for<class eval_rho_orth_kernel_##L##_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { \
-            eval_rho_orth_kernel<L>(rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
-        }); \
-    })
-#else
-#define LAUNCH_EVAL_RHO(L) \
-    eval_rho_orth_kernel<L> <<<workers, THREADS, buflen(L, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head)
-#endif
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
     cudaMemset(batch_head, 0, sizeof(uint32_t));
 
     switch (l) {
-        case 0: LAUNCH_EVAL_RHO(0); break;
-        case 1: LAUNCH_EVAL_RHO(1); break;
-        case 2: LAUNCH_EVAL_RHO(2); break;
-        case 3: LAUNCH_EVAL_RHO(3); break;
-        case 4: LAUNCH_EVAL_RHO(4); break;
-        case 5: LAUNCH_EVAL_RHO(5); break;
-        case 6: LAUNCH_EVAL_RHO(6); break;
-        case 7: LAUNCH_EVAL_RHO(7); break;
-        case 8: LAUNCH_EVAL_RHO(8); break;
+    case 0: eval_rho_orth_kernel<0> <<<workers, THREADS, buflen(0, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 1: eval_rho_orth_kernel<1> <<<workers, THREADS, buflen(1, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 2: eval_rho_orth_kernel<2> <<<workers, THREADS, buflen(2, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 3: eval_rho_orth_kernel<3> <<<workers, THREADS, buflen(3, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 4: eval_rho_orth_kernel<4> <<<workers, THREADS, buflen(4, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 5: eval_rho_orth_kernel<5> <<<workers, THREADS, buflen(5, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 6: eval_rho_orth_kernel<6> <<<workers, THREADS, buflen(6, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 7: eval_rho_orth_kernel<7> <<<workers, THREADS, buflen(7, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 8: eval_rho_orth_kernel<8> <<<workers, THREADS, buflen(8, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
     default: return 1;
     }
 
@@ -302,7 +274,6 @@ int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
         return 1;
     }
     cudaFree(batch_head);
-#undef LAUNCH_EVAL_RHO
     return 0;
 }
 }

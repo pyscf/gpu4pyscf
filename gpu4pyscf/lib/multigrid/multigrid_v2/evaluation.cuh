@@ -20,25 +20,12 @@
 #include "constant_objects.cuh"
 #include "utils.cuh"
 #include <assert.h>
-#ifndef USE_SYCL
 #include <cub/cub.cuh>
-#endif
 #include <gint/cuda_alloc.cuh>
 #include <gint/gint.h>
 #include <stdio.h>
 
 #define BLOCK_DIM_XYZ 4
-
-// Abstracts CUDA/SYCL 3D block_size/block_grid configuration. Used 4x in this file.
-#ifdef USE_SYCL
-#define SETUP_EVAL_BLOCK_CONFIG() \
-  sycl::range<3> block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ); \
-  sycl::range<3> block_grid(1, 1, n_contributing_blocks);
-#else
-#define SETUP_EVAL_BLOCK_CONFIG() \
-  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ); \
-  dim3 block_grid(n_contributing_blocks, 1, 1);
-#endif
 
 namespace gpu4pyscf::gpbc::multi_grid {
 
@@ -57,27 +44,14 @@ __global__ static void evaluate_density_kernel(
     const int mesh_a, const int mesh_b, const int mesh_c, const int *__restrict__ atm,
     const int *__restrict__ bas, const double *__restrict__ env) {
 
-  constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
-
-#ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<3>();
-  int threadIdx_x = item.get_local_id(2);
-  int threadIdx_y = item.get_local_id(1);
-  int threadIdx_z = item.get_local_id(0);
-  int blockIdx_x = item.get_group(2);
-#else
-  int threadIdx_x = threadIdx.x;
-  int threadIdx_y = threadIdx.y;
-  int threadIdx_z = threadIdx.z;
-  int blockIdx_x = blockIdx.x;
-#endif
   constexpr int n_i_cartesian_functions = (i_angular + 1) * (i_angular + 2) / 2;
   constexpr int n_j_cartesian_functions = (j_angular + 1) * (j_angular + 2) / 2;
+  constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
 
   const int density_matrix_stride = n_i_functions * n_j_functions;
   const int64_t density_matrix_channel_stride = ((int64_t) density_matrix_stride) * ((int64_t) n_difference_images);
 
-  const int block_index = sorted_block_index[blockIdx_x];
+  const int block_index = sorted_block_index[blockIdx.x];
   const int n_blocks_b = (mesh_b + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
   const int n_blocks_c = (mesh_c + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
 
@@ -112,8 +86,8 @@ __global__ static void evaluate_density_kernel(
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
   const int c_upper = min(c_start + BLOCK_DIM_XYZ, mesh_c) - c_start;
 
-  const int thread_id = threadIdx_x + threadIdx_y * BLOCK_DIM_XYZ +
-                        threadIdx_z * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
+  const int thread_id = threadIdx.x + threadIdx.y * BLOCK_DIM_XYZ +
+                        threadIdx.z * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
 
   KernelType
       prefactor[n_channels * n_i_cartesian_functions * n_j_cartesian_functions];
@@ -123,11 +97,7 @@ __global__ static void evaluate_density_kernel(
   // value will make the future HIP/wavefront port a single-point edit.
   constexpr int WARP_SIZE_CT = 32;
   constexpr int n_warps = n_threads / WARP_SIZE_CT;  /*L2*/
-#ifdef USE_SYCL
-  auto &reduced_density_values = *sycl::ext::oneapi::group_local_memory_for_overwrite<KernelType[n_channels * n_warps * n_threads]>(item.get_group());
-#else
   __shared__ KernelType reduced_density_values[n_channels * n_warps * n_threads];
-#endif
 
 #pragma unroll
   for (int i_channel = 0; i_channel < n_channels; i_channel++) {
@@ -412,9 +382,9 @@ __global__ static void evaluate_density_kernel(
       }
     }
   }
-  const int a_index = a_start + threadIdx_z;
-  const int b_index = b_start + threadIdx_y;
-  const int c_index = c_start + threadIdx_x;
+  const int a_index = a_start + threadIdx.z;
+  const int b_index = b_start + threadIdx.y;
+  const int c_index = c_start + threadIdx.x;
 
   __syncthreads();
 
@@ -433,30 +403,6 @@ __global__ static void evaluate_density_kernel(
   }
 }
 
-#ifdef USE_SYCL
-namespace { struct evaluate_density_tu_tag {}; }
-namespace { template<int> struct evaluate_density_callsite_tag {}; }
-template<int LI, int LJ, typename TUtag, typename CallTag, typename KernelTypeTag, typename NChannelsTag, typename NonOrthTag> struct evaluate_density_kernel_sycl_name;
-template<int LI, int LJ, int CS, typename KernelType, int NCH, bool NONORTH>
-using evaluate_density_kernel_sycl_t = evaluate_density_kernel_sycl_name<LI, LJ,
-                                                                         evaluate_density_tu_tag,
-                                                                         evaluate_density_callsite_tag<CS>,
-                                                                         KernelType,                                 // encodes KernelType
-                                                                         std::integral_constant<int, NCH>,          // encodes n_channels
-                                                                         std::bool_constant<NONORTH>>;                // encodes is_non_orthogonal
-
-#define density_kernel_macro(li, lj)                                    \
-  sycl_get_queue()->parallel_for<evaluate_density_kernel_sycl_t<li, lj, __COUNTER__, KernelType, n_channels, is_non_orthogonal>> \
-  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
-    evaluate_density_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
-      (density, density_matrices, non_trivial_pairs, i_shells, j_shells, \
-       n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions,   \
-       sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid, \
-       sorted_block_index, image_indices, vectors_to_neighboring_images, \
-       n_images, image_pair_difference_index, n_difference_images, mesh_a, \
-       mesh_b, mesh_c, atm, bas, env);                                  \
-  })
-#else
 #define density_kernel_macro(li, lj)                                           \
   evaluate_density_kernel<KernelType, n_channels, li, lj, is_non_orthogonal>   \
       <<<block_grid, block_size>>>(                                            \
@@ -466,7 +412,6 @@ using evaluate_density_kernel_sycl_t = evaluate_density_kernel_sycl_name<LI, LJ,
           sorted_block_index, image_indices, vectors_to_neighboring_images,    \
           n_images, image_pair_difference_index, n_difference_images, mesh_a,  \
           mesh_b, mesh_c, atm, bas, env)
-#endif
 
 #define density_kernel_case_macro(li, lj)                                      \
   case (li * 10 + lj):                                                         \
@@ -486,10 +431,11 @@ int evaluate_density_driver(
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
     const int *bas, const double *env) {
+  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
   int mesh_c = mesh[2];
-  SETUP_EVAL_BLOCK_CONFIG();
+  dim3 block_grid(n_contributing_blocks, 1, 1);
   switch (i_angular * 10 + j_angular) {
     density_kernel_case_macro(0, 0);
     density_kernel_case_macro(0, 1);
@@ -542,34 +488,16 @@ __global__ static void evaluate_xc_kernel(
     const int mesh_a, const int mesh_b, const int mesh_c, const int *atm,
     const int *bas, const double *env) {
 
-  constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
-
-#ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<3>();
-  int threadIdx_x = item.get_local_id(2);
-  int threadIdx_y = item.get_local_id(1);
-  int threadIdx_z = item.get_local_id(0);
-  int blockIdx_x = item.get_group(2);
-
-  auto &xc_values = *sycl::ext::oneapi::group_local_memory_for_overwrite<KernelType[n_channels * n_threads]>(item.get_group());
-#else
-  int threadIdx_x = threadIdx.x;
-  int threadIdx_y = threadIdx.y;
-  int threadIdx_z = threadIdx.z;
-  int blockIdx_x = blockIdx.x;
-
-  __shared__ KernelType xc_values[n_channels * n_threads];
-#endif
-
   constexpr int n_i_cartesian_functions = (i_angular + 1) * (i_angular + 2) / 2;
   constexpr int n_j_cartesian_functions = (j_angular + 1) * (j_angular + 2) / 2;
+  constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
   constexpr int n_xy_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
 
   const int xc_weights_stride = mesh_a * mesh_b * mesh_c;
   const int fock_stride = n_i_functions * n_j_functions;
   const int64_t fock_channel_stride = ((int64_t) fock_stride) * ((int64_t) n_difference_images);
 
-  const int block_index = sorted_block_index[blockIdx_x];
+  const int block_index = sorted_block_index[blockIdx.x];
 
   const int n_blocks_b = (mesh_b + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
   const int n_blocks_c = (mesh_c + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
@@ -614,16 +542,18 @@ __global__ static void evaluate_xc_kernel(
   const int n_pairs = end_pair_index - start_pair_index;
   const int n_batches = (n_pairs + n_threads - 1) / n_threads;
 
-  int a_index = a_start + threadIdx_z;
-  int b_index = b_start + threadIdx_y;
-  int c_index = c_start + threadIdx_x;
+  __shared__ KernelType xc_values[n_channels * n_threads];
+
+  int a_index = a_start + threadIdx.z;
+  int b_index = b_start + threadIdx.y;
+  int c_index = c_start + threadIdx.x;
 
   const bool out_of_boundary =
       a_index >= mesh_a || b_index >= mesh_b || c_index >= mesh_c;
   KernelType xc_value = 0;
 
   const int thread_id =
-      threadIdx_x + threadIdx_y * BLOCK_DIM_XYZ + threadIdx_z * n_xy_threads;
+      threadIdx.x + threadIdx.y * BLOCK_DIM_XYZ + threadIdx.z * n_xy_threads;
 
 #pragma unroll
   for (int i_channel = 0; i_channel < n_channels; i_channel++) {
@@ -894,30 +824,6 @@ __global__ static void evaluate_xc_kernel(
   }
 }
 
-#ifdef USE_SYCL
-  namespace { struct evaluate_xc_tu_tag {}; }
-  namespace { template<int> struct evaluate_xc_callsite_tag {}; }
-  template<int LI, int LJ, typename TUtag, typename CallTag, typename KernelTypeTag, typename NChannelsTag, typename NonOrthTag> struct evaluate_xc_kernel_sycl_name;
-  template<int LI, int LJ, int CS, typename KernelType, int NCH, bool NONORTH>
-  using evaluate_xc_kernel_sycl_t = evaluate_xc_kernel_sycl_name<LI, LJ,
-                                                                 evaluate_xc_tu_tag,
-                                                                 evaluate_xc_callsite_tag<CS>,
-                                                                 KernelType, // encodes KernelType
-                                                                 std::integral_constant<int, NCH>, // encodes n_channels
-                                                                 std::bool_constant<NONORTH>>; // encodes is_non_orthogonal
-
-#define xc_kernel_macro(li, lj)                                         \
-  sycl_get_queue()->parallel_for<evaluate_xc_kernel_sycl_t<li, lj, __COUNTER__, KernelType, n_channels, is_non_orthogonal>>     \
-  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
-    evaluate_xc_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
-      (fock, xc_weights, non_trivial_pairs, i_shells, j_shells, n_j_shells, \
-       shell_to_ao_indices, n_i_functions, n_j_functions,               \
-       sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid, \
-       sorted_block_index, image_indices, vectors_to_neighboring_images, \
-       n_images, image_pair_difference_index, n_difference_images, mesh_a, \
-       mesh_b, mesh_c, atm, bas, env);                                  \
-  })
-#else
 #define xc_kernel_macro(li, lj)                                                \
   evaluate_xc_kernel<KernelType, n_channels, li, lj, is_non_orthogonal>        \
       <<<block_grid, block_size>>>(                                            \
@@ -927,7 +833,6 @@ __global__ static void evaluate_xc_kernel(
           sorted_block_index, image_indices, vectors_to_neighboring_images,    \
           n_images, image_pair_difference_index, n_difference_images, mesh_a,  \
           mesh_b, mesh_c, atm, bas, env)
-#endif
 
 #define xc_kernel_case_macro(li, lj)                                           \
   case (li * 10 + lj):                                                         \
@@ -947,10 +852,11 @@ int evaluate_xc_driver(
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
     const int *bas, const double *env) {
+  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
   int mesh_c = mesh[2];
-  SETUP_EVAL_BLOCK_CONFIG();
+  dim3 block_grid(n_contributing_blocks, 1, 1);
 
   switch (i_angular * 10 + j_angular) {
     xc_kernel_case_macro(0, 0);
@@ -1004,32 +910,15 @@ __global__ static void evaluate_density_tau_kernel(
     const int mesh_a, const int mesh_b, const int mesh_c, const int *atm,
     const int *bas, const double *env) {
 
-  constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
-
-#ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<3>();
-  int threadIdx_x = item.get_local_id(2);
-  int threadIdx_y = item.get_local_id(1);
-  int threadIdx_z = item.get_local_id(0);
-  int blockIdx_x = item.get_group(2);
-
-  auto &reduced_density_tau_values = *sycl::ext::oneapi::group_local_memory_for_overwrite<KernelType[n_channels * 2 * n_threads]>(item.get_group());
-#else
-  int threadIdx_x = threadIdx.x;
-  int threadIdx_y = threadIdx.y;
-  int threadIdx_z = threadIdx.z;
-  int blockIdx_x = blockIdx.x;
-
-  __shared__ KernelType reduced_density_tau_values[n_channels * 2 * n_threads];
-#endif
   constexpr int n_i_cartesian_functions = (i_angular + 1) * (i_angular + 2) / 2;
   constexpr int n_j_cartesian_functions = (j_angular + 1) * (j_angular + 2) / 2;
+  constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
   constexpr int n_dimensions = 3;
 
   const int density_matrix_stride = n_i_functions * n_j_functions;
   const int64_t density_matrix_channel_stride = ((int64_t) density_matrix_stride) * ((int64_t) n_difference_images);
 
-  const int block_index = sorted_block_index[blockIdx_x];
+  const int block_index = sorted_block_index[blockIdx.x];
   const int n_blocks_b = (mesh_b + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
   const int n_blocks_c = (mesh_c + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
 
@@ -1064,11 +953,13 @@ __global__ static void evaluate_density_tau_kernel(
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
   const int c_upper = min(c_start + BLOCK_DIM_XYZ, mesh_c) - c_start;
 
-  const int thread_id = threadIdx_x + threadIdx_y * BLOCK_DIM_XYZ +
-                        threadIdx_z * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
+  const int thread_id = threadIdx.x + threadIdx.y * BLOCK_DIM_XYZ +
+                        threadIdx.z * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
 
   KernelType
       prefactor[n_channels * n_i_cartesian_functions * n_j_cartesian_functions];
+
+  __shared__ KernelType reduced_density_tau_values[n_channels * 2 * n_threads];
 
 #pragma unroll
   for (int i_channel = 0; i_channel < n_channels * 2; i_channel++) {
@@ -1330,15 +1221,11 @@ __global__ static void evaluate_density_tau_kernel(
 
             __syncthreads();
 
-            #ifdef USE_SYCL
-            const KernelType reduced_density = sycl::reduce_over_group(item.get_group(), density_value_to_be_shared, sycl::plus<>());
-            #else
             const KernelType reduced_density =
                 cub::BlockReduce<KernelType, BLOCK_DIM_XYZ,
                                  cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY,
                                  BLOCK_DIM_XYZ, BLOCK_DIM_XYZ>()
                     .Sum(density_value_to_be_shared);
-            #endif
 
             if (thread_id == 0) {
               reduced_density_tau_values[(i_channel * 2 + 0) * n_threads +
@@ -1350,15 +1237,11 @@ __global__ static void evaluate_density_tau_kernel(
 
             __syncthreads();
 
-            #ifdef USE_SYCL
-            const KernelType reduced_tau = sycl::reduce_over_group(item.get_group(), tau_value_to_be_shared, sycl::plus<>());
-            #else
             const KernelType reduced_tau =
                 cub::BlockReduce<KernelType, BLOCK_DIM_XYZ,
                                  cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY,
                                  BLOCK_DIM_XYZ, BLOCK_DIM_XYZ>()
                     .Sum(tau_value_to_be_shared);
-            #endif
 
             if (thread_id == 0) {
               reduced_density_tau_values[(i_channel * 2 + 1) * n_threads +
@@ -1393,9 +1276,9 @@ __global__ static void evaluate_density_tau_kernel(
       }
     }
   }
-  const int a_index = a_start + threadIdx_z;
-  const int b_index = b_start + threadIdx_y;
-  const int c_index = c_start + threadIdx_x;
+  const int a_index = a_start + threadIdx.z;
+  const int b_index = b_start + threadIdx.y;
+  const int c_index = c_start + threadIdx.x;
 
   __syncthreads();
 
@@ -1414,30 +1297,6 @@ __global__ static void evaluate_density_tau_kernel(
   }
 }
 
-#ifdef USE_SYCL
-namespace { struct evaluate_density_tau_tu_tag {}; }
-namespace { template<int> struct evaluate_density_tau_callsite_tag {}; }
-template<int LI, int LJ, typename TUtag, typename CallTag, typename KernelTypeTag, typename NChannelsTag, typename NonOrthTag> struct evaluate_density_tau_kernel_sycl_name;
-template<int LI, int LJ, int CS, typename KernelType, int NCH, bool NONORTH>
-using evaluate_density_tau_kernel_sycl_t = evaluate_density_tau_kernel_sycl_name<LI, LJ,
-                                                                         evaluate_density_tau_tu_tag,
-                                                                         evaluate_density_tau_callsite_tag<CS>,
-                                                                         KernelType,                                 // encodes KernelType
-                                                                         std::integral_constant<int, NCH>,          // encodes n_channels
-                                                                         std::bool_constant<NONORTH>>;                // encodes is_non_orthogonal
-
-#define density_tau_kernel_macro(li, lj)                                \
-  sycl_get_queue()->parallel_for<evaluate_density_tau_kernel_sycl_t<li, lj, __COUNTER__, KernelType, n_channels, is_non_orthogonal>> \
-  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
-    evaluate_density_tau_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
-      (density, density_matrices, non_trivial_pairs, i_shells, j_shells, \
-       n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions,   \
-       sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid, \
-       sorted_block_index, image_indices, vectors_to_neighboring_images, \
-       n_images, image_pair_difference_index, n_difference_images, mesh_a, \
-       mesh_b, mesh_c, atm, bas, env);                                  \
-  })
-#else
 #define density_tau_kernel_macro(li, lj)                                       \
   evaluate_density_tau_kernel<KernelType, n_channels, li, lj,                  \
                               is_non_orthogonal><<<block_grid, block_size>>>(  \
@@ -1447,7 +1306,6 @@ using evaluate_density_tau_kernel_sycl_t = evaluate_density_tau_kernel_sycl_name
       sorted_block_index, image_indices, vectors_to_neighboring_images,        \
       n_images, image_pair_difference_index, n_difference_images, mesh_a,      \
       mesh_b, mesh_c, atm, bas, env)
-#endif
 
 #define density_tau_kernel_case_macro(li, lj)                                  \
   case (li * 10 + lj):                                                         \
@@ -1467,10 +1325,11 @@ int evaluate_density_tau_driver(
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
     const int *bas, const double *env) {
+  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
   int mesh_c = mesh[2];
-  SETUP_EVAL_BLOCK_CONFIG();
+  dim3 block_grid(n_contributing_blocks, 1, 1);
   switch (i_angular * 10 + j_angular) {
     density_tau_kernel_case_macro(0, 0);
     density_tau_kernel_case_macro(0, 1);
@@ -1523,27 +1382,9 @@ __global__ static void evaluate_xc_with_tau_kernel(
     const int mesh_a, const int mesh_b, const int mesh_c, const int *atm,
     const int *bas, const double *env) {
 
-  constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
-
-#ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<3>();
-  int threadIdx_x = item.get_local_id(2);
-  int threadIdx_y = item.get_local_id(1);
-  int threadIdx_z = item.get_local_id(0);
-  int blockIdx_x = item.get_group(2);
-
-  auto &xc_values = *sycl::ext::oneapi::group_local_memory_for_overwrite<KernelType[n_channels * 2 * n_threads]>(item.get_group());
-#else
-  int threadIdx_x = threadIdx.x;
-  int threadIdx_y = threadIdx.y;
-  int threadIdx_z = threadIdx.z;
-  int blockIdx_x = blockIdx.x;
-
-  __shared__ KernelType xc_values[n_channels * 2 * n_threads];
-#endif
-
   constexpr int n_i_cartesian_functions = (i_angular + 1) * (i_angular + 2) / 2;
   constexpr int n_j_cartesian_functions = (j_angular + 1) * (j_angular + 2) / 2;
+  constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
   constexpr int n_xy_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
   constexpr int n_dimensions = 3;
 
@@ -1551,7 +1392,7 @@ __global__ static void evaluate_xc_with_tau_kernel(
   const int fock_stride = n_i_functions * n_j_functions;
   const int64_t fock_channel_stride = ((int64_t) fock_stride) * ((int64_t) n_difference_images);
 
-  const int block_index = sorted_block_index[blockIdx_x];
+  const int block_index = sorted_block_index[blockIdx.x];
 
   const int n_blocks_b = (mesh_b + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
   const int n_blocks_c = (mesh_c + BLOCK_DIM_XYZ - 1) / BLOCK_DIM_XYZ;
@@ -1596,15 +1437,17 @@ __global__ static void evaluate_xc_with_tau_kernel(
   const int n_pairs = end_pair_index - start_pair_index;
   const int n_batches = (n_pairs + n_threads - 1) / n_threads;
 
-  int a_index = a_start + threadIdx_z;
-  int b_index = b_start + threadIdx_y;
-  int c_index = c_start + threadIdx_x;
+  __shared__ KernelType xc_values[n_channels * 2 * n_threads];
+
+  int a_index = a_start + threadIdx.z;
+  int b_index = b_start + threadIdx.y;
+  int c_index = c_start + threadIdx.x;
 
   const bool out_of_boundary =
       a_index >= mesh_a || b_index >= mesh_b || c_index >= mesh_c;
 
   const int thread_id =
-      threadIdx_x + threadIdx_y * BLOCK_DIM_XYZ + threadIdx_z * n_xy_threads;
+      threadIdx.x + threadIdx.y * BLOCK_DIM_XYZ + threadIdx.z * n_xy_threads;
 
 #pragma unroll
   for (int i_channel = 0; i_channel < n_channels; i_channel++) {
@@ -1916,30 +1759,6 @@ __global__ static void evaluate_xc_with_tau_kernel(
   }
 }
 
-#ifdef USE_SYCL
-namespace { struct evaluate_xc_with_tau_tu_tag {}; }
-namespace { template<int> struct evaluate_xc_with_tau_callsite_tag {}; }
-template<int LI, int LJ, typename TUtag, typename CallTag, typename KernelTypeTag, typename NChannelsTag, typename NonOrthTag> struct evaluate_xc_with_tau_kernel_sycl_name;
-template<int LI, int LJ, int CS, typename KernelType, int NCH, bool NONORTH>
-using evaluate_xc_with_tau_kernel_sycl_t = evaluate_xc_with_tau_kernel_sycl_name<LI, LJ,
-                                                                         evaluate_xc_with_tau_tu_tag,
-                                                                         evaluate_xc_with_tau_callsite_tag<CS>,
-                                                                         KernelType,                                 // encodes KernelType
-                                                                         std::integral_constant<int, NCH>,          // encodes n_channels
-                                                                         std::bool_constant<NONORTH>>;                // encodes is_non_orthogonal
-
-#define xc_with_tau_kernel_macro(li, lj)                                \
-  sycl_get_queue()->parallel_for<evaluate_xc_with_tau_kernel_sycl_t<li, lj, __COUNTER__, KernelType, n_channels, is_non_orthogonal>> \
-  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
-    evaluate_xc_with_tau_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
-      (fock, xc_weights, non_trivial_pairs, i_shells, j_shells, n_j_shells, \
-       shell_to_ao_indices, n_i_functions, n_j_functions,               \
-       sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid, \
-       sorted_block_index, image_indices, vectors_to_neighboring_images, \
-       n_images, image_pair_difference_index, n_difference_images, mesh_a, \
-       mesh_b, mesh_c, atm, bas, env);                                  \
-  });
-#else
 #define xc_with_tau_kernel_macro(li, lj)                                       \
   evaluate_xc_with_tau_kernel<KernelType, n_channels, li, lj,                  \
                               is_non_orthogonal><<<block_grid, block_size>>>(  \
@@ -1949,7 +1768,6 @@ using evaluate_xc_with_tau_kernel_sycl_t = evaluate_xc_with_tau_kernel_sycl_name
       sorted_block_index, image_indices, vectors_to_neighboring_images,        \
       n_images, image_pair_difference_index, n_difference_images, mesh_a,      \
       mesh_b, mesh_c, atm, bas, env)
-#endif
 
 #define xc_with_tau_kernel_case_macro(li, lj)                                  \
   case (li * 10 + lj):                                                         \
@@ -1969,10 +1787,11 @@ int evaluate_xc_with_tau_driver(
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
     const int *bas, const double *env) {
+  dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
   int mesh_c = mesh[2];
-  SETUP_EVAL_BLOCK_CONFIG();
+  dim3 block_grid(n_contributing_blocks, 1, 1);
 
   switch (i_angular * 10 + j_angular) {
     xc_with_tau_kernel_case_macro(0, 0);
@@ -2012,5 +1831,3 @@ int evaluate_xc_with_tau_driver(
 }
 
 } // namespace gpu4pyscf::gpbc::multi_grid
-
-#undef SETUP_EVAL_BLOCK_CONFIG

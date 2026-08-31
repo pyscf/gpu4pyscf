@@ -17,12 +17,19 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifndef USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
+
+#ifdef USE_SYCL
+#define CONCAT_(a,b) a##b
+#define CONCAT(a,b)  CONCAT_(a,b)
+#endif
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
@@ -33,12 +40,47 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
                          int mesh_a, int mesh_b, int mesh_c, int npairs,
                          double negligible)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    constexpr int tile = 16;
+    int tx = item.get_local_id(1);
+    int ty = item.get_local_id(0);
+    int thread_id = ty * tile + tx;
+    int pair_id = item.get_group(1);
+#else
     constexpr int tile = 16;
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int thread_id = ty * tile + tx;
     int pair_id = blockIdx.x;
+#endif
 
+#ifdef USE_SYCL
+    auto &a_start = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &a_stop = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &a_center = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &b_start = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &b_stop = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &c_start = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &c_stop = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &ij_offset = *sycl::ext::oneapi::group_local_memory_for_overwrite<uint32_t>(item.get_group());
+    auto &cc = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &exp_da_squared = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &xi = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &yi = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &zi = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &xj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &yj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &zj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &xij = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &yij = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &zij = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &ai = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &aj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &aij = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &theta_rr = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &swap = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[8]>(item.get_group());
+#else
     __shared__ int a_start, a_stop, a_center;
     __shared__ int b_start, b_stop;
     __shared__ int c_start, c_stop;
@@ -48,6 +90,7 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
     __shared__ double xj, yj, zj;
     __shared__ double xij, yij, zij, ai, aj, aij, theta_rr;
     __shared__ double swap[8];
+#endif
 
     int *bas = envs.bas;
     double *env = envs.env;
@@ -291,6 +334,18 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
 }
 
 extern "C" {
+#ifdef USE_SYCL
+#define eval_mgga_mat_kernel_v2_case(li, lj, slice_i, slice_j) \
+    case (li * LMAX1 + lj): \
+        sycl_get_queue()->parallel_for<class CONCAT(eval_mgga_mat_kernel_v2_mgv3_sycl_, CONCAT(li, _##lj))> \
+        (sycl::nd_range<2>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { \
+            eval_mgga_mat_kernel_v2<li,lj,slice_i,slice_j>( \
+                out, vxc, tau, *envs, bas_ij_idx, grid_frac_ranges, \
+                da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
+                negligible); \
+        }).wait(); \
+    break
+#else
 #define eval_mgga_mat_kernel_v2_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
         eval_mgga_mat_kernel_v2<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
@@ -298,6 +353,7 @@ extern "C" {
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
             negligible); \
     break
+#endif
 
 int evaluate_mgga_mat_v2(double *out, double *vxc, double *tau, PBCIntEnvVars *envs,
                      double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
@@ -310,7 +366,12 @@ int evaluate_mgga_mat_v2(double *out, double *vxc, double *tau, PBCIntEnvVars *e
     double da_squared = distance_squared(dxyz_dabc[0], dxyz_dabc[1], dxyz_dabc[2]);
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
+#ifdef USE_SYCL
+    sycl::range<2> threads(16, 16);
+    sycl::range<2> grids(1, npairs);
+#else
     dim3 threads(16, 16);
+#endif
     switch (li * LMAX1 + lj) {
         eval_mgga_mat_kernel_v2_case(0,0, 1, 1);
         eval_mgga_mat_kernel_v2_case(1,0, 3, 1);

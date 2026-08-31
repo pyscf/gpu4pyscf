@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -24,9 +26,6 @@
 __device__ inline
 void int3c2e_ip1_000(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-#endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
     constexpr int nst_per_block = THREADS;
@@ -238,9 +237,6 @@ void int3c2e_ip1_000(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_100(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-#endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
     constexpr int nst_per_block = THREADS;
@@ -514,9 +510,6 @@ void int3c2e_ip1_100(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_110(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-#endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
     constexpr int nst_per_block = THREADS;
@@ -970,9 +963,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_200(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-#endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
     constexpr int nst_per_block = THREADS;
@@ -1333,9 +1323,6 @@ void int3c2e_ip1_200(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_001(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-#endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
     constexpr int nst_per_block = THREADS;
@@ -1609,9 +1596,6 @@ void int3c2e_ip1_001(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_101(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-#endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
     constexpr int nst_per_block = THREADS;
@@ -2060,9 +2044,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
 __device__ inline
 void int3c2e_ip1_002(KERNEL_ARGS)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-#endif
     int sp_id = thread_id / BLOCK_SIZE;
     int aux_id = thread_id % BLOCK_SIZE;
     constexpr int nst_per_block = THREADS;

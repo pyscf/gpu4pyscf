@@ -16,12 +16,8 @@
 
 #pragma once
 
-#ifdef USE_SYCL
-#define CONCAT_(a,b) a##b
-#define CONCAT(a,b)  CONCAT_(a,b)
-#else
 #include <cub/cub.cuh>
-#endif
+
 #include <gint/cuda_alloc.cuh>
 #include <gint/gint.h>
 
@@ -30,7 +26,7 @@
 
 #define EIJ_CUTOFF 60
 #define BLOCK_DIM_XYZ 4
-#define EXP_OVERFLOW 400
+#define EXP_OVERFLOW 400 
 
 namespace gpu4pyscf::gpbc::multi_grid {
 
@@ -118,14 +114,8 @@ __global__ void count_non_trivial_pairs_kernel(
     const double *vectors_to_neighboring_images, const int n_images,
     const int mesh_a, const int mesh_b, const int mesh_c, const int *atm,
     const int *bas, const double *env, const double threshold_in_log) {
-  #ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<2>();
-  const int i_shell_image_index = item.get_global_id(1);
-  const int j_shell_image_index = item.get_global_id(0);
-  #else
   const int i_shell_image_index = threadIdx.x + blockDim.x * blockIdx.x;
   const int j_shell_image_index = threadIdx.y + blockDim.y * blockIdx.y;
-  #endif
   bool is_valid_pair = i_shell_image_index < n_i_shells * n_images &&
                        j_shell_image_index < n_j_shells * n_images;
 
@@ -216,19 +206,12 @@ __global__ void count_non_trivial_pairs_kernel(
   }
   int count = is_valid_pair ? 1 : 0;
   int sum;
-  #ifdef USE_SYCL
-  sum = sycl::reduce_over_group(item.get_group(), count, sycl::plus<>());
-  if (item.get_local_id(1) == 0 && item.get_local_id(0) == 0) {
-    atomicAdd(n_counts, sum);
-  }
-  #else
   sum =
       cub::BlockReduce<int, 16, cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY, 16>()
           .Sum(count);
   if (threadIdx.x == 0 && threadIdx.y == 0) {
     atomicAdd(n_counts, sum);
   }
-  #endif
 }
 
 template <int i_angular, int j_angular>
@@ -241,14 +224,8 @@ __global__ void screen_gaussian_pairs_kernel(
     const int *atm, const int *bas, const double *env,
     const double threshold_in_log) {
 
-  #ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<2>();
-  const int i_shell_image_index = item.get_global_id(1);
-  const int j_shell_image_index = item.get_global_id(0);
-  #else
   const int i_shell_image_index = threadIdx.x + blockDim.x * blockIdx.x;
   const int j_shell_image_index = threadIdx.y + blockDim.y * blockIdx.y;
-  #endif
   bool is_valid_pair = i_shell_image_index < n_i_shells * n_images &&
                        j_shell_image_index < n_j_shells * n_images;
 
@@ -354,30 +331,12 @@ __global__ void screen_gaussian_pairs_kernel(
 
   int write_pair_index = is_valid_pair ? 1 : 0;
   int aggregated_pairs;
-  #ifdef USE_SYCL
-  {
-    // Group-wide exclusive scan (init = 0) plus group aggregate, using
-    // standard SYCL group algorithms (replaces dpct::group::exclusive_scan).
-    const int input = write_pair_index;
-    const int exclusive =
-        sycl::exclusive_scan_over_group(item.get_group(), input, 0, sycl::plus<>());
-    const size_t last = item.get_local_range().size() - 1;
-    aggregated_pairs =
-        sycl::group_broadcast(item.get_group(), exclusive + input, last);
-    write_pair_index = exclusive;
-  }
-  auto &offset_for_this_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
-  if (item.get_local_id(1) == 0 && item.get_local_id(0) == 0) {
-    offset_for_this_block = atomicAdd(written_counts, aggregated_pairs);
-  }
-  #else
   cub::BlockScan<int, 16, cub::BLOCK_SCAN_RAKING, 16>().ExclusiveSum(
       write_pair_index, write_pair_index, aggregated_pairs);
   __shared__ int offset_for_this_block;
   if (threadIdx.x == 0 && threadIdx.y == 0) {
     offset_for_this_block = atomicAdd(written_counts, aggregated_pairs);
   }
-  #endif
   __syncthreads();
 
   const int offset_for_this_thread = offset_for_this_block + write_pair_index;
@@ -402,32 +361,11 @@ __global__ void count_pairs_on_blocks_kernel(
     const double *vectors_to_neighboring_images, const int n_images,
     const int mesh_a, const int mesh_b, const int mesh_c, const int *atm,
     const int *bas, const double *env) {
-  #ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<3>();
-
-  int threadIdx_x = item.get_local_id(2);
-  int blockIdx_x = item.get_group(2);
-  int blockIdx_y = item.get_group(1);
-  int blockIdx_z = item.get_group(0);
-  int blockDim_x = item.get_local_range(2);
-  int gridDim_x = item.get_group_range(2);
-  int gridDim_y = item.get_group_range(1);
-  int gridDim_z = item.get_group_range(0);
-  #else
-  int threadIdx_x = threadIdx.x;
-  int blockIdx_x = blockIdx.x;
-  int blockIdx_y = blockIdx.y;
-  int blockIdx_z = blockIdx.z;
-  int blockDim_x = blockDim.x;
-  int gridDim_x = gridDim.x;
-  int gridDim_y = gridDim.y;
-  int gridDim_z = gridDim.z;
-  #endif
   const int block_index =
-      blockIdx_x + blockIdx_y * gridDim_x + blockIdx_z * gridDim_x * gridDim_y;
-  const int a_start = blockIdx_x * BLOCK_DIM_XYZ;
-  const int b_start = blockIdx_y * BLOCK_DIM_XYZ;
-  const int c_start = blockIdx_z * BLOCK_DIM_XYZ;
+      blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+  const int a_start = blockIdx.x * BLOCK_DIM_XYZ;
+  const int b_start = blockIdx.y * BLOCK_DIM_XYZ;
+  const int c_start = blockIdx.z * BLOCK_DIM_XYZ;
 
   const double da_squared =
       distance_squared(dxyz_dabc[0], dxyz_dabc[1], dxyz_dabc[2]);
@@ -447,16 +385,16 @@ __global__ void count_pairs_on_blocks_kernel(
   int unstable_count = 0;
   constexpr int n_threads = 256;
 
-  for (int i_pair = threadIdx_x; i_pair < n_pairs; i_pair += blockDim_x) {
+  for (int i_pair = threadIdx.x; i_pair < n_pairs; i_pair += blockDim.x) {
     const int begin_block_a = pairs_to_blocks_begin[i_pair];
     const int end_block_a = pairs_to_blocks_end[i_pair];
     const int begin_block_b = pairs_to_blocks_begin[n_pairs + i_pair];
     const int end_block_b = pairs_to_blocks_end[n_pairs + i_pair];
     const int begin_block_c = pairs_to_blocks_begin[2 * n_pairs + i_pair];
     const int end_block_c = pairs_to_blocks_end[2 * n_pairs + i_pair];
-    if (blockIdx_x >= begin_block_c && blockIdx_x <= end_block_c &&
-        blockIdx_y >= begin_block_b && blockIdx_y <= end_block_b &&
-        blockIdx_z >= begin_block_a && blockIdx_z <= end_block_a) {
+    if (blockIdx.x >= begin_block_c && blockIdx.x <= end_block_c &&
+        blockIdx.y >= begin_block_b && blockIdx.y <= end_block_b &&
+        blockIdx.z >= begin_block_a && blockIdx.z <= end_block_a) {
 
       const int image_index = image_indices[i_pair];
       const int image_index_i = image_index / n_images;
@@ -520,29 +458,21 @@ __global__ void count_pairs_on_blocks_kernel(
       }
     }
   }
-  #ifdef USE_SYCL
-  count = sycl::reduce_over_group(item.get_group(), count, sycl::plus<>());
-  #else
   count = cub::BlockReduce<int, n_threads,
                            cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>()
               .Sum(count);
-  #endif
   __syncthreads();
-  #ifdef USE_SYCL
-  unstable_count = sycl::reduce_over_group(item.get_group(), unstable_count, sycl::plus<>());
-  #else
   unstable_count = cub::BlockReduce<int, n_threads,
                                     cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>()
                        .Sum(unstable_count);
-  #endif
-  if (threadIdx_x == 0) {
+  if (threadIdx.x == 0) {
     n_pairs_per_block[block_index] = count;
     n_unstable_pairs_per_block[block_index] = unstable_count;
     if (count > 0) {
-      atomicAdd(n_pairs_per_block + gridDim_x * gridDim_y * gridDim_z, 1);
+      atomicAdd(n_pairs_per_block + gridDim.x * gridDim.y * gridDim.z, 1);
     }
     if (unstable_count > 0) {
-      atomicAdd(n_unstable_pairs_per_block + gridDim_x * gridDim_y * gridDim_z,
+      atomicAdd(n_unstable_pairs_per_block + gridDim.x * gridDim.y * gridDim.z,
                 1);
     }
   }
@@ -557,20 +487,7 @@ __global__ void put_pairs_on_blocks_kernel(
     const int *image_indices, const double *vectors_to_neighboring_images,
     const int n_images, const int mesh_a, const int mesh_b, const int mesh_c,
     const int *atm, const int *bas, const double *env) {
-  constexpr int n_threads = 256;
-  constexpr int batch_size = 4 * n_threads;
-  constexpr int shared_memory_size = 7 * n_threads;
-  #ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<1>();
-  int threadIdx_x = item.get_local_id(0);
-  int blockIdx_x = item.get_group(0);
-  auto &filtered_index = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[shared_memory_size]>(item.get_group());
-  #else
-  int threadIdx_x = threadIdx.x;
-  int blockIdx_x = blockIdx.x;
-  __shared__ int filtered_index[shared_memory_size];
-  #endif
-  const int block_index = sorted_block_index[blockIdx_x];
+  const int block_index = sorted_block_index[blockIdx.x];
   const int n_blocks_bc = n_blocks_b * n_blocks_c;
   const int block_a_index = block_index / n_blocks_bc;
   const int block_bc_index = block_index % n_blocks_bc;
@@ -595,14 +512,17 @@ __global__ void put_pairs_on_blocks_kernel(
   const double dc_squared =
       distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
 
+  constexpr int n_threads = 256;
   int stored_pair_index[4];
   int valid_pairs[4];
   int exclusive_sum[4];
   int n_filtered_pairs_on_shared_memory = 0;
   int offset_on_global_memory = accumulated_n_pairs_per_block[block_index];
-
+  constexpr int batch_size = 4 * n_threads;
+  constexpr int shared_memory_size = 7 * n_threads;
+  __shared__ int filtered_index[shared_memory_size];
   const int n_batches = (n_pairs + batch_size - 1) / batch_size;
-  for (int i_batch = 0, i_pair = threadIdx_x; i_batch < n_batches; i_batch++) {
+  for (int i_batch = 0, i_pair = threadIdx.x; i_batch < n_batches; i_batch++) {
 #pragma unroll
     for (int i = 0; i < 4; i++) {
       const bool is_valid_pair = i_pair < n_pairs;
@@ -693,47 +613,11 @@ __global__ void put_pairs_on_blocks_kernel(
       i_pair += n_threads;
     }
     int aggregated_block;
-    #ifdef USE_SYCL
-    {
-      // Array-form (4 elements per work-item) exclusive scan across the group,
-      // using standard SYCL group algorithms (replaces
-      // dpct::group::exclusive_scan). Reproduces dpct semantics: reduce the
-      // per-work-item elements, perform a group exclusive scan on that
-      // per-work-item total, then sequentially scan the local elements.
-      int thread_valid_count = valid_pairs[0];
-      #pragma unroll
-      for (int i = 1; i < 4; i++) {
-        thread_valid_count += valid_pairs[i];
-      }
-      const int thread_exclusive = sycl::exclusive_scan_over_group(
-          item.get_group(), thread_valid_count, 0, sycl::plus<>());
-
-      int input = valid_pairs[0];
-      exclusive_sum[0] =
-          (item.get_local_linear_id() == 0) ? 0 : thread_exclusive;
-      #pragma unroll
-      for (int i = 1; i < 4; i++) {
-        exclusive_sum[i] = input + exclusive_sum[i - 1];
-        input = valid_pairs[i];
-      }
-    }
-    // The block aggregate is not produced by the array-form scan above
-    // (unlike cub's ExclusiveSum). Recover it as the block-wide sum of the
-    // per-work-item valid_pairs counts.
-    int thread_valid_count = 0;
-    #pragma unroll
-    for (int i = 0; i < 4; i++) {
-      thread_valid_count += valid_pairs[i];
-    }
-    aggregated_block = sycl::reduce_over_group(item.get_group(),
-                                               thread_valid_count, sycl::plus<int>());
-    #else
     cub::BlockScan<int, n_threads>().ExclusiveSum(valid_pairs, exclusive_sum,
                                                   aggregated_block);
-    #endif
     if ((aggregated_block + n_filtered_pairs_on_shared_memory) >
         shared_memory_size) {
-      for (int i = threadIdx_x; i < n_filtered_pairs_on_shared_memory;
+      for (int i = threadIdx.x; i < n_filtered_pairs_on_shared_memory;
            i += n_threads) {
         pairs_on_blocks[offset_on_global_memory + i] = filtered_index[i];
       }
@@ -752,7 +636,7 @@ __global__ void put_pairs_on_blocks_kernel(
   }
   if (n_filtered_pairs_on_shared_memory > 0) {
     __syncthreads();
-    for (int i = threadIdx_x; i < n_filtered_pairs_on_shared_memory;
+    for (int i = threadIdx.x; i < n_filtered_pairs_on_shared_memory;
          i += n_threads) {
       pairs_on_blocks[offset_on_global_memory + i] = filtered_index[i];
     }

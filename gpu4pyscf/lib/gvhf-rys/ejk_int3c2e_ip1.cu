@@ -27,7 +27,20 @@
 #define DM_BLOCK        7
 #define GOUT_WIDTH      54
 
+// unrolled_ejk_int3c2e_ip1.cu is auto-generated upstream and must stay
+// byte-identical. Its kernels use __syncthreads() but never declare an
+// nd_item, so swap in an item-free barrier for the duration of the include.
+// The kernels are only ever instantiated from 2-D nd_range launches, so
+// get_nd_item<2>() is well-formed.
+#ifdef USE_SYCL
+#pragma push_macro("__syncthreads")
+#undef __syncthreads
+#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<2>().get_group()))
+#endif
 #include "unrolled_ejk_int3c2e_ip1.cu"
+#ifdef USE_SYCL
+#pragma pop_macro("__syncthreads")
+#endif
 
 __global__ static
 void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,

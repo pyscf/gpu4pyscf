@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include "multigrid.cuh"
 
 #define REMOTE_THRESHOLD 50
@@ -30,12 +32,7 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *Ecut, float *radius,
                                  int *ls, int cell0_nbas, int nbas,
                                  int hermi, int l_inc, float log_cutoff)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int bas_ij = item.get_global_id(0);
-#else
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
     int npairs = cell0_nbas * nbas;
     if (bas_ij >= npairs) {
         return;
@@ -123,12 +120,7 @@ void filter_supmol_bas_kernel(int8_t *mask, double *Ls, int nimgs,
                               int *uniq_Dbasis_idx, int nbas_uniq,
                               int *bas, int nbas, double *env, float log_cutoff)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int jsh = item.get_global_id(0) + nbas;
-#else
     int jsh = blockIdx.x * blockDim.x + threadIdx.x + nbas;
-#endif
     if (jsh >= nbas*nimgs) {
         return;
     }
@@ -187,16 +179,9 @@ int ovlp_mask_estimation(int8_t *ovlp_mask, float *Ecut, float *radius,
 {
     constexpr int threads = 1024;
     int blocks = (cell0_nbas*nbas + threads-1)/threads;
-    #ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class ovlp_mask_estimation_kernel_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-      ovlp_mask_estimation_kernel(ovlp_mask, Ecut, radius, exps, log_coeff, bas_coords, ao_loc_in_cell0,
-                                  ls, cell0_nbas, nbas, hermi, l_inc, log_cutoff);
-    });
-    #else
     ovlp_mask_estimation_kernel<<<blocks, threads>>>(
         ovlp_mask, Ecut, radius, exps, log_coeff, bas_coords, ao_loc_in_cell0,
         ls, cell0_nbas, nbas, hermi, l_inc, log_cutoff);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in overlap_estimation: %s\n", cudaGetErrorString(err));
@@ -211,14 +196,8 @@ int filter_supmol_bas(int8_t *mask, double *Ls, int nimgs,
 {
     constexpr int threads = 1024;
     int blocks = (nbas*nimgs + threads-1)/threads;
-    #ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class filter_supmol_bas_kernel_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-      filter_supmol_bas_kernel(mask, Ls, nimgs, uniq_Dbasis_idx, nbas_uniq, bas, nbas, env, log_cutoff);
-    });
-    #else
     filter_supmol_bas_kernel<<<blocks, threads>>>(
         mask, Ls, nimgs, uniq_Dbasis_idx, nbas_uniq, bas, nbas, env, log_cutoff);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in filter_supmol_bas: %s\n", cudaGetErrorString(err));

@@ -17,9 +17,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifndef USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuComplex.h>
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
@@ -39,17 +41,36 @@ void orth_ft_tau_dm_kernel(double *densityR, double *densityI, double *tauR, dou
                            int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                            int *mesh_cum, int *nimgs_cum, int ntiles, double factor)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(0) / ntiles;
+    int tile_id = item.get_group(0) % ntiles;
+#else
     int thread_id = threadIdx.x;
-    int x_id = thread_id / NGV_PER_BLOCK;
-    int Gv_id = thread_id % NGV_PER_BLOCK;
     int sp_block_id = blockIdx.x / ntiles;
     int tile_id = blockIdx.x % ntiles;
+#endif
+    int x_id = thread_id / NGV_PER_BLOCK;
+    int Gv_id = thread_id % NGV_PER_BLOCK;
+#ifdef USE_SYCL
+    auto &gx = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NGV_PER_BLOCK*3*2*(LMAX1+1)*(LMAX1+1)]>(item.get_group());
+    auto &swap = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NGV_PER_BLOCK*3*2*(LMAX+LMAX+3)]>(item.get_group());
+    auto &mesh_start = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[3]>(item.get_group());
+    auto &ri = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &rj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &ij_offset = *sycl::ext::oneapi::group_local_memory_for_overwrite<size_t>(item.get_group());
+    auto &fac = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &ai = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &aj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+#else
     __shared__ double gx[NGV_PER_BLOCK*3*2*(LMAX1+1)*(LMAX1+1)];
     __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+3)];
     __shared__ int mesh_start[3];
     __shared__ int ri, rj;
     __shared__ size_t ij_offset;
     __shared__ double fac, ai, aj;
+#endif
 
     int *bas = envs.bas;
     int nbas = envs.nbas;
@@ -250,9 +271,20 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
     int ntiles_y = (mesh_y + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
+#ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> grids(ntiles*nbatches_shl_pair);
+    sycl_get_queue()->parallel_for<class orth_ft_tau_dm_kernel_mgv3_sycl>
+        (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            orth_ft_tau_dm_kernel(
+                densityR, densityI, tauR, tauI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
+                mesh_cum, nimgs_cum, ntiles, factor);
+        }).wait();
+#else
     orth_ft_tau_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS>>>(
         densityR, densityI, tauR, tauI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, ntiles, factor);
+#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_ft_tau_dm_kernel: %s\n", cudaGetErrorString(err));

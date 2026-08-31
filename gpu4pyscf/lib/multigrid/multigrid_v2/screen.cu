@@ -14,9 +14,7 @@
  * limitations under the License.
  */
 
-#ifndef USE_SYCL
 #include <complex.h>
-#endif
 #include <gint/cuda_alloc.cuh>
 #include <gint/gint.h>
 #include <stdio.h>
@@ -25,24 +23,12 @@
 
 extern "C" {
 
-#ifdef USE_SYCL
-#define count_non_trivial_pairs_kernel_macro(li, lj)                    \
-  sycl_get_queue()->parallel_for<class CONCAT(count_non_trivial_pairs_kernel_sycl_, CONCAT(li, _##lj))> \
-  (sycl::nd_range<2>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
-    gpu4pyscf::gpbc::multi_grid::count_non_trivial_pairs_kernel<li, lj> \
-      (n_counts, i_shells, n_i_shells, j_shells,                        \
-       n_j_shells, vectors_to_neighboring_images,                       \
-       n_images, mesh_a, mesh_b, mesh_c, atm, bas,                      \
-       env, threshold_in_log);                                          \
-  })
-#else
 #define count_non_trivial_pairs_kernel_macro(li, lj)                           \
   gpu4pyscf::gpbc::multi_grid::count_non_trivial_pairs_kernel<li, lj>          \
       <<<block_grid, block_size>>>(n_counts, i_shells, n_i_shells, j_shells,   \
                                    n_j_shells, vectors_to_neighboring_images,  \
                                    n_images, mesh_a, mesh_b, mesh_c, atm, bas, \
                                    env, threshold_in_log)
-#endif
 
 #define count_non_trivial_pairs_kernel_case_macro(li, lj)                      \
   case (li * 10 + lj):                                                         \
@@ -57,15 +43,9 @@ int count_non_trivial_pairs(int *n_counts, const int i_angular,
                             const int n_images, const int *mesh, const int *atm,
                             const int *bas, const double *env,
                             const double threshold_in_log) {
-#ifdef USE_SYCL
-  sycl::range<2> block_size(16, 16);
-  sycl::range<2> block_grid((n_j_shells * n_images + 15) / 16,
-                            (n_i_shells * n_images + 15) / 16);
-#else
   dim3 block_size(16, 16);
   dim3 block_grid((n_i_shells * n_images + 15) / 16,
                   (n_j_shells * n_images + 15) / 16);
-#endif
   const int mesh_a = mesh[0];
   const int mesh_b = mesh[1];
   const int mesh_c = mesh[2];
@@ -105,17 +85,6 @@ int count_non_trivial_pairs(int *n_counts, const int i_angular,
   return checkCudaErrors(cudaPeekAtLastError());
 }
 
-#ifdef USE_SYCL
-#define screen_gaussian_pairs_kernel_macro(li, lj)                      \
-  sycl_get_queue()->parallel_for<class CONCAT(screen_gaussian_pairs_kernel_sycl_, CONCAT(li, _##lj))> \
-  (sycl::nd_range<2>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
-    gpu4pyscf::gpbc::multi_grid::screen_gaussian_pairs_kernel<li, lj>   \
-      (shell_pair_indices, image_indices, pairs_to_blocks_begin,        \
-       pairs_to_blocks_end, written_counts, i_shells, n_i_shells, j_shells, \
-       n_j_shells, n_pairs, vectors_to_neighboring_images, n_images,    \
-       mesh_a, mesh_b, mesh_c, atm, bas, env, threshold_in_log);        \
-  })
-#else
 #define screen_gaussian_pairs_kernel_macro(li, lj)                             \
   gpu4pyscf::gpbc::multi_grid::screen_gaussian_pairs_kernel<li, lj>            \
       <<<block_grid, block_size>>>(                                            \
@@ -123,7 +92,6 @@ int count_non_trivial_pairs(int *n_counts, const int i_angular,
           pairs_to_blocks_end, written_counts, i_shells, n_i_shells, j_shells, \
           n_j_shells, n_pairs, vectors_to_neighboring_images, n_images,        \
           mesh_a, mesh_b, mesh_c, atm, bas, env, threshold_in_log)
-#endif
 
 #define screen_gaussian_pairs_kernel_case_macro(li, lj)                        \
   case (li * 10 + lj):                                                         \
@@ -140,20 +108,14 @@ int screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
                           const int n_images, const int *mesh, const int *atm,
                           const int *bas, const double *env,
                           const double threshold_in_log) {
-#ifdef USE_SYCL
-  sycl::range<2> block_size(16, 16);
-  sycl::range<2> block_grid((n_j_shells * n_images + 15) / 16,
-                            (n_i_shells * n_images + 15) / 16);
-#else
   dim3 block_size(16, 16);
   dim3 block_grid((n_i_shells * n_images + 15) / 16,
                   (n_j_shells * n_images + 15) / 16);
-#endif
   const int mesh_a = mesh[0];
   const int mesh_b = mesh[1];
   const int mesh_c = mesh[2];
   int *written_counts = nullptr;
-  checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&written_counts), sizeof(int)));
+  checkCudaErrors(cudaMalloc(&written_counts, sizeof(int)));
   checkCudaErrors(cudaMemset(written_counts, 0, sizeof(int)));
   switch (i_angular * 10 + j_angular) {
     screen_gaussian_pairs_kernel_case_macro(0, 0);
@@ -207,18 +169,6 @@ int count_pairs_on_blocks(int *n_pairs_per_block,
   const int n_blocks_b = n_blocks[1];
   const int n_blocks_c = n_blocks[2];
   const int n_threads = 256;
-  #ifdef USE_SYCL
-  sycl::range<3> block_size(1, 1, n_threads);
-  sycl::range<3> block_grid(n_blocks_a, n_blocks_b, n_blocks_c);
-  sycl_get_queue()->parallel_for<class count_pairs_on_blocks_kernel_sycl>
-    (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] {
-      gpu4pyscf::gpbc::multi_grid::count_pairs_on_blocks_kernel
-        (n_pairs_per_block, n_unstable_pairs_per_block, pairs_to_blocks_begin,
-         pairs_to_blocks_end, n_pairs, non_trivial_pairs, i_shells, j_shells,
-         n_j_shells, image_indices, vectors_to_neighboring_images, n_images,
-         mesh[0], mesh[1], mesh[2], atm, bas, env);
-    });
-  #else
   const dim3 block_size(n_threads, 1, 1);
   const dim3 block_grid(n_blocks_c, n_blocks_b, n_blocks_a);
   gpu4pyscf::gpbc::multi_grid::
@@ -227,7 +177,6 @@ int count_pairs_on_blocks(int *n_pairs_per_block,
           pairs_to_blocks_end, n_pairs, non_trivial_pairs, i_shells, j_shells,
           n_j_shells, image_indices, vectors_to_neighboring_images, n_images,
           mesh[0], mesh[1], mesh[2], atm, bas, env);
-  #endif
 
   return checkCudaErrors(cudaPeekAtLastError());
 }
@@ -245,19 +194,6 @@ void put_pairs_on_blocks(
   const int n_blocks_b = n_blocks[1];
   const int n_blocks_c = n_blocks[2];
   const int n_threads = 256;
-  #ifdef USE_SYCL
-  sycl::range<1> block_size(n_threads);
-  sycl::range<1> block_grid(n_contributing_blocks);
-  sycl_get_queue()->parallel_for<class put_pairs_on_blocks_kernel_sycl>
-    (sycl::nd_range<1>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] {
-      gpu4pyscf::gpbc::multi_grid::put_pairs_on_blocks_kernel
-        (pairs_on_blocks, accumulated_n_pairs_per_block, sorted_block_index,
-         pairs_to_blocks_begin, pairs_to_blocks_end, n_blocks_a, n_blocks_b,
-         n_blocks_c, n_pairs, non_trivial_pairs, i_shells, j_shells,
-         n_j_shells, image_indices, vectors_to_neighboring_images, n_images,
-         mesh[0], mesh[1], mesh[2], atm, bas, env);
-    });
-  #else
   const dim3 block_size(n_threads);
   const dim3 block_grid(n_contributing_blocks);
   gpu4pyscf::gpbc::multi_grid::
@@ -267,7 +203,6 @@ void put_pairs_on_blocks(
           n_blocks_c, n_pairs, non_trivial_pairs, i_shells, j_shells,
           n_j_shells, image_indices, vectors_to_neighboring_images, n_images,
           mesh[0], mesh[1], mesh[2], atm, bas, env);
-  #endif
 
   checkCudaErrors(cudaPeekAtLastError());
 }

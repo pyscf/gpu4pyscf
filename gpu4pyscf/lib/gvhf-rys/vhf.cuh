@@ -2,7 +2,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#ifndef USE_SYCL
+#ifdef USE_SYCL
+#include <sycl_device.hpp>
+#else
 #include <cuda_runtime.h>
 #endif
 

@@ -14,10 +14,7 @@
  * limitations under the License.
  */
 
-#pragma once
 #include <stdint.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 // WARP_SIZE: compile-time constant used for shared-memory sizing.
 // `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
@@ -27,7 +24,6 @@
 #define WARP_SIZE       32
 #endif
 #define WARPS           8
-
 #define THREADS         (WARP_SIZE*WARPS)
 #define LMAX            4
 
@@ -83,14 +79,8 @@ typedef struct {
     uint8_t _padding;
 } Fold3Index;
 
-#ifdef USE_SYCL
-extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_mg_i_in_fold2idx;
-extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_mg_i_in_fold3idx;
-#else //USE_SYCL
 #ifdef __CUDACC__
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
-#endif // __CUDACC__
-#endif // USE_SYCL
-
-#endif //HAVE_DEFINED_MGRIDENVVAS_H
+#endif
+#endif

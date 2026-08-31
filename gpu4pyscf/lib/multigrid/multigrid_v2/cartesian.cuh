@@ -16,10 +16,6 @@
 
 #pragma once
 
-#ifdef USE_SYCL
-#include <sycl_device.hpp>
-#endif
-
 namespace gpu4pyscf::gpbc::multi_grid {
 
 template <typename T, int ANG>
