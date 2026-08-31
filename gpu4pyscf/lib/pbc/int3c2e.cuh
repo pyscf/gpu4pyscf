@@ -27,7 +27,14 @@
 #endif
 // corresponding to 256 threads
 #define WARPS           8
-#define THREADS         (WARP_SIZE*WARPS)
+// Block size is fixed at 256 threads and must NOT scale with WARP_SIZE. The
+// int3c2e / int1e kernels here are thread-indexed (sp_id = tid % nsp_per_block)
+// and reduce through shared memory, and their host/device shared-memory budget
+// assumes 256 threads. Deriving THREADS from WARP_SIZE would make a wave64
+// block 512 threads, doubling shared memory past the 64KB LDS limit (invalid
+// device image) and desyncing host/device sizing. 256 threads is 8 warps on
+// wave32 or 4 warps on wave64; the warp count is irrelevant to correctness here.
+#define THREADS         256
 #define IMG_MASK_SLOTS  1024
 #define L_AUX_MAX       6
 #define L_AUX1          7

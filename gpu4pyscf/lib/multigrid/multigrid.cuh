@@ -24,7 +24,13 @@
 #define WARP_SIZE       32
 #endif
 #define WARPS           8
-#define THREADS         (WARP_SIZE*WARPS)
+// Block size is fixed at 256 threads and must NOT scale with WARP_SIZE. The
+// multigrid collocation/eval kernels are thread-indexed and their shared-memory
+// budget (buflen) assumes 256 threads. Deriving THREADS from WARP_SIZE would
+// make a wave64 block 512 threads, doubling shared memory past the 64KB LDS
+// limit and desyncing host/device sizing. 256 threads is 8 warps on wave32 or
+// 4 warps on wave64; warp count is irrelevant to correctness here.
+#define THREADS         256
 #define LMAX            4
 
 #define PRIMBAS_SLOTS   4

@@ -92,10 +92,14 @@ __global__ static void evaluate_density_kernel(
   KernelType
       prefactor[n_channels * n_i_cartesian_functions * n_j_cartesian_functions];
 
-  // Compile-time warp count; `warpSize` is a device-runtime constant
-  // (not constexpr), so we use the literal here. Centralizing the
-  // value will make the future HIP/wavefront port a single-point edit.
+  // Compile-time warp size; `warpSize` is a device-runtime constant (not
+  // constexpr), so use the WARP_SIZE macro (32 by default, 64 on wave64 builds
+  // via -DWARP_SIZE=64) for the static reduced_density_values sizing / n_warps.
+#if defined(WARP_SIZE)
+  constexpr int WARP_SIZE_CT = WARP_SIZE;
+#else
   constexpr int WARP_SIZE_CT = 32;
+#endif
   constexpr int n_warps = n_threads / WARP_SIZE_CT;  /*L2*/
   __shared__ KernelType reduced_density_values[n_channels * n_warps * n_threads];
 
@@ -348,7 +352,7 @@ __global__ static void evaluate_density_kernel(
             // built-in). Stride starts at warpSize/2 and halves.
 #pragma unroll
             for (int _o = warpSize / 2; _o > 0; _o >>= 1)
-              _wv += __shfl_down_sync(0xffffffffu, _wv, _o);
+              _wv += __shfl_down_sync(~0, _wv, _o);
             // Warp leader test + warp-index extraction using warpSize.
             if ((thread_id % warpSize) == 0) {  /*L2: warp-private store, no atomic*/
               reduced_density_values[(i_channel * n_warps + (thread_id / warpSize)) *
