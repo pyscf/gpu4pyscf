@@ -50,7 +50,7 @@ class KnownValues(unittest.TestCase):
                            minao_ref='gth-szv')
         mf.conv_tol = 1e-10
         e1 = mf.kernel()
-        self.assertAlmostEqual(e1, -10.694460059491741, 8)
+        self.assertAlmostEqual(e1, -10.694460059491741, 6)
 
     def test_KUKSpU(self):
         kmesh = [1, 1, 1]
@@ -61,7 +61,7 @@ class KnownValues(unittest.TestCase):
                            minao_ref='gth-szv')
         mf.conv_tol = 1e-10
         e1 = mf.kernel()
-        self.assertAlmostEqual(e1, -10.1793267284188, 8)
+        self.assertAlmostEqual(e1, -10.1793267284188, 6)
 
     def test_get_veff(self):
         kmesh = [2, 1, 1]

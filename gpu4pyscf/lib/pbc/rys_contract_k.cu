@@ -384,6 +384,10 @@ while (1) {
 }
 }
 
+// Requires room for 256*3 entries: the tile count prod((nf+2)/3) reaches 625
+// at (4,4,4,4), and the launcher copies it out in chunks of 256.
+// NOTE: kept as PBC_make_gxyz_offset (not renamed to RYS_make_gxyz_offset to
+// match upstream) -- see the symbol-collision comment above this function.
 GXYZOffset *PBC_make_gxyz_offset(GXYZOffset *goff, BoundsInfo &bounds)
 {
 /*
@@ -414,8 +418,10 @@ GXYZOffset *PBC_make_gxyz_offset(GXYZOffset *goff, BoundsInfo &bounds)
         goff[nf].loff = l;
         ++nf;
     } } } }
+    // n+m must be clamped too: nf need not divide 256, so the last round
+    // would otherwise write past entry 255.
     for (int n = nf; n < 256; n += nf) {
-        for (int m = 0; m < nf; ++m) {
+        for (int m = 0; m < nf && n+m < 256; ++m) {
             goff[n+m] = goff[m];
         }
     }

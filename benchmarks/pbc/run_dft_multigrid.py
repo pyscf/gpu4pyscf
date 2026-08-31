@@ -94,24 +94,42 @@ configs = yaml.safe_load(
     smearing:
       sigma: 0.005
 - filename:
-  - MgO.cif
+  - Mg4O4_cubic.cif
   method:
-  - xc: PBE
+  - xc:
+    - PBE
+    - R2SCAN
     supercell: [2,2,2]
-  - xc: PBE
+  - xc:
+    - PBE
+    - R2SCAN
     supercell: [3,3,3]
-  - xc: PBE
+  - xc:
+    - PBE
+    - R2SCAN
     supercell: [4,4,4]
+  - xc:
+    - PBE
+    - R2SCAN
+    supercell: [5,5,5]
 - filename:
   - Al2Mg3O12Si3_ICSD_80847.cif
   method:
-  - xc: PBE
+  - xc:
+    - PBE
+    - R2SCAN
     supercell: [1,1,1]
-  - xc: PBE
+  - xc:
+    - PBE
+    - R2SCAN
     supercell: [2,1,1]
-  - xc: PBE
+  - xc:
+    - PBE
+    - R2SCAN
     supercell: [2,2,1]
-  - xc: PBE
+  - xc:
+    - PBE
+    - R2SCAN
     supercell: [2,2,2]
 ''')
 
@@ -139,6 +157,7 @@ for conf in configs:
                     kstring = 'x'.join([str(x) for x in kmesh])
                     confstr = f'{xc}-k{kstring}'
                     if 'supercell' in method:
+                        cupy.fft.config.get_plan_cache().clear()
                         ncopy = method['supercell']
                         scstring = 'x'.join([str(x) for x in ncopy])
                         confstr = f'{scstring}-{confstr}'
@@ -157,6 +176,7 @@ for conf in configs:
                     else:
                         kpts = cell.make_kpts(kmesh)
                         mf = cell.KRKS(xc=xc, kpts=kpts).to_gpu()
+                    cupy.get_default_memory_pool().free_all_blocks()
                     mf = mf.multigrid_numint()
                     mf.max_cycle = 20
                     mf.conv_tol = 1e-6
@@ -168,4 +188,3 @@ for conf in configs:
                         import traceback
                         traceback.print_stack()
                         traceback.print_exception(e)
-                    cupy.get_default_memory_pool().free_all_blocks()

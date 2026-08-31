@@ -2,7 +2,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifndef USE_SYCL
 #include <cuda_runtime.h>
+#endif
 
 #define PTR_RANGE_OMEGA 8
 // slots of atm
@@ -29,19 +31,6 @@
 #define LMAX1           (LMAX+1)
 #define NCART_MAX       ((LMAX+1)*(LMAX+2)/2)
 
-// performance drop when TILE>2, reason unclear
-#define TILE            2
-#define TILE2           (TILE*TILE)
-#define TILE4           (TILE2*TILE2)
-// when nroots > 5, GWIDTH=57 may be better
-#define GWIDTH          42
-// 2MB per block. This is the per-block stride of the task pool:
-//   bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH
-//   head       = (int *)(pool + workers * QUEUE_DEPTH)
-// The host-side (Python) pool allocation in scf/jk.py defines a QUEUE_DEPTH
-// constant that must be kept equal to this value: it both sizes the device pool
-// buffer and locates the `head` counter at the +1/+3/+n_dm tail slots that the
-// host reserves. Keep the two definitions in sync.
 #define QUEUE_DEPTH     65536
 
 #define MIN(x, y)       ((x) < (y) ? (x) : (y))

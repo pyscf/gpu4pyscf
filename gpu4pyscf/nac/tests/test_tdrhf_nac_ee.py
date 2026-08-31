@@ -21,6 +21,8 @@ from gpu4pyscf import tdscf, nac
 import gpu4pyscf
 import pytest
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.df.tests.test_df_tdrhf_grad import diagonalize_tda
+
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -40,21 +42,6 @@ def tearDownModule():
     global mol
     mol.stdout.close()
     del mol
-
-
-def diagonalize_tda(a, nroots=5):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    e, xy = np.linalg.eig(np.asarray(a))
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 
 class KnownValues(unittest.TestCase):

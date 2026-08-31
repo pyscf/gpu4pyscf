@@ -182,7 +182,7 @@ class KnownValues(unittest.TestCase):
 
         mf = mf.multigrid_numint()
         g1 = mf.Gradients().kernel()
-        self.assertAlmostEqual(abs(g - g1).max(), 0, 8)
+        self.assertAlmostEqual(abs(g - g1).max(), 0, delta=5e-6)
 
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad(self):

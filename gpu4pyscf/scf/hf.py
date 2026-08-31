@@ -228,12 +228,15 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     assert isinstance(dm0, cupy.ndarray)
 
+    dm, dm0 = dm0, None
+    # Call get_veff before get_hcore. In PBC, the initialization for
+    # two-electron integrals can be reused by get_hcore, avoiding redundant
+    # initialization.
+    vhf = mf.get_veff(mol, dm)
+
     h1e = cupy.asarray(mf.get_hcore())
     s1e = cupy.asarray(mf.get_ovlp())
-    t1 = log.timer_debug1('hcore', *t1)
 
-    dm, dm0 = dm0, None
-    vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
     x_orth = mf.check_linear_dependency(s1e, log)
@@ -301,7 +304,13 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
                  cycle+1, e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
 
         if dump_chk:
-            mf.dump_chk(locals())
+            mf.dump_chk({
+                'mol': mol,
+                'mo_energy': mo_energy,
+                'mo_occ': mo_occ,
+                'mo_coeff': mo_coeff,
+                'e_tot': e_tot,
+            })
 
         if callable(callback):
             callback(locals())
@@ -315,8 +324,10 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     mf.cycles = cycle + 1
     if scf_conv and mf.level_shift is not None:
+        mo_coeff = mo_occ = mo_energy = mf_diis = None
         # An extra diagonalization, to remove level shift
         mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth)
+        fock = None
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm, dm_last = mf.make_rdm1(mo_coeff, mo_occ), dm
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
@@ -922,8 +933,8 @@ class SCF(pyscf_lib.StreamObject):
         return self
 
     def dump_chk(self, envs):
-        assert isinstance(envs, dict)
         if self.chkfile:
+            assert isinstance(envs, dict)
             chkfile.dump_scf(
                 self.mol, self.chkfile, envs['e_tot'],
                 cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),
