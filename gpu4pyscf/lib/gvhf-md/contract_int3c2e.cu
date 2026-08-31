@@ -26,6 +26,18 @@
 #define THREADS         256
 #define L_AUX_MAX       6
 
+// Full-wavefront lane mask for __shfl_*_sync warp reductions: 32 bits on wave32
+// (NVIDIA / RDNA default) and 64 bits on wave64 (CDNA, or RDNA built with
+// -mwavefrontsize64 -DWARP_SIZE=64). A 32-bit 0xffffffff literal on a 64-lane
+// wavefront masks out lanes 32-63 and silently breaks the reduction. On CUDA and
+// the wave32 HIP build WARP_SIZE is not set here, so this stays 0xffffffff
+// (byte-for-byte unchanged).
+#if defined(WARP_SIZE) && (WARP_SIZE >= 64)
+#define WARP_FULL_MASK 0xffffffffffffffffULL
+#else
+#define WARP_FULL_MASK 0xffffffffU
+#endif
+
 template <int RT_SIZE> __device__ inline
 void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
                int nsq_per_block, int gout_id, int gout_stride)
@@ -508,19 +520,23 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
         int lane = thread_id % warpSize;
         int wid  = thread_id / warpSize;
+        int nwarps = blockDim.x / warpSize;  // 8 on wave32, 4 on wave64 (THREADS=256)
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
             double val = vj_aux[k];
             for (int offset = warpSize/2; offset > 0; offset >>= 1) {
-                val += __shfl_down_sync(0xffffffff, val, offset);
+                val += __shfl_down_sync(WARP_FULL_MASK, val, offset);
             }
             if (lane == 0) {
                 shared_memory[wid] = val;
             }
             __syncthreads();
 
+            // Only nwarps partials were written above; zero the rest so the fixed
+            // 8-wide reduction below does not fold in stale shared memory (nwarps
+            // is 8 on wave32 but 4 on wave64).
             if (thread_id < 8) {
-                val = shared_memory[lane];
+                val = (thread_id < nwarps) ? shared_memory[lane] : 0.0;
             }
             for (int offset = 4; offset > 0; offset >>= 1) {
                 val += __shfl_down_sync(0xff, val, offset);
