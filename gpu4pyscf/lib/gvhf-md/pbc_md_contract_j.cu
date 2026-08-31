@@ -17,10 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#ifndef USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
-#endif
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
@@ -33,22 +31,6 @@
 #define RT2_IDX_CACHE_SIZE (35*56)
 // defined in pbc/create_tasks.cu
 #define NBAS_MAX 1048576
-
-#ifndef USE_SYCL
-// extern const uint16_t c_Rt_idx[];
-// extern const int8_t c_Rt_tuv_fac[];
-// extern const int8_t c_Rt2_efg_phase[];
-// extern const int Rt2_idx_offsets[];
-// extern const uint16_t Rt2_kl_ij[];
-// extern const uint16_t Rt2_ij_kl[];
-// #else
-extern __constant__ uint16_t c_Rt_idx[];
-extern __constant__ int8_t c_Rt_tuv_fac[];
-extern __constant__ int8_t c_Rt2_efg_phase[];
-extern __device__ int Rt2_idx_offsets[];
-extern __device__ uint16_t Rt2_kl_ij[];
-extern __device__ uint16_t Rt2_ij_kl[];
-#endif
 
 #define ADDR(l, t, u, v) \
         ((l+1)*(l+2)*(l+3)/6 - ((l)-(t)+1)*((l)-(t)+2)*((l)-(t)+3)/6 + \

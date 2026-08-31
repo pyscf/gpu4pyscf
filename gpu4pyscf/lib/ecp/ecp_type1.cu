@@ -229,9 +229,6 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac
 }
 
 template <int LI, int LJ> __global__
-#ifdef USE_SYCL
-SYCL_EXTERNAL
-#endif
 void type1_cart(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
@@ -243,12 +240,12 @@ void type1_cart(double *gctr,
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     auto thread_block = item.get_group();
-    const int task_id = thread_block.get_group_id(0); //item.get_group(0);
+    const int task_id = thread_block.get_group_id(0);
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     double (&rad_ang)[LIJ1*LIJ1*LIJ1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ1*LIJ1*LIJ1]>(thread_block);
 #else // USE_SYCL
-    const int task_id = blockIdx_x;
+    const int task_id = blockIdx.x;
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
     __shared__ double rad_ang[LIJ1*LIJ1*LIJ1];
@@ -385,7 +382,7 @@ void type1_cart(double *gctr,
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
 #else
-    const int task_id = blockIdx_x;
+    const int task_id = blockIdx.x;
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
     extern __shared__ double smem[];

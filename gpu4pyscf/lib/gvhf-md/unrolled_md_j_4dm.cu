@@ -1,10 +1,37 @@
 
 #include <stdio.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
 #ifdef USE_SYCL
+
+// ---------------------------------------------------------------------
+// SYCL overlay for the generated md_j kernels.
+//
+// Everything below the macro block in this file is auto-generated and is
+// kept byte-identical to upstream/master: the kernel bodies still spell
+// the launch geometry as blockIdx.x/.y and threadIdx.x/.y, and still
+// reach shared memory through vj_kl_cache. Only these three macros
+// differ between the CUDA and SYCL backends.
+//
+//   KERNEL_ARGS   appends the nd_item and the work-group local pointer,
+//                 which SYCL must thread through explicitly.
+//   KERNEL_SETUP  materialises blockIdx/threadIdx (md_j_index2, declared
+//                 in md_j.cuh) from the nd_item. nd_range dimension 1 is
+//                 the fast-varying axis and maps to CUDA's .x; dimension
+//                 0 maps to .y.
+//   LAUNCH_KERNEL builds the nd_range and the local_accessor. The block
+//                 counts arrive as the per-block task counts BLOCKS_IJ /
+//                 BLOCKS_KL so one macro covers both backends; the CUDA
+//                 side derives the same grid from them.
+//
+// KERNEL##_sycl gives every kernel a distinct name class. The names in
+// this file are unique across the whole gvhf_md library, so no per-TU tag
+// is needed here (contrast gvhf-rys/unrolled_kernels.cuh).
+// ---------------------------------------------------------------------
 
 #define KERNEL_ARGS \
     RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
@@ -12,10 +39,12 @@
     sycl::nd_item<2> &item, double *vj_kl_cache
 
 #define KERNEL_SETUP() \
-    int blockIdx_x = item.get_group(1); \
-    int blockIdx_y = item.get_group(0); \
-    int threadIdx_x = item.get_local_id(1); \
-    int threadIdx_y = item.get_local_id(0);
+    const md_j_index2 blockIdx {(int)item.get_group(1), (int)item.get_group(0)}; \
+    const md_j_index2 threadIdx {(int)item.get_local_id(1), (int)item.get_local_id(0)}; \
+    int tx = threadIdx.x; \
+    int ty = threadIdx.y; \
+    int block_x = blockIdx.x; \
+    int block_y = blockIdx.y;
 
 #define LAUNCH_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
     auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds; \
@@ -25,7 +54,7 @@
     sycl_get_queue()->submit([&](sycl::handler &cgh) { \
         sycl::local_accessor<double, 1> local_acc(sycl::range<1>((SHM)+addition_buf), cgh); \
         cgh.parallel_for<class KERNEL##_sycl>(sycl::nd_range<2>(blocks * threads, threads), \
-            [=](auto item) { \
+            [=](sycl::nd_item<2> item) { \
                 KERNEL(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_size, \
                        item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
             }); \
@@ -39,10 +68,10 @@
     float *q_cond_ij, float *q_cond_kl, int dm_size
 
 #define KERNEL_SETUP() \
-    int blockIdx_x = blockIdx.x; \
-    int blockIdx_y = blockIdx.y; \
-    int threadIdx_x = threadIdx.x; \
-    int threadIdx_y = threadIdx.y; \
+    int tx = threadIdx.x; \
+    int ty = threadIdx.y; \
+    int block_x = blockIdx.x; \
+    int block_y = blockIdx.y; \
     extern __shared__ double vj_kl_cache[];
 
 #define LAUNCH_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
@@ -62,19 +91,17 @@
 __global__ static
 void md_j_4dm_0_0(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 336;
-    int task_kl0 = blockIdx_y * 336;
+    int task_ij0 = block_x * 336;
+    int task_kl0 = block_y * 336;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping && task_ij0+336 <= task_kl0) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -103,7 +130,7 @@ void md_j_4dm_0_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 336; n += 256) {
-        int task_kl = blockIdx_y * 336 + n;
+        int task_kl = blockIdx.y * 336 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -137,7 +164,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 21; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 336 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 336 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -183,15 +210,15 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 21; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 336 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 336 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*21] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*21] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*21] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*21] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -353,7 +380,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         int kl = n / 21;
         int batch_kl = n - kl * 21;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 336 + sq_kl;
+        int task_kl = blockIdx.y * 336 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
@@ -367,16 +394,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
 __global__ static
 void md_j_4dm_1_0(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 768;
-    int task_kl0 = blockIdx_y * 336;
+    int task_ij0 = block_x * 768;
+    int task_kl0 = block_y * 336;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -405,7 +430,7 @@ void md_j_4dm_1_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 336; n += 256) {
-        int task_kl = blockIdx_y * 336 + n;
+        int task_kl = blockIdx.y * 336 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -439,7 +464,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -485,12 +510,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 21; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 336 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 336 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*21] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*21] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -723,7 +748,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         int kl = n / 21;
         int batch_kl = n - kl * 21;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 336 + sq_kl;
+        int task_kl = blockIdx.y * 336 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
@@ -737,19 +762,17 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
 __global__ static
 void md_j_4dm_1_1(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 96;
-    int task_kl0 = blockIdx_y * 96;
+    int task_ij0 = block_x * 96;
+    int task_kl0 = block_y * 96;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping && task_ij0+96 <= task_kl0) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -778,7 +801,7 @@ void md_j_4dm_1_1(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 96; n += 256) {
-        int task_kl = blockIdx_y * 96 + n;
+        int task_kl = blockIdx.y * 96 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -812,7 +835,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 6; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 96 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 96 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -858,15 +881,15 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 6; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 96 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 96 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*6] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*6] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*6] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*6] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1493,7 +1516,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         int kl = n / 6;
         int batch_kl = n - kl * 6;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 96 + sq_kl;
+        int task_kl = blockIdx.y * 96 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
@@ -1507,16 +1530,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
 __global__ static
 void md_j_4dm_2_0(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 768;
-    int task_kl0 = blockIdx_y * 256;
+    int task_ij0 = block_x * 768;
+    int task_kl0 = block_y * 256;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -1545,7 +1566,7 @@ void md_j_4dm_2_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 256; n += 256) {
-        int task_kl = blockIdx_y * 256 + n;
+        int task_kl = blockIdx.y * 256 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -1579,7 +1600,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -1625,12 +1646,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 16; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 256 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 256 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*16] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*16] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -2022,7 +2043,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         int kl = n / 16;
         int batch_kl = n - kl * 16;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 256 + sq_kl;
+        int task_kl = blockIdx.y * 256 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
@@ -2036,16 +2057,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
 __global__ static
 void md_j_4dm_2_1(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 768;
-    int task_kl0 = blockIdx_y * 160;
+    int task_ij0 = block_x * 768;
+    int task_kl0 = block_y * 160;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -2074,7 +2093,7 @@ void md_j_4dm_2_1(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 160; n += 256) {
-        int task_kl = blockIdx_y * 160 + n;
+        int task_kl = blockIdx.y * 160 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -2108,7 +2127,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -2154,12 +2173,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 10; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 160 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 160 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*10] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*10] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -3047,7 +3066,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         int kl = n / 10;
         int batch_kl = n - kl * 10;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 160 + sq_kl;
+        int task_kl = blockIdx.y * 160 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
@@ -3061,19 +3080,17 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
 __global__ static
 void md_j_4dm_2_2(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 64;
-    int task_kl0 = blockIdx_y * 64;
+    int task_ij0 = block_x * 64;
+    int task_kl0 = block_y * 64;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping && task_ij0+64 <= task_kl0) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -3102,7 +3119,7 @@ void md_j_4dm_2_2(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 64; n += 256) {
-        int task_kl = blockIdx_y * 64 + n;
+        int task_kl = blockIdx.y * 64 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -3136,7 +3153,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 4; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 64 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 64 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -3182,15 +3199,15 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 4; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 64 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 64 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*4] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*4] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*4] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*4] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -5222,7 +5239,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         int kl = n / 4;
         int batch_kl = n - kl * 4;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 64 + sq_kl;
+        int task_kl = blockIdx.y * 64 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
@@ -5236,16 +5253,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
 __global__ static
 void md_j_4dm_3_0(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 768;
-    int task_kl0 = blockIdx_y * 336;
+    int task_ij0 = block_x * 768;
+    int task_kl0 = block_y * 336;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -5274,7 +5289,7 @@ void md_j_4dm_3_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 336; n += 256) {
-        int task_kl = blockIdx_y * 336 + n;
+        int task_kl = blockIdx.y * 336 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -5308,7 +5323,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -5354,12 +5369,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 21; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 336 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 336 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*21] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*21] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -5868,7 +5883,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         int kl = n / 21;
         int batch_kl = n - kl * 21;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 336 + sq_kl;
+        int task_kl = blockIdx.y * 336 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
@@ -5882,16 +5897,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
 __global__ static
 void md_j_4dm_3_1(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 768;
-    int task_kl0 = blockIdx_y * 96;
+    int task_ij0 = block_x * 768;
+    int task_kl0 = block_y * 96;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -5920,7 +5933,7 @@ void md_j_4dm_3_1(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 96; n += 256) {
-        int task_kl = blockIdx_y * 96 + n;
+        int task_kl = blockIdx.y * 96 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -5954,7 +5967,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -6000,12 +6013,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 6; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 96 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 96 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*6] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*6] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -7759,7 +7772,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         int kl = n / 6;
         int batch_kl = n - kl * 6;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 96 + sq_kl;
+        int task_kl = blockIdx.y * 96 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
@@ -7773,16 +7786,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
 __global__ static
 void md_j_4dm_4_0(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 768;
-    int task_kl0 = blockIdx_y * 384;
+    int task_ij0 = block_x * 768;
+    int task_kl0 = block_y * 384;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -7811,7 +7822,7 @@ void md_j_4dm_4_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 384; n += 256) {
-        int task_kl = blockIdx_y * 384 + n;
+        int task_kl = blockIdx.y * 384 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -7845,7 +7856,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -7891,12 +7902,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 24; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 384 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 384 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*24] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*24] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -8340,7 +8351,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         int kl = n / 24;
         int batch_kl = n - kl * 24;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 384 + sq_kl;
+        int task_kl = blockIdx.y * 384 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(2, remaining_n_dm); ++m) {
@@ -8354,16 +8365,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
 __global__ static
 void md_j_4dm_4_1(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 768;
-    int task_kl0 = blockIdx_y * 144;
+    int task_ij0 = block_x * 768;
+    int task_kl0 = block_y * 144;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -8392,7 +8401,7 @@ void md_j_4dm_4_1(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 144; n += 256) {
-        int task_kl = blockIdx_y * 144 + n;
+        int task_kl = blockIdx.y * 144 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -8426,7 +8435,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -8472,12 +8481,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 9; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 144 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 144 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*9] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -9976,7 +9985,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         int kl = n / 9;
         int batch_kl = n - kl * 9;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 144 + sq_kl;
+        int task_kl = blockIdx.y * 144 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(2, remaining_n_dm); ++m) {
@@ -9990,16 +9999,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
 __global__ static
 void md_j_4dm_5_0(KERNEL_ARGS)
 {
-    KERNEL_SETUP()
+    KERNEL_SETUP();
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int task_ij0 = blockIdx_x * 768;
-    int task_kl0 = blockIdx_y * 192;
+    int task_ij0 = block_x * 768;
+    int task_kl0 = block_y * 192;
     if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
         return;
     }
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
     int sq_id = tx + 16 * ty;
     int thread_id = sq_id;
     int *bas = envs.bas;
@@ -10028,7 +10035,7 @@ void md_j_4dm_5_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 192; n += 256) {
-        int task_kl = blockIdx_y * 192 + n;
+        int task_kl = blockIdx.y * 192 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -10062,7 +10069,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
@@ -10108,12 +10115,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 12; ++batch_kl) {
-            int task_kl0 = blockIdx_y * 192 + batch_kl * 16;
+            int task_kl0 = blockIdx.y * 192 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx_y*12] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*12] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -11039,7 +11046,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         int kl = n / 12;
         int batch_kl = n - kl * 12;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx_y * 192 + sq_kl;
+        int task_kl = blockIdx.y * 192 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(2, remaining_n_dm); ++m) {
@@ -11065,7 +11072,6 @@ int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
     if (omega < 0) {
         addition_buf = 256;
     }
-
     switch (ijkl) {
     case 0:  // lij=0, lkl=0, tilex=21, tiley=21
         LAUNCH_KERNEL(md_j_4dm_0_0, 6080, 336, 336) break;
@@ -11093,6 +11099,7 @@ int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
     }
     return 1;
 }
+
 #undef LAUNCH_KERNEL
 #undef KERNEL_SETUP
 #undef KERNEL_ARGS

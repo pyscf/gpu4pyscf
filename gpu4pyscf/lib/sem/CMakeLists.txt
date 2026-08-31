@@ -22,9 +22,9 @@ set(GPU_SRCS
     grad_kernel.cu
 )
 
-if (USE_SYCL)
-    add_library(sem SHARED ${GPU_SRCS})
+add_library(sem SHARED ${GPU_SRCS})
 
+if (USE_SYCL)
     set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
 
     set_target_properties(sem PROPERTIES
@@ -32,8 +32,6 @@ if (USE_SYCL)
     target_compile_options(sem PRIVATE -x c++ -nocudainc -nocudalib)
     target_link_libraries(sem PRIVATE sycl_compat gsycl)
 else()
-    add_library(sem SHARED ${GPU_SRCS})
-
     set_target_properties(sem PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
         CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"

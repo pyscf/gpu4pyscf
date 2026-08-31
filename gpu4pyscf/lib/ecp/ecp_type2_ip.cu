@@ -31,7 +31,7 @@ void type2_cart_unrolled_kernel(double *gctr,
 
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-    
+
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
@@ -51,9 +51,9 @@ void type2_cart_unrolled_kernel(double *gctr,
     __shared__ double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
     __shared__ double rad_all[(LI+LJ+1)*LIC1*LJC1];
     __shared__ double angi[LI1*nfi*LIC1];
-    __shared__ double angj[LJ1*nfj*LJC1];    
+    __shared__ double angj[LJ1*nfj*LJC1];
 #endif // USE_SYCL
-  
+
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
@@ -142,6 +142,11 @@ void type2_cart_unrolled_kernel(double *gctr,
     }
 }
 
+// `smem` is passed in rather than declared here as `extern __shared__`:
+// under SYCL the dynamic local memory comes from a sycl::local_accessor
+// created by the enclosing submit(), which cannot be reached from a
+// device function. The CUDA callers pass their own `extern __shared__`
+// block, so behaviour is unchanged.
 template <int orderi, int orderj> __device__
 void type2_cart_kernel(double *smem, double *gctr,
                 const int LI, const int LJ, const int LC,
@@ -191,7 +196,7 @@ void type2_cart_kernel(double *smem, double *gctr,
 
     const double dca = norm3d(rca[0], rca[1], rca[2]);
     const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
-
+    
     double radi[AO_LMAX+ECP_LMAX+orderi+1];
     type2_facs_rad<orderi>(radi, LI+LC, npi, dca, ci, ai);
     double radj[AO_LMAX+ECP_LMAX+orderj+1];
@@ -303,15 +308,15 @@ void type2_cart_ip1(double *gctr,
     __syncthreads();
 
     type2_cart_unrolled_kernel<1,0,LI+1,LJ,LC>(
-        buf, ish, jsh, ksh,
-        ecpbas, ecploc,
+        buf, ish, jsh, ksh, 
+        ecpbas, ecploc, 
         atm, bas, env);
     _li_down(gctr_smem, buf, LI, LJ);
     __syncthreads();
     if constexpr (LI > 0){
         type2_cart_unrolled_kernel<0,0,LI-1,LJ,LC>(
-            buf, ish, jsh, ksh,
-            ecpbas, ecploc,
+            buf, ish, jsh, ksh, 
+            ecpbas, ecploc, 
             atm, bas, env);
         _li_up(gctr_smem, buf, LI, LJ);
         __syncthreads();
@@ -378,17 +383,17 @@ void type2_cart_ip1_general(double *gctr,
     __syncthreads();
 
     type2_cart_kernel<1,0>(smem,
-        buf, LI+1, LJ, LC,
-        ish, jsh, ksh,
-        ecpbas, ecploc,
+        buf, LI+1, LJ, LC, 
+        ish, jsh, ksh, 
+        ecpbas, ecploc, 
         atm, bas, env);
     _li_down(gctr_smem, buf, LI, LJ);
     __syncthreads();
     if (LI > 0){
         type2_cart_kernel<0,0>(smem,
-            buf, LI-1, LJ, LC,
-            ish, jsh, ksh,
-            ecpbas, ecploc,
+            buf, LI-1, LJ, LC, 
+            ish, jsh, ksh, 
+            ecpbas, ecploc, 
             atm, bas, env);
         _li_up(gctr_smem, buf, LI, LJ);
         __syncthreads();
