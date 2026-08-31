@@ -113,6 +113,8 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh=None, scale_precision=1):
 
     assert isinstance(cell, Cell)
     if bvk_kmesh is None:
+        if kpts is not None:
+            kpts = kpts.reshape(-1, 3)
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
     rcut = cell.rcut

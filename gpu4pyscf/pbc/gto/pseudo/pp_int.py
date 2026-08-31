@@ -104,4 +104,6 @@ def get_pp_nl_gpu(cell, kpts=None):
         ilp_conj = cp.conjugate(ilp, out=ilp)
         contract('knilp,knilq->kpq', ilp_conj, tmp, beta=1, out=ppnl)
 
+    if kpts is None or gamma_point(kpts):
+        ppnl = ppnl.real
     return ppnl
