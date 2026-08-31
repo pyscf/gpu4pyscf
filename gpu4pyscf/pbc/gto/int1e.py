@@ -99,24 +99,21 @@ def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
 
 def ovlp_strain_deriv(cell, dm, kpts=None):
     assert isinstance(cell, Cell)
-    opt = _Int1eOpt(cell, 1)
+    opt = _check_opt(cell, 1, kpts)
     return opt.get_ovlp_strain_deriv(dm, kpts)
 
 def kin_strain_deriv(cell, dm, kpts=None):
     assert isinstance(cell, Cell)
-    with lib.temporary_env(cell, precision=cell.precision*1e-2):
-        opt = _Int1eOpt(cell, 1)
+    opt = _check_opt(cell, 1, kpts, scale_precision=1e-1)
     return opt.get_kin_strain_deriv(dm, kpts)
 
-def _check_opt(cell, hermi, kpts, bvk_kmesh, scale_precision=1):
+def _check_opt(cell, hermi, kpts, bvk_kmesh=None, scale_precision=1):
     if isinstance(cell, Mole):
         return _Int1eOpt(cell, hermi)
 
     assert isinstance(cell, Cell)
-    if kpts is None or is_zero(kpts):
-        bvk_kmesh = np.ones(3, dtype=int)
-    elif bvk_kmesh is None:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+    if bvk_kmesh is None:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
     rcut = cell.rcut
     precision = cell.precision * scale_precision
@@ -151,7 +148,7 @@ class _Int1eOpt:
                 # PTR_BAS_COORD was not initialized in the super_cell function
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             Ls = _bvkcell_lattice_sum_Ls(bvkcell)
-            Ls = Ls[np.linalg.norm(Ls-.5, axis=1).argsort()]
+            Ls = asarray(Ls[np.linalg.norm(Ls-.5, axis=1).argsort()])
 
             rad = bvkcell.rcut / bvkcell.vol**(1./3) + 1
             surface = 4*np.pi * rad**2
@@ -161,7 +158,6 @@ class _Int1eOpt:
         self.hermi = hermi
         self.bvk_kmesh = bvk_kmesh
         self.bvkcell = bvkcell
-        self.Ls = Ls
         self.bvkmesh_Ls = bvkmesh_Ls
 
         _env = _scale_sp_ctr_coeff(bvkcell)
@@ -231,26 +227,11 @@ class _Int1eOpt:
             naoj = ao_loc[jsh1] - j0
             ij_offset = i0 * naoj + j0
 
-        if isinstance(self.cell, Mole) or self.bvk_kmesh is not None:
-            # if kpts is None, compute integrals at gamma point
-            ncells = len(self.bvkmesh_Ls)
-            int1e_envs = self.int1e_envs
-        else:
-            assert kpts is not None
-            # build supmol for evaluating integrals <cell-0|super-mol>, which
-            # can be transformed to integrals at arbitrary k-points
-            supmol = cell.copy(deep=False)
-            supmol = _build_supcell_(supmol, cell, cp.asnumpy(self.Ls))
-            supmol._bas[:,PTR_BAS_COORD] = supmol._atm[supmol._bas[:,ATOM_OF],PTR_COORD]
-            ncells = len(self.Ls)
-            Ls = cp.zeros((1, 3))
-            _env = _scale_sp_ctr_coeff(supmol)
-            int1e_envs = PBCIntEnvVars.new(
-                cell.natm, cell.nbas, ncells, 1, supmol._atm, supmol._bas, _env,
-                supmol.ao_loc, Ls)
-
         gout_stride, max_shm_size = _gout_stride_lookup_table(cell, deriv_ij, gout_width)
         nbatches_shl_pair = len(self.shl_pair_offsets) - 1
+
+        ncells = len(self.bvkmesh_Ls)
+        int1e_envs = self.int1e_envs
 
         mat = ndarray((ncells, comp, naoi, naoj), buffer=buf)
         mat.fill(0)
@@ -287,10 +268,7 @@ class _Int1eOpt:
             is_single_kpt = kpts.ndim == 1
             kpts = asarray(kpts.reshape(-1, 3))
             nkpts = len(kpts)
-            if self.bvk_kmesh is None:
-                expLk = cp.exp(1j*asarray(self.Ls).dot(kpts.T))
-            else:
-                expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
             expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
             mat = contract('lkz,lxpq->kxpqz', expLkz, mat)
             mat = mat.view(np.complex128)[:,:,:,:,0]
@@ -326,16 +304,12 @@ class _Int1eOpt:
         if is_gamma_point:
             assert dm.dtype == np.float64
         else:
-            if self.bvk_kmesh is None:
-                expLk = cp.exp(1j*asarray(self.Ls).dot(kpts.T))
-            else:
-                expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
             dm = contract('Lk,kpq->Lpq', expLk, dm)
             expLk = None
             dm = dm.real
         dm = cp.asarray(dm, order='C')
 
-        assert self.bvk_kmesh is None
         assert self.hermi == 1
         gout_stride_lookup, shm_size = _gout_stride_lookup_table(cell, deriv)
         nbatches_shl_pair = len(self.shl_pair_offsets) - 1
@@ -411,7 +385,6 @@ class CrossInt1e(_Int1eOpt):
 
         self.bvk_kmesh = bvk_kmesh
         self.bvkcell = bvkcell
-        self.Ls = Ls
         self.bvkmesh_Ls = bvkmesh_Ls
 
         ao_loc = cell12.ao_loc
