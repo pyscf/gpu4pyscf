@@ -36,7 +36,7 @@ from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, jk_energy_per_atom
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.pbc.dft import multigrid
 
 __all__ = ['Gradients']
 
@@ -71,22 +71,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     t1 = log.timer('gradients of 2e part', *t0)
 
     ni = mf._numint
-    if isinstance(ni, multigrid.MultiGridNumInt):
-        raise NotImplementedError(
-            "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
-            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
-    elif isinstance(ni, multigrid_v2.MultiGridNumInt):
-        # Attention: The orbital derivative of vpploc term is in multigrid_v2.get_veff_ip1() function.
-        rho_g = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0, kpts)
-        rho_g = rho_g[0,0]
-        if cell._pseudo:
-            dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
-        else:
-            dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
-
-        dh1e = dh1e.get()
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
+        # Vne or pploc contribution is evaluated in energy_ee
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        dh1e -= contract_h1e_dm(cell, dh1e_kin, dm0, hermi=1)
+        dh1e = -contract_h1e_dm(cell, dh1e_kin, dm0, hermi=1)
     else:
         hcore_deriv = mf_grad.hcore_generator(cell, kpts)
         dh1e = cp.empty([natm, 3])
@@ -270,13 +258,11 @@ class Gradients(GradientsBase):
         # When J is evaluated using mf.j_engine or mf.rsjk, it is identical to
         # the J from MultiGridNumInt. The contribution from J matrix can be
         # efficiently evaluated using the MultiGridNumInt integrator.
-        j_in_xc = ni is not None and isinstance(ni, multigrid_v2.MultiGridNumInt)
+        j_in_xc = ni is not None and isinstance(ni, multigrid.MultiGridNumIntBase)
         if j_in_xc:
             j_factor = 0
-            de = multigrid_v2.get_veff_ip1(
-                ni, 'HF', dm, kpts=kpts, with_j=j_in_xc,
-                with_pseudo_vloc_orbital_derivative=True).get()
-            de /= len(kpts)
+            de = ni.energy_nuclear_gradient(
+                'HF', dm, kpts=kpts, spin=0, with_j=j_in_xc, with_nuc=True)
         else:
             j_factor = 1
             de = 0

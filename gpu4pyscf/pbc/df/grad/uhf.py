@@ -22,14 +22,15 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, get_avail_mem, empty_aligned)
-from gpu4pyscf.lib.utils import nearest_power2
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
-from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_kpts
+from gpu4pyscf.pbc.df.rsdf_builder import (
+    _weighted_coulG_kpts, LINEAR_DEP_THR)
 from gpu4pyscf.pbc.df.grad.rhf import (
-    int3c2e_scheme, _j_energy_per_atom, factorize_dm)
+    int3c2e_scheme, _j_energy_per_atom, factorize_dm, _gen_metric_solver,
+    _get_shl_pair_batch_size)
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf.pbc.gto import int1e
@@ -39,7 +40,8 @@ from gpu4pyscf.__config__ import props as gpu_specs
 
 
 def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, omega=None, verbose=None):
+                        exxdiv=None, omega=None, verbose=None,
+                        linear_dep_threshold=LINEAR_DEP_THR):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -48,7 +50,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         j_factor = 0
     if k_factor == 0:
         return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
-                                  omega, verbose) * j_factor
+                                  omega, verbose,
+                                  linear_dep_threshold) * j_factor
 
     assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
@@ -174,7 +177,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         raise NotImplementedError
     else:
         aux_coeff = cp.asarray(auxcell.ctr_coeff)
-        metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+        solve_j2c = _gen_metric_solver(
+            j2c, linear_dep_threshold, auxcell.dimension)
+        metric = aux_coeff.dot(solve_j2c(aux_coeff.T))
     j2c = aux_coeff = None
     dm_oo = cp.einsum('uv,nvij->nuij', metric, j3c_oo)
     metric = j3c_oo = None
@@ -314,7 +319,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
     nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
-    shl_pair_batch_size = nearest_power2(POOL_SIZE // nksh_per_batch.max())
+    shl_pair_batch_size = _get_shl_pair_batch_size(
+        nksh_per_batch, bvk_ncells)
     bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
         int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
     ao_pair_loc = get_ao_pair_loc(cell.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache, cart=True)

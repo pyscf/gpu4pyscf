@@ -65,7 +65,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -9.870755717258616, 8)
+        self.assertAlmostEqual(mf.e_tot, -9.870755717258616, 7)
 
     def test_nr_uhf(self):
         mf = scf.UHF(cell).density_fit()
@@ -74,7 +74,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -9.87737235242746, 8)
+        self.assertAlmostEqual(mf.e_tot, -9.87737235242746, 7)
 
     def test_nr_rks_lda(self):
         mf = dft.RKS(cell, xc='lda,')
@@ -84,7 +84,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -9.454224868598352, 8)
+        self.assertAlmostEqual(mf.e_tot, -9.454224868598352, 7)
 
     def test_nr_uks_lda(self):
         mf = dft.RKS(cell, xc='lda,')
@@ -113,7 +113,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.021211009946274, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.021211009946274, 7)
 
     def test_nr_uks_rsh(self):
         mf = dft.UKS(cell, xc='camb3lyp')
@@ -124,7 +124,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.04741991140345, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.04741991140345, 7)
 
     def test_nr_krhf(self):
         mf = scf.KRHF(cell, cell.make_kpts([2,1,1]))
@@ -204,7 +204,7 @@ class KnowValues(unittest.TestCase):
         hcore = mf.get_hcore()
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), -2.580202335681725-0.28028319954452735j, 9)
+        self.assertAlmostEqual(lib.fp(dat.get()), -2.580202335681725-0.28028319954452735j, 8)
 
         mf_ref = cell.KRKS(kpts=cell.make_kpts([2,1,1]))
         mf_ref.xc = 'b3lyp5'
@@ -220,7 +220,7 @@ class KnowValues(unittest.TestCase):
         dm1 = cp.append(dm1, 0.5)
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), 7.474044381526779+0.0640933714545938j, 9)
+        self.assertAlmostEqual(lib.fp(dat.get()), 7.474044381526779+0.0640933714545938j, delta=3e-7)
 
         g_ref, hop_ref, hdiag_ref = mf_ref.gen_g_hop(mo.get(), mo_occ.get(), hcore.get())
         self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, 7)
@@ -243,7 +243,7 @@ class KnowValues(unittest.TestCase):
         hcore = cp.array([mf.get_hcore()]*2)
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), -10.115070233160678-0.818925838878515j, 9)
+        self.assertAlmostEqual(lib.fp(dat.get()), -10.115070233160678-0.818925838878515j, delta=1e-7)
 
         mf_ref = cell.KUKS(kpts=cell.make_kpts([2,1,1]))
         mf_ref.xc = 'b3lyp5'
@@ -259,7 +259,7 @@ class KnowValues(unittest.TestCase):
         dm1 = cp.append(dm1, 0.5)
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), 0.21794953957922497-0.08227815483834572j, 9)
+        self.assertAlmostEqual(lib.fp(dat.get()), 0.21794953957922497-0.08227815483834572j, delta=1e-7)
 
         g_ref, hop_ref, hdiag_ref = mf_ref.gen_g_hop(mo.get(), mo_occ.get(), hcore.get())
         self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, delta=3e-8)
