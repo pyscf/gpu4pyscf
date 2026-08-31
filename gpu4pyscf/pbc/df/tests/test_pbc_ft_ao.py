@@ -25,6 +25,8 @@ from gpu4pyscf.pbc.df import ft_ao as ft_ao_gpu
 from gpu4pyscf.pbc.df.ft_ao import ft_aopair, ft_aopair_kpts
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.pbc.df.ft_ao import libpbc
+from gpu4pyscf.pbc.df.aft import AFTDF
+from gpu4pyscf.pbc.tools import get_coulG
 
 def setUpModule():
     global cell
@@ -176,6 +178,42 @@ class KnownValues(unittest.TestCase):
 
         ref = cp.einsum('Gpq,qp->G', ft_aopair(cell, Gv), dm).get()
         self.assertAlmostEqual(abs(ref-rhoG).max(), 0, 10)
+
+    def test_j(self):
+        cp.random.seed(10)
+        nao = cell.nao
+        dm = cp.random.rand(nao, nao)
+        dm = dm + dm.T
+        mesh = [9,11,3]
+        Gv = cell.get_Gv(mesh=mesh)
+        ft_opt = ft_ao_gpu.FTOpt(cell)
+        rhoG = ft_opt.contract_dm(ft_opt.cell.apply_C_mat_CT(dm), Gv)
+        coulG = rhoG * cp.array(get_coulG(cell, Gv=Gv)) / cell.vol
+        vj = ft_opt.contract_rhoG(coulG, -Gv, sort_output=True)
+
+        mydf  = AFTDF(cell).set(mesh=mesh)
+        jref = mydf.get_jk(dm, with_k=False)[0]
+        assert abs(vj - jref).max().get() < 1e-9
+
+    @unittest.skip('FTOpt.contract_dm with kpts not supported')
+    def test_j_kpts(self):
+        cp.random.seed(10)
+        kmesh = [3,2,1]
+        kpts = cell.make_kpts(kmesh)
+        nk = len(kpts)
+        nao = cell.nao
+        dm = cp.random.rand(nk, nao, nao)
+        dm = dm + dm.transpose(0, 2, 1)
+        mesh = [9,11,3]
+        Gv = cell.get_Gv(mesh=mesh)
+        ft_opt = ft_ao_gpu.FTOpt(cell)
+        rhoG = ft_opt.contract_dm(ft_opt.cell.apply_C_mat_CT(dm), Gv, kpts=kpts)
+        coulG = rhoG * cp.array(get_coulG(cell, Gv=Gv)) / cell.vol
+        vj = ft_opt.contract_rhoG(coulG, -Gv, kpts=kpts, sort_output=True)
+
+        mydf  = AFTDF(cell).set(mesh=mesh)
+        jref = mydf.get_jk(dm, kpts=kpts, with_k=False)[0]
+        assert abs(vj - jref).max().get() < 1e-9
 
     def test_gen_ft_kernel(self):
         kmesh = [2, 3, 2]

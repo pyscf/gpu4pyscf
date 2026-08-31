@@ -21,6 +21,7 @@ import gpu4pyscf
 from pyscf import lib, gto, scf
 from gpu4pyscf import tdscf, nac, dft
 from gpu4pyscf.solvent.tdscf.pcm import WithSolventTDSCFNacMethod
+from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize_tda
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -39,21 +40,6 @@ def setUpModule():
 def tearDownModule():
     global mol 
     del mol
-
-
-def diagonalize_tda(a, nroots=5):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    e, xy = np.linalg.eig(np.asarray(a))
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 
 def get_mf(mol, mf, s, mo_coeff, method='CPCM'):
