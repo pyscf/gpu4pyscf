@@ -127,7 +127,7 @@ void block_reduce(double val, double *d_out) {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     double (&sdata)[THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS]>(item.get_group());
-    const unsigned int tid = item.get_local_id(0);    
+    const unsigned int tid = item.get_local_id(0);
 #else // USE_SYCL
     __shared__ double sdata[THREADS];
     const unsigned int tid = threadIdx.x;

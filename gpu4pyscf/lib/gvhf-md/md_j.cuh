@@ -71,6 +71,24 @@ int qd_offset_for_threads(int npairs, int threads);
 
 #ifdef USE_SYCL
 #include "md_indices.cu"
+
+// ---------------------------------------------------------------------
+// blockIdx / threadIdx shim for the generated unrolled_md_j*.cu kernels.
+//
+// Those two files are ~15k lines of auto-generated kernel body that index
+// the launch geometry directly as blockIdx.x/.y and threadIdx.x/.y. CUDA
+// supplies those as built-ins; SYCL has no equivalent. Rather than rewrite
+// every reference, KERNEL_SETUP() materialises two locals of this type
+// from the nd_item, so the generated bodies stay byte-identical to
+// upstream/master and only the macro preamble at the top of each file
+// differs between the two backends.
+//
+// Axis mapping is fixed by the launch: sycl::nd_range<2> dimension 1 is
+// the fast-varying axis and carries CUDA's .x, dimension 0 carries .y.
+// ---------------------------------------------------------------------
+struct md_j_index2 {
+    int x, y;
+};
 #else
 extern __device__ int Rt2_idx_offsets[];
 extern __device__ uint16_t Rt2_ij_kl[];

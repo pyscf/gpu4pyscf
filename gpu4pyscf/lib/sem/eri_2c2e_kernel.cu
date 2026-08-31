@@ -1088,7 +1088,13 @@ __global__ void calc_local_rep_core_kernel(
 
 // HARDCODED MAPPINGS
 // Dense 1D index (0..44) to 2D orbital index (i)
+#ifdef USE_SYCL
+// SYCL has no cross-TU __device__ linkage for read-only tables;
+// `static constexpr` gives the same device-side constant data.
 static constexpr int DENSE_TO_I[45] = {
+#else
+__device__ const int DENSE_TO_I[45] = {
+#endif
     0,
     1, 1,
     2, 2, 2,
@@ -1101,7 +1107,11 @@ static constexpr int DENSE_TO_I[45] = {
 };
 
 // Dense 1D index (0..44) to 2D orbital index (j)
+#ifdef USE_SYCL
 static constexpr int DENSE_TO_J[45] = {
+#else
+__device__ const int DENSE_TO_J[45] = {
+#endif
     0,
     0, 1,
     0, 1, 2,
@@ -1114,7 +1124,11 @@ static constexpr int DENSE_TO_J[45] = {
 };
 
 // It is indexd in the mopac
+#ifdef USE_SYCL
 static constexpr int MOPAC_INDEXD[9][9] = {
+#else
+__device__ const int MOPAC_INDEXD[9][9] = {
+#endif
     { 0,  1,  2,  3,  4,  5,  6,  7,  8},
     { 1,  9, 10, 11, 12, 13, 14, 15, 16},
     { 2, 10, 17, 18, 19, 20, 21, 22, 23},

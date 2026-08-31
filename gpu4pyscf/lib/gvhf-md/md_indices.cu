@@ -15,10 +15,8 @@
  */
 
 #include <stdint.h>
-#ifndef USE_SYCL
 #include <cuda_runtime.h>
 #include <cuda.h>
-#endif
 
 #ifdef USE_SYCL
 inline constexpr int Rt2_idx_offsets[] =
@@ -24604,7 +24602,7 @@ __constant__ int8_t c_Rt2_efg_phase[] =
 
 // offsets = l*(l+1)*(l+2)*(l+3)//24 - l
 #ifdef USE_SYCL
-inline constexpr int8_t c_Rt_tuv_fac[] = 
+inline constexpr int8_t c_Rt_tuv_fac[] =
 #else
 __constant__ int8_t c_Rt_tuv_fac[] =
 #endif
@@ -24875,7 +24873,7 @@ __constant__ int8_t c_Rt_tuv_fac[] =
 13,13,13,13,14,14,14,15,
 };
 #ifdef USE_SYCL
-inline constexpr uint16_t c_Rt_idx[] = 
+inline constexpr uint16_t c_Rt_idx[] =
 #else
 __constant__ uint16_t c_Rt_idx[] =
 #endif

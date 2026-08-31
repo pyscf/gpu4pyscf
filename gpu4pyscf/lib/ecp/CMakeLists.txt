@@ -12,17 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(GPU_SRCS nr_ecp_driver.cu)
+set(GPU_SRCS
+  nr_ecp_driver.cu
+)
 
 add_library(gecp SHARED ${GPU_SRCS})
 
 if (USE_SYCL)
-  file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
-  set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   target_compile_options(gecp PRIVATE -x c++ -nocudainc -nocudalib)
   target_link_libraries(gecp PRIVATE sycl_compat gsycl)
-else ()
+else()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
   # If compiling with CUDA<13.1 and arch>100, ECP will silently provide incorrect result.
@@ -45,11 +45,10 @@ else ()
 
   if(HAS_BLACKWELL_OR_NEWER AND CUDA_VERSION_LESS_THAN_13_1)
     message(WARNING "Blackwell or newer GPU detected with sm ${arch_number} >= 100, and a CUDA version ${CMAKE_CUDA_COMPILER_VERSION} < 13.1 is detected. "
-      "To get around with a severe bug in nvcc, we turn off compiler optimization. The performance will be damaged.")
+                    "To get around with a severe bug in nvcc, we turn off compiler optimization. The performance will be damaged.")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --Ofast-compile max")
   endif()
   # End of hacking CUDA<13.1 and arch>100
-
 endif()
 
 set_target_properties(gecp PROPERTIES

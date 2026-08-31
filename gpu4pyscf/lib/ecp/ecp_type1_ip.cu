@@ -140,6 +140,11 @@ void type1_cart_unrolled_kernel(double *gctr,
     }
 }
 
+// `smem` is passed in rather than declared here as `extern __shared__`:
+// under SYCL the dynamic local memory comes from a sycl::local_accessor
+// created by the enclosing submit(), which cannot be reached from a
+// device function. The CUDA callers pass their own `extern __shared__`
+// block, so behaviour is unchanged.
 template <int orderi, int orderj> __device__
 void type1_cart_kernel(double *smem, double *gctr,
                 const int LI, const int LJ,

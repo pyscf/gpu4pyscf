@@ -18,10 +18,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <assert.h>
-#ifndef USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
-#endif
 #include "gvhf-rys/vhf.cuh"
 
 #define THREADS         256

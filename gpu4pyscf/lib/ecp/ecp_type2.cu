@@ -199,6 +199,7 @@ void type2_facs_omega(double* __restrict__ omega, double *r){
 }
 
 
+__device__
 void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *rca, double *omega){
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
@@ -339,7 +340,7 @@ void type2_cart(double * __restrict__ gctr,
     const int blockDim_x = item.get_local_range(0);
 
     auto thread_block = item.get_group();
-    const int task_id = thread_block.get_group_id(0); //item.get_group(0);
+    const int task_id = thread_block.get_group_id(0);
     using tile_t1 = double[LI1*(LI1+1)*(LI1+2)/6 * BLKI];
     tile_t1& omegai = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t1>(thread_block);
     using tile_t2 = double[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
@@ -349,7 +350,7 @@ void type2_cart(double * __restrict__ gctr,
     double (&angi)[LI1*nfi*LIC1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LI1*nfi*LIC1]>(thread_block);
     double (&angj)[LJ1*nfj*LJC1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LJ1*nfj*LJC1]>(thread_block);
 #else // USE_SYCL
-    const int task_id = blockIdx_x;
+    const int task_id = blockIdx.x;
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
 

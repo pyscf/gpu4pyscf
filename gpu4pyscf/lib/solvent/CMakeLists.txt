@@ -32,12 +32,20 @@ set(GPU_SRCS
 
 add_library(solvent SHARED ${FTN_SRCS} ${GPU_SRCS})
 
+#option(BUILD_SHARED_LIBS "build shared libraries" 1)
+#option(ENABLE_STATIC "Enforce static library build" 0)
+#if(ENABLE_STATIC)
+#  set(BUILD_SHARED_LIBS 0)
+#endif()
+
 set_target_properties(solvent PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-)
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 if (USE_SYCL)
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  # Unlike the other GPU targets, `solvent` also carries Fortran sources, so
+  # the SYCL/C++-only flags must be guarded by a COMPILE_LANGUAGE genex
+  # instead of applied to the whole target.
   target_compile_options(solvent PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-x c++ -nocudainc -nocudalib>
   )
