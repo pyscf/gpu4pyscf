@@ -20,7 +20,19 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+// unrolled_int3c2e.cu is auto-generated upstream and must stay byte-identical.
+// Its kernels use __syncthreads() but never declare an nd_item, so swap in an
+// item-free barrier for the duration of the include. The kernels are only ever
+// instantiated from 2-D nd_range launches, so get_nd_item<2>() is well-formed.
+#ifdef USE_SYCL
+#pragma push_macro("__syncthreads")
+#undef __syncthreads
+#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<2>().get_group()))
+#endif
 #include "unrolled_int3c2e.cu"
+#ifdef USE_SYCL
+#pragma pop_macro("__syncthreads")
+#endif
 #include "build_rys_gxyz.cuh"
 
 #define THREADS         256

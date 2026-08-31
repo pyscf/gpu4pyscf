@@ -1,53 +1,10 @@
 
-#include "vhf.cuh"
-#include "rys_roots_for_k.cu"
-#include "create_tasks.cu"
-#include "unrolled_kernels.cuh"
-
-
-#ifdef USE_SYCL
-
-#undef JKMATRIX_KERNEL_ARGS
-#define JKMATRIX_KERNEL_ARGS                                            \
-  RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,                   \
-    float *q_cond_ij, float *q_cond_kl, float dm_penalty,               \
-    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,            \
-    uint32_t *pool, int *head,                                          \
-    sycl::nd_item<2> &item, double *shared_memory
-
-#undef JKMATRIX_KERNEL_SETUP
-#define JKMATRIX_KERNEL_SETUP()                                             \
-  int sq_id = item.get_local_id(1);                                         \
-  int gout_id = item.get_local_id(0);                                       \
-  int _nsq_per_block = item.get_local_range(1);                             \
-  uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;            \
-  auto thread_block = item.get_group();                                     \
-  int &ntasks   = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
-  int &pair_ij  = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
-  int &pair_kl0 = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
-  int &ish      = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
-  int &jsh      = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
-  double (&ri)[3]   = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block); \
-  double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block); \
-  int &expi = *sycl::ext::oneapi::group_local_memory<int>(thread_block); \
-  int &expj = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
-
-#undef LAUNCH_JKMATRIX_KERNEL
-#define LAUNCH_JKMATRIX_KERNEL(KERNEL) {                                \
-  auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds;  \
-  sycl::range<2> blocks(1, workers);                                    \
-  sycl::range<2> threads(gout_stride, nsq_per_block);                   \
-  sycl_get_queue()->submit([&](sycl::handler &cgh) {                    \
-    sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); \
-    cgh.parallel_for<class KERNEL##_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { \
-      KERNEL(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_penalty, \
-             s_cond_ij, s_cond_kl, diffuse_exps, pool, head,            \
-             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));       \
-    });                                                                 \
-  });                                                                   \
-}
-
-#endif // USE_SYCL
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include "gvhf-rys/vhf.cuh"
+#include "gvhf-rys/rys_roots_for_k.cu"
+#include "gvhf-rys/create_tasks.cu"
+#include "gvhf-rys/unrolled_kernels.cuh"
 
 
 __global__ static
@@ -33737,9 +33694,7 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
         break;
     }
 
-#ifndef USE_SYCL
     dim3 threads(nsq_per_block, gout_stride);
-#endif
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
     int buflen = nroots*2 * nsq_per_block + iprim*jprim + 3;
@@ -33822,7 +33777,3 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     }
     return 1;
 }
-
-#undef LAUNCH_JKMATRIX_KERNEL
-#undef JKMATRIX_KERNEL_SETUP
-#undef JKMATRIX_KERNEL_ARGS

@@ -17,31 +17,16 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda_runtime.h>
 #include "multigrid.cuh"
 #include "cart2xyz.cu"
 #include "loader.cu"
 
-// Abstracts CUDA/SYCL 1D thread-id + fold2idx setup. Used 3x in this file.
-#ifdef USE_SYCL
-#define KERNEL_SETUP() \
-    auto item = syclex::this_work_item::get_nd_item<1>(); \
-    int thread_id = item.get_local_id(0); \
-    auto c_i_in_fold2idx = s_mg_i_in_fold2idx.get();
-#else
-#define KERNEL_SETUP() \
-    int thread_id = threadIdx.x;
-#endif
-
 template <int L> __device__ static
-void fill_dm_xyz_ip1(double *cache, double *dm_xyz, double *gx_dmyz, double *xs_exp,
+void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
                      int ngridx, int ngrid_span)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
     int thread_id = threadIdx.x;
-#endif
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     constexpr int L1 = L + 1;
@@ -54,6 +39,7 @@ void fill_dm_xyz_ip1(double *cache, double *dm_xyz, double *gx_dmyz, double *xs_
     for (int n = 0; n < (L2*nf2+WARPS-1)/WARPS; ++n) {
         r3[n] = 0.;
     }
+    extern __shared__ double cache[];
     double *xs_cache = cache + sp_id;
     double *yz_cache = cache + (L+2) * WARP_SIZE + sp_id;
     for (int ix = 0; ix < ngridx; ++ix) {
@@ -137,6 +123,7 @@ void fill_dm_xyz_ip1(double *cache, double *dm_xyz, double *gx_dmyz, double *xs_
         for (int n = 0; n < (L2*nf2+WARPS-1)/WARPS; ++n) {
             r3[n] = 0.;
         }
+        extern __shared__ double cache[];
         double *xs_cache = cache + sp_id;
         double *yz_cache = cache + (L+2) * WARP_SIZE + sp_id;
         for (int ix = 0; ix < ngridx; ++ix) {
@@ -484,15 +471,16 @@ double sub_dm_xyz_to_dm(int lx_i, int ly_i, int lz_i, int lx_j, int ly_j, int lz
 }
 
 template <int L> __device__ static
-void _dm_xyz_to_dm_sigmax(double *cache, double *dm, double *dm_yzx, int nao, int li, int lj,
+void _dm_xyz_to_dm_sigmax(double *dm, double *dm_yzx, int nao, int li, int lj,
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-    KERNEL_SETUP();
+    int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
     int lj2 = lj + 2;
+    extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj2 * lj2 * WARP_SIZE;
     double *cz = cy + lj2 * lj2 * WARP_SIZE;
@@ -527,15 +515,16 @@ void _dm_xyz_to_dm_sigmax(double *cache, double *dm, double *dm_yzx, int nao, in
 }
 
 template <int L> __device__ static
-void _dm_xyz_to_dm_sigmay(double *cache, double *dm, double *dm_xzy, int nao, int li, int lj,
+void _dm_xyz_to_dm_sigmay(double *dm, double *dm_xzy, int nao, int li, int lj,
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-    KERNEL_SETUP();
+    int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
     int lj2 = lj + 2;
+    extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj2 * lj2 * WARP_SIZE;
     double *cz = cy + lj2 * lj2 * WARP_SIZE;
@@ -570,15 +559,16 @@ void _dm_xyz_to_dm_sigmay(double *cache, double *dm, double *dm_xzy, int nao, in
 }
 
 template <int L> __device__ static
-void _dm_xyz_to_dm_sigmaz(double *cache, double *dm, double *dm_xyz, int nao, int li, int lj,
+void _dm_xyz_to_dm_sigmaz(double *dm, double *dm_xyz, int nao, int li, int lj,
                           double *ri, double *rj, double ai2, double aj2,
                           double cicj, int npairs_per_block)
 {
-    KERNEL_SETUP();
+    int thread_id = threadIdx.x;
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
     int lj2 = lj + 2;
+    extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj2 * lj2 * WARP_SIZE;
     double *cz = cy + lj2 * lj2 * WARP_SIZE;
@@ -613,15 +603,10 @@ void _dm_xyz_to_dm_sigmaz(double *cache, double *dm, double *dm_xyz, int nao, in
 }
 
 template <int L, int TILE> __device__ static
-void _eval_mat_gga_kernel(double *cache, double *out, double *rho, MGridEnvVars envs,
+void _eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
                           MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
     int thread_id = threadIdx.x;
-#endif
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int npairs_this_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
@@ -680,6 +665,7 @@ void _eval_mat_gga_kernel(double *cache, double *out, double *rho, MGridEnvVars 
     double *gx_dmyz = zs_exp + xs_size;
     init_orth_data(xs_exp, grid_start, envs, bounds, ri, rj, ai, aj, L+1);
 
+    extern __shared__ double cache[];
     double *xs_cache, *ys_cache, *zs_cache;
     double *dm_xyz = gx_dmyz + nf2 * ngrid_span * WARP_SIZE;
     if (L < 4) {
@@ -759,7 +745,7 @@ void _eval_mat_gga_kernel(double *cache, double *out, double *rho, MGridEnvVars 
     }
     __syncthreads();
 
-    fill_dm_xyz<L>(cache, dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
+    fill_dm_xyz<L>(dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
     dm_xyz_to_dm<L>(out, dm_xyz, nao, li, lj, ri, rj, cicj, cache,
                     npairs_this_block);
     __syncthreads();
@@ -815,8 +801,8 @@ void _eval_mat_gga_kernel(double *cache, double *out, double *rho, MGridEnvVars 
     }
     __syncthreads();
 
-    fill_dm_xyz_ip1<L>(cache, dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
-    _dm_xyz_to_dm_sigmax<L>(cache, out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
+    fill_dm_xyz_ip1<L>(dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
+    _dm_xyz_to_dm_sigmax<L>(out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
     __syncthreads();
 
@@ -874,8 +860,8 @@ void _eval_mat_gga_kernel(double *cache, double *out, double *rho, MGridEnvVars 
     }
     __syncthreads();
 
-    fill_dm_xyz_ip1<L>(cache, dm_xyz, gy_dmxz, ys_exp, ngridy, ngrid_span);
-    _dm_xyz_to_dm_sigmay<L>(cache, out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
+    fill_dm_xyz_ip1<L>(dm_xyz, gy_dmxz, ys_exp, ngridy, ngrid_span);
+    _dm_xyz_to_dm_sigmay<L>(out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
     __syncthreads();
 
@@ -933,42 +919,30 @@ void _eval_mat_gga_kernel(double *cache, double *out, double *rho, MGridEnvVars 
     }
     __syncthreads();
 
-    fill_dm_xyz_ip1<L>(cache, dm_xyz, gz_dmxy, zs_exp, ngridz, ngrid_span);
-    _dm_xyz_to_dm_sigmaz<L>(cache, out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
+    fill_dm_xyz_ip1<L>(dm_xyz, gz_dmxy, zs_exp, ngridz, ngrid_span);
+    _dm_xyz_to_dm_sigmaz<L>(out, dm_xyz, nao, li, lj, ri, rj, ai2, aj2,
                             cicj, npairs_this_block);
 }
 
 template <int L, int TILE> __global__
 void eval_mat_gga_kernel(double *out, double *rho, MGridEnvVars envs,
-                         MGridBounds bounds, double *pool, uint32_t *batch_head
-                         #ifdef USE_SYCL
-                         , sycl::nd_item<1> &item, char* shm_mem
-                         #endif
-                         )
+                         MGridBounds bounds, double *pool, uint32_t *batch_head)
 {
-#ifdef USE_SYCL
-    int thread_id = item.get_local_id(0);
-    int b_id = item.get_group(0);
-    uint32_t& pair_idx0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<uint32_t>(item.get_group());
-    double *cache = reinterpret_cast<double*>(shm_mem);
-#else
     int thread_id = threadIdx.x;
     int b_id = blockIdx.x;
-    extern __shared__ double cache[];
-    __shared__ uint32_t pair_idx0;
-#endif
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+2) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
     int l3 = nf2*(L+2);
     pool += (xs_size*3 + nf2*ngrid_span + 3 + l3) * WARP_SIZE * b_id;
 
+    __shared__ uint32_t pair_idx0;
     if (thread_id == 0) {
         pair_idx0 = atomicAdd(batch_head, WARP_SIZE);
     }
     __syncthreads();
     while (pair_idx0 < bounds.nshl_pair) {
-        _eval_mat_gga_kernel<L, TILE>(cache, out, rho, envs, bounds, pool, pair_idx0);
+        _eval_mat_gga_kernel<L, TILE>(out, rho, envs, bounds, pool, pair_idx0);
         if (thread_id == 0) {
             pair_idx0 = atomicAdd(batch_head, WARP_SIZE);
         }
@@ -996,32 +970,20 @@ int MG_eval_mat_gga_orth(double *out, double *rho, MGridEnvVars envs,
         nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
-#ifdef USE_SYCL
-#define LAUNCH_EVAL_MAT_GGA(L, TILE) \
-    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-        sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_gga(L, TILE)), cgh); \
-        cgh.parallel_for<class eval_mat_gga_kernel_##L##_##TILE##_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { \
-            eval_mat_gga_kernel<L, TILE>(out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
-        }); \
-    })
-#else
-#define LAUNCH_EVAL_MAT_GGA(L, TILE) \
-    eval_mat_gga_kernel<L, TILE> <<<workers, THREADS, buflen_gga(L, TILE)>>>(out, rho, envs, bounds, pool, batch_head)
-#endif
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
     cudaMemset(batch_head, 0, sizeof(uint32_t));
 
     switch (l) {
-        case 0: LAUNCH_EVAL_MAT_GGA(0, 32); break;
-        case 1: LAUNCH_EVAL_MAT_GGA(1, 32); break;
-        case 2: LAUNCH_EVAL_MAT_GGA(2, 16); break;
-        case 3: LAUNCH_EVAL_MAT_GGA(3, 16); break;
-        case 4: LAUNCH_EVAL_MAT_GGA(4, 16); break;
-        case 5: LAUNCH_EVAL_MAT_GGA(5, 8); break;
-        case 6: LAUNCH_EVAL_MAT_GGA(6, 8); break;
-        case 7: LAUNCH_EVAL_MAT_GGA(7, 8); break;
-        case 8: LAUNCH_EVAL_MAT_GGA(8, 8); break;
-    default:
+    case 0: eval_mat_gga_kernel<0,32> <<<workers, THREADS, buflen_gga(0,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 1: eval_mat_gga_kernel<1,32> <<<workers, THREADS, buflen_gga(1,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 2: eval_mat_gga_kernel<2,16> <<<workers, THREADS, buflen_gga(2,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 3: eval_mat_gga_kernel<3,16> <<<workers, THREADS, buflen_gga(3,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 4: eval_mat_gga_kernel<4,16> <<<workers, THREADS, buflen_gga(4,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 5: eval_mat_gga_kernel<5, 8> <<<workers, THREADS, buflen_gga(5, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 6: eval_mat_gga_kernel<6, 8> <<<workers, THREADS, buflen_gga(6, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 7: eval_mat_gga_kernel<7, 8> <<<workers, THREADS, buflen_gga(7, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 8: eval_mat_gga_kernel<8, 8> <<<workers, THREADS, buflen_gga(8, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    default: 
         fprintf(stderr, "MG_eval_mat_gga_orth does not support l>8\n");
         cudaFree(batch_head);
         return 1;
@@ -1034,8 +996,6 @@ int MG_eval_mat_gga_orth(double *out, double *rho, MGridEnvVars envs,
         return 1;
     }
     cudaFree(batch_head);
-#undef KERNEL_SETUP
-#undef LAUNCH_EVAL_MAT_GGA
     return 0;
 }
 }

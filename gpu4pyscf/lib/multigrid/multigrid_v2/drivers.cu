@@ -15,22 +15,17 @@
  */
 
 #include <stdio.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #include "evaluation.cuh"
 
 namespace gpu4pyscf::gpbc::multi_grid {
 
-#ifdef USE_SYCL
-SYCL_EXTERNAL sycl_device_global<double[9]> s_lattice_vectors;
-SYCL_EXTERNAL sycl_device_global<double[9]> s_reciprocal_lattice_vectors;
-SYCL_EXTERNAL sycl_device_global<double[9]> s_dxyz_dabc;
-SYCL_EXTERNAL sycl_device_global<double[3]> s_reciprocal_norm;
-#else
 __constant__ double lattice_vectors[9];
 __constant__ double reciprocal_lattice_vectors[9];
 __constant__ double dxyz_dabc[9];
 __constant__ double reciprocal_norm[3];
-#endif
 
 } // namespace gpu4pyscf::gpbc::multi_grid
 
@@ -38,32 +33,17 @@ extern "C" {
 void update_lattice_vectors(const double *lattice_vectors_on_device,
                             const double *reciprocal_lattice_vectors_on_device,
                             const double *reciprocal_norm_on_device) {
-  #ifdef USE_SYCL
-  sycl_get_queue()->memcpy(gpu4pyscf::gpbc::multi_grid::s_lattice_vectors,
-                     lattice_vectors_on_device, 9 * sizeof(double));
-  sycl_get_queue()->memcpy(gpu4pyscf::gpbc::multi_grid::s_reciprocal_lattice_vectors,
-                     reciprocal_lattice_vectors_on_device, 9 * sizeof(double));
-  sycl_get_queue()->memcpy(gpu4pyscf::gpbc::multi_grid::s_reciprocal_norm,
-                           reciprocal_norm_on_device, 3 * sizeof(double));
-  sycl_get_queue()->wait();
-  #else
   cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::lattice_vectors,
                      lattice_vectors_on_device, 9 * sizeof(double));
   cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::reciprocal_lattice_vectors,
                      reciprocal_lattice_vectors_on_device, 9 * sizeof(double));
   cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::reciprocal_norm,
                      reciprocal_norm_on_device, 3 * sizeof(double));
-  #endif
 }
 
 void update_dxyz_dabc(const double *dxyz_dabc_on_device) {
-#ifdef USE_SYCL
-  sycl_get_queue()->memcpy(gpu4pyscf::gpbc::multi_grid::s_dxyz_dabc,
-                           dxyz_dabc_on_device, 9 * sizeof(double)).wait();
-#else
   cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::dxyz_dabc,
                      dxyz_dabc_on_device, 9 * sizeof(double));
-#endif
 }
 
 int evaluate_density_driver(

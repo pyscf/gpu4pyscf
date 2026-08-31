@@ -17,20 +17,16 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda_runtime.h>
 #include "multigrid.cuh"
 #include "cart2xyz.cu"
 #include "loader.cu"
 
 template <int L, int TILE> __device__ static
-void _eval_mat_lda_kernel(double* cache, double *out, double *rho, MGridEnvVars envs,
+void _eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
                           MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-#else
     int thread_id = threadIdx.x;
-#endif
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int npairs_this_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
@@ -80,6 +76,7 @@ void _eval_mat_lda_kernel(double* cache, double *out, double *rho, MGridEnvVars 
 
     double r2[nf2];
     double r1[L+1];
+    extern __shared__ double cache[];
     double *ys_cache = cache + sp_id;
     double *zs_cache = ys_cache + TILE * (L+1) * WARP_SIZE;
     double *dm_xyz = gx_dmyz + ngrid_span * nf2 * WARP_SIZE;
@@ -155,7 +152,7 @@ void _eval_mat_lda_kernel(double* cache, double *out, double *rho, MGridEnvVars 
         }
     }
     __syncthreads();
-    fill_dm_xyz<L>(cache, dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
+    fill_dm_xyz<L>(dm_xyz, gx_dmyz, xs_exp, ngridx, ngrid_span);
     int *ao_loc = envs.ao_loc;
     int nao = envs.nao;
     int i0 = ao_loc[ish];
@@ -166,35 +163,23 @@ void _eval_mat_lda_kernel(double* cache, double *out, double *rho, MGridEnvVars 
 
 template <int L, int TILE> __global__
 void eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
-                         MGridBounds bounds, double *pool, uint32_t *batch_head
-                         #ifdef USE_SYCL
-                         , sycl::nd_item<1> &item, char* shm_mem
-                         #endif
-                         )
+                         MGridBounds bounds, double *pool, uint32_t *batch_head)
 {
-#ifdef USE_SYCL
-    int thread_id = item.get_local_id(0);
-    int b_id = item.get_group(0);
-    uint32_t& pair_idx0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<uint32_t>(item.get_group());
-    double *cache = reinterpret_cast<double*>(shm_mem);
-#else
     int thread_id = threadIdx.x;
     int b_id = blockIdx.x;
-    extern __shared__ double cache[];
-    __shared__ uint32_t pair_idx0;
-#endif
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
     int l3 = nf2*(L+1);
     pool += (xs_size*3 + nf2*ngrid_span + 3 + l3) * WARP_SIZE * b_id;
 
+    __shared__ uint32_t pair_idx0;
     if (thread_id == 0) {
         pair_idx0 = atomicAdd(batch_head, WARP_SIZE);
     }
     __syncthreads();
     while (pair_idx0 < bounds.nshl_pair) {
-        _eval_mat_lda_kernel<L, TILE>(cache, out, rho, envs, bounds, pool, pair_idx0);
+        _eval_mat_lda_kernel<L, TILE>(out, rho, envs, bounds, pool, pair_idx0);
         if (thread_id == 0) {
             pair_idx0 = atomicAdd(batch_head, WARP_SIZE);
         }
@@ -222,32 +207,20 @@ int MG_eval_mat_lda_orth(double *out, double *rho, MGridEnvVars envs,
         nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
-#ifdef USE_SYCL
-#define LAUNCH_EVAL_MAT_LDA(L, TILE) \
-    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-        sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen_lda(L, TILE)), cgh); \
-        cgh.parallel_for<class eval_mat_lda_kernel_##L##_##TILE##_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) [[intel::kernel_args_restrict]] { \
-            eval_mat_lda_kernel<L, TILE>(out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
-        }); \
-    })
-#else
-#define LAUNCH_EVAL_MAT_LDA(L, TILE) \
-    eval_mat_lda_kernel<L, TILE> <<<workers, THREADS, buflen_lda(L, TILE)>>>(out, rho, envs, bounds, pool, batch_head)
-#endif
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
     cudaMemset(batch_head, 0, sizeof(uint32_t));
 
     switch (l) {
-        case 0: LAUNCH_EVAL_MAT_LDA(0, 32); break;
-        case 1: LAUNCH_EVAL_MAT_LDA(1, 32); break;
-        case 2: LAUNCH_EVAL_MAT_LDA(2, 16); break;
-        case 3: LAUNCH_EVAL_MAT_LDA(3, 16); break;
-        case 4: LAUNCH_EVAL_MAT_LDA(4, 16); break;
-        case 5: LAUNCH_EVAL_MAT_LDA(5, 8); break;
-        case 6: LAUNCH_EVAL_MAT_LDA(6, 8); break;
-        case 7: LAUNCH_EVAL_MAT_LDA(7, 8); break;
-        case 8: LAUNCH_EVAL_MAT_LDA(8, 8); break;
-    default:
+    case 0: eval_mat_lda_kernel<0,32> <<<workers, THREADS, buflen_lda(0,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 1: eval_mat_lda_kernel<1,32> <<<workers, THREADS, buflen_lda(1,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 2: eval_mat_lda_kernel<2,16> <<<workers, THREADS, buflen_lda(2,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 3: eval_mat_lda_kernel<3,16> <<<workers, THREADS, buflen_lda(3,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 4: eval_mat_lda_kernel<4,16> <<<workers, THREADS, buflen_lda(4,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 5: eval_mat_lda_kernel<5, 8> <<<workers, THREADS, buflen_lda(5, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 6: eval_mat_lda_kernel<6, 8> <<<workers, THREADS, buflen_lda(6, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 7: eval_mat_lda_kernel<7, 8> <<<workers, THREADS, buflen_lda(7, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 8: eval_mat_lda_kernel<8, 8> <<<workers, THREADS, buflen_lda(8, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    default: 
         fprintf(stderr, "MG_eval_mat_lda_orth does not support l>8\n");
         cudaFree(batch_head);
         return 1;
@@ -260,7 +233,6 @@ int MG_eval_mat_lda_orth(double *out, double *rho, MGridEnvVars envs,
         return 1;
     }
     cudaFree(batch_head);
-#undef LAUNCH_EVAL_MAT_LDA
     return 0;
 }
 }

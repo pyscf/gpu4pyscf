@@ -16,7 +16,7 @@
 
 #pragma once
 
-__forceinline__ __device__
+inline __forceinline__ __device__
 void rename_registers(double i_cartesian[], int start, int stop, int count)
 {
     if (start > 0) {
