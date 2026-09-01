@@ -269,6 +269,83 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
 
     return rhoG, tauG
 
+def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
+    cell = ni.sorted_cell
+    if ni.aft_buckets is not None:
+        rhoG, tauG = _aft_eval_density(ni, dm_sc, kpts, with_tau)
+    else:
+        rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
+        tauG = None
+        if with_tau:
+            tauG = cp.zeros(ni.mesh, dtype=np.complex128)
+
+    a = cell.lattice_vectors()
+    b = np.linalg.inv(a.T)
+    b_norm = np.linalg.norm(b, axis=1).astype(np.float32)
+    vol = np.linalg.det(a)
+    nkpts = len(ni.bvkmesh_Ls)
+
+    work = cp.empty_like(rhoG)
+    if not with_tau:
+        kern = libmgrid.evaluate_density1
+    else:
+        kern = libmgrid.evaluate_tau
+        work1 = cp.empty_like(rhoG)
+    mg_envs = ni.mg_envs
+
+    tile_info = None
+    fft_buckets = ni.fft_buckets or []
+    if fft_buckets and fft_buckets[0]['grid_tile_cache'] is None:
+        tile_info = _grid_range_to_tile_info_converter(fft_buckets, cell)
+
+    for bucket in fft_buckets:
+        mesh = bucket['mesh']
+        ngrids = np.prod(mesh)
+        weight = vol / ngrids / nkpts
+
+        dxyz_dabc = a / mesh[:,None]
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+
+        rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
+        rhoR.fill(0)
+        tauR = rhoR # placeholder
+        if with_tau:
+            tauR = ndarray(mesh, dtype=np.complex128, buffer=work1)
+            tauR.fill(0)
+
+        for (li, lj), bas_ij_idx, grid_frac_ranges, atom_grid_ranges, shl_pair_offsets in zip(
+                bucket['lij_patterns'], bucket['bas_ij_cache'],
+                bucket['grid_ranges_cache'], bucket['atom_grid_ranges_cache'],
+                bucket['atom_seg_offsets']):
+            if len(bas_ij_idx) == 0: continue
+            atom_range_a = cp.ceil(atom_grid_ranges[0] * mesh[0])
+            atom_mesh_a = atom_range_a[:,1] - atom_range_a[:,0]
+            atom_mesh_a_max = int(atom_mesh_a.max().get())
+
+            err = kern(
+                ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tauR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
+                ctypes.byref(mg_envs),
+                dxyz_dabc.ctypes,
+                ctypes.c_int(li), ctypes.c_int(lj),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(atom_grid_ranges.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(atom_mesh_a_max),
+                ctypes.c_int(len(shl_pair_offsets) - 1),
+                (ctypes.c_int*3)(*mesh),
+                ctypes.c_double(weight),
+                ctypes.c_double(bucket['negligible']))
+            if err != 0:
+                raise RuntimeError('evaluate_density kernel failed')
+
+        _inv_take_fft_submesh(rhoG, fft_in_place(rhoR).reshape(mesh), mesh)
+        if with_tau:
+            _inv_take_fft_submesh(tauG, fft_in_place(tauR).reshape(mesh), mesh)
+
+    return rhoG, tauG
+
 # This function is not used by the current implementation. It is provided
 # to maintain compatibility with the multigrid_v2 implementation.
 def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
@@ -504,16 +581,12 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     '''Estimate the FFT energy cutoff and the spread of each orbital pair
     in real space'''
     cell = ni.sorted_cell
-    # Some orbitals may require high Ecut, sometimes higher than ke_max.
-    # Use ke_max to limit the highest Ecut. This ensures that these orbital
-    # pairs are included in the last bucket in _partition_ke_for_fft.
-    Ecut_by_shell = _estimate_fft_Ecut_per_shell(cell, precision)
-    Ecut_by_shell[Ecut_by_shell > ke_max] = ke_max
-    Ecut_by_shell = cp.asarray(Ecut_by_shell, dtype=np.float32)
+    Ecut_by_shell = _estimate_fft_Ecut_per_shell(cell, precision, ke_max)
 
     npairs = len(bas_ij_idx)
     pair_ke = cp.empty(npairs, dtype=np.float32)
     grid_frac_ranges = cp.empty((3,npairs,2), dtype=np.float32)
+    primary_atoms = cp.empty(npairs, dtype=np.int32)
 
     li_inc = lj_inc = 0
     if xctype == 'MGGA':
@@ -529,6 +602,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
         ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
         ctypes.cast(pair_ke.data.ptr, ctypes.c_void_p),
         ctypes.cast(Ecut_by_shell.data.ptr, ctypes.c_void_p),
+        ctypes.cast(primary_atoms.data.ptr, ctypes.c_void_p),
         ctypes.byref(ni.mg_envs),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.c_int(npairs),
@@ -538,9 +612,9 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
         ctypes.c_float(ke_max))
     if err != 0:
         raise RuntimeError('grid range kernel failed')
-    return pair_ke, grid_frac_ranges
+    return pair_ke, grid_frac_ranges, primary_atoms
 
-def _estimate_fft_Ecut_per_shell(cell, precision):
+def _estimate_fft_Ecut_per_shell(cell, precision, ke_max):
     # To accurately describe the orbital in real space, the resolution for
     # real-space grid cannot be reduced, even a small normalized function is
     # associated with the orbital. The resolution is estimated in terms of the
@@ -556,6 +630,12 @@ def _estimate_fft_Ecut_per_shell(cell, precision):
     E2 = log_fac * ai
     E2 = (log_fac + .5 * li * np.log(E2)) * ai
     Ecut = E2 * 2
+
+    # Some orbitals may require high Ecut, sometimes higher than ke_max.
+    # Use ke_max to limit the highest Ecut. This ensures that these orbital
+    # pairs are included in the last bucket in _partition_ke_for_fft.
+    Ecut[Ecut > ke_max] = ke_max
+    Ecut = cp.asarray(Ecut, dtype=np.float32)
     return Ecut
 
 def ke_to_mesh(a, cutoff):
@@ -593,7 +673,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     mesh_max = np.asarray(ni.mesh, dtype=np.int32)
     mesh = ke_to_mesh(a, init_ke)
 
-    ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
+    ang_by_shell = cp.array(bvkcell._bas[:,ANG_OF])
     nimgs = np.asarray(bvkcell.nimgs, dtype=np.int32)
 
     buckets = []
@@ -604,7 +684,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
         filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
         if len(filtered_pairs) > 0:
             ish, jsh = divmod(filtered_pairs, NBAS_MAX)
-            lij = ang_per_shell[ish] * 5 + ang_per_shell[jsh]
+            lij = ang_by_shell[ish] * 6 + ang_by_shell[jsh]
             idx = cp.argsort(lij)
             filtered_pairs = filtered_pairs[idx]
             lij = lij[idx]
@@ -631,18 +711,22 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
 def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log):
     cell = ni.sorted_cell
     bvkcell = ni.bvkcell
+    supmol_natm = bvkcell.natm * ni.mg_envs.nimgs
 
     a = cell.lattice_vectors()
     mesh = ke_to_mesh(a, init_ke)
     mesh_final = ni.mesh
 
-    ang_per_shell = cp.array(bvkcell._bas[:,ANG_OF])
+    # angular momemtum for each shell in cell
+    ang_by_shell = cp.array(cell._bas[:,ANG_OF])
 
     supmol_bas_ij_idx = _bvk_pairs_to_supmol_pairs(
         ni, pair_idx, precision, xctype)
 
-    pair_ke, grid_frac_ranges = _estimate_Ecut_and_grid_ranges(
+    pair_ke, grid_frac_ranges, primary_atoms = _estimate_Ecut_and_grid_ranges(
         ni, supmol_bas_ij_idx, ke_max, precision, xctype)
+
+    atom_grid_ranges_kern = libmgrid.atom_grid_ranges
 
     buckets = []
 
@@ -653,10 +737,12 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
         if len(idx) > 0:
             filtered_pairs = supmol_bas_ij_idx[idx]
             filtered_grid_ranges = grid_frac_ranges[:,idx]
+            filtered_p_atoms = primary_atoms[idx]
 
             ish, jsh = divmod(filtered_pairs, NBAS_MAX)
-            lij = ang_per_shell[ish] * 5 + ang_per_shell[jsh % bvkcell.nbas]
-            idx = cp.argsort(lij)
+            lij = ang_by_shell[ish] * 6 + ang_by_shell[jsh % cell.nbas]
+            # For each li-lj subgroup, sort for locality based on primary_atoms
+            idx = cp.argsort(lij * supmol_natm + filtered_p_atoms)
             lij = lij[idx]
             split_points = (cp.where(lij[1:] != lij[:-1])[0] + 1).get()
 
@@ -666,10 +752,34 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
             # Group bas_ij_idx and grid_frac_ranges by (li, lj) patterns
             idx_by_pattern = cp.split(idx, split_points)
             lilj_patterns = np.append(lij[0].get(), lij[split_points].get())
-            lilj_patterns = [divmod(x, 5) for x in lilj_patterns.tolist()]
+            lilj_patterns = [divmod(x, 6) for x in lilj_patterns.tolist()]
 
-            bas_ij_cache = [filtered_pairs[idx] for idx in idx_by_pattern]
-            grid_ranges_cache = [filtered_grid_ranges[:,idx] for idx in idx_by_pattern]
+            bas_ij_cache = []
+            grid_ranges_cache = []
+            atom_seg_offsets = []
+            atom_grid_ranges_cache = []
+            for idx in idx_by_pattern:
+                bas_ij_idx = filtered_pairs[idx]
+                bas_ij_cache.append(bas_ij_idx)
+                grid_ranges = filtered_grid_ranges[:,idx]
+                grid_ranges_cache.append(grid_ranges)
+
+                p_atoms = cp.empty(len(idx) + 2, dtype=np.int32)
+                p_atoms[0] = 0
+                cp.take(filtered_p_atoms, idx, out=p_atoms[1:-1])
+                p_atoms[-1] = len(p_atoms)
+                shl_pair_offsets = cp.asarray(cp.where(p_atoms[1:] != p_atoms[:-1])[0], dtype=np.int32)
+                atom_seg_offsets.append(shl_pair_offsets)
+
+                nseg = len(shl_pair_offsets) - 1
+                atom_grid_ranges = cp.empty((3,nseg,2), dtype=np.float32)
+                atom_grid_ranges_kern(
+                    ctypes.cast(atom_grid_ranges.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(grid_ranges.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(len(bas_ij_idx)),
+                    ctypes.c_int(nseg))
+                atom_grid_ranges_cache.append(atom_grid_ranges)
 
             # * bas_ij_cache[key] are shell-pairs (one shell in the unit cell,
             #   the other in supmol)
@@ -691,7 +801,9 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
                 'bas_ij_cache': bas_ij_cache,
                 'grid_ranges_cache': grid_ranges_cache,
                 'grid_tile_cache': None,
-                'negligible': ao_val_threshold
+                'negligible': ao_val_threshold,
+                'atom_seg_offsets': atom_seg_offsets,
+                'atom_grid_ranges': atom_grid_ranges_cache,
             })
             log.debug('Add fft bucket: ke=%g mesh=%s, shl_pairs=%d',
                       ke_upper, mesh, len(filtered_pairs))

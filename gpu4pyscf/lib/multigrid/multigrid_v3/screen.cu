@@ -53,7 +53,8 @@ void accumulate(T lower, T upper, T c, T& min_val, T& max_val)
 
 __global__ static
 void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
-                        float *Ecut_by_shell, PBCIntEnvVars envs,
+                        float *Ecut_by_shell, int *primary_atoms,
+                        PBCIntEnvVars envs,
                         int64_t *bas_ij_idx, int li_inc, int lj_inc,
                         int npairs, float log_threshold,
                         float undressed_threshold, float ke_max)
@@ -65,11 +66,12 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
     double *env = envs.env;
     int nbas = envs.nbas;
     int bvk_nbas = envs.nbas * envs.bvk_ncells;
+    int bvk_natm = envs.natm * envs.bvk_ncells;
     int64_t bas_ij = bas_ij_idx[pair_id];
     int ish = bas_ij / NBAS_MAX;
     int jsh = bas_ij % NBAS_MAX;
     int jL = jsh / bvk_nbas;
-    jsh = jsh % bvk_nbas;
+    jsh = jsh - bvk_nbas * jL;
     // li_inc and lj_inc to account for derivatives
     int li = bas[ish*BAS_SLOTS+ANG_OF] + li_inc;
     int lj = bas[jsh*BAS_SLOTS+ANG_OF] + lj_inc;
@@ -151,14 +153,16 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
     yfrac_range[pair_id] = {yp_frac - ycut_frac, yp_frac + ycut_frac};
     zfrac_range[pair_id] = {zp_frac - zcut_frac, zp_frac + zcut_frac};
 
+    int ish_cell0 = ish;
+    int jsh_cell0 = jsh % nbas;
+    float ish_ke = Ecut_by_shell[ish_cell0];
+    float jsh_ke = Ecut_by_shell[jsh_cell0];
     // When cutoff radius is 0, the contribution of this orbital pair is small.
     // By setting its pair_ke to 0, this orbital pair will be discarded when
     // filtering orbitals in _partition_ke_for_fft function.
     if (x_cut < 1e-3 || y_cut < 1e-3 || z_cut < 1e-3) {
         pair_ke[pair_id] = -1.f;
     } else {
-        float ish_ke = Ecut_by_shell[ish];
-        float jsh_ke = Ecut_by_shell[jsh % nbas];
         float ke_two_centers = max(ish_ke, jsh_ke);
         if (ri == rj && jL == 0) {
             // Higher resolution is required for orbitals located on the same center.
@@ -174,6 +178,45 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
             pair_ke[pair_id] = ke_two_centers;
         }
     }
+
+    int atom_i = bas[ish*BAS_SLOTS+ATOM_OF];
+    int atom_j = bas[jsh*BAS_SLOTS+ATOM_OF] + jL * bvk_natm;
+    int primary_atom = atom_i;
+    if (ish_ke < jsh_ke) {
+        primary_atom = atom_j;
+    }
+    primary_atoms[pair_id] = primary_atom;
+}
+
+__global__ static
+void atom_grid_ranges_kernel(float2 *atom_grid_ranges, float2 *grid_frac_ranges,
+                             int *shl_pair_offsets, int npairs, int nsegs)
+{
+    int seg_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (seg_id >= nsegs) return;
+
+    int shl_pair0 = shl_pair_offsets[seg_id];
+    int shl_pair1 = shl_pair_offsets[seg_id+1];
+    float xfrac_lower = 1e9f;
+    float yfrac_lower = 1e9f;
+    float zfrac_lower = 1e9f;
+    float xfrac_upper = -1e9f;
+    float yfrac_upper = -1e9f;
+    float zfrac_upper = -1e9f;
+    for (int pair_id = shl_pair0; pair_id < shl_pair1; ++pair_id) {
+        float2 x_range = grid_frac_ranges[pair_id];
+        float2 y_range = grid_frac_ranges[npairs+pair_id];
+        float2 z_range = grid_frac_ranges[npairs*2+pair_id];
+        xfrac_lower = min(xfrac_lower, x_range.x);
+        yfrac_lower = min(yfrac_lower, y_range.x);
+        zfrac_lower = min(zfrac_lower, z_range.x);
+        xfrac_upper = max(xfrac_upper, x_range.y);
+        yfrac_upper = max(yfrac_upper, y_range.y);
+        zfrac_upper = max(zfrac_upper, z_range.y);
+    }
+    atom_grid_ranges[        seg_id] = {xfrac_lower, xfrac_upper};
+    atom_grid_ranges[nsegs  +seg_id] = {yfrac_lower, yfrac_upper};
+    atom_grid_ranges[nsegs*2+seg_id] = {zfrac_lower, zfrac_upper};
 }
 
 __global__ static
@@ -492,14 +535,15 @@ void supmol_non_trivial_pairs_kernel(int64_t *supmol_bas_ij, int64_t *bas_ij_idx
 
 extern "C" {
 int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
-                              float *Ecut_by_shell, PBCIntEnvVars *envs,
+                              float *Ecut_by_shell, int *primary_atoms,
+                              PBCIntEnvVars *envs,
                               int64_t *bas_ij_idx, int npairs,
                               int li_inc, int lj_inc, float log_threshold,
                               float undressed_threshold, float ke_max)
 {
     int batches = (npairs + THREADS-1) / THREADS;
     grid_ranges_kernel<<<batches, THREADS>>>(
-        grid_frac_ranges, pair_ke, Ecut_by_shell, *envs, bas_ij_idx,
+        grid_frac_ranges, pair_ke, Ecut_by_shell, primary_atoms, *envs, bas_ij_idx,
         li_inc, lj_inc, npairs, log_threshold, undressed_threshold, ke_max);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -527,6 +571,21 @@ int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in grid_range_to_tiles: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int atom_grid_ranges(float2 *atom_frac_ranges, float2 *grid_frac_ranges,
+                     int *shl_pair_offsets, int npairs, int nsegs)
+{
+    int blocks = (nsegs + 255) / 256;
+    atom_grid_ranges_kernel<<<blocks, 256>>>(
+        atom_frac_ranges, grid_frac_ranges, shl_pair_offsets, npairs, nsegs);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in atom_grid_ranges_kernel: %s\n",
+                cudaGetErrorString(err));
         return 1;
     }
     return 0;
