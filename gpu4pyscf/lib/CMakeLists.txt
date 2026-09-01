@@ -13,10 +13,10 @@
 # limitations under the License.
 
 cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
-# OFF by default: setup.py (the CUDA build) never passes this, so an ON
-# default silently sends the CUDA CI down the SYCL path, where it fails
-# looking for MKL. The SYCL build opts in explicitly -- setup_sycl.py and
-# .github/workflows/sycl-cpu-ci.yml both pass -DUSE_SYCL=ON.
+# OFF by default so that a plain `python setup.py build` produces the CUDA
+# backend, as upstream does. An ON default sent the CUDA CI down the SYCL
+# path, where it failed looking for MKL. setup.py passes -DUSE_SYCL=ON when
+# GPU4PYSCF_BACKEND=sycl is set.
 option(USE_SYCL "Using SYCL backend" OFF)
 
 if (USE_SYCL)
