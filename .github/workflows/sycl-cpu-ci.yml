@@ -57,7 +57,7 @@ env:
   SYCL_CACHE_PERSISTENT: "1"
   SYCL_CACHE_DIR: "/tmp/sycl_cache"
   CCACHE_DIR: "/home/runner/.ccache"
-  CCACHE_MAXSIZE: "3G"
+  CCACHE_MAXSIZE: "6G"
   VENV: "/home/runner/sycl-venv"
   # The SYCL port is used via PYTHONPATH, not pip-installed: `pip install .`
   # would run the CUDA setup.py, and the vendored cupy/cupyx shims live under
@@ -181,6 +181,17 @@ jobs:
             versioneer pybind11 pytest pytest-timeout \
             pyscf pyscf-dispersion h5py geometric
 
+      # Restored before the dpctl/dpnp builds, not just before the gpu4pyscf
+      # one: those two are now routed through ccache as well, and they are the
+      # expensive half of a cold run.
+      - name: Restore ccache (C++/SYCL objects, incl. dpctl/dpnp)
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/.ccache
+          key: sycl-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            sycl-ccache-${{ runner.os }}-
+
       - name: Build dpctl from source (IntelPython/dpctl master)
         if: steps.stack-cache.outputs.cache-matched-key == ''
         run: |
@@ -192,7 +203,12 @@ jobs:
           # pin; a shallow clone yields 0+untagged, which pip rejects).
           git clone --filter=blob:none https://github.com/IntelPython/dpctl /home/runner/dpctl
           cd /home/runner/dpctl
-          { python scripts/build_locally.py --oneapi &&
+          # Route the compiler through ccache. The stack cache above is keyed
+          # by week, so when it does roll over most translation units are
+          # unchanged from the previous build and come straight from ccache
+          # rather than being recompiled.
+          { python scripts/build_locally.py --oneapi \
+              --cmake-opts="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache" &&
             pip install --no-build-isolation --no-deps . &&
             cd /tmp && python -c "import dpctl; print('dpctl OK', dpctl.__version__)" ; } 2>&1 | tee /tmp/logs/20_dpctl_build.log
           # NON-editable install on purpose: dpnp's Cython resolves dpctl.pxd
@@ -207,7 +223,10 @@ jobs:
           set -o pipefail; mkdir -p /tmp/logs
           git clone --filter=blob:none https://github.com/IntelPython/dpnp /home/runner/dpnp
           cd /home/runner/dpnp
-          { python scripts/build_locally.py --oneapi &&
+          # ccache as above. dpnp is the expensive half of the stack (291
+          # Ninja targets), so this is where it pays off.
+          { python scripts/build_locally.py --oneapi \
+              --cmake-opts="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache" &&
             pip install --no-build-isolation --no-deps . &&
             cd /tmp && python -c "import dpnp; print('dpnp OK', dpnp.__version__)" ; } 2>&1 | tee /tmp/logs/30_dpnp_build.log
 
@@ -220,14 +239,6 @@ jobs:
             /home/runner/dpctl
             /home/runner/dpnp
           key: sycl-stack-v2-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
-
-      - name: Restore ccache (gpu4pyscf C++/SYCL objects)
-        uses: actions/cache/restore@v4
-        with:
-          path: /home/runner/.ccache
-          key: sycl-ccache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            sycl-ccache-${{ runner.os }}-
 
       - name: Build gpu4pyscf (SYCL backend, JIT spir64, CPU-runnable)
         env:
