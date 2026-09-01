@@ -45,55 +45,6 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
   assert(ntasks_kl < 65536*THREADSY);
   int type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
 
-#ifdef USE_SYCL
-  sycl::range<2> threads(THREADSY, THREADSX);
-  sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
-  auto dev_envs = *envs;
-  auto dev_jk = *jk;
-  auto dev_offsets = *offsets;
-  switch (nrys_roots) {
-    case 1:
-      switch (type_ijkl) {
-        case 0b0000: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel_0000<<<blocks, threads, 0>>>(dev_envs, dev_jk, dev_offsets); }); break;
-        default:
-          fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
-      }
-      break;
-
-    case 2:
-      switch (type_ijkl) {
-        case (0<<6)|(0<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel0010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0010(dev_envs, dev_jk, dev_offsets); }); break;
-        case (0<<6)|(0<<4)|(1<<2)|1: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel0011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0011(dev_envs, dev_jk, dev_offsets); }); break;
-        case (0<<6)|(0<<4)|(2<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel0020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0020(dev_envs, dev_jk, dev_offsets); }); break;
-        case (1<<6)|(0<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1000(dev_envs, dev_jk, dev_offsets); }); break;
-        case (1<<6)|(0<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel1010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1010(dev_envs, dev_jk, dev_offsets); }); break;
-        case (1<<6)|(1<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel1100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1100(dev_envs, dev_jk, dev_offsets); }); break;
-        case (2<<6)|(0<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel2000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel2000(dev_envs, dev_jk, dev_offsets); }); break;
-        default:
-          fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
-      }
-      break;
-
-    case 3:
-      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<3, NABLAGSIZE3> (dev_envs, dev_jk, dev_offsets); });
-      break;
-    case 4:
-      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<4, NABLAGSIZE4> (dev_envs, dev_jk, dev_offsets); });
-      break;
-    case 5:
-      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<5, NABLAGSIZE5> (dev_envs, dev_jk, dev_offsets); });
-      break;
-    case 6:
-      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<6, NABLAGSIZE6> (dev_envs, dev_jk, dev_offsets); });
-      break;
-    case 7:
-      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<7, NABLAGSIZE7> (dev_envs, dev_jk, dev_offsets); });
-      break;
-    default:
-      fprintf(stderr, "rys roots %d\n", nrys_roots);
-      return 1;
-  }
-#else // USE_SYCL
   dim3 threads(THREADSX, THREADSY);
   dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
   switch (nrys_roots) {
@@ -145,7 +96,6 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
     fprintf(stderr, "CUDA Error of GINTint2e_jk_kernel_nabla1i: %s\n", cudaGetErrorString(err));
     return 1;
   }
-#endif // USE_SYCL
   return 0;
 }
 

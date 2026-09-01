@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+
 template <int NROOTS> __device__
 static void GINTg0_2e_2d4d_ip1(GINTEnvVars envs, double* __restrict__ g, double norm,
                                int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)
@@ -788,14 +789,8 @@ __global__
 static void GINTint2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets) {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
-  #ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<2>();
-  const int task_ij = item.get_global_id(1);
-  const int task_kl = item.get_global_id(0);
-  #else
-  const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-  const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-  #endif
+  int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+  int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
 
   if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
     return;
@@ -1220,14 +1215,8 @@ static void
 GINTint2e_ip1_jk_kernel_0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets) {
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
-  #ifdef USE_SYCL
-  auto item = syclex::this_work_item::get_nd_item<2>();
-  const int task_ij = item.get_global_id(1);
-  const int task_kl = item.get_global_id(0);
-  #else
-  const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-  const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-  #endif
+  int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+  int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
   if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
     return;
   }

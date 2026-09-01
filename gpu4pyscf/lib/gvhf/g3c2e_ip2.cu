@@ -14,24 +14,22 @@
  * limitations under the License.
  */
 
+
 template <int LI, int LJ, int LK> __device__
-static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
+static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk, 
         double* j3, double* k3, double *g, double ak2,
         int ish, int jsh, int ksh)
 {
-#ifdef USE_SYCL
-    auto c_bpcache = s_gvhf_bpcache.get();
-#endif
     int *ao_loc = c_bpcache.ao_loc;
     const int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     const int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
     const int k0 = ao_loc[ksh  ] - jk.ao_offsets_k;
-
+    
     constexpr int LK_CEIL = LK + 1;
     constexpr int NROOTS = (LI+LJ+LK_CEIL)/2 + 1;
     constexpr int nfi = (LI+1)*(LI+2)/2;
     constexpr int nfj = (LJ+1)*(LJ+2)/2;
-    constexpr int nfk = (LK+1)*(LK+2)/2;
+    constexpr int nfk = (LK+1)*(LK+2)/2; 
 
     constexpr int di = NROOTS;
     constexpr int dj = di * (LI + 1);
@@ -39,14 +37,14 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     constexpr int g_size = dk * (LK_CEIL + 1);
 
     const int nao = jk.nao;
-
+    
     double* __restrict__ rhoj = jk.rhoj;
     double* __restrict__ rhok = jk.rhok;
     double* __restrict__ dm = jk.dm;
 
-    const int *idx = c_idx;
-    const int *idy = c_idx + TOT_NF;
-    const int *idz = c_idx + TOT_NF * 2;
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
 
     if (rhoj == NULL){
         for (int kp = 0; kp < nfk; ++kp) {
@@ -100,13 +98,13 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             double jx = 0.0;
             double jy = 0.0;
             double jz = 0.0;
-
+            
             for (int jp = 0; jp < nfj; ++jp) {
             for (int ip = 0; ip < nfi; ++ip) {
                 const int loc_k = c_l_locs[LK] + kp;
                 const int loc_j = c_l_locs[LJ] + jp;
                 const int loc_i = c_l_locs[LI] + ip;
-
+                
                 const int k_idx = idx[loc_k];
                 const int k_idy = idy[loc_k];
                 const int k_idz = idz[loc_k];
@@ -123,7 +121,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
                     const double gx = g[ix+ir];
                     const double gy = g[iy+ir];
                     const double gz = g[iz+ir];
-
+                    
                     double fx = ak2*g[ix+ir+dk];
                     double fy = ak2*g[iy+ir+dk];
                     double fz = ak2*g[iz+ir+dk];
@@ -154,13 +152,13 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
         double jx = 0.0;
         double jy = 0.0;
         double jz = 0.0;
-
+        
         for (int jp = 0; jp < nfj; ++jp) {
         for (int ip = 0; ip < nfi; ++ip) {
             const int loc_k = c_l_locs[LK] + kp;
             const int loc_j = c_l_locs[LJ] + jp;
             const int loc_i = c_l_locs[LI] + ip;
-
+            
             const int k_idx = idx[loc_k];
             const int k_idy = idy[loc_k];
             const int k_idz = idz[loc_k];
@@ -203,7 +201,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
             jy += dm_ij * sy;
             jz += dm_ij * sz;
         }}
-
+        
         const double rhoj_k = rhoj[kp+k0];
         j3[0] += jx * rhoj_k;
         j3[1] += jy * rhoj_k;
@@ -213,23 +211,14 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 
 __device__
 static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int tx = item.get_local_id(1);
-    const int ty = item.get_local_id(0);
-    using tile_t = double[THREADSX][THREADSY];
-    tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
-    const int tx = threadIdx.x;
-    const int ty = threadIdx.y;
-    __shared__ double sdata[THREADSX][THREADSY];
-    #endif
-
     int *bas_atm = c_bpcache.bas_atm;
     const int atm_id = bas_atm[ksh];
     double *vj = jk.vj;
     double *vk = jk.vk;
+
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    __shared__ double sdata[THREADSX][THREADSY];
 
     if (vj != NULL){
         for (int j = 0; j < 3; j++){
@@ -259,15 +248,8 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int task_ij = item.get_global_id(1);
-    int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         active = false;
@@ -285,15 +267,15 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     const int ish = bas_pair2bra[bas_ij];
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
-
+    
     constexpr int LK_CEIL = LK + 1;
     constexpr int NROOTS = (LI+LJ+LK_CEIL)/2 + 1;
     constexpr int GSIZE = 3 * NROOTS * (LI+1)*(LJ+1)*(LK_CEIL+1);
 
     double g[GSIZE];
 
-    const int as_ish = envs.ibase ? ish: jsh;
-    const int as_jsh = envs.ibase ? jsh: ish;
+    const int as_ish = envs.ibase ? ish: jsh; 
+    const int as_jsh = envs.ibase ? jsh: ish; 
 
     double j3[3] = {0.0};
     double k3[3] = {0.0};
@@ -310,19 +292,10 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
 }
 
 __device__
-static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
+static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk, 
         double* j3, double* k3, double *g, const double ak2,
         const int ish, const int jsh, const int ksh)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int threadIdx_x = item.get_local_id(1);
-    const int blockDim_x = item.get_local_range(1);
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
     int *ao_loc = c_bpcache.ao_loc;
     const int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     const int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
@@ -344,13 +317,13 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     const int j_l = envs.j_l;
     const int k_l = envs.k_l;
     const int nrys_roots = envs.nrys_roots;
-
-    const int *idx = c_idx;
-    const int *idy = c_idx + TOT_NF;
-    const int *idz = c_idx + TOT_NF * 2;
+    
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
 
     if (rhoj == NULL){
-        for (int tx = threadIdx_x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim_x) {
+        for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
             const int kp = tx / ((j1-j0)*(i1-i0));
             const int jp = (tx / (i1-i0)) % (j1-j0);
             const int ip = tx % (i1-i0);
@@ -399,7 +372,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     }
 
     if (rhok == NULL){
-        for (int tx = threadIdx_x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim_x) {
+        for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
             const int kp = tx / ((j1-j0)*(i1-i0));
             const int jp = (tx / (i1-i0)) % (j1-j0);
             const int ip = tx % (i1-i0);
@@ -446,11 +419,11 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
         return;
     }
 
-    for (int tx = threadIdx_x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim_x) {
+    for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
         const int kp = tx / ((j1-j0)*(i1-i0));
         const int jp = (tx / (i1-i0)) % (j1-j0);
         const int ip = tx % (i1-i0);
-
+        
         const int loc_k = c_l_locs[k_l] + kp;
         const int loc_j = c_l_locs[j_l] + jp;
         const int loc_i = c_l_locs[i_l] + ip;
@@ -502,21 +475,10 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 
 // General version
 __global__
-void GINTint3c2e_ip2_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets
-#ifdef USE_SYCL
-				       , sycl::nd_item<2> &item, double* g
-#endif
-    )
+void GINTint3c2e_ip2_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
-    #ifdef USE_SYCL
-    const int task_ij = item.get_group(1);
-    const int task_kl = item.get_group(0);
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
-    extern __shared__ double g[];
-    #endif
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -528,9 +490,11 @@ void GINTint3c2e_ip2_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdO
     const int ish = bas_pair2bra[bas_ij];
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
+    
+    extern __shared__ double g[];
 
-    const int as_ish = envs.ibase ? ish: jsh;
-    const int as_jsh = envs.ibase ? jsh: ish;
+    const int as_ish = envs.ibase ? ish: jsh; 
+    const int as_jsh = envs.ibase ? jsh: ish; 
 
     double j3[3] = {0.0};
     double k3[3] = {0.0};
@@ -541,7 +505,7 @@ void GINTint3c2e_ip2_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdO
         const double ak2 = -2.0* c_bpcache.a1[kl];
         GINTkernel_int3c2e_ip2_getjk_direct(envs, jk, j3, k3, g, ak2, ish, jsh, ksh);
     }}
-
+    
     constexpr int nthreads = THREADSX * THREADSY;
     int *bas_atm = c_bpcache.bas_atm;
     const int atm_id = bas_atm[ksh];
@@ -562,22 +526,8 @@ static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisPro
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int task_ij = item.get_global_id(1);
-    int task_kl = item.get_global_id(0);
-    const int tx = item.get_local_id(1);
-    const int ty = item.get_local_id(0);
-    using tile_t = double[THREADSX][THREADSY];
-    tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
     int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    const int tx = threadIdx.x;
-    const int ty = threadIdx.y;
-    __shared__ double sdata[THREADSX][THREADSY];
-    #endif
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         active = false;
@@ -686,6 +636,9 @@ static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisPro
     double* __restrict__ vj = jk.vj;
     double* __restrict__ vk = jk.vk;
 
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    __shared__ double sdata[THREADSX][THREADSY];
     if (!active){
         gout0 = 0.0; gout1 = 0.0; gout2 = 0.0;
     }

@@ -14,20 +14,14 @@
  * limitations under the License.
  */
 
+
 template <int NROOTS, int GSIZE> __global__
 void GINTint3c2e_pass2_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
@@ -51,8 +45,8 @@ void GINTint3c2e_pass2_j_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets 
         norm *= .5;
     }
 
-    const int as_ish = envs.ibase ? ish: jsh;
-    const int as_jsh = envs.ibase ? jsh: ish;
+    const int as_ish = envs.ibase ? ish: jsh; 
+    const int as_jsh = envs.ibase ? jsh: ish; 
 
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
@@ -66,15 +60,8 @@ static void GINTint3c2e_pass2_j_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisP
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -141,15 +128,8 @@ static void GINTint3c2e_pass2_j_kernel0010(GINTEnvVars envs, JKMatrix jk, BasisP
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -249,15 +229,8 @@ static void GINTint3c2e_pass2_j_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisP
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_gvhf_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
