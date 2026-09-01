@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include "gvhf-rys/rys_roots.cu"
 
 __device__ __forceinline__

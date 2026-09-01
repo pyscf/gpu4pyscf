@@ -37,7 +37,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -45,7 +45,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -156,7 +156,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -281,7 +281,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -289,7 +289,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -400,7 +400,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -590,7 +590,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -598,7 +598,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -709,7 +709,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1051,7 +1051,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -1059,7 +1059,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -1170,7 +1170,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1502,7 +1502,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -1510,7 +1510,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -1621,7 +1621,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2161,7 +2161,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -2169,7 +2169,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -2280,7 +2280,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2851,7 +2851,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -3403,7 +3403,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -3411,7 +3411,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -3522,7 +3522,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -3711,7 +3711,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -3719,7 +3719,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -3830,7 +3830,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -4172,7 +4172,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -4180,7 +4180,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -4291,7 +4291,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -4852,7 +4852,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -4860,7 +4860,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -4971,7 +4971,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -5519,7 +5519,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -5527,7 +5527,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -5652,7 +5652,7 @@ while (1) {
                     }
                 }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, gout_stride, gout_id);
                 double s0, s1, s2;
                 double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -7771,7 +7771,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -7779,7 +7779,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -7890,7 +7890,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -8226,7 +8226,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -8234,7 +8234,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -8345,7 +8345,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -8901,7 +8901,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -8909,7 +8909,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -9034,7 +9034,7 @@ while (1) {
                     }
                 }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, gout_stride, gout_id);
                 double s0, s1, s2;
                 double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -10961,7 +10961,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -10969,7 +10969,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -11080,7 +11080,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -11658,7 +11658,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -12219,7 +12219,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -12227,7 +12227,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -12338,7 +12338,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -12524,7 +12524,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -12532,7 +12532,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -12643,7 +12643,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -12982,7 +12982,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -12990,7 +12990,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -13101,7 +13101,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -13665,7 +13665,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -13673,7 +13673,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -13784,7 +13784,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -14332,7 +14332,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -14340,7 +14340,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -14465,7 +14465,7 @@ while (1) {
                     }
                 }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, gout_stride, gout_id);
                 double s0, s1, s2;
                 double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -16551,7 +16551,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -16559,7 +16559,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -16670,7 +16670,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -17007,7 +17007,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -17015,7 +17015,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -17126,7 +17126,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -17690,7 +17690,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -17698,7 +17698,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -17823,7 +17823,7 @@ while (1) {
                     }
                 }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, gout_stride, gout_id);
                 double s0, s1, s2;
                 double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -20078,7 +20078,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -20086,7 +20086,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -20211,7 +20211,7 @@ while (1) {
                     }
                 }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, gout_stride, gout_id);
                 double s0, s1, s2;
                 double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -22420,7 +22420,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -22428,7 +22428,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -22539,7 +22539,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -23090,7 +23090,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -23098,7 +23098,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -23223,7 +23223,7 @@ while (1) {
                     }
                 }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, gout_stride, gout_id);
                 double s0, s1, s2;
                 double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -25317,7 +25317,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -25325,7 +25325,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -25436,7 +25436,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -25766,7 +25766,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -25774,7 +25774,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -25885,7 +25885,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -26438,7 +26438,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -26446,7 +26446,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -26571,7 +26571,7 @@ while (1) {
                     }
                 }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, gout_stride, gout_id);
                 double s0, s1, s2;
                 double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -28441,7 +28441,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -28449,7 +28449,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -28560,7 +28560,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -29135,7 +29135,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -29688,7 +29688,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -29696,7 +29696,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -29807,7 +29807,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -30358,7 +30358,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -30366,7 +30366,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -30491,7 +30491,7 @@ while (1) {
                     }
                 }
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, gout_stride, gout_id);
                 double s0, s1, s2;
                 double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -32357,7 +32357,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -32365,7 +32365,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -32476,7 +32476,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -33050,7 +33050,7 @@ while (1) {
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor, nsq_per_block, 1, 0);
                 if (task_id >= ntasks) {
                     continue;
                 }

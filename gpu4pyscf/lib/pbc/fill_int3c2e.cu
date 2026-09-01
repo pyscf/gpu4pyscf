@@ -31,7 +31,7 @@
 
 // lattice sum over j and k for (ij|k)
 __global__ static
-void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *img_pool,
+void pbc_int3c2e_latsum23_kernel(double *out, double omega, PBCIntEnvVars envs, uint32_t *img_pool,
                                  ShellTripletTaskInfo *task_pool, double *c2s_pool, int shm_size,
                                  uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                                  int *img_idx, uint32_t *sp_img_offsets,
@@ -131,7 +131,7 @@ while (1) {
         num_ijk_tasks = nksh * ncells * nshl_pairs;
     }
     __syncthreads();
-    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
+    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, omega, envs,
                          shl_pair0, shl_pair1, ksh0_cell0, ksh1_cell0,
                          li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
@@ -147,7 +147,7 @@ while (1) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
                         rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
         if (num_sub_tasks == 0) continue;
-        if (!int3c2e_unrolled(out, envs, img_pool, sub_task_idx, num_sub_tasks,
+        if (!int3c2e_unrolled(out, omega, envs, img_pool, sub_task_idx, num_sub_tasks,
                               img_tile_size, ijk_tasks_info, c2s_pool,
                               shm_size, iprim, jprim, kprim, li, lj, lk,
                               bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset,
@@ -245,7 +245,6 @@ while (1) {
                             double ypq = Rpq[1*nst_per_block];
                             double zpq = Rpq[2*nst_per_block];
                             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                            double omega = env[PTR_RANGE_OMEGA];
                             rys_roots_rs(nroots, theta, rr, omega,
                                          rw, nst_per_block, gout_id, gout_stride);
                             for (int irys = 0; irys < nroots; ++irys) {
@@ -1097,7 +1096,7 @@ void ovlp_img_idx_kernel(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_i
 }
 
 extern "C" {
-int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, uint32_t *pool,
+int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint32_t *pool,
                            ShellTripletTaskInfo *task_pool, double *c2s_pool, int *head,
                            int shm_size, int nbatches_shl_pair, int nbatches_ksh,
                            uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
@@ -1113,7 +1112,7 @@ int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, uint32_t *pool,
     int workers = prop.multiProcessorCount;
     cudaMemset(head, 0, sizeof(int));
     pbc_int3c2e_latsum23_kernel<<<workers, THREADS, shm_size>>>(
-            out, *envs, pool, task_pool, c2s_pool, shm_size,
+            out, omega, *envs, pool, task_pool, c2s_pool, shm_size,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, sp_img_offsets,
             gout_stride_lookup, ao_pair_loc,
             ao_pair_offset, aux_offset, nauxbas, naux, to_sph,

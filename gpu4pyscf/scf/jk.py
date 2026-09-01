@@ -547,6 +547,8 @@ class _VHFOpt:
             # An additional integer to count for the proccessed pair_ijs
             pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int32)
 
+            omega, lr_factor, sr_factor = 0., 1., 1.
+
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_rys.RYS_build_jk
@@ -566,7 +568,11 @@ class _VHFOpt:
                     ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_double(omega),
+                    ctypes.c_double(lr_factor),
+                    ctypes.c_double(sr_factor),
+                    ctypes.byref(rys_envs),
+                    (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(SHM_SIZE),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
@@ -859,8 +865,10 @@ class _VHFOpt:
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
                     ctypes.c_double(omega),
-                    ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
-                    ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_double(lr_factor),
+                    ctypes.c_double(sr_factor),
+                    ctypes.byref(rys_envs),
+                    (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(SHM_SIZE),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),

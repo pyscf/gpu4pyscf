@@ -244,8 +244,7 @@ while (1) {
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega,
-                                kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(nroots, theta, rr, kmat.omega, rw, nsq_per_block, gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
                     int lij = li + lj;
                     int lkl = lk + ll;

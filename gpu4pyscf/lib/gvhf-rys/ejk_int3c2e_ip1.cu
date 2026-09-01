@@ -20,7 +20,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
-#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "build_rys_gxyz.cuh"
 
@@ -34,7 +34,9 @@
 __global__ static
 void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             double *dm, double *density_auxvec, int n_dm,
-                            RysIntEnvVars envs, int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                            RysIntEnvVars envs,
+                            double omega, double lr_factor, double sr_factor,
+                            int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int naux)
 {
@@ -54,7 +56,6 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -91,9 +92,11 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     }
     __syncthreads();
     if (n_dm == 1 &&
-        int3c2e_ip1_unrolled(ejk, ejk_aux, dm, density_auxvec, envs,
+        int3c2e_ip1_unrolled(ejk, ejk_aux, dm, density_auxvec,
+            omega, lr_factor, sr_factor, envs,
             shl_pair0, shl_pair1, ksh0, ksh1,
-            iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx, ao_pair_loc,
+            iprim, jprim, kprim, li, lj, lk,
+            bas_ij_idx, ao_pair_loc,
             aux_offset, naux, nao, thread_id, shared_memory)) {
         return;
     }
@@ -245,9 +248,8 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                     double ypq = Rpq[1*nst_per_block];
                     double zpq = Rpq[2*nst_per_block];
                     double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                    //TODO: rys_roots_for_k
-                    rys_roots_rs(nroots, theta, rr, omega,
-                                 rw, nst_per_block, gout_id, gout_stride);
+                    rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                                    nst_per_block, gout_stride, gout_id);
                     for (int irys = 0; irys < nroots; ++irys) {
                         int lij = li + lj + 1;
                         int stride_j = li + 2;
@@ -383,7 +385,9 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
 __global__ static
 void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             double *dm, double *density_auxvec, int n_dm,
-                            RysIntEnvVars envs, int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                            double omega, double lr_factor, double sr_factor,
+                            RysIntEnvVars envs,
+                            int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int npairs, int naux)
 {
@@ -417,7 +421,6 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
         int lij = li + lj + 1;
         nroots = (lij + lk) / 2 + 1;
-        double omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -566,10 +569,8 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                     double ypq = Rpq[1*nst_per_block];
                     double zpq = Rpq[2*nst_per_block];
                     double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                    //TODO: rys_roots_for_k
-                    double omega = env[PTR_RANGE_OMEGA];
-                    rys_roots_rs(nroots, theta, rr, omega,
-                                 rw, nst_per_block, gout_id, gout_stride);
+                    rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                                    nst_per_block, gout_stride, gout_id);
                     for (int irys = 0; irys < nroots; ++irys) {
                         int lij = li + lj + 1;
                         int stride_j = li + 2;
@@ -733,6 +734,7 @@ extern "C" {
 // For exchange energy (density_auxvec==NULL), n_dm must be 1
 int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     double *dm, double *density_auxvec, int n_dm,
+                    double omega, double lr_factor, double sr_factor,
                     RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
@@ -743,6 +745,7 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     sum_ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
             ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
+            omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
             ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();
@@ -755,6 +758,7 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
 
 int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     double *dm, double *density_auxvec, int n_dm,
+                    double omega, double lr_factor, double sr_factor,
                     RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
@@ -766,7 +770,8 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     size_t nao2 = nao * nao;
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
         ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-                ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n, *envs,
+                ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n,
+                omega, lr_factor, sr_factor, *envs,
                 shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
                 ao_pair_loc, aux_offset, npairs, naux);
         if (density_auxvec == NULL) { // for exchange
