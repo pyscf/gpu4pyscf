@@ -18,6 +18,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <type_traits>
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"

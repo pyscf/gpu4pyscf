@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #include "vhf.cuh"
 #include "rys_roots.cu"
