@@ -119,7 +119,7 @@ class PySCF(Calculator):
     default_parameters = {}
 
     def __init__(self, restart=None, label='PySCF', atoms=None, directory='.',
-                 method=None, method_factory=None, **kwargs):
+                 method=None, **kwargs):
         """Construct PySCF-calculator object.
 
         Parameters
@@ -129,10 +129,6 @@ class PySCF(Calculator):
             Default is 'PySCF'.
 
         method: A PySCF method class
-
-        method_factory: callable
-            A function that takes a new Mole/Cell and returns a fresh PySCF
-            method. When provided, a new method is built for every geometry.
         """
         Calculator.__init__(self, restart, label=label, atoms=atoms,
                             directory=directory, **kwargs)
@@ -141,9 +137,6 @@ class PySCF(Calculator):
             raise RuntimeError(f'{method} must be an instance of a PySCF method')
 
         self.method = method
-        self.method_factory = method_factory
-        self.base_method = method
-        self.dm0 = None
         self.pbc = hasattr(method, 'cell')
         if self.pbc:
             mol = method.cell
@@ -151,11 +144,9 @@ class PySCF(Calculator):
             mol = method.mol
         self.mol = mol
         self.method_scan = None
-        if method_factory is None and hasattr(method, 'as_scanner'):
+        if hasattr(method, 'as_scanner'):
             # Scanner can utilize the initial guess from previous calculations
             self.method_scan = method.as_scanner()
-        elif method_factory is not None and getattr(method, 'mo_coeff', None) is not None:
-            self.dm0 = method.make_rdm1()
 
     def set(self, **kwargs):
         changed_parameters = Calculator.set(self, **kwargs)
@@ -175,29 +166,15 @@ class PySCF(Calculator):
             _atoms = list(zip(atomic_numbers, positions))
 
         if self.pbc:
-            self.mol = self.mol.set_geom_(
-                _atoms, a=np.asarray(atoms.cell), unit='Angstrom',
-                inplace=self.method_factory is None)
+            self.mol.set_geom_(_atoms, a=np.asarray(atoms.cell), unit='Angstrom')
         else:
-            self.mol = self.mol.set_geom_(
-                _atoms, unit='Angstrom',
-                inplace=self.method_factory is None)
+            self.mol.set_geom_(_atoms, unit='Angstrom')
 
         with_grad = 'forces' in properties or 'stress' in properties
         with_energy = with_grad or 'energy' in properties or 'dipole' in properties
 
         if with_energy:
-            if self.method_factory is not None:
-                base_method = self.method_factory(self.mol)
-                if not isinstance(base_method, lib.StreamObject):
-                    raise RuntimeError(
-                        'method_factory must return a PySCF method')
-                e_tot = base_method.kernel(dm0=self.dm0)
-                if not getattr(base_method, 'converged', True):
-                    raise RuntimeError(f'{base_method} not converged')
-                self.dm0 = base_method.make_rdm1()
-                self.base_method = base_method
-            elif self.method_scan is None:
+            if self.method_scan is None:
                 self.mol.set_geom_(atoms)
                 self.method.reset(self.mol).run()
                 e_tot = self.method.e_tot
@@ -210,7 +187,7 @@ class PySCF(Calculator):
             self.results['energy'] = e_tot * HARTREE2EV
 
         if self.method_scan is None:
-            base_method = self.base_method
+            base_method = self.method
         else:
             base_method = self.method_scan
 

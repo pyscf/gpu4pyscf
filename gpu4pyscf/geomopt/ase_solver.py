@@ -20,7 +20,6 @@ https://ase-lib.org/ase/optimize.html
 
 from ase.optimize import BFGS
 from ase.filters import UnitCellFilter, StrainFilter
-from ase.constraints import FixCom
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.pbc import gto
@@ -28,7 +27,7 @@ from pyscf.pbc.tools.pyscf_ase import pyscf_to_ase_atoms
 from gpu4pyscf.tools.ase_interface import PySCF
 
 def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
-           restart=False, method_factory=None):
+           restart=False):
     '''Optimize the geometry using ASE.
 
     Kwargs:
@@ -49,9 +48,6 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
             Maximum number of optimization steps.
         restart : bool
             Whether to restart from a previous optimization state.
-        method_factory : callable
-            A function that takes a new Mole/Cell and returns a fresh PySCF
-            method for each geometry.
     '''
     assert not restart
     if hasattr(method, 'cell'):
@@ -63,10 +59,7 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
     is_pbc = isinstance(cell, gto.Cell)
 
     atoms = pyscf_to_ase_atoms(cell)
-    atoms.calc = PySCF(method=method, method_factory=method_factory)
-    # fixing the center of mass of a subset of atoms
-    if is_pbc and target != 'lattice':
-        atoms.set_constraint(FixCom())
+    atoms.calc = PySCF(method=method)
 
     if target is None:
         if is_pbc:
@@ -79,7 +72,6 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
     if logfile is None:
         logfile = '-' # stdout
 
-    # TODO: for cell optimization, optimizer can be cell awared BFGS.
     opt = BFGS(atoms, logfile=logfile)
     converged = opt.run(fmax=fmax, steps=max_steps)
 
@@ -123,9 +115,6 @@ class GeometryOptimizer(lib.StreamObject):
             'atoms' for molecular systems.
         logfile: file object, Path, or str
             File to save the ASE output
-        method_factory : callable
-            A function that takes a new Mole/Cell and returns a fresh PySCF
-            method for each geometry.
 
     Saved results:
         converged : bool
@@ -140,7 +129,6 @@ class GeometryOptimizer(lib.StreamObject):
         self.fmax = 0.05
         self.target = None
         self.logfile = None
-        self.method_factory = None
 
     @property
     def max_cycle(self):
@@ -166,8 +154,7 @@ class GeometryOptimizer(lib.StreamObject):
     def kernel(self):
         self.converged, cell = kernel(
             self.method, self.target, self.logfile,
-            fmax=self.fmax, max_steps=self.max_steps,
-            method_factory=self.method_factory)
+            fmax=self.fmax, max_steps=self.max_steps)
         if isinstance(cell, gto.Cell):
             self.cell = cell
         else:
