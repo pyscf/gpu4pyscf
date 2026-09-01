@@ -48,7 +48,12 @@ permissions:
 
 concurrency:
   group: sycl-cpu-ci-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: true
+  # Do NOT cancel in progress. A cold run spends ~45 min building dpctl/dpnp;
+  # cancelling it on the next push means that work is thrown away and the
+  # caches it would have populated are never written, so the following run
+  # starts cold too. Several pushes in quick succession could then leave the
+  # stack permanently unbuilt. Queue instead.
+  cancel-in-progress: false
 
 env:
   # Only the OpenCL CPU device may be visible to SYCL.
@@ -231,7 +236,10 @@ jobs:
             cd /tmp && python -c "import dpnp; print('dpnp OK', dpnp.__version__)" ; } 2>&1 | tee /tmp/logs/30_dpnp_build.log
 
       - name: Save dpctl/dpnp stack cache
-        if: steps.stack-cache.outputs.cache-matched-key == ''
+        # always(): a cancelled or failed run has usually still built part of
+        # the stack, and saving it means the next run resumes rather than
+        # restarting. Mirrors the ccache save step below.
+        if: always() && steps.stack-cache.outputs.cache-matched-key == ''
         uses: actions/cache/save@v4
         with:
           path: |
