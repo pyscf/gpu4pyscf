@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef USE_SYCL
-#include <sycl_device.hpp>
-#endif
-
 __global__
 static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {

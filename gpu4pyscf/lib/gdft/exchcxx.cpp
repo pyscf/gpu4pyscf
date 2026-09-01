@@ -10,12 +10,26 @@
 #include <cctype>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 #include <sycl_device.hpp>
 #include <exchcxx/exchcxx.hpp>
 #include <atomic>
 #include <mutex>
 #include "exchcxx.h"                     // ABI structs
+
+// Verbose tracing of functional construction and of every GGA evaluation.
+// Off by default: the GGA dump copies np doubles device->host per call, so
+// leaving it on would dominate the runtime of any real SCF.
+// Build with -DGDFT_EXCHCXX_TRACE=1 to enable.
+#ifndef GDFT_EXCHCXX_TRACE
+#define GDFT_EXCHCXX_TRACE 0
+#endif
+#if GDFT_EXCHCXX_TRACE
+#define GDFT_TRACE(...) std::fprintf(stderr, __VA_ARGS__)
+#else
+#define GDFT_TRACE(...) ((void)0)
+#endif
 
 namespace detail {
 
@@ -81,7 +95,8 @@ namespace detail {
   //    by your caller if it sees both half-labels; for single labels use the alias table.
   inline std::optional<ExchCXX::Functional>
   libxc_name_to_functional(std::string_view libxc_name) {
-    std::cout << "string name from libxc_name_to_functional() : " << libxc_name << std::endl;
+    GDFT_TRACE("[gdft] libxc_name_to_functional(): %s\n",
+               std::string(libxc_name).c_str());
     auto key = to_upper(std::string{libxc_name});
 
     // 1) Exact alias → canonical functional name
@@ -1070,11 +1085,11 @@ static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
   set_family(su);
   if(needs_lapl_out) *needs_lapl_out = libxc_name_needs_lapl(su);
 
-  // Debug breadcrumb (optional)
-  std::cout << "[map_name_to_kernel] " << in << " -> " << su
-            << " | family=" << (family_out ? *family_out : -999)
-            << " | needs_lapl=" << (needs_lapl_out ? *needs_lapl_out : false)
-            << " | kernel=" << static_cast<int>(*optk) << std::endl;
+  GDFT_TRACE("[gdft] map_name_to_kernel: %s -> %s | family=%d | needs_lapl=%d | kernel=%d\n",
+             in.c_str(), su.c_str(),
+             family_out ? *family_out : -999,
+             needs_lapl_out ? int(*needs_lapl_out) : 0,
+             static_cast<int>(*optk));
 
   return *optk;
 }
@@ -1095,14 +1110,48 @@ extern "C" const char *xc_functional_get_name(int number) {
   }
   return nullptr;  // LibXC ID not found
 }
+// LibXC IDs this shim can actually evaluate on the device.
+//
+// libxc_id_to_name is a full LibXC ID->name table, but ExchCXX's builtin
+// backend implements only a subset of those functionals. Advertising the
+// whole table makes gpu4pyscf/dft/libxc.py set XCfun.on_gpu = True for every
+// functional; xc_func_init then returns 3 ("caller should fall back") and
+// that caller raises RuntimeError instead, so the CPU path in
+// numint.eval_xc_eff() is never reached. Reporting only the resolvable IDs
+// keeps on_gpu honest, and everything else transparently uses PySCF's CPU
+// libxc.
+static const std::vector<int>& supported_libxc_ids() {
+  static const std::vector<int> ids = [] {
+    std::vector<int> v;
+    for (const auto& kv : libxc_id_to_name) {
+      const auto name = detail::to_upper(kv.second);
+      if (detail::libxc_name_to_functional(name) ||
+          detail::kernel_from_libxc_name(name)) {
+        v.push_back(kv.first);
+      }
+    }
+    return v;
+  }();
+  return ids;
+}
+
+// Highest derivative order the device path implements.
+//
+// GDFT_xc_lda/gga/mgga all evaluate up to fxc (order 2); kxc (order 3) has no
+// ExchCXX device entry point. Without a way to ask, gpu4pyscf/dft/libxc.py
+// requests order 3, gets a nonzero return, and raises RuntimeError. Exposing
+// the limit lets the caller route those requests to PySCF's CPU libxc, the
+// same way it already does for functionals this shim cannot evaluate.
+extern "C" int xc_device_max_deriv_order(void) { return 2; }
+
 extern "C" int xc_number_of_functionals(void) {
-  return static_cast<int>(libxc_id_to_name.size());
+  return static_cast<int>(supported_libxc_ids().size());
 }
 extern "C" void xc_available_functional_numbers(int* list) {
   if (!list) return;
   int i = 0;
-  for (const auto& kv : libxc_id_to_name) {
-    list[i++] = kv.first;
+  for (int id : supported_libxc_ids()) {
+    list[i++] = id;
   }
 }
 /* ---------------- Shim state kept in xc_func_type::params ---------------- */
@@ -1188,7 +1237,7 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
   using detail::kernel_from_libxc_name;
   using detail::libxc_name_to_functional;
 
-  std::cout << "xc_func_init: " << functional << ", " << nspin << std::endl;
+  GDFT_TRACE("[gdft] xc_func_init: functional=%d nspin=%d\n", functional, nspin);
   if (!p) return 1;
   if (nspin != XC_UNPOLARIZED && nspin != XC_POLARIZED) return 2;
 
@@ -1196,7 +1245,7 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
   impl->spin = (nspin == XC_UNPOLARIZED)
                  ? ExchCXX::Spin::Unpolarized
                  : ExchCXX::Spin::Polarized;
-  std::fprintf(stderr, "[DEBUG] GDFT_xc_gga: nspin=%d, spin=%d\n",
+  GDFT_TRACE("[DEBUG] GDFT_xc_gga: nspin=%d, spin=%d\n",
                (impl->spin == ExchCXX::Spin::Polarized) ? 2 : 1,
                int(impl->spin));
 
@@ -1301,9 +1350,9 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
              : impl->k->is_gga()  ? XC_FAMILY_GGA
              :                      XC_FAMILY_LDA;
 
-      std::fprintf(stderr, "[gdft] 1. Built XCKernel: enum=%d family=%d spin=%d\n",
+      GDFT_TRACE("[gdft] 1. Built XCKernel: enum=%d family=%d spin=%d\n",
                    int(kenum), family, int(impl->spin));
-      std::fprintf(stderr, "[gdft] 1. is_lda=%d is_gga=%d is_mgga=%d\n",
+      GDFT_TRACE("[gdft] 1. is_lda=%d is_gga=%d is_mgga=%d\n",
                    impl->k->is_lda(), impl->k->is_gga(), impl->k->is_mgga());
 
     } else if (path == Path::FunctionalByName) {
@@ -1323,9 +1372,9 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
           : impl->f->is_gga()  ? XC_FAMILY_GGA
           :                      XC_FAMILY_LDA;
 
-        std::fprintf(stderr, "[gdft] 2. Built XCFunctional: '%s' family=%d spin=%d\n",
+        GDFT_TRACE("[gdft] 2. Built XCFunctional: '%s' family=%d spin=%d\n",
                      name_upper.c_str(), family, int(impl->spin));
-        std::fprintf(stderr, "[gdft] 2. f.is_lda=%d f.is_gga=%d f.is_mgga=%d\n",
+        GDFT_TRACE("[gdft] 2. f.is_lda=%d f.is_gga=%d f.is_mgga=%d\n",
                      impl->f->is_lda(), impl->f->is_gga(), impl->f->is_mgga());
 
     } else { // KernelByName: single kernel by LibXC name
@@ -1346,9 +1395,9 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
              : impl->k->is_gga()  ? XC_FAMILY_GGA
              :                      XC_FAMILY_LDA;
 
-      std::fprintf(stderr, "[gdft] 3. Built XCKernel: name='%s' enum=%d family=%d spin=%d\n",
+      GDFT_TRACE("[gdft] 3. Built XCKernel: name='%s' enum=%d family=%d spin=%d\n",
                    name_upper.c_str(), int(kenum), family, int(impl->spin));
-      std::fprintf(stderr, "[gdft] 3. is_lda=%d is_gga=%d is_mgga=%d\n",
+      GDFT_TRACE("[gdft] 3. is_lda=%d is_gga=%d is_mgga=%d\n",
                    impl->k->is_lda(), impl->k->is_gga(), impl->k->is_mgga());
     }
 
@@ -1632,6 +1681,7 @@ extern "C" int GDFT_xc_lda(
 //   return 0;
 // }
 
+#if GDFT_EXCHCXX_TRACE
 static void debug_dump_gga(sycl::queue* stream, const char* tag,
                            int np, const double* rho, const double* sigma,
                            const double* eps, const double* vrho, const double* vsigma) {
@@ -1645,11 +1695,11 @@ static void debug_dump_gga(sycl::queue* stream, const char* tag,
   if(vsigma) stream->memcpy(h_vsig.data(), vsigma, N*sizeof(double));
   stream->wait();
 
-  std::fprintf(stderr, "\n[%s] np=%d, first %d points:\n", tag, np, N);
-  std::fprintf(stderr, "%6s %20s %20s %20s %20s %20s\n",
+  GDFT_TRACE("\n[%s] np=%d, first %d points:\n", tag, np, N);
+  GDFT_TRACE("%6s %20s %20s %20s %20s %20s\n",
                "pt", "rho", "sigma", "eps", "vrho", "vsigma");
   for(int i = 0; i < N; i++) {
-    std::fprintf(stderr, "%6d %20.12e %20.12e %20.12e %20.12e %20.12e\n",
+    GDFT_TRACE("%6d %20.12e %20.12e %20.12e %20.12e %20.12e\n",
                  i, h_rho[i], h_sig[i],
                  eps    ? h_eps[i]  : 0.0,
                  vrho   ? h_vrho[i] : 0.0,
@@ -1669,9 +1719,10 @@ static void debug_dump_gga(sycl::queue* stream, const char* tag,
     if(vrho)   sum_vrho += all_vrho[i];
     if(vsigma) sum_vsig += all_vsig[i];
   }
-  std::fprintf(stderr, "[%s] SUMS: eps=%.12e vrho=%.12e vsigma=%.12e\n",
+  GDFT_TRACE("[%s] SUMS: eps=%.12e vrho=%.12e vsigma=%.12e\n",
                tag, sum_eps, sum_vrho, sum_vsig);
 }
+#endif // GDFT_EXCHCXX_TRACE
 
 extern "C" int GDFT_xc_gga(
   void* stream_v,
@@ -1681,7 +1732,7 @@ extern "C" int GDFT_xc_gga(
   if(!func || !rho || !sigma || !out || np <= 0) return bad_args();
 
   const int order = detect_order(out);
-  std::cout << "order in GDFT_xc_gga: " << order << std::endl;
+  GDFT_TRACE("[gdft] GDFT_xc_gga: order=%d\n", order);
   if(order < 0) return 0;
   if(order > 2){
     std::fprintf(stderr, "ExchCXX device: GGA order %d not implemented\n", order);
@@ -1698,18 +1749,20 @@ extern "C" int GDFT_xc_gga(
 
   zero_gga_out(*stream, func, out, np, order);
 
+#if GDFT_EXCHCXX_TRACE
   debug_dump_gga(stream, "EXCHCXX-INPUT", np, rho, sigma, nullptr, nullptr, nullptr);
+#endif
 
 
   if(order >= 1){
-    std::cout << "1. call to exhcxx API order >=1 \n";
+    GDFT_TRACE("[gdft] GDFT_xc_gga: eval_exc_vxc_device (order >= 1)\n");
     int err = with_xc(func, [&](auto& xc){
       xc.eval_exc_vxc_device(np, rho, sigma, eps, vrho, vsigma, stream);
     });
     if(err) return err;
   }
   if(order >= 2){
-    std::cout << "2. call to exhcxx API order >=2 \n";
+    GDFT_TRACE("[gdft] GDFT_xc_gga: eval_vxc_fxc_device (order >= 2)\n");
     int err = with_xc(func, [&](auto& xc){
       xc.eval_vxc_fxc_device(np, rho, sigma, vrho, vsigma, v2rho2, v2rs, v2s2, stream);
     });
@@ -1717,14 +1770,16 @@ extern "C" int GDFT_xc_gga(
   }
 
   if(eps){
-    std::cout << "3. call to exhcxx API eps \n";
+    GDFT_TRACE("[gdft] GDFT_xc_gga: eval_exc_device\n");
     int err = with_xc(func, [&](auto& xc){
       xc.eval_exc_device(np, rho, sigma, eps, stream);
     });
     if(err) return err;
   }
 
+#if GDFT_EXCHCXX_TRACE
   debug_dump_gga(stream, "EXCHCXX-OUTPUT", np, rho, sigma, eps, vrho, vsigma);
+#endif
 
   return 0;
 }
