@@ -29,9 +29,6 @@ template <int NROOTS> __device__
 static void GINTkernel_int3c2e_getj_pass1(GINTEnvVars envs, JKMatrix jk, double* g,
                        int ish, int jsh, int ksh)
 {
-#ifdef USE_SYCL
-    auto c_bpcache = s_gvhf_bpcache.get();
-#endif
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
@@ -50,9 +47,9 @@ static void GINTkernel_int3c2e_getj_pass1(GINTEnvVars envs, JKMatrix jk, double*
     int i_l = envs.i_l;
     int j_l = envs.j_l;
     int k_l = envs.k_l;
-    const int *idx = c_idx;
-    const int *idy = c_idx + TOT_NF;
-    const int *idz = c_idx + TOT_NF * 2;
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
 
     for (k = k0; k < k1; ++k) {
         int kp = k - k0;
@@ -87,9 +84,6 @@ template <int NROOTS> __device__
 static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double* g,
                        int ish, int jsh, int ksh)
 {
-#ifdef USE_SYCL
-    auto c_bpcache = s_gvhf_bpcache.get();
-#endif
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
@@ -107,9 +101,9 @@ static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double*
     int i_l = envs.i_l;
     int j_l = envs.j_l;
     int k_l = envs.k_l;
-    const int *idx = c_idx;
-    const int *idy = c_idx + TOT_NF;
-    const int *idz = c_idx + TOT_NF * 2;
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
 
     double rhoj[GPU_CART_MAX];
     for (k = 0; k < k1-k0; k++){

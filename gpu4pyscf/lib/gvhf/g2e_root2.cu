@@ -14,23 +14,14 @@
  * limitations under the License.
  */
 
+
 __global__
 static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    const int tx = item.get_local_id(1);
-    const int ty = item.get_local_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         task_ij = 0; task_kl = 0;
@@ -111,7 +102,7 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -168,6 +159,8 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double* __restrict__ dm = jk.dm;
     double *vj = jk.vj;
     double *vk = jk.vk;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
     for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         if (vj != NULL) {
             // ijkl,ij->kl
@@ -235,22 +228,16 @@ static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         }
         dm += nao2;
     }
-
 }
+
 
 __global__
 static void GINTint2e_jk_kernel1011(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -349,12 +336,12 @@ static void GINTint2e_jk_kernel1011(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
         //double fac = norm * eij * ekl / (sqrt(aijkl) * a1);
-
+        
         double rw[4];
         double root0, weight0;
         GINTrys_root<2>(x, rw);
@@ -530,14 +517,8 @@ static void GINTint2e_jk_kernel1100(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -615,7 +596,7 @@ static void GINTint2e_jk_kernel1100(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -734,14 +715,8 @@ static void GINTint2e_jk_kernel1110(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -840,7 +815,7 @@ static void GINTint2e_jk_kernel1110(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1021,14 +996,8 @@ static void GINTint2e_jk_kernel2000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1100,7 +1069,7 @@ static void GINTint2e_jk_kernel2000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1211,14 +1180,8 @@ static void GINTint2e_jk_kernel2010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1305,7 +1268,7 @@ static void GINTint2e_jk_kernel2010(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1474,14 +1437,8 @@ static void GINTint2e_jk_kernel2100(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1568,7 +1525,7 @@ static void GINTint2e_jk_kernel2100(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1733,14 +1690,8 @@ static void GINTint2e_jk_kernel3000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1816,7 +1767,7 @@ static void GINTint2e_jk_kernel3000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));

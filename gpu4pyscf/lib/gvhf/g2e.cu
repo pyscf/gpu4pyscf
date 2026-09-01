@@ -29,14 +29,8 @@ void GINTint2e_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         task_ij = 0; task_kl = 0;
@@ -95,18 +89,8 @@ static void GINTint2e_jk_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    const int tx = item.get_local_id(1);
-    const int ty = item.get_local_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    const int tx = threadIdx.x;
-    const int ty = threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         task_ij = 0; task_kl = 0;
@@ -182,6 +166,8 @@ static void GINTint2e_jk_kernel0000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double* __restrict__ dm = jk.dm;
     double *vj = jk.vj;
     double *vk = jk.vk;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
 
     for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         if (vj != NULL) {
@@ -207,18 +193,8 @@ static void GINTint2e_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
-    const int tx = item.get_local_id(1);
-    const int ty = item.get_local_id(0);
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    #endif
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         task_ij = 0; task_kl = 0;
@@ -328,6 +304,8 @@ static void GINTint2e_jk_kernel1000(GINTEnvVars envs, JKMatrix jk, BasisProdOffs
     double* __restrict__ dm = jk.dm;
     double *vj = jk.vj;
     double *vk = jk.vk;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
 
     for (i_dm = 0; i_dm < n_dm; ++i_dm) {
         if (vj != NULL) {

@@ -33,15 +33,13 @@ set_target_properties(gvhf PROPERTIES
 if (USE_SYCL)
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   target_compile_options(gvhf PRIVATE -x c++ -nocudainc -nocudalib)
-  # libgvhf textually #includes gint device sources (gint/g2e.cu,
-  # gint/cint2e.cuh, gint/rys_roots.cu). Those refer to gint's `s_bpcache`
-  # device_global, which is DEFINED in libgint's device image only. libgvhf
-  # carries its own copy under a distinct name (s_gvhf_bpcache, see
-  # gvhf/constant.cuh) so the two libraries' default-visibility host symbols
-  # cannot interpose on each other. Without this rename the inlined gint code
-  # leaves `s_bpcache` undefined in libgvhf's device image and the first
-  # GINTint3c2e_pass1/pass2 launch aborts with an uncaught sycl::exception:
-  #   "Unresolved Symbol <s_bpcache>" from the Level Zero program build.
+  # gvhf/constant.cuh declares its bpcache as s_gvhf_bpcache rather than
+  # gint's s_bpcache. Both are default-visibility device_global objects, and
+  # libgint.so and libgvhf.so are co-resident with no DT_NEEDED link between
+  # them, so identical names would alias to whichever definition the dynamic
+  # linker resolved first and let one library's host-side memcpy land in the
+  # other's device image. The rename keeps them distinct; this define maps
+  # any inlined gint source that still spells s_bpcache onto gvhf's copy.
   target_compile_definitions(gvhf PRIVATE s_bpcache=s_gvhf_bpcache)
   target_link_libraries(gvhf PRIVATE sycl_compat gsycl gint)
 else (USE_SYCL)
