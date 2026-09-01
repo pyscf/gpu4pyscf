@@ -190,7 +190,80 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
     vxc_mat *= weight
     return vxc_mat
 
-def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
+def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
+    cell = ni.sorted_cell
+    if ni.aft_buckets is not None:
+        rhoG, tauG = _aft_eval_density(ni, dm_sc, kpts, with_tau)
+    else:
+        rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
+        tauG = None
+        if with_tau:
+            tauG = cp.zeros(ni.mesh, dtype=np.complex128)
+
+    a = cell.lattice_vectors()
+    b = np.linalg.inv(a.T)
+    b_norm = np.linalg.norm(b, axis=1).astype(np.float32)
+    vol = np.linalg.det(a)
+    nkpts = len(ni.bvkmesh_Ls)
+
+    work = cp.empty_like(rhoG)
+    if not with_tau:
+        kern = libmgrid.evaluate_density_v2
+    else:
+        kern = libmgrid.evaluate_tau_v2
+        work1 = cp.empty_like(rhoG)
+    mg_envs = ni.mg_envs
+
+    fft_buckets = ni.fft_buckets or []
+    for bucket in fft_buckets:
+        mesh = bucket['mesh']
+        ngrids = np.prod(mesh)
+        weight = vol / ngrids / nkpts
+
+        dxyz_dabc = a / mesh[:,None]
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+
+        rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
+        rhoR.fill(0)
+        tauR = rhoR # placeholder
+        if with_tau:
+            tauR = ndarray(mesh, dtype=np.complex128, buffer=work1)
+            tauR.fill(0)
+
+        for (li, lj), bas_ij_idx, grid_frac_ranges, atom_grid_ranges, \
+                shl_pair_offsets, atom_mesh in zip(
+                    bucket['lij_patterns'], bucket['bas_ij_cache'],
+                    bucket['grid_ranges_cache'], bucket['atom_grid_ranges'],
+                    bucket['atom_seg_offsets'], bucket['atom_mesh_max']):
+            if len(bas_ij_idx) == 0: continue
+
+            err = kern(
+                ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tauR.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
+                ctypes.byref(mg_envs),
+                dxyz_dabc.ctypes,
+                ctypes.c_int(li), ctypes.c_int(lj),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(atom_grid_ranges.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(shl_pair_offsets) - 1),
+                (ctypes.c_int*3)(*atom_mesh),
+                (ctypes.c_int*3)(*mesh),
+                ctypes.c_double(weight),
+                ctypes.c_double(bucket['negligible']))
+            if err != 0:
+                raise RuntimeError('evaluate_density kernel failed')
+
+        _inv_take_fft_submesh(rhoG, fft_in_place(rhoR).reshape(mesh), mesh)
+        if with_tau:
+            _inv_take_fft_submesh(tauG, fft_in_place(tauR).reshape(mesh), mesh)
+
+    return rhoG, tauG
+
+# An alternative implementation, based on multigrid_v2
+# This version is slower than _eval_density in most scenarios
+def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
     cell = ni.sorted_cell
     if ni.aft_buckets is not None:
         rhoG, tauG = _aft_eval_density(ni, dm_sc, kpts, with_tau)
@@ -269,76 +342,7 @@ def _eval_density(ni, dm_sc, kpts=None, with_tau=False):
 
     return rhoG, tauG
 
-def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
-    cell = ni.sorted_cell
-    if ni.aft_buckets is not None:
-        rhoG, tauG = _aft_eval_density(ni, dm_sc, kpts, with_tau)
-    else:
-        rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
-        tauG = None
-        if with_tau:
-            tauG = cp.zeros(ni.mesh, dtype=np.complex128)
-
-    a = cell.lattice_vectors()
-    b = np.linalg.inv(a.T)
-    b_norm = np.linalg.norm(b, axis=1).astype(np.float32)
-    vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
-
-    work = cp.empty_like(rhoG)
-    if not with_tau:
-        kern = libmgrid.evaluate_density_v2
-    else:
-        kern = libmgrid.evaluate_tau_v2
-        work1 = cp.empty_like(rhoG)
-    mg_envs = ni.mg_envs
-
-    fft_buckets = ni.fft_buckets or []
-    for bucket in fft_buckets:
-        mesh = bucket['mesh']
-        ngrids = np.prod(mesh)
-        weight = vol / ngrids / nkpts
-
-        dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
-
-        rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
-        rhoR.fill(0)
-        tauR = rhoR # placeholder
-        if with_tau:
-            tauR = ndarray(mesh, dtype=np.complex128, buffer=work1)
-            tauR.fill(0)
-
-        for (li, lj), bas_ij_idx, grid_frac_ranges, atom_grid_ranges, \
-                shl_pair_offsets, atom_mesh in zip(
-                    bucket['lij_patterns'], bucket['bas_ij_cache'],
-                    bucket['grid_ranges_cache'], bucket['atom_grid_ranges'],
-                    bucket['atom_seg_offsets'], bucket['atom_mesh_max']):
-            if len(bas_ij_idx) == 0: continue
-
-            err = kern(
-                ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
-                ctypes.cast(tauR.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm_sc.data.ptr, ctypes.c_void_p),
-                ctypes.byref(mg_envs),
-                dxyz_dabc.ctypes,
-                ctypes.c_int(li), ctypes.c_int(lj),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(atom_grid_ranges.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(shl_pair_offsets) - 1),
-                (ctypes.c_int*3)(*atom_mesh),
-                (ctypes.c_int*3)(*mesh),
-                ctypes.c_double(weight),
-                ctypes.c_double(bucket['negligible']))
-            if err != 0:
-                raise RuntimeError('evaluate_density kernel failed')
-
-        _inv_take_fft_submesh(rhoG, fft_in_place(rhoR).reshape(mesh), mesh)
-        if with_tau:
-            _inv_take_fft_submesh(tauG, fft_in_place(tauR).reshape(mesh), mesh)
-
-    return rhoG, tauG
+_eval_density = _eval_density_v2
 
 # This function is not used by the current implementation. It is provided
 # to maintain compatibility with the multigrid_v2 implementation.
@@ -350,7 +354,7 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
     rhoG = cp.array([_eval_density(ni, dm_sc[i])[0] for i in range(n_dm)])
     return rhoG
 
-def _eval_xc_mat(ni, vxcG, out=None, work=None):
+def _eval_xc_mat_v2(ni, vxcG, out=None, work=None):
     '''Note, contents of vxcG will be destroyed in this function
     '''
     cell = ni.sorted_cell
@@ -417,6 +421,7 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
 
+# An alternative implementation, based on multigrid_v2.
 # This version is slower than _eval_xc_mat in most scenarios
 def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
     '''Note, contents of vxcG will be destroyed in this function
@@ -488,6 +493,8 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
             if err != 0:
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
+
+_eval_xc_mat = _eval_xc_mat_v2
 
 def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
     '''
@@ -1766,7 +1773,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     weight = vol / ngrids
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
-    rhoG, tauG = _eval_density_v1(ni, dm_sc, with_tau=xctype=='MGGA')
+    rhoG, tauG = _eval_density(ni, dm_sc, with_tau=xctype=='MGGA')
     n_electrons = float(rhoG[0,0,0].real.get())
 
     if xctype == 'HF':
@@ -1782,7 +1789,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         # dm_sc is represented in primitive bases (by sorted_cell). Its size can be
         # much larger than the input dm_kpts. Release its memory if remaining memory
         # is insufficient.
-        if (nvar+4)*ngrids*8 > get_avail_mem():
+        if (nvar+4)*ngrids*10 > get_avail_mem():
             dm_sc = None
 
         density = cp.empty((nvar, ngrids))
@@ -1791,6 +1798,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         # computing rhoR with IFFT, the weight factor is not needed.
         density *= 1/weight
 
+        if dm_sc is None:
+            tauG = None
         rho_sf = ndarray(ngrids, dtype=np.float64, buffer=tauG)
         rho_sf[:] = density[0].real
         t0 = log.timer_debug1("density", *t0)
@@ -1896,7 +1905,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # dm_sc is represented in primitive bases (by sorted_cell). Its size can be
     # much larger than the input dm_kpts. Release its memory if remaining memory
     # is insufficient.
-    if (2*nvar+4)*ngrids*8 > get_avail_mem():
+    if (2*nvar+4)*ngrids*10 > get_avail_mem():
         dm_sc = [None, None]
 
     density = cp.empty((2, nvar, ngrids))
@@ -2076,7 +2085,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         init_ke = mesh_to_ke(a, [8]*3).max()
         log.debug1('initial ke_cutoff = %g', init_ke)
 
-        if self.enable_aft and is_orth_lattice and nimgs > 30:
+        if self.enable_aft and is_orth_lattice and nimgs > 20:
             # Estimate Ecut for AFT integrals. These can be potentially handled by
             # aft_eval_* functions.
             # Use ke_cutoff to limit the highest Ecut. This ensures to handle
@@ -2085,7 +2094,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
                 self, bas_ij_idx, ke_cutoff, precision, xctype)
 
             # aft_final_ke based on system size
-            final_ke_fac = max(nimgs / 40, 1.)
+            final_ke_fac = max(nimgs / 20, 1.)
             aft_final_ke = min(init_ke * final_ke_fac, ke_cutoff)
             log.debug1('aft init_ke_cutoff = %g, final_ke_cutoff = %g (%.2fx)',
                        init_ke, aft_final_ke, final_ke_fac)
@@ -2119,7 +2128,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
             # If memory is sufficient, cache tile info for each bucket, including:
             # effective tile indices, orbital pairs indices, and corresponding offsets
-            if len(bas_ij_idx) < 3000000 and np.prod(mesh) < 400**3:
+            if 0 and len(bas_ij_idx) < 3000000 and np.prod(mesh) < 400**3:
                 mem = get_avail_mem()
                 t1 = log.timer_debug1('generating orbital pairs', *t0)
                 tile_info = _grid_range_to_tile_info_converter(self.fft_buckets, cell)
@@ -2506,7 +2515,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             log.debug1('lattice_sum_factor = %g', lattice_sum_factor)
             precision = cell.precision / lattice_sum_factor
             bas_ij_idx = _non_trivial_bvk_pairs(self, precision)
-            init_ke = mesh_to_ke(cell.lattice_vectors(), [16]*3).max()
+            init_ke = mesh_to_ke(cell.lattice_vectors(), [8]*3).max()
             fft_buckets = _partition_ke_for_fft(
                 self, bas_ij_idx, init_ke, self.ke_cutoff, precision, xctype, log)
 

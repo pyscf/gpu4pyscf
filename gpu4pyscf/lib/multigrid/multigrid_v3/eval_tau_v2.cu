@@ -302,10 +302,11 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
     int64_t abc_idx_start = (a_index + 100 * mesh_a) % mesh_a * mesh_bc;
     for (int n = thread_id; n < atom_mesh_bc; n += threads) {
         int b_index = n / c_stride;
-        int c_index = n % c_stride;
+        int c_index = n - c_stride * b_index + c_index0;
+        if (c_index >= c_stop) continue;
         int64_t abc_idx = abc_idx_start +
             (b_start + b_index + 100 * mesh_b) % mesh_b * mesh_c +
-            (c_index0+ c_index + 100 * mesh_c) % mesh_c;
+            (c_index + 100 * mesh_c) % mesh_c;
         atomicAdd(rho_c + abc_idx*2, rho_cache[n]);
         atomicAdd(tau_c + abc_idx*2, tau_cache[n]);
     }
@@ -334,7 +335,7 @@ int evaluate_tau_v2(double *rho_c, double *tau_c, double *dm,
     int mesh_c = mesh[2];
     int ntasks = nseg * atom_mesh[0];
     int c_stride = (3000 / atom_mesh[1] / TILE) * TILE;
-    int shmsize = atom_mesh[1] * c_stride * sizeof(double);
+    int shmsize = atom_mesh[1] * c_stride * 2 * sizeof(double);
     dim3 threads(WARP_SIZE, TILE);
     double a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] + dxyz_dabc[1] * dxyz_dabc[4] + dxyz_dabc[2] * dxyz_dabc[5];
     double a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] + dxyz_dabc[1] * dxyz_dabc[7] + dxyz_dabc[2] * dxyz_dabc[8];

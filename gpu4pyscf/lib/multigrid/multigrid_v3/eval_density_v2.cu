@@ -252,10 +252,11 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
     int64_t abc_idx_start = (a_index + 100 * mesh_a) % mesh_a * mesh_bc;
     for (int n = thread_id; n < atom_mesh_bc; n += threads) {
         int b_index = n / c_stride;
-        int c_index = n % c_stride;
+        int c_index = n - c_stride * b_index + c_index0;
+        if (c_index >= c_stop) continue;
         int64_t abc_idx = abc_idx_start +
             (b_start + b_index + 100 * mesh_b) % mesh_b * mesh_c +
-            (c_index0+ c_index + 100 * mesh_c) % mesh_c;
+            (c_index + 100 * mesh_c) % mesh_c;
         atomicAdd(rho_c + abc_idx*2, rho_cache[n]);
     }
     __syncthreads();

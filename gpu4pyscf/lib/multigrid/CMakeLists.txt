@@ -11,6 +11,7 @@
 #  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
 #  CUDA_SEPARABLE_COMPILATION ON)
 
+if (ENABLE_MULTIGRID_V2)
 add_library(mgrid_v2 SHARED
         multigrid_v2/drivers.cu
         multigrid_v2/screen.cu
@@ -25,14 +26,17 @@ set_target_properties(mgrid_v2 PROPERTIES
 if(ENABLE_FP32_MULTIGRID)
   target_compile_definitions(mgrid_v2 PRIVATE GPU4PYSCF_ENABLE_FP32_MULTIGRID)
 endif()
+endif()
 
 add_library(mgrid_v3 SHARED
   multigrid_v3/screen.cu
   multigrid_v3/drivers.cu
-  multigrid_v3/eval_density.cu
-  multigrid_v3/eval_tau.cu
+  #multigrid_v3/eval_density.cu
+  #multigrid_v3/eval_tau.cu
   #multigrid_v3/eval_lda_mat.cu
   #multigrid_v3/eval_mgga_mat.cu
+  multigrid_v3/eval_density_v2.cu
+  multigrid_v3/eval_tau_v2.cu
   multigrid_v3/eval_lda_mat_v2.cu
   multigrid_v3/eval_mgga_mat_v2.cu
   multigrid_v3/eval_lda_strain_grad.cu
@@ -41,11 +45,8 @@ add_library(mgrid_v3 SHARED
   multigrid_v3/aft_eval_tau.cu
   multigrid_v3/aft_eval_lda_mat.cu
   multigrid_v3/aft_eval_mgga_mat.cu
-  multigrid_v3/eval_density_v2.cu
-  multigrid_v3/eval_tau_v2.cu
 )
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 set_target_properties(mgrid_v3 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
   CUDA_SEPARABLE_COMPILATION ON
