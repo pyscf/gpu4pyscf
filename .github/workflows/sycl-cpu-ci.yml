@@ -140,12 +140,18 @@ jobs:
           sycl-ls
           sycl-ls | grep -qi "opencl:cpu"
 
-      - name: Resolve dpctl/dpnp upstream commits (cache keys)
+      - name: Resolve dpctl/dpnp commits and cache keys
         id: stack
         run: |
+          # Keying on upstream HEAD meant any commit to IntelPython/dpctl or
+          # dpnp invalidated the cache and forced a ~45 min rebuild, often on
+          # a run that changed nothing here. Bucket by ISO week instead: the
+          # stack is rebuilt at most once a week, and the SHAs resolved inside
+          # that bucket are recorded so a run is still reproducible.
           echo "dpctl_sha=$(git ls-remote https://github.com/IntelPython/dpctl HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
           echo "dpnp_sha=$(git ls-remote https://github.com/IntelPython/dpnp HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
           echo "oneapi_ver=$(dpkg-query -W -f='${Version}' intel-oneapi-compiler-dpcpp-cpp)" >> "$GITHUB_OUTPUT"
+          echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore dpctl/dpnp stack cache (venv + source builds)
         id: stack-cache
@@ -158,10 +164,16 @@ jobs:
             /home/runner/sycl-venv
             /home/runner/dpctl
             /home/runner/dpnp
-          key: sycl-stack-v1-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-dpctl${{ steps.stack.outputs.dpctl_sha }}-dpnp${{ steps.stack.outputs.dpnp_sha }}
+          key: sycl-stack-v2-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
+          # Fall back to any earlier week on the same oneAPI: a stale but
+          # working dpctl/dpnp beats a 45 min rebuild, and the weekly key
+          # above still refreshes it once the bucket rolls over.
+          restore-keys: |
+            sycl-stack-v2-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-
+            sycl-stack-v2-${{ runner.os }}-py311-
 
       - name: Create venv with Python build/runtime dependencies
-        if: steps.stack-cache.outputs.cache-hit != 'true'
+        if: steps.stack-cache.outputs.cache-matched-key == ''
         run: |
           python -m venv "$VENV"
           "$VENV/bin/pip" install --upgrade pip
@@ -170,7 +182,7 @@ jobs:
             pyscf pyscf-dispersion h5py geometric
 
       - name: Build dpctl from source (IntelPython/dpctl master)
-        if: steps.stack-cache.outputs.cache-hit != 'true'
+        if: steps.stack-cache.outputs.cache-matched-key == ''
         run: |
           source /opt/intel/oneapi/setvars.sh --force
           source "$VENV/bin/activate"
@@ -188,7 +200,7 @@ jobs:
           # PEP-660 editable install hides it behind an import hook.
 
       - name: Build dpnp from source (IntelPython/dpnp master)
-        if: steps.stack-cache.outputs.cache-hit != 'true'
+        if: steps.stack-cache.outputs.cache-matched-key == ''
         run: |
           source /opt/intel/oneapi/setvars.sh --force
           source "$VENV/bin/activate"
@@ -200,14 +212,14 @@ jobs:
             cd /tmp && python -c "import dpnp; print('dpnp OK', dpnp.__version__)" ; } 2>&1 | tee /tmp/logs/30_dpnp_build.log
 
       - name: Save dpctl/dpnp stack cache
-        if: steps.stack-cache.outputs.cache-hit != 'true'
+        if: steps.stack-cache.outputs.cache-matched-key == ''
         uses: actions/cache/save@v4
         with:
           path: |
             /home/runner/sycl-venv
             /home/runner/dpctl
             /home/runner/dpnp
-          key: sycl-stack-v1-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-dpctl${{ steps.stack.outputs.dpctl_sha }}-dpnp${{ steps.stack.outputs.dpnp_sha }}
+          key: sycl-stack-v2-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
 
       - name: Restore ccache (gpu4pyscf C++/SYCL objects)
         uses: actions/cache/restore@v4
