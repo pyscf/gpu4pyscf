@@ -34,7 +34,7 @@ void GINTinit_contraction_types(BasisProdCache *bpcache,
         bpcache->ncptype = ncptype;
         bpcache->bas_pair2shls = bas_pair2shls;
         bpcache->bas_pairs_locs = bas_pairs_locs;
-
+        
         ContractionProdType *cptype = (ContractionProdType *)malloc(sizeof(ContractionProdType) * ncptype);
         bpcache->cptype = cptype;
         int *primitive_pairs_locs = (int *)malloc(sizeof(int) * (ncptype + 1));
@@ -84,7 +84,7 @@ void GINTsort_bas_coordinates(double *bas_coords, int *bas_atm,
 }
 
 void GINTinit_exponent(double *exp, int *bas, int nbas, double *env)
-{
+{        
         int ib, ptr;
         for (ib = 0; ib < nbas; ib++) {
                 ptr = bas[PTR_EXP + ib * BAS_SLOTS];
@@ -100,7 +100,7 @@ void GINTinit_aexyz(double *aexyz, BasisProdCache *bpcache, double diag_fac,
         int n_primitive_pairs = bpcache->primitive_pairs_locs[ncptype];
         int *bas_pair2bra = bpcache->bas_pair2shls;
         int *bas_pair2ket = bpcache->bas_pair2shls + n_bas_pairs;
-
+        
         double *a12 = aexyz;
         double *e12 = a12 + n_primitive_pairs;
         double *x12 = e12 + n_primitive_pairs;
@@ -108,7 +108,7 @@ void GINTinit_aexyz(double *aexyz, BasisProdCache *bpcache, double diag_fac,
         double *z12 = y12 + n_primitive_pairs;
         double *a1  = z12 + n_primitive_pairs;
         double *a2  = a1 + n_primitive_pairs;
-
+        
         int pair_id, count;
         int ish, jsh, ia, ja;
         int ip, jp, npi, npj, li, lj;
