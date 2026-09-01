@@ -640,6 +640,24 @@ else:
         gpu4pyscf_cusolver = _LazyModule('gpu4pyscf.lib.cusolver', _load_onemkl_lapack)
         sys.modules['gpu4pyscf.lib.cusolver'] = gpu4pyscf_cusolver
 
+        # gpu4pyscf.lib.cupy_helper -> gpu4pyscf.lib.dpnp_helper.
+        #
+        # cupy_helper.py reaches for cusolver, cutensor and cupy.cuda.runtime
+        # APIs that do not exist here, so importing it under SYCL fails. Alias
+        # it to its dpnp counterpart, which exposes the same public surface.
+        #
+        # Done here rather than in gpu4pyscf/lib/__init__.py so that file stays
+        # identical to upstream: gpu4pyscf/__init__.py imports _patch_pyscf
+        # (which imports cupy, loading this shim) before it imports .lib, so
+        # the alias is already registered by the time lib/__init__.py runs.
+        # Lazy, to avoid importing dpnp_helper before the master queue exists.
+        def _load_dpnp_helper():
+            import importlib
+            return importlib.import_module('gpu4pyscf.lib.dpnp_helper')
+
+        sys.modules['gpu4pyscf.lib.cupy_helper'] = _LazyModule(
+            'gpu4pyscf.lib.cupy_helper', _load_dpnp_helper)
+
 
     _setup_cupy_backends()
     del _setup_cupy_backends

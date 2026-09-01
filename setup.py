@@ -33,20 +33,20 @@ DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
 
-# Selects the compute backend for this build. CUDA is the default, matching
-# upstream, so an unmodified invocation is unchanged. To build SYCL:
+# Selects the compute backend for this build. CUDA is the default. To build
+# SYCL:
 #
 #     python setup.py --sycl build
-#     GPU4PYSCF_BACKEND=sycl python setup.py build
-#     CMAKE_CONFIGURE_ARGS=-DUSE_SYCL=ON python setup.py build
+#     CMAKE_CONFIGURE_ARGS=-DUSE_SYCL=ON pip install .
 #
-# The env var form is what pip and other frontends can use, since they do not
-# forward unknown flags to setup.py.
+# The second form covers pip and other PEP 517 frontends, which do not forward
+# unknown flags to setup.py; CMAKE_CONFIGURE_ARGS has to be set for a SYCL
+# build regardless, to point cmake at icpx.
 def build_backend():
     # --sycl / --cuda are ours, not setuptools', so strip them from argv before
     # setuptools parses it -- an unrecognised global option is a hard error.
-    # Precedence: command line, then GPU4PYSCF_BACKEND, then -DUSE_SYCL=ON in
-    # CMAKE_CONFIGURE_ARGS, else CUDA.
+    # Precedence: command line, then -DUSE_SYCL=ON in CMAKE_CONFIGURE_ARGS,
+    # else CUDA.
     backend = None
     for flag in ('--sycl', '--cuda'):
         while flag in sys.argv:
@@ -55,9 +55,6 @@ def build_backend():
     if backend is not None:
         return backend
 
-    backend = os.getenv('GPU4PYSCF_BACKEND', '').strip().lower()
-    if backend in ('sycl', 'cuda'):
-        return backend
     if 'USE_SYCL=ON' in os.getenv('CMAKE_CONFIGURE_ARGS', ''):
         return 'sycl'
     return 'cuda'
@@ -109,14 +106,20 @@ class CMakeBuildPy(build_py):
         self.announce('Configuring extensions', level=3)
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
-        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}']
         if BACKEND == 'sycl':
-            # USE_SYCL defaults OFF in gpu4pyscf/lib/CMakeLists.txt so that an
-            # unmodified CUDA build needs no flags; request it explicitly here.
-            # The SYCL path builds its own libxc stand-in (ExchCXX).
-            cmd += ['-DUSE_SYCL=ON', '-DBUILD_LIBXC=ON']
+            # USE_SYCL defaults OFF in gpu4pyscf/lib/CMakeLists.txt so that a
+            # plain CUDA build needs no flags at all. SYCL uses ExchCXX where
+            # CUDA uses libxc, and there is no wheel for ExchCXX, so it has to
+            # be built from source, hence BUILD_LIBXC=ON rather than the OFF
+            # that CUDA passes.
+            libxc_arg = '-DBUILD_LIBXC=ON'
+            backend_args = ['-DUSE_SYCL=ON']
         else:
-            cmd += ['-DBUILD_LIBXC=OFF']
+            # CUDA takes libxc from the gpu4pyscf-libxc-cuda* wheel listed in
+            # install_requires rather than building it (upstream, since #110).
+            libxc_arg = '-DBUILD_LIBXC=OFF'
+            backend_args = []
+        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', libxc_arg] + backend_args
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
             cmd.extend(configure_args.split(' '))
