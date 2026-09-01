@@ -17,12 +17,12 @@ name: SYCL CPU CI
 #
 # Triggers:
 #   - workflow_dispatch (Actions tab)
-#   - push / pull_request targeting the sycl branch
+#   - every push and every pull request, on any branch
 #   - an issue/PR comment containing "@sycl-runner"
 #     NOTE: GitHub only delivers issue_comment events to the copy of this file
 #     on the repository's DEFAULT branch. For the comment trigger to work,
-#     this workflow file must also exist on the default branch; the comment
-#     run always builds the sycl branch.
+#     this workflow file must also exist on the default branch; a comment on a
+#     PR then builds that PR's head ref.
 #
 # The full test suite will not finish on a 4-core runner and is not the goal;
 # the smoke steps below are allowed to partially fail (continue-on-error) so a
@@ -30,12 +30,12 @@ name: SYCL CPU CI
 
 on:
   workflow_dispatch: {}
+  # Run on every push and every pull request, the way lint.yml does, so the
+  # SYCL build is checked on each commit rather than only on the sycl branch.
+  # unittest.yml restricts itself to master because its runners are costly;
+  # this job is a build plus smoke test on a stock GitHub runner.
   push:
-    # sycl-cpu-ci is the CI development branch itself, so workflow changes
-    # self-test on push without needing a PR.
-    branches: [sycl, sycl-cpu-ci]
   pull_request:
-    branches: [sycl]
   issue_comment:
     types: [created]
 
@@ -89,9 +89,12 @@ jobs:
       - name: Checkout gpu4pyscf
         uses: actions/checkout@v4
         with:
-          # Comment-triggered runs always build the sycl branch; push/PR/
-          # dispatch runs build the ref that triggered them.
-          ref: ${{ github.event_name == 'issue_comment' && 'sycl' || '' }}
+          # push / pull_request / workflow_dispatch build the ref that
+          # triggered them. A comment on a PR builds that PR's head ref, so
+          # "@sycl-runner" tests the branch under discussion rather than a
+          # fixed one; a comment on a plain issue has no PR to resolve, so it
+          # falls back to the default branch.
+          ref: ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
