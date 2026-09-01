@@ -502,7 +502,7 @@ class KSCF(pbchf.SCF):
 
         kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=False)
         if nkpts == np.prod(kmesh):
-            return [x[:2] for x in kk_adapted_iter(kmesh)]
+            return [x[:2] for x in kk_adapted_iter(kmesh, return_pair_index=False)]
         else:
             return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
 

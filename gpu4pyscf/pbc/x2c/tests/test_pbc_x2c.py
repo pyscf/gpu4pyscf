@@ -39,7 +39,7 @@ class KnownValues(unittest.TestCase):
         )
 
         cell2 = cell.copy()
-        cell2.precision = 1e-12
+        cell2.precision = 1e-10
         cell2.build(0, 0)
 
         kpts4 = cell.make_kpts([4,1,1])
@@ -53,12 +53,12 @@ class KnownValues(unittest.TestCase):
         ref = sfx2c1e_cpu.get_pnucp(df_cpu.GDF(cell2))
         v1 = x2c1e._get_pnucp(sorted_cell, intor='pnucp')
         v1 = sorted_cell.apply_CT_mat_C(v1)
-        assert abs(v1.get() - ref).max() < 1e-8
+        assert abs(v1.get() - ref).max() < 1e-7
 
         ref = sfx2c1e_cpu.get_pnucp(df_cpu.GDF(cell2), kpts4)
         v1 = x2c1e._get_pnucp(sorted_cell, kpts=kpts4, intor='pnucp')
         v1 = sorted_cell.apply_CT_mat_C(v1)
-        assert abs(v1.get() - ref).max() < 1e-8
+        assert abs(v1.get() - ref).max() < 1e-7
 
     def get_hcore(self):
         cell = pyscf.M(

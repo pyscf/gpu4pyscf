@@ -209,6 +209,8 @@ def _hess_nuc_without_ecp(mol, dm0):
     int3c2e_opt = Int3c2eOpt(sorted_mol, fakemol).build()
     dm = sorted_mol.apply_C_mat_CT(dm0)
 
+    omega, lr_factor, sr_factor = 0., 1., 1.
+
     nsp_per_block, gout_stride, shm_size = int3c2e_scheme_ip2()
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
     lmax = sorted_mol.uniq_l_ctr[:,0].max()
@@ -226,6 +228,9 @@ def _hess_nuc_without_ecp(mol, dm0):
         ctypes.cast(de.data.ptr, ctypes.c_void_p),
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
         ctypes.cast(charges.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(omega),
+        ctypes.c_double(lr_factor),
+        ctypes.c_double(sr_factor),
         ctypes.byref(int3c2e_envs), ctypes.c_double(0.),
         ctypes.c_double(1.), ctypes.c_double(1.),
         ctypes.c_int(shm_size_max),
@@ -265,6 +270,8 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
     n_dm, nao = dms.shape[:2]
     assert n_dm <= 2
+
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
     ao_loc = mol.ao_loc
     uniq_l_ctr = mol.uniq_l_ctr
@@ -327,6 +334,9 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
                     ctypes.c_double(j_factor), ctypes.c_double(k_factor),
                     ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    ctypes.c_double(omega),
+                    ctypes.c_double(lr_factor),
+                    ctypes.c_double(sr_factor),
                     rys_envs, (ctypes.c_int*2)(*scheme1),
                     (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
@@ -350,6 +360,9 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
                     ctypes.c_double(j_factor), ctypes.c_double(k_factor),
                     ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    ctypes.c_double(omega),
+                    ctypes.c_double(lr_factor),
+                    ctypes.c_double(sr_factor),
                     rys_envs, (ctypes.c_int*2)(*scheme3),
                     (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
@@ -454,7 +467,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         vj = vk = vhf = None
     return h1mo
 
-def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
+def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None,
+                omega=None, lr_factor=None, sr_factor=None, verbose=None):
     r'''
     For each atom, compute
     J = ((\nabla_X i) j| kl) (D_lk + D_ji)
@@ -473,6 +487,8 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
     n_dm, nao = dms.shape[:2]
     assert n_dm == 1
+
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
     natm = mol.natm
     if atoms_slice is None:
@@ -547,6 +563,9 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
             err = kern(
                 vj_ptr, vk_ptr, ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
+                ctypes.c_double(omega),
+                ctypes.c_double(lr_factor),
+                ctypes.c_double(sr_factor),
                 rys_envs, (ctypes.c_int*2)(*scheme),
                 (ctypes.c_int*8)(*shls_slice),
                 ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),

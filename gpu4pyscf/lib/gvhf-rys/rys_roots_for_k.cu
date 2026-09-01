@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include "gvhf-rys/rys_roots.cu"
 
 // NOTE (SYCL/PVC): the barriers below must NOT be taken when `stride == 1`.

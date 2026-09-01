@@ -313,10 +313,13 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
         kern = libpbc.PBCcontract_int3c2e_auxvec
         nsp_per_block, gout_stride, shm_size = int3c2e.int3c2e_scheme(
             cache_cart_idx=True, gout_width=29, gout_ndim='ij', deriv=(0,0,0))
+        precision = cell.precision
     elif intor == 'pnucp':
         kern = libpbc.PBCcontract_int3c2e_pvp_auxvec
         nsp_per_block, gout_stride, shm_size = int3c2e.int3c2e_scheme(
             cache_cart_idx=True, gout_width=29, gout_ndim='ij', deriv=(1,1,0))
+        # pnucp introduces second order derivatives. AFT requires higher ke_cutoff
+        precision = cell.precision * 1e-2
     else:
         raise NotImplementedError
     lmax = cell.uniq_l_ctr[:,0].max()
@@ -345,6 +348,7 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
     err = kern(
         ctypes.cast(wj.data.ptr, ctypes.c_void_p),
         ctypes.cast(charges.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(-rsdf_omega),
         ctypes.byref(int3c2e_envs),
         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
         ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
@@ -368,7 +372,7 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
     ###############################################
     # LR part with AFT
     if omega != rsdf_omega:
-        ke_cutoff = rsdf_builder.estimate_ke_cutoff_for_omega(cell, rsdf_omega)
+        ke_cutoff = rsdf_builder.estimate_ke_cutoff_for_omega(cell, rsdf_omega, precision)
         mesh = cell.cutoff_to_mesh(ke_cutoff)
         mesh = cell.symmetrize_mesh(mesh)
         Gv, _, kws = cell.get_Gv_weights(mesh)

@@ -5,7 +5,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
-#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #define THREADS         256
 #define POOL_SIZE       25600
@@ -704,8 +704,7 @@ void int3c2e_220(KERNEL_ARGS)
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
-                            128, 2, gout_id);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, 128, 2, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*256];
@@ -1520,8 +1519,7 @@ void int3c2e_211(KERNEL_ARGS)
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
-                            64, 4, gout_id);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, 64, 4, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*128];
@@ -2065,8 +2063,7 @@ void int3c2e_112(KERNEL_ARGS)
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
-                            64, 4, gout_id);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, 64, 4, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*128];
@@ -2312,8 +2309,7 @@ void int3c2e_202(KERNEL_ARGS)
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
-                            128, 2, gout_id);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, 128, 2, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*256];

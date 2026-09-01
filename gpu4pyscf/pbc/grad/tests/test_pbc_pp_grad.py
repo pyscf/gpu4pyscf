@@ -148,7 +148,7 @@ class TestCrossBasisIntegrals(unittest.TestCase):
                 continue
             self.assertEqual(c.shape, g.shape,
                              f"Shape mismatch at level {lvl}: CPU {c.shape} vs GPU {g.shape}")
-            err = np.max(np.abs(g - c))
+            err = np.max(np.abs(g.get() - c))
             self.assertAlmostEqual(err, 0, places,
                                    f"Level {lvl} base integrals: max|err|={err:.2e}")
 
@@ -388,7 +388,7 @@ class TestFiniteDifference(unittest.TestCase):
         ni.allow_mesh_reduction = False
         Gv_bases = _get_Gv_bases(ni.mesh, cell.reciprocal_vectors())
         rho_g = multigrid_v3._eval_rhoG(ni, dm0, 1, kpts).ravel()
-        analytical_gradient = _pploc_derivatives(cell, ni.mesh, rho_g, Gv_bases)[0].get()
+        analytical_gradient = _pploc_derivatives(cell, rho_g, Gv_bases)[0].get()
 
         dx = 1e-4
         numerical_gradient = np.zeros([cell.natm, 3])

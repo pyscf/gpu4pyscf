@@ -38,10 +38,11 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_get_pp(self):
-        #kpt = cell.make_kpts([9,6,5])[107]
-        #ref = df_cpu.GDF(cell, kpt).get_pp()
-        #v1 = GDF(cell, kpt).get_pp().get()
-        #assert abs(v1 - ref).max() < 1e-8
+        kpt = cell.make_kpts([9,6,5])[107]
+        ref = df_cpu.GDF(cell, kpt).get_pp(kpts=kpt)
+        v1 = GDF(cell, kpt).get_pp(kpts=kpt).get()
+        assert v1.shape == ref.shape
+        assert abs(v1 - ref).max() < 1e-8
 
         ref = df_cpu.GDF(cell).get_pp()
         v1 = GDF(cell).get_pp().get()

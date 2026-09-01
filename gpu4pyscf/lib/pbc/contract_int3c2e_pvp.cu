@@ -27,7 +27,7 @@
 #define GOUT_WIDTH      29
 
 __global__ static
-void contract_int3c2e_pvp_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars envs,
+void contract_int3c2e_pvp_auxvec_kernel(double *out, double *auxvec, double omega, PBCIntEnvVars envs,
                                         uint32_t *img_pool, ShellTripletTaskInfo *task_pool,
                                         uint32_t *bas_ij_idx, int *ksh_offsets,
                                         int *img_idx, uint32_t *sp_img_offsets,
@@ -115,7 +115,6 @@ while (1) {
     int *ao_loc = envs.ao_loc;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
     if (thread_id == 0) {
         int bvk_nbas = envs.nbas * ncells;
@@ -175,7 +174,7 @@ while (1) {
 
 while (ksh0_cell0 < ksh1_cell0) {
     int nksh = min(POOL_SIZE/ncells, ksh1_cell0 - ksh0_cell0);
-    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
+    initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, omega, envs,
                          pair_ij, pair_ij+1, ksh0_cell0, ksh0_cell0+nksh,
                          li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
@@ -264,8 +263,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                         double ypq = Rpq[1*nst_per_block];
                         double zpq = Rpq[2*nst_per_block];
                         double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                        rys_roots_rs(nroots, theta, rr, omega,
-                                     rw, nst_per_block, gout_id, gout_stride);
+                        rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, gout_id, gout_stride);
                         for (int irys = 0; irys < nroots; ++irys) {
                             int lij = li + lj + 2;
                             BUILD_3C_GXYZ(lj+1, lk, nst_per_block, task_id < num_sub_tasks);
@@ -364,7 +362,7 @@ while (ksh0_cell0 < ksh1_cell0) {
 }
 
 extern "C" {
-int PBCcontract_int3c2e_pvp_auxvec(double *out, double *auxvec, PBCIntEnvVars *envs,
+int PBCcontract_int3c2e_pvp_auxvec(double *out, double *auxvec, double omega, PBCIntEnvVars *envs,
                                    uint32_t *pool, ShellTripletTaskInfo *task_pool, int *head,
                                    int shm_size, int npairs, int nbatches_ksh, int nauxbas,
                                    uint32_t *bas_ij_idx, int *ksh_offsets,
@@ -381,7 +379,7 @@ int PBCcontract_int3c2e_pvp_auxvec(double *out, double *auxvec, PBCIntEnvVars *e
       sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class contract_int3c2e_pvp_auxvec_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
         contract_int3c2e_pvp_auxvec_kernel(
-            out, auxvec, dev_envs, pool, task_pool, bas_ij_idx, ksh_offsets,
+            out, auxvec, omega, dev_envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
             head, npairs, nbatches_ksh,
@@ -391,7 +389,7 @@ int PBCcontract_int3c2e_pvp_auxvec(double *out, double *auxvec, PBCIntEnvVars *e
 #else
     cudaFuncSetAttribute(contract_int3c2e_pvp_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     contract_int3c2e_pvp_auxvec_kernel<<<workers, THREADS, shm_size>>>(
-            out, auxvec, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
+            out, auxvec, omega, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
             head, npairs, nbatches_ksh);

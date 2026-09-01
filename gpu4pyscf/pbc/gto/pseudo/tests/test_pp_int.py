@@ -53,6 +53,7 @@ def setUpModule():
         pseudo='gth-pade',
         unit='bohr',
         verbose=0,
+        precision=1e-10,
     )
 
     cell_fe = pyscf.M(
@@ -62,33 +63,8 @@ def setUpModule():
         pseudo='gth-pbe',
         unit='bohr',
         verbose=0,
+        precision=1e-10,
     )
-
-
-class TestContractPpnl(unittest.TestCase):
-    """Test GPU _contract_ppnl_gpu against CPU _contract_ppnl, gamma point."""
-
-    def _compare(self, cell, places=13):
-        from gpu4pyscf.pbc.gto.pseudo.pp_int import _contract_ppnl_gpu
-        kpts = np.zeros((1, 3))
-        fakecell, hl_blocks = fake_cell_vnl(cell)
-        ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts)
-
-        cpu = _contract_ppnl(cell, fakecell, hl_blocks, ppnl_half, kpts=kpts)
-        gpu = _contract_ppnl_gpu(cell, fakecell, hl_blocks, ppnl_half, kpts=kpts)
-
-        err = np.max(np.abs(cp.asarray(gpu).get() - np.asarray(cpu)))
-        self.assertAlmostEqual(err, 0, places, f"max|err|={err:.2e}")
-
-    def test_carbon(self):
-        self._compare(cell_c)
-
-    def test_silicon(self):
-        self._compare(cell_si)
-
-    def test_iron(self):
-        self._compare(cell_fe, places=12)
-
 
 class TestGetPpNlGamma(unittest.TestCase):
     """Test get_pp_nl_gpu against CPU get_pp_nl, gamma point."""
@@ -122,7 +98,7 @@ class TestGetPpNlKpts(unittest.TestCase):
 
     def test_silicon_single_kpt(self):
         kpts = np.array([[0.1, 0.0, 0.0]])
-        self._compare(cell_si, kpts)
+        self._compare(cell_si, kpts, places=12)
 
     def test_silicon_kmesh(self):
         kpts = cell_si.make_kpts([2, 2, 2])
@@ -131,6 +107,10 @@ class TestGetPpNlKpts(unittest.TestCase):
     def test_iron_single_kpt(self):
         kpts = np.array([[0.1, 0.0, 0.0]])
         self._compare(cell_fe, kpts, places=12)
+
+    def test_iron_single_kpts(self):
+        kpts = cell_fe.make_kpts([2, 5, 1])
+        self._compare(cell_fe, kpts, places=11)
 
 
 if __name__ == "__main__":

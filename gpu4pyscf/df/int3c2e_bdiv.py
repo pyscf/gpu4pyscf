@@ -581,7 +581,7 @@ def int3c2e_scheme(*, short_range=False, shm_size=SHM_SIZE, gout_width=None,
         # Round up to the next 2^n
         gout_stride = _nearest_power2(gout_stride, return_leq=False)
         nsp_per_block = THREADS // gout_stride
-    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
+    nsp_per_block = np.minimum(nsp_max, nsp_per_block)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
     if cache_cart_idx:

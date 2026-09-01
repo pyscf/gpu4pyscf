@@ -17,9 +17,9 @@ import unittest
 import numpy
 import os
 from pathlib import Path
-
 from pyscf import gto, dft
 from gpu4pyscf.dft.rks import RKS as RKS_gpu
+import pytest
 
 def setUpModule():
     global mol
@@ -108,6 +108,7 @@ class KnownValues(unittest.TestCase):
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
+    @pytest.mark.slow
     def test_bugfix_Pb_hessian_large_difference(self):
         mol = gto.M(
             atom = """
