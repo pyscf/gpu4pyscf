@@ -144,7 +144,8 @@ def get_hcore(mol):
         h = asarray(pp_int.get_gth_pp(mol))
     else:
         assert not mol.nucmod
-        from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec
+        #from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec
+        from gpu4pyscf.df.j_engine_3c2e import contract_int3c2e_auxvec
         nucmol = gto.mole.fakemol_for_charges(mol.atom_coords())
         Z = cupy.asarray(mol.atom_charges(), dtype=np.float64)
         #:h = mol.intor_symmetric('int1e_nuc')

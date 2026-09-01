@@ -32,8 +32,8 @@
 
 __global__ static
 void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
-                            RysIntEnvVars envs, double omega, double lr_factor,
-                            double sr_factor, int *shl_pair_offsets,
+                            double omega, double lr_factor, double sr_factor,
+                            RysIntEnvVars envs, int *shl_pair_offsets,
                             uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int naux
                             #ifdef USE_SYCL
@@ -573,8 +573,8 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
 
 extern "C" {
 int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
-                    RysIntEnvVars *envs, double omega, double lr_factor,
-                    double sr_factor, int shm_size, int nbatches_shl_pair,
+                    double omega, double lr_factor, double sr_factor,
+                    RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int aux_offset, int naux)
@@ -587,7 +587,7 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class ejk_int3c2e_ip2_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
         ejk_int3c2e_ip2_kernel(
-            ejk, dm, density_auxvec, dev_envs, omega, lr_factor, sr_factor,
+            ejk, dm, density_auxvec, omega, lr_factor, sr_factor, dev_envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, naux,
             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
@@ -597,7 +597,7 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
     cudaFuncSetAttribute(ejk_int3c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     ejk_int3c2e_ip2_kernel<<<blocks, THREADS, shm_size>>>(
-            ejk, dm, density_auxvec, *envs, omega, lr_factor, sr_factor,
+            ejk, dm, density_auxvec, omega, lr_factor, sr_factor, *envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();

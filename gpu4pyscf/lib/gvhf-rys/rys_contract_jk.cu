@@ -22,7 +22,7 @@
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
-#include "rys_roots.cu"
+#include "rys_roots_for_k.cu"
 #include "rys_contract_k.cuh"
 #include "create_tasks.cu"
 #include "build_rys_gxyz.cuh"
@@ -153,7 +153,7 @@ while (1) {
         _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                            q_cond_ij, q_cond_kl, dm_penalty,
                            s_cond_ij, s_cond_kl, diffuse_exps,
-                           (int *)shared_memory, envs, bounds);
+                           (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -289,8 +289,8 @@ while (1) {
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block,
-                             gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor,
+                                nsq_per_block, gout_stride, gout_id);
                 int lij = li + lj;
                 int lkl = lk + ll;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -380,6 +380,7 @@ extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds
 
 extern "C" {
 int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
+                 double omega, double lr_factor, double sr_factor,
                  RysIntEnvVars *envs, int *shls_slice, int shm_size,
                  int npairs_ij, int npairs_kl,
                  uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
@@ -409,7 +410,6 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
     int ntiles_l = (nfl + 2) / 3;
     int order = li + lj + lk + ll;
     int nroots = order / 2 + 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
@@ -430,14 +430,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int)*3);
 
-    JKMatrix jk = {vj, vk, dm, n_dm, 0, omega};
-    if (omega >= 0) {
-        jk.lr_factor = 1;
-        jk.sr_factor = 0;
-    } else {
-        jk.lr_factor = 0;
-        jk.sr_factor = 1;
-    }
+    JKMatrix jk = {vj, vk, dm, n_dm, 0, omega, lr_factor, sr_factor};
     if (!rys_jk_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
                          s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers)) {
         GXYZOffset gxyz_offset[256*3];

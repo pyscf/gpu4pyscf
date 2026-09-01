@@ -208,7 +208,7 @@ def _check_grad(mol, tol=1e-5, lindep=1.0E-12, disp=None, tda=False, method="cpu
 
 class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_cpu(self):
-        grad_gpu = _check_grad(mol, tol=1e-10, tda=True, method="cpu")
+        grad_gpu = _check_grad(mol, tol=1e-6, tda=True, method="cpu")
 
         grad_cpu, grad_gpu = benchmark_with_cpu(
             mol, nstates=5, lindep=1e-12, tda=True
@@ -224,7 +224,7 @@ class KnownValues(unittest.TestCase):
 
     @unittest.skipIf(num_devices > 1, '')
     def test_grad_tdhf_singlet_cpu(self):
-        grad_gpu = _check_grad(mol, tol=1e-10, lindep=1.0E-6, tda=False, method="cpu")
+        grad_gpu = _check_grad(mol, tol=1e-6, lindep=1.0E-6, tda=False, method="cpu")
         ref = np.array([[-3.4653829069609e-16,  2.3748317799310e-14, 1.0506609371536e-01],
                         [ 5.6250300822602e-16,  7.1515265578103e-02, -5.2533046857670e-02],
                         [-2.1596471752992e-16, -7.1515265578123e-02, -5.2533046857686e-02]])

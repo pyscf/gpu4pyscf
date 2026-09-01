@@ -450,7 +450,7 @@ while (1) {
                 int nroots = bounds.nroots;
                 double lr_factor = 0.;
                 double sr_factor = 1.;
-                rys_roots_for_k(nroots, theta, rr, rw, jmat.omega, lr_factor, sr_factor);
+                rys_roots_rs(nroots, theta, rr, jmat.omega, rw, nsq_per_block, gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
                     int lij = li + lj;
                     int lkl = lk + ll;

@@ -148,7 +148,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(2, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(2, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 2; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
@@ -333,7 +333,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(2, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(2, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 2; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
@@ -550,7 +550,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(4, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
@@ -811,7 +811,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(4, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
@@ -1178,7 +1178,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(4, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
@@ -1417,7 +1417,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(4, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
@@ -1784,7 +1784,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(4, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
@@ -2032,7 +2032,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(4, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
@@ -2372,7 +2372,7 @@ while (1) {
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
+                rys_roots_rs(4, theta, rr, kmat.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) continue;
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];

@@ -361,7 +361,7 @@ while (1) {
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
                     BUILD_4C_GXYZ(lj, ll, task_id < ntasks);
                     if (task_id >= ntasks) {
@@ -833,7 +833,7 @@ while (1) {
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
                     BUILD_4C_GXYZ(lj, ll, task_id < ntasks);
                     if (task_id >= ntasks) {
@@ -1180,7 +1180,9 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
     }
     // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
     // Additional factor 1/2 from the two-electron Coulomb operator
-    JKEnergy jk = {ejk, dm, 2.*j_factor, -k_factor, n_dm, omega, 0, 1};
+    JKEnergy jk = {ejk, dm, 2.*j_factor, -k_factor, n_dm, omega};
+    jk.lr_factor = 0;
+    jk.sr_factor = 1;
 
     #ifdef USE_SYCL
     sycl::queue& stream = *sycl_get_queue();

@@ -32,7 +32,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt,
-    _nearest_power2, _TimingCollector)
+    _nearest_power2, _TimingCollector, _check_rsh_factors)
 from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedMole
 from gpu4pyscf.df.int3c2e_bdiv import (
     Int3c2eOpt, _int3c2e_ip1_evaluator, int3c2e_scheme, int3c2e_scheme_ip1)
@@ -78,6 +78,8 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
     n_dm, nao = dms.shape[:2]
     assert n_dm <= 2
 
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+
     ao_loc = mol.ao_loc
     uniq_l_ctr = mol.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
@@ -90,11 +92,13 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
     diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
     n_groups = len(uniq_l_ctr)
-    tasks = ((i, j, k, l)
+    tasks = [(i, j, k, l)
              for i in range(n_groups)
              for j in range(i+1)
              for k in range(i+1)
-             for l in range(k+1))
+             for l in range(k+1)]
+    schemes = {t: _ejk_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
+    tasks = iter(tasks)
 
     def proc():
         device_id = cp.cuda.device.get_device_id()
@@ -120,7 +124,8 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
-        for i, j, k, l in tasks:
+        for task in tasks:
+            i, j, k, l = task
             shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
             pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
             pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
@@ -129,12 +134,15 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
             if npairs_ij == 0 or npairs_kl == 0:
                 continue
             llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            scheme = schemes[task]
             err = kern(
                 ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                 ctypes.c_double(j_factor), ctypes.c_double(k_factor),
                 ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(n_dm), ctypes.c_int(nao),
+                ctypes.c_double(omega),
+                ctypes.c_double(lr_factor),
+                ctypes.c_double(sr_factor),
                 rys_envs, (ctypes.c_int*2)(*scheme),
                 (ctypes.c_int*8)(*shls_slice),
                 ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
@@ -262,6 +270,8 @@ def _grad_nuc_without_ecp(mol, dm0):
     ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+sorted_mol.nbas, dtype=np.int32)
 
+    omega, lr_factor, sr_factor = 0., 1., 1.
+
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libvhf_rys.sum_ejk_int3c2e_ip1
     de = cp.zeros((mol.natm, 3))
@@ -273,6 +283,9 @@ def _grad_nuc_without_ecp(mol, dm0):
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
         ctypes.cast(charges.data.ptr, ctypes.c_void_p),
         ctypes.c_int(1),
+        ctypes.c_double(omega),
+        ctypes.c_double(lr_factor),
+        ctypes.c_double(sr_factor),
         ctypes.byref(int3c2e_envs),
         ctypes.c_int(shm_size_max),
         ctypes.c_int(len(shl_pair_offsets) - 1),

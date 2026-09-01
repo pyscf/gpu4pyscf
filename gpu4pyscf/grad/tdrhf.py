@@ -32,7 +32,8 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf.jk import (
-    LMAX, QUEUE_DEPTH, SHM_SIZE, libvhf_rys, _VHFOpt, _TimingCollector)
+    LMAX, QUEUE_DEPTH, SHM_SIZE, libvhf_rys, _VHFOpt, _TimingCollector,
+    _check_rsh_factors)
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.tdscf.rhf import TDA
 from gpu4pyscf.gto.mole import extract_pgto_params
@@ -333,6 +334,8 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
     dm2 = vhfopt.apply_coeff_C_mat_CT(dm2)
     nao = dm1.shape[-1]
 
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+
     assert j_factor is None or len(j_factor) == n_dm
     assert k_factor is None or len(k_factor) == n_dm
     if j_factor is None:
@@ -355,11 +358,25 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
     diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
     n_groups = len(uniq_l_ctr)
-    tasks = ((i, j, k, l)
+    tasks = [(i, j, k, l)
              for i in range(n_groups)
              for j in range(i+1)
              for k in range(i+1)
-             for l in range(k+1))
+             for l in range(k+1)]
+    schemes = {t: _ejk_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
+
+    if sum_results:
+        kern = libvhf_rys.RYS_per_atom_jk_ip1_sum
+        uniq_l = uniq_l_ctr[:,0]
+        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+        nf = nf[:,None] * nf
+        nf = nf[:,:,None,None] * nf
+        dd_cache_maxsize = max(scheme[0] * nf[tuple(task)] for task, scheme in schemes.items())
+    else:
+        kern = libvhf_rys.RYS_per_atom_jk_ip1_multidm
+        dd_cache_maxsize = DD_CACHE_MAX[lmax] * n_dm
+
+    tasks = iter(tasks)
 
     def proc():
         device_id = cp.cuda.device.get_device_id()
@@ -373,10 +390,8 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         _dm2 = cp.asarray(dm2, order='C')
 
         if sum_results:
-            kern = libvhf_rys.RYS_per_atom_jk_ip1_sum
             ejk = cp.zeros((mol.natm, 3))
         else:
-            kern = libvhf_rys.RYS_per_atom_jk_ip1_multidm
             ejk = cp.zeros((n_dm, mol.natm, 3))
         _j_factor = cp.asarray(j_factor, dtype=np.float64)
         _k_factor = cp.asarray(k_factor, dtype=np.float64)
@@ -392,11 +407,11 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         workers = gpu_specs['multiProcessorCount']
         # An additional integer to count for the proccessed pair_ijs
         pool = cp.empty(workers*QUEUE_DEPTH+n_dm, dtype=np.int32)
-        dd_cache_maxsize = DD_CACHE_MAX[lmax] * n_dm
         dd_pool = cp.empty((workers, dd_cache_maxsize), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
-        for i, j, k, l in tasks:
+        for task in tasks:
+            i, j, k, l = task
             shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
             pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
             pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
@@ -405,12 +420,7 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
             if npairs_ij == 0 or npairs_kl == 0:
                 continue
             llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-            uniq_l_ctr_ijkl = uniq_l_ctr[[i, j, k, l]]
-            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr_ijkl)
-
-            uniq_l_ijkl = uniq_l_ctr_ijkl[:, 0]
-            nf_ijkl = np.prod((uniq_l_ijkl + 1) * (uniq_l_ijkl + 2) // 2)
-            assert scheme[0] * nf_ijkl <= dd_cache_maxsize
+            scheme = schemes[task]
 
             err = kern(
                 ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
@@ -419,6 +429,9 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
                 ctypes.cast(_dm1.data.ptr, ctypes.c_void_p),
                 ctypes.cast(_dm2.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(n_dm), ctypes.c_int(nao),
+                ctypes.c_double(omega),
+                ctypes.c_double(lr_factor),
+                ctypes.c_double(sr_factor),
                 rys_envs, (ctypes.c_int*2)(*scheme),
                 (ctypes.c_int*8)(*shls_slice),
                 ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
