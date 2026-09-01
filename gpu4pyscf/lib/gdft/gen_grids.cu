@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <cuda.h>
 #include <cuda_runtime.h>
 
 #define NATOM_PER_BLOCK        128

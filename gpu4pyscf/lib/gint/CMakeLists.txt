@@ -33,29 +33,20 @@ set(GPU_SRCS
   j_engine_matrix_reorder.c
   rys_roots_dat.cu
   cart2sph.cu
-  )
+)
+
+add_library(gint SHARED ${GPU_SRCS})
+
+set_target_properties(gint PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 if (USE_SYCL)
-  #file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
-  #file(GLOB ALL_GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")
-
-  # This ensures all the files are added to $GPU_SRCS
-  # before target is generated
-  add_library(gint SHARED ${GPU_SRCS})
-
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
-  set_target_properties(gint PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(gint PRIVATE -x c++ -nocudainc -nocudalib)
   target_link_libraries(gint PRIVATE sycl_compat gsycl)
 else()
-  add_library(gint SHARED ${GPU_SRCS})
-  
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
-
-  set_target_properties(gint PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-    CUDA_SEPARABLE_COMPILATION ON)
+  set_target_properties(gint PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 endif()
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)

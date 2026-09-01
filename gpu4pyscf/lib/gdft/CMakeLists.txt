@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ExchCXX is built as a static dependency and linked into the shared
+# libgdft.so / libxc.so below, so every object in this directory must be
+# position-independent.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(GPU_SRCS
@@ -23,7 +26,7 @@ set(GPU_SRCS
 )
 
 if(USE_SYCL)
-  # ── Step 1: Compile exchcxx.cpp ONCE as an OBJECT library ─────────────
+  # Step 1: compile exchcxx.cpp ONCE as an OBJECT library.
   # Isolated from GPU_SRCS so changes to grid/numint kernels never
   # retrigger this expensive AoT SPIR-V compilation (~35 min).
   # Only rebuilt when exchcxx.cpp itself changes.
@@ -47,7 +50,7 @@ if(USE_SYCL)
   target_link_libraries(exchcxx_shim PRIVATE ExchCXX::ExchCXX)
   add_dependencies(exchcxx_shim ExchCXX)
 
-  # ── Step 2: libgdft.so ─────────────────────────────────────────────────
+  # Step 2: libgdft.so.
   # GPU grid/numint kernels + exchcxx.o via TARGET_OBJECTS (no recompile).
   # Python libgdft handle: GDFT_xc_lda/gga/mgga entry points live here.
   # Changing any GPU_SRCS file only recompiles that file + relinks gdft.
@@ -64,10 +67,10 @@ if(USE_SYCL)
   # that must be resolved against libexchcxx.so at runtime
   target_link_libraries(gdft PRIVATE sycl_compat gsycl ExchCXX::ExchCXX)
 
-  # ── Step 3: libxc.so — the libxc ABI shim Python loads as _libxc ──────
+  # Step 3: libxc.so -- the libxc ABI shim Python loads as _libxc.
   # Python _libxc handle: xc_func_alloc/init/end/free +
   #                       xc_version_string + xc_number_of_functionals etc.
-  # Same exchcxx.o reused via TARGET_OBJECTS — zero recompilation cost.
+  # Same exchcxx.o reused via TARGET_OBJECTS -- zero recompilation cost.
   # Replaces the old create_symlink approach with a real DSO target.
   add_library(xc SHARED
     $<TARGET_OBJECTS:exchcxx_shim>           # reuse same compiled object
@@ -90,5 +93,4 @@ else()
 endif()
 
 set_target_properties(gdft PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-)
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
