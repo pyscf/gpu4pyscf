@@ -146,6 +146,10 @@ def _check_arrays(current_arrays, fields, sizes, factor, required):
 class _xcfun(ctypes.Structure):
     pass
 
+# Set from the device library below when it advertises a limit; None means
+# "no limit reported", i.e. the device path handles every order it advertises.
+MAX_DERIV_ORDER = None
+
 if _libxc is not None:
     _xc_func_p = ctypes.POINTER(xc_func_type)
     _libxc.xc_func_alloc.restype = _xc_func_p
@@ -154,6 +158,16 @@ if _libxc is not None:
     _libxc.xc_func_free.argtypes = (_xc_func_p, )
     _libxc.xc_functional_get_name.argtypes = (ctypes.c_int, )
     _libxc.xc_functional_get_name.restype = ctypes.c_char_p
+
+    # Highest derivative order the device library implements. The CUDA libxc
+    # build handles every order it advertises, so it does not export this
+    # symbol; the SYCL ExchCXX shim stops at fxc and does. Anything beyond it
+    # is routed to PySCF's CPU libxc by XCfun.on_gpu below.
+    try:
+        _libxc.xc_device_max_deriv_order.restype = ctypes.c_int
+        MAX_DERIV_ORDER = _libxc.xc_device_max_deriv_order()
+    except AttributeError:
+        MAX_DERIV_ORDER = None
 
     nfunc = _libxc.xc_number_of_functionals()
     XC_IDS = np.zeros(nfunc, dtype=np.int32)
