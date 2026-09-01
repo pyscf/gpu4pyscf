@@ -253,14 +253,6 @@ class KnownValues(unittest.TestCase):
         assert abs(ej - ref).max() < 1e-12
         assert abs(lib.fp(ej) - -5.7379651745047555) < 2e-12
 
-    @pytest.mark.xfail(
-        reason=(
-               'Hard-coded fingerprint is cuRAND-specific: the DM comes from cp.random, and on'
-               ' SYCL cupy.random is dpnp.random (oneMKL) not cuRAND XORWOW, so the DM differs'
-               ' and 16.8821623565 is unreachable. GPU gradient VERIFIED CORRECT for the DM it'
-               ' receives against an independent CPU finite-difference reference (CPU FD fp 17'
-               '.190284408864635 vs GPU 17.190357036853285, max diff 5.795e-05, consistent wit'
-               'h O(disp^2) FD error). Needs an upstream decision.'))
     def test_jk_energy_per_atom(self):
         cp.random.seed(8)
         nao = mol.nao

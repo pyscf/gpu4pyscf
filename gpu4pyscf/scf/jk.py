@@ -49,11 +49,6 @@ libgint = load_library('libgint')
 PTR_BAS_COORD = 7
 LMAX = 4
 TILE = 12
-# NOTE (SYCL): the device kernels stride the task pool by the C-side
-# QUEUE_DEPTH in lib/gvhf-rys/vhf.cuh (65536) and carve the head counter at
-# pool + workers*QUEUE_DEPTH_C. This host value only sizes the allocation, so
-# it may exceed the C-side value (that merely over-allocates) but must never
-# be smaller.
 QUEUE_DEPTH = 262144
 SHM_SIZE = shm_size - 1024
 del shm_size
