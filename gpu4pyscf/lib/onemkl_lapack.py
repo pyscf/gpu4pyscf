@@ -12,6 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""oneMKL-backed stand-in for gpu4pyscf.lib.cusolver on the SYCL backend.
+
+cusolver.py calls cuSOLVER through `cupy_backends.cuda.libs.cusolver`, which
+does not exist under SYCL. gpu4pyscf/cupy/__init__.py therefore redirects both
+`cupy_backends.cuda.libs.cusolver` and `gpu4pyscf.lib.cusolver` to this module,
+so anything importing either name (x2c/x2c.py, lib/cupy_helper.py) reaches
+oneMKL instead.
+
+This module must mirror cusolver.py's public surface exactly -- `eigh`,
+`cholesky`, `LinAlgError` and `MAX_EIGH_DIM` -- with the same signatures and
+the same failure behaviour, since callers are shared, unmodified upstream code.
+
+Only the routines with no dpnp equivalent are routed through libonemkl_helper:
+`dsygvd`/`zhegvd` for the generalized problem Hx = (lambda)Sx (dpnp.linalg.eigh
+takes a single matrix) and `trsm`. `potrf` is kept here too so that Cholesky
+failures raise this module's LinAlgError rather than dpnp's, matching what the
+CUDA path does.
+"""
+
 import numpy as np
 import dpnp
 import dpctl
@@ -73,6 +92,8 @@ libonemkl.onemkl_dpotrf_scratchpad_size.argtypes = [
     ctypes.c_int # lda
 ]
 libonemkl.onemkl_dpotrf_scratchpad_size.restype = ctypes.c_int64
+libonemkl.onemkl_dpotrf.restype = ctypes.c_int
+libonemkl.onemkl_zpotrf.restype = ctypes.c_int
 libonemkl.onemkl_zpotrf_scratchpad_size.argtypes = [
     ctypes.c_int, # n
     ctypes.c_int # lda
@@ -164,27 +185,34 @@ def cholesky(A):
     Returns:
         Lower triangular matrix L such that A = L * L.T
     """
-    print("1. in here onemkl_lapack cholesky()")
     n = len(A)
-    assert A.flags['C_CONTIGUOUS']
-    x = A.copy()
+    # cusolver.py transposes an F-contiguous input and copies to C order;
+    # do the same rather than asserting, so callers passing a transposed
+    # view behave identically on both backends.
+    if A.flags.f_contiguous:
+        A = A.T
+    x = A.copy(order='C')
     if A.dtype == np.float64:
         potrf = libonemkl.onemkl_dpotrf
         potrf_bufferSize = libonemkl.onemkl_dpotrf_scratchpad_size
     else:
         potrf = libonemkl.onemkl_zpotrf
         potrf_bufferSize = libonemkl.onemkl_zpotrf_scratchpad_size
-    print("2. in here onemkl_lapack cholesky()")        
     scratchpad_size = potrf_bufferSize(n, n)
-    print("3. in here onemkl_lapack cholesky()")    
     scratchpad = dpnp.empty(scratchpad_size, dtype=A.dtype)
-    print("4. in here onemkl_lapack cholesky()")    
-    potrf(n,
-          ctypes.cast(x.data.ptr, ctypes.c_void_p),
-          n,
-          ctypes.cast(scratchpad.data.ptr, ctypes.c_void_p),
-          scratchpad_size)
-    print("5. in here onemkl_lapack cholesky()")
+    info = potrf(n,
+                 ctypes.cast(x.data.ptr, ctypes.c_void_p),
+                 n,
+                 ctypes.cast(scratchpad.data.ptr, ctypes.c_void_p),
+                 scratchpad_size)
+    # cusolver.py raises on a non-zero dev_info; df.py and grad/rhf.py catch
+    # RuntimeError to fall back to an eigendecomposition for singular j2c.
+    if info != 0:
+        raise LinAlgError('failed to perform Cholesky Decomposition')
     x = dpnp.tril(x, k=0)
-    print("6. in here onemkl_lapack cholesky()")    
     return x
+
+
+class LinAlgError(RuntimeError):
+    """Mirrors cusolver.LinAlgError, which also derives from RuntimeError."""
+    pass

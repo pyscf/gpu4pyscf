@@ -135,7 +135,11 @@ extern "C" int64_t onemkl_zpotrf_scratchpad_size(int n,
 }
 
 
-extern "C" void onemkl_dpotrf(int n,
+// Returns 0 on success, non-zero if the factorization failed. cuSOLVER
+// reports this through dev_info and cusolver.py raises LinAlgError on it;
+// callers in df.py rely on that to fall back to an eigendecomposition when
+// j2c is singular, so the status has to survive the wrapper.
+extern "C" int onemkl_dpotrf(int n,
                               double* A,
                               int lda,
                               double* scratchpad,
@@ -148,11 +152,21 @@ extern "C" void onemkl_dpotrf(int n,
                                         A, lda,
                                         scratchpad, scratchpad_size);
     e.wait();
+  } catch (oneapi::mkl::lapack::exception const& e) {
+    // info() > 0 means the leading minor of that order is not positive
+    // definite -- the expected signal for a singular input, not a bug.
+    return e.info() ? static_cast<int>(e.info()) : 1;
   } catch (sycl::exception const& e) {
-    std::cerr << "SYCL exception: " << e.what() << std::endl;
+    std::cerr << "SYCL exception in dpotrf: " << e.what() << std::endl;
+    return 1;
   }
+  return 0;
 }
-extern "C" void onemkl_zpotrf(int n,
+// Returns 0 on success, non-zero if the factorization failed. cuSOLVER
+// reports this through dev_info and cusolver.py raises LinAlgError on it;
+// callers in df.py rely on that to fall back to an eigendecomposition when
+// j2c is singular, so the status has to survive the wrapper.
+extern "C" int onemkl_zpotrf(int n,
                               std::complex<double>* A,
                               int lda,
                               std::complex<double>* scratchpad,
@@ -165,7 +179,13 @@ extern "C" void onemkl_zpotrf(int n,
                                         A, lda,
                                         scratchpad, scratchpad_size);
     e.wait();
+  } catch (oneapi::mkl::lapack::exception const& e) {
+    // info() > 0 means the leading minor of that order is not positive
+    // definite -- the expected signal for a singular input, not a bug.
+    return e.info() ? static_cast<int>(e.info()) : 1;
   } catch (sycl::exception const& e) {
-    std::cerr << "SYCL exception: " << e.what() << std::endl;
+    std::cerr << "SYCL exception in zpotrf: " << e.what() << std::endl;
+    return 1;
   }
+  return 0;
 }
