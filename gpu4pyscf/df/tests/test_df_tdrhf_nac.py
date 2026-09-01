@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import unittest
-import pytest
 import numpy as np
 import cupy as cp
 import pyscf
@@ -196,13 +195,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(nac2.de_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(nac2.de_etf_scaled)).max() < 3e-4
 
-    @pytest.mark.xfail(
-        reason=(
-               'Hard-coded fingerprint is cuRAND-specific, same cause as test_df_tdrhf_grad.py'
-               '::test_jk_energy_per_atom: MO coefficients and xyI/xyJ all come from cp.random'
-               '.seed(4)/cp.random.rand and cupy.random is dpnp.random here. NOTE: unlike that'
-               ' case the GPU result has NOT been independently validated; only the cause of t'
-               'he mismatch is established.'))
     def test_get_nacv_ee(self):
         mol = pyscf.M(
             atom = '''

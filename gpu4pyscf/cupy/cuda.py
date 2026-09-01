@@ -1549,18 +1549,6 @@ def alloc_pinned_memory(nbytes, flags=None):
     return Mem(nbytes, queue=q)
 
 
-def _gpu_probe(label):
-    """Probe whether the GPU context is still healthy. Prints OK or raises
-    with the failure site. Drains the master queue so earlier async faults
-    surface HERE instead of at some later innocent-looking call."""
-    import dpnp
-    try:
-        x = dpnp.zeros(4, dtype=dpnp.float64)
-        x.sycl_queue.wait()
-    except Exception as e:
-        raise
-
-
 # =====================================================================
 # cupy.cuda.memory shim
 #
