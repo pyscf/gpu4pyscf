@@ -9,18 +9,18 @@ must land on that master queue.
 
 Enforcement layers (defence in depth)
 -------------------------------------
-1. Master queue registry — `_master_queue(d)` creates the singleton
+1. Master queue registry -- `_master_queue(d)` creates the singleton
    in-order queue for device `d` on first call, registers its native
    pointer with libgsycl.so, and caches it forever.
 
-2. Global queue-cache replacement — on dpctl/dpnp master,
+2. Global queue-cache replacement -- on dpctl/dpnp master,
    `_global_device_queue_cache` is a plain process-global object whose
    `get_or_create(key)` returns a SyclQueue. We replace it with a cache
    that always returns the per-device master queue. Being process-global
    (not a ContextVar), it is also visible to ThreadPoolExecutor worker
    threads, so every thread sees the master queue.
 
-3. Creation-API wrappers — every dpnp and dpctl.tensor array-creation
+3. Creation-API wrappers -- every dpnp and dpctl.tensor array-creation
    function is wrapped to inject `sycl_queue=master` unless the caller
    has explicitly placed the allocation.
 
@@ -31,8 +31,8 @@ we're loaded through the gpu4pyscf.cupy facade that re-exports as
 `cupy`) and `gpu4pyscf.cupy.cuda` (the real dotted path). Both names
 are aliased in gpu4pyscf/cupy/__init__.py, but as belt-and-suspenders
 this file stashes its mutable state (master queue registry, device
-cache, stream cache) on the `dpnp` module — which is guaranteed to
-load exactly once — so even if we execute twice we don't duplicate
+cache, stream cache) on the `dpnp` module -- which is guaranteed to
+load exactly once -- so even if we execute twice we don't duplicate
 the master queue or install the wrappers twice.
 
 Verification
@@ -59,8 +59,6 @@ import weakref
 
 import dpctl
 import dpctl.memory as dpmem
-# import dpctl.utils
-# import dpctl.utils as dputils
 import dpctl._sycl_queue_manager as qmgr
 import dpnp
 
@@ -126,7 +124,7 @@ _DEFER_FREE_OFFTHREAD_CAP = max(
 
 
 # =====================================================================
-# Shared, reload-safe state — stashed on dpnp (which loads once).
+# Shared, reload-safe state -- stashed on dpnp (which loads once).
 #
 # If this file gets executed twice (two distinct module objects under
 # two names), both copies share the same registry, the same device
@@ -229,7 +227,7 @@ def _on_scheduler_safe_thread():
 
 
 # =====================================================================
-# libgsycl.so — the C++ side's master-queue registry
+# libgsycl.so -- the C++ side's master-queue registry
 # =====================================================================
 _lib_path = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../lib/libgsycl.so"))
@@ -273,11 +271,11 @@ def _get_sycl_queue_ptr(q: dpctl.SyclQueue) -> int:
     """Return the actual sycl::queue* as an integer.
 
     DPCTLSyclQueueRef is a typedef for sycl::queue*, and
-    SyclQueue.addressof_ref() returns its value cast to size_t —
+    SyclQueue.addressof_ref() returns its value cast to size_t --
     i.e. the sycl::queue* itself. sycl_set_queue_ptr does a direct
     static_cast<sycl::queue*>, so we pass the value as-is.
 
-    q must remain alive for the lifetime of the stored pointer —
+    q must remain alive for the lifetime of the stored pointer --
     _master_queues guarantees this for master queues.
     """
     return int(q.addressof_ref())
@@ -328,74 +326,6 @@ def _master_queue(device_id=None):
             ctypes.c_void_p(_get_sycl_queue_ptr(q)))
         _master_queues[device_id] = q   # keeps q alive -> pointer stays valid
         return q
-# def _master_queue(device_id=None):
-#     if device_id is None:
-#         device_id = int(libgpu.sycl_get_device_id())
-#     with _master_lock:
-#         q = _master_queues.get(device_id)
-#         if q is None:
-#             devs = _gpu_devices()
-#             if device_id < 0 or device_id >= len(devs):
-#                 raise ValueError(
-#                     f"device_id {device_id} out of range (have {len(devs)} GPUs)")
-#             q = dpctl.SyclQueue(devs[device_id], property="in_order")
-
-#             # Register before any USM allocation; idempotent.
-#             dputils.register_externally_shared_queue(q)
-
-#             libgpu.sycl_set_queue_ptr(
-#                 ctypes.c_int(device_id),
-#                 ctypes.c_void_p(int(q.addressof_ref())))
-#             _master_queues[device_id] = q
-#         else:
-#             # Belt-and-suspenders: catch the case where _master_queues was
-#             # populated by a path that skipped registration.
-#             if not hasattr(q, '_dpctl_deferred_free_pool'):
-#                 dputils.register_externally_shared_queue(q)
-#         return q
-    
-# def _master_queue(device_id=None):
-#     if device_id is None:
-#         device_id = int(libgpu.sycl_get_device_id())
-#     with _master_lock:
-#         q = _master_queues.get(device_id)
-#         if q is not None:
-#             return q
-#         devs = _gpu_devices()
-#         if device_id < 0 or device_id >= len(devs):
-#             raise ValueError(
-#                 f"device_id {device_id} out of range (have {len(devs)} GPUs)")
-#         q = dpctl.SyclQueue(devs[device_id], property="in_order")
-
-#         libgpu.sycl_set_queue_ptr(
-#             ctypes.c_int(device_id),
-#             ctypes.c_void_p(_get_sycl_queue_ptr(q))  # ← fixed
-#         )
-#         _master_queues[device_id] = q   # keeps q alive → pointer stays valid
-#         return q
-
-# def _master_queue(device_id=None):
-#     """Return the singleton master in-order SyclQueue for a device.
-
-#     First call creates the queue, registers its native pointer with
-#     libgsycl.so, and caches it. Subsequent calls are O(1).
-#     """
-#     if device_id is None:
-#         device_id = int(libgpu.sycl_get_device_id())
-#     with _master_lock:
-#         q = _master_queues.get(device_id)
-#         if q is not None:
-#             return q
-#         devs = _gpu_devices()
-#         if device_id < 0 or device_id >= len(devs):
-#             raise ValueError(
-#                 f"device_id {device_id} out of range (have {len(devs)} GPUs)")
-#         q = dpctl.SyclQueue(devs[device_id], property="in_order")
-#         libgpu.sycl_set_queue_ptr(
-#             ctypes.c_int(device_id),
-#             ctypes.c_void_p(q.addressof_ref()))
-#         _master_queues[device_id] = q
-#         return q
 
 
 def master_device(device_id=None):
@@ -418,7 +348,7 @@ def _same_queue(q1, q2):
 
 
 # =====================================================================
-# Layer 2 — replace dpctl's process-global queue cache
+# Layer 2 -- replace dpctl's process-global queue cache
 # =====================================================================
 class _MasterQueueCache:
     """Drop-in replacement for dpctl._DeviceDefaultQueueCache.
@@ -432,7 +362,7 @@ class _MasterQueueCache:
     We resolve every key to the per-device master in-order queue so all
     dpnp/dpctl allocations land on the singleton queue for that GPU.
     Because this object is process-global rather than a ContextVar,
-    ThreadPoolExecutor worker threads observe it too — fixing the
+    ThreadPoolExecutor worker threads observe it too -- fixing the
     worker-thread allocation escape that motivated the original shim.
 
     Accepted key types (per dpctl): a SyclDevice, a (SyclContext,
@@ -489,7 +419,7 @@ class _MasterQueueCache:
         return self
 
 # =====================================================================
-# Layer 3 — wrap every creation API so sycl_queue=master is injected
+# Layer 3 -- wrap every creation API so sycl_queue=master is injected
 # =====================================================================
 _DPNP_CREATION = (
     "asarray", "array", "zeros", "ones", "empty", "full",
@@ -501,7 +431,7 @@ _DPNP_CREATION = (
 
 
 # =====================================================================
-# Layer 4 — queue-ordered deferred free of dpnp USM buffers
+# Layer 4 -- queue-ordered deferred free of dpnp USM buffers
 # =====================================================================
 #
 # Why this exists
@@ -1112,7 +1042,7 @@ def _pin_order_managers():
 
 
 # =====================================================================
-# Bootstrap — install layers 1-3. Guarded by _state["bootstrapped"]
+# Bootstrap -- install layers 1-3. Guarded by _state["bootstrapped"]
 # so a second execution of this file is a no-op.
 # =====================================================================
 def _bootstrap():
@@ -1129,7 +1059,7 @@ def _bootstrap():
                 RuntimeWarning)
 
     # Layer 2: replace dpctl's process-global queue cache with one that
-    # always returns the per-device master queue — but only if not already
+    # always returns the per-device master queue -- but only if not already
     # replaced by a previous load.
     try:
         existing = qmgr._global_device_queue_cache
@@ -1173,9 +1103,8 @@ def _bootstrap():
 _bootstrap()
 
 
-# import dpnp.tensor._ctors as _ctors
 # =====================================================================
-# Runtime verification — catches regressions early.
+# Runtime verification -- catches regressions early.
 # Uses native-handle equality (not `is`) because dpnp may rewrap a
 # SyclQueue Python object around the same underlying sycl::queue.
 # Runs once per process (guarded by _state["verified"]).
@@ -1189,7 +1118,7 @@ def _verify_single_queue_invariant():
     for d in range(len(_gpu_devices())):
         q = _master_queue(d)
         libgpu.sycl_set_device(ctypes.c_int(d))
-        if int(libgpu.sycl_get_queue_ptr() or 0) != _get_sycl_queue_ptr(q):  # ← fixed
+        if int(libgpu.sycl_get_queue_ptr() or 0) != _get_sycl_queue_ptr(q):  # <- fixed
             raise RuntimeError(
                 f"libgsycl queue pointer diverges from Python master on device {d}")
 
@@ -1206,7 +1135,7 @@ def _verify_single_queue_invariant():
         worker_q = ex.submit(_probe).result()
     if not _same_queue(worker_q, _master_queue(0)):
         raise RuntimeError(
-            "worker-thread dpnp allocation escaped master queue — "
+            "worker-thread dpnp allocation escaped master queue -- "
             "ContextVar replacement regressed"
         )
 
@@ -1281,7 +1210,7 @@ def release_deferred_frees():
 
 
 # =====================================================================
-# Stream — singleton per device, wraps master SyclQueue.
+# Stream -- singleton per device, wraps master SyclQueue.
 # Uses the shared _stream_cache on _state so both module copies (if any)
 # hand out the same Stream instance per device.
 # =====================================================================
@@ -1289,7 +1218,7 @@ class Stream:
     """CuPy-compatible singleton Stream wrapping the master SyclQueue.
 
     The constructor arguments (null, non_blocking, ptds) are accepted
-    for CuPy API parity but ignored — every Stream for a given device
+    for CuPy API parity but ignored -- every Stream for a given device
     returns the same object, backed by the master queue. If you need
     true stream-level concurrency you must step outside this shim and
     create a dpctl queue directly, which voids the single-queue
@@ -1338,7 +1267,7 @@ class Stream:
     def wait_event(self, event):
         # Every Stream is the same in-order master queue, so any work the
         # event was recorded after is already ordered before later
-        # submissions on this "stream" — nothing to wait for.
+        # submissions on this "stream" -- nothing to wait for.
         pass
 
     @classproperty
@@ -1394,10 +1323,10 @@ def get_device_name():
 
 
 # =====================================================================
-# Device — singleton per id, backed by the shared _device_cache on _state.
+# Device -- singleton per id, backed by the shared _device_cache on _state.
 # =====================================================================
 class Device:
-    """Singleton-per-id Device wrapper — CuPy Device(0) semantics."""
+    """Singleton-per-id Device wrapper -- CuPy Device(0) semantics."""
 
     def __new__(cls, device=None):
         if device is None:
@@ -1437,7 +1366,7 @@ class Device:
         pass
 
     def synchronize(self):
-        """Drain the device's master queue — superset of cudaDeviceSynchronize."""
+        """Drain the device's master queue -- superset of cudaDeviceSynchronize."""
         _master_queue(self._id).wait()
 
     @property
@@ -1449,7 +1378,7 @@ device = Device
 
 
 # =====================================================================
-# Event — wall-clock timing + queue.wait() sync
+# Event -- wall-clock timing + queue.wait() sync
 #
 # submit_barrier() on an idle in-order queue can return a Level Zero
 # 'internal event' that cannot be .wait()'d on, so we use host-clock
@@ -1490,7 +1419,7 @@ class Event:
         return True
 
     def __del__(self):
-        # Finalizer never touches GPU work — queue may be in teardown.
+        # Finalizer never touches GPU work -- queue may be in teardown.
         self._queue = None
 
 
@@ -1505,7 +1434,7 @@ def get_elapsed_time(start_event, end_event):
 
 
 # =====================================================================
-# Address helper — used by _Runtime.memcpy
+# Address helper -- used by _Runtime.memcpy
 # =====================================================================
 def _addr_of(obj) -> int:
     if isinstance(obj, int):

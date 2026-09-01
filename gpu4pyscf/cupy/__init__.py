@@ -3,11 +3,11 @@ CuPy-compatibility facade over dpnp for gpu4pyscf.
 
 Exports a fake `cupy` module built from dpnp, patches CuPy-vs-dpnp API
 differences in place, and sets up the `cupy.cuda` submodule (master
-queue, Stream, Device, Event — see cupy/cuda.py).
+queue, Stream, Device, Event -- see cupy/cuda.py).
 
 Import order matters: `cuda.py` monkey-patches dpnp creation APIs to
 inject sycl_queue=master. The aliases on `cupy_fake` must be bound
-AFTER that patching or they'll reference the unwrapped originals —
+AFTER that patching or they'll reference the unwrapped originals --
 see the rebind section near the bottom of this file.
 
 Idempotency / single-load guarantee
@@ -16,7 +16,7 @@ This package can be reached through two dotted paths:
   - `cupy`              (because we install `cupy_fake` into sys.modules)
   - `gpu4pyscf.cupy`    (the real package path)
 and similarly for the `.cuda` submodule. Without care, Python's import
-machinery loads the file TWICE — once per name — producing two module
+machinery loads the file TWICE -- once per name -- producing two module
 objects with two independent `_master_queues` registries and two
 independent sets of wrappers on dpnp.
 
@@ -31,8 +31,8 @@ Namespace isolation
 module. This matters: `setattr(cupy_fake, 'any', dpnp.any)` must only
 populate the fake cupy namespace. If we used `sys.modules[__name__]`
 as cupy_fake, the broad dpnp-attribute loop would overwrite Python
-builtins (`any`, `max`, `sum`, `abs`, …) in this module's globals,
-breaking every function defined here that calls `any(generator)` —
+builtins (`any`, `max`, `sum`, `abs`, ...) in this module's globals,
+breaking every function defined here that calls `any(generator)` --
 e.g. the numpy-einsum dispatcher. Keep cupy_fake separate.
 """
 import os
@@ -47,7 +47,7 @@ import dpnp.tensor as dpt
 
 
 # =====================================================================
-# Early short-circuit — if the facade has already been built under
+# Early short-circuit -- if the facade has already been built under
 # another name, just re-alias sys.modules and return it. This handles
 # the rare case where Python manages to execute this file a second
 # time despite the end-of-file aliasing (e.g. reload, stale finder).
@@ -70,11 +70,11 @@ if _ALREADY_LOADED is not None:
         sys.modules["gpu4pyscf.cupy.cuda"] = _existing_cuda
 else:
     # =================================================================
-    # First-time initialization — build the fake cupy module.
+    # First-time initialization -- build the fake cupy module.
     # =================================================================
 
     # -----------------------------------------------------------------
-    # cupy.ndarray alias — callable with CuPy's memptr= kwarg,
+    # cupy.ndarray alias -- callable with CuPy's memptr= kwarg,
     # isinstance-compatible with dpnp arrays.
     # -----------------------------------------------------------------
     def _resolve_dpnp_impl():
@@ -89,7 +89,7 @@ else:
 
 
     class _CuPyNdarrayMeta(ABCMeta):
-        """Supports `cupy.ndarray(shape, dtype=..., memptr=buf.data)` —
+        """Supports `cupy.ndarray(shape, dtype=..., memptr=buf.data)` --
         the `memptr=` kwarg is CuPy-specific; dpnp uses `buffer=` and
         doesn't accept our raw CuPy MemoryPointer shim, so we unwrap it."""
 
@@ -127,7 +127,7 @@ else:
 
 
     # -----------------------------------------------------------------
-    # Build the fake cupy module — SEPARATE from the current module so
+    # Build the fake cupy module -- SEPARATE from the current module so
     # setattr doesn't pollute our globals. See the module docstring.
     # Give it package attributes so `from . import cuda` style imports
     # resolve correctly when the fake is looked up as `cupy`.
@@ -162,7 +162,7 @@ else:
 
 
     # -----------------------------------------------------------------
-    # ndarray.dot(out=...) — fix a shape-mismatch edge case CuPy permits
+    # ndarray.dot(out=...) -- fix a shape-mismatch edge case CuPy permits
     # but dpnp rejects. Guarded so a second execution is a no-op.
     # -----------------------------------------------------------------
     if not getattr(dpnp.ndarray.dot, "__gpu4pyscf_patched__", False):
@@ -233,7 +233,7 @@ else:
 
 
     # -----------------------------------------------------------------
-    # cupy.cuda submodule — creates master queues, installs creation-API
+    # cupy.cuda submodule -- creates master queues, installs creation-API
     # wrappers on dpnp/dpt, installs the master queue cache (replacing
     # dpctl's process-global queue cache), installs in-place op drain.
     # See cupy/cuda.py for details.
@@ -256,7 +256,7 @@ else:
     # the PRE-patch references and is now stale. Refresh every name on
     # dpnp so cupy.foo() reaches the patched (queue-injecting) version.
     #
-    # Skip names that have custom cupy_fake shims later in this file —
+    # Skip names that have custom cupy_fake shims later in this file --
     # those shims already call the patched dpnp.* internally and inherit
     # queue injection that way.
     # -----------------------------------------------------------------
@@ -283,7 +283,7 @@ else:
     cupy_fake.asarray = dpnp.asarray
     cupy_fake.array   = dpnp.array
 
-    # cupy.add.at — dpnp's ufuncs have no .at (unbuffered scatter-add with
+    # cupy.add.at -- dpnp's ufuncs have no .at (unbuffered scatter-add with
     # duplicate-index accumulation). Host round-trip keeps np.add.at
     # semantics exactly; call sites (hessian, sem) use natm-scale arrays.
     class _AddWithAt:
@@ -306,7 +306,7 @@ else:
     cupy_fake.add = _AddWithAt()
 
     # =================================================================
-    # .get() / .set() — CuPy-style host <-> device transfer
+    # .get() / .set() -- CuPy-style host <-> device transfer
     # =================================================================
     def _dpnp_set(self, host_array, stream=None):
         # `stream` accepted for CuPy API compatibility; dpnp assignments are
@@ -398,7 +398,7 @@ else:
 
 
     # =================================================================
-    # hstack / vstack — cast numpy inputs to dpnp (CuPy does this, dpnp doesn't)
+    # hstack / vstack -- cast numpy inputs to dpnp (CuPy does this, dpnp doesn't)
     # =================================================================
     def _to_dpnp_seq(seq):
         out = []
@@ -423,7 +423,7 @@ else:
 
 
     # =================================================================
-    # zeros wrapper — CuPy allows positional dtype; dpnp requires kwarg
+    # zeros wrapper -- CuPy allows positional dtype; dpnp requires kwarg
     # =================================================================
     def _cupy_zeros(shape, dtype=None, order='C'):
         return dpnp.zeros(shape, dtype=dtype, order=order)
@@ -433,7 +433,7 @@ else:
 
 
     # =================================================================
-    # zeros_like / empty_like — CuPy accepts np.ndarray input; dpnp doesn't
+    # zeros_like / empty_like -- CuPy accepts np.ndarray input; dpnp doesn't
     # =================================================================
     def _norm_order(order):
         return 'C' if order in (None, 'K', 'A') else order
@@ -473,7 +473,7 @@ else:
 
 
     # =================================================================
-    # allclose — CuPy accepts Python scalars; dpnp.allclose does not
+    # allclose -- CuPy accepts Python scalars; dpnp.allclose does not
     # Upstream: https://github.com/IntelPython/dpnp/issues/2566
     # =================================================================
     def _cupy_allclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):
@@ -500,7 +500,7 @@ else:
 
 
     # =================================================================
-    # sqrt — CuPy accepts Python scalars; dpnp doesn't. Guarded.
+    # sqrt -- CuPy accepts Python scalars; dpnp doesn't. Guarded.
     # =================================================================
     if not getattr(dpnp.sqrt, "__gpu4pyscf_patched__", False):
         _orig_dpnp_sqrt = dpnp.sqrt
@@ -518,8 +518,8 @@ else:
 
 
     # =================================================================
-    # numpy.einsum / numpy.dot — auto-dispatch to dpnp when any arg is
-    # dpnp. Guarded. NOTE: `any` here is the Python builtin — we keep
+    # numpy.einsum / numpy.dot -- auto-dispatch to dpnp when any arg is
+    # dpnp. Guarded. NOTE: `any` here is the Python builtin -- we keep
     # cupy_fake separate from this module's globals specifically so that
     # stays true; see module docstring.
     # =================================================================
@@ -555,7 +555,7 @@ else:
 
 
     # =================================================================
-    # tril_indices — accept numpy.int64 etc.
+    # tril_indices -- accept numpy.int64 etc.
     # =================================================================
     def _cupy_tril_indices(n, k=0, m=None):
         n = int(n)
@@ -568,7 +568,7 @@ else:
 
 
     # =================================================================
-    # _LazyModule + cupy_backends stubs — defer loading onemkl_lapack
+    # _LazyModule + cupy_backends stubs -- defer loading onemkl_lapack
     # =================================================================
     class _LazyModule(types.ModuleType):
         def __init__(self, name, loader_func):
@@ -646,10 +646,10 @@ else:
 
 
     # =================================================================
-    # Memory pool — reports actual SYCL device memory.
+    # Memory pool -- reports actual SYCL device memory.
     #
     # Reference cuda through cupy_fake.cuda (closure-captured) rather
-    # than re-importing — this works regardless of which name the cuda
+    # than re-importing -- this works regardless of which name the cuda
     # module ended up registered under in sys.modules.
     # =================================================================
     _cuda_ref = _cuda_mod       # captured for the pool methods below
@@ -662,7 +662,7 @@ else:
         free_bytes  = free memory
         total_bytes = total HBM/VRAM capacity
 
-        All other methods are no-ops — dpnp has no user-managed memory pool.
+        All other methods are no-ops -- dpnp has no user-managed memory pool.
         """
 
         def free_all_blocks(self):
@@ -716,7 +716,7 @@ else:
 
 
     # =================================================================
-    # cupy.fuse — no-op under dpnp (CuPy kernel fusion not available)
+    # cupy.fuse -- no-op under dpnp (CuPy kernel fusion not available)
     # =================================================================
     def fuse(*args, **kwargs):
         """No-op replacement for cupy.fuse.
@@ -735,7 +735,7 @@ else:
 
 
     # =================================================================
-    # cupy.RawKernel / cupy.RawModule — runtime kernel compilation.
+    # cupy.RawKernel / cupy.RawModule -- runtime kernel compilation.
     #
     # Backed by dpctl.program.create_kernel_bundle_from_sycl_source (the
     # DPC++ `kernel_compiler` extension). The CUDA kernel sources already
@@ -752,7 +752,7 @@ else:
 
 
     # =================================================================
-    # sys.modules aliasing — make `cupy`, `gpu4pyscf.cupy`, and their
+    # sys.modules aliasing -- make `cupy`, `gpu4pyscf.cupy`, and their
     # `.cuda` submodules all resolve to the SAME module objects.
     #
     # This is what prevents the double-load: once both entries are set,
@@ -773,7 +773,7 @@ else:
 
 
 # =================================================================
-# cupy.fft submodule — direct aliases, dpnp signature is a superset
+# cupy.fft submodule -- direct aliases, dpnp signature is a superset
 # =================================================================
 _fft_mod = types.ModuleType("cupy.fft")
 _fft_mod.__package__ = "cupy"
