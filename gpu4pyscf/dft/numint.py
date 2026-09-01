@@ -1807,8 +1807,13 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
                 out[m] = cupy.zeros([2,1]*m + [ngrids])
         return out
 
-    # Fall back to the libxc library provided by PySCF, evaluate xc on CPUs
-    if not all(x.on_gpu for x, w in xcfuns):
+    # Fall back to the libxc library provided by PySCF, evaluate xc on CPUs.
+    # Either the functional has no device implementation, or the requested
+    # derivative order is beyond what the device library supports (the SYCL
+    # ExchCXX shim stops at fxc; CUDA libxc reports no limit).
+    max_deriv = libxc.MAX_DERIV_ORDER
+    if (not all(x.on_gpu for x, w in xcfuns)
+            or (max_deriv is not None and deriv > max_deriv)):
         ni_cpu = ni.to_cpu()
         ret = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)
         for i in range(deriv+1):
