@@ -1004,45 +1004,49 @@ def empty_mapped(shape, dtype=float, order='C'):
     return out
 
 def ndarray(shape, dtype=np.float64, buffer=None):
-    # the next if-else logic for shape is required because of this:
-    #     gpu4pyscf/scf/tests/test_diffuse_orbital.py:273:
-    # _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-    # gpu4pyscf/grad/rhf.py:445: in kernel
-    #     de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
-    #          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    # gpu4pyscf/grad/rhf.py:273: in grad_elec
-    #     e2_grad = mf_grad.energy_ee(mol, dm0)
-    #               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    # gpu4pyscf/df/grad/rhf.py:363: in energy_ee
-    #     return self.jk_energy_per_atom(dm, hermi=1)
-    #            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    # gpu4pyscf/df/grad/rhf.py:378: in jk_energy_per_atom
-    #     return _jk_energy_per_atom(
-    # gpu4pyscf/df/grad/rhf.py:98: in _jk_energy_per_atom
-    #     compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
-    #                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    # gpu4pyscf/df/int3c2e_bdiv.py:210: in evaluate_j3c
-    #     out = ndarray((nao_pair, naux), buffer=out)
-    #           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    # gpu4pyscf/lib/dpnp_helper.py:931: in ndarray
-    #     out = dpnp.ndarray(shape, dtype, buffer=buffer)
-    #           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    # ../dpnp_sparse/dpnp/dpnp_array.py:145: in __init__
-    #     self._array_obj = dpt.usm_ndarray(
-    # dpnp/tensor/_usmarray.pyx:354: in dpnp.tensor._usmarray.usm_ndarray.__cinit__
-    #     ???
-    # E   TypeError: only integer scalar arrays can be converted to a scalar index
-        
-    if isinstance(shape, (list, tuple)):
+    '''
+    Construct a dpnp ndarray object using the NumPy ndarray API.
+
+    dpnp counterpart of cupy_helper.ndarray.
+
+    Args:
+        shape : tuple or int
+            Shape of the array to allocate.
+
+    Kwargs:
+        dtype : Numpy data type.
+
+        buffer : dpnp array
+            If buffer is specified, the array is a view over its memory.
+            Otherwise a new allocation is made.
+    '''
+    # Normalise shape the way numpy.empty() does. Callers pass plain ints,
+    # tuples/lists, numpy integer scalars, and occasionally a device array
+    # produced by shape arithmetic. dpnp's __int__ rejects anything with
+    # ndim != 0, so `int(shape)` alone raises
+    #     TypeError: only 0-dimensional arrays can be converted to Python scalars
+    # for a 1-element 1-D array, which numpy accepts as the sequence [n].
+    if hasattr(shape, 'ndim') and not isinstance(shape, (list, tuple)):
+        # 0-d array is a scalar length; anything higher is a sequence of them.
+        shape = int(shape) if shape.ndim == 0 else tuple(int(s) for s in shape)
+    elif isinstance(shape, (list, tuple)):
         shape = tuple(int(s) for s in shape)
     else:
         shape = int(shape)
+
     if buffer is None:
         return dpnp.empty(shape, dtype=dtype)
-    else:
-        out = dpnp.ndarray(shape, dtype, buffer=buffer)
-        assert buffer.nbytes >= out.nbytes
-        return out
+
+    # cupy_helper builds the view from the raw pointer (memptr=buffer.data),
+    # so the buffer's own shape and dtype are irrelevant -- only its extent
+    # matters. dpnp validates the request against the buffer object instead
+    # and raises if the declared shape does not fit its element count, so
+    # reinterpret through a flat byte view to get the same semantics.
+    out_nbytes = int(np.prod(shape)) * np.dtype(dtype).itemsize
+    assert buffer.nbytes >= out_nbytes, (
+        'buffer of %d bytes is too small for the requested %d bytes'
+        % (buffer.nbytes, out_nbytes))
+    return dpnp.ndarray(shape, dtype, buffer=buffer)
 
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf

@@ -139,7 +139,26 @@ else:
 
     cupy_fake.ndarray = _CuPyNdarray
     cupy_fake.asnumpy = dpnp.asnumpy
-    cupy_fake.einsum  = dpnp.einsum
+
+    # einsum: dpnp can return a non-contiguous result where numpy and cupy
+    # both return a C-contiguous one. For 'lkz,lxpq->kxpqz' on
+    # (3,2,2) x (3,1,6,6) numpy gives strides (576,1152,96,16,8) while dpnp
+    # gives (16,0,192,32,8) -- correct values (agreement to 2e-16), but a
+    # strided view with a 0-stride broadcast axis.
+    #
+    # Upstream code relies on the numpy/cupy layout. pbc/gto/int1e.py feeds
+    # the result of contract() straight into hermi_triu(), which asserts
+    # mat.flags.c_contiguous and aborts the test otherwise. Normalise here so
+    # every caller sees the layout it would get on the CUDA backend.
+    def _einsum(*args, **kwargs):
+        out = dpnp.einsum(*args, **kwargs)
+        if isinstance(out, dpnp.ndarray) and not out.flags.c_contiguous:
+            out = dpnp.ascontiguousarray(out)
+        return out
+
+    _einsum.__name__ = 'einsum'
+    _einsum.__doc__ = getattr(dpnp.einsum, '__doc__', None)
+    cupy_fake.einsum = _einsum
 
 
     # -----------------------------------------------------------------
@@ -247,6 +266,7 @@ else:
         "hstack", "vstack",
         "allclose", "sqrt", "tril_indices",
         "dot", "asarray", "array",
+        "einsum",
     })
 
     for _attr in dir(dpnp):
