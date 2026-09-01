@@ -13,7 +13,11 @@
 # limitations under the License.
 
 cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
-option(USE_SYCL "Using SYCL backend" ON)
+# OFF by default: setup.py (the CUDA build) never passes this, so an ON
+# default silently sends the CUDA CI down the SYCL path, where it fails
+# looking for MKL. The SYCL build opts in explicitly -- setup_sycl.py and
+# .github/workflows/sycl-cpu-ci.yml both pass -DUSE_SYCL=ON.
+option(USE_SYCL "Using SYCL backend" OFF)
 
 if (USE_SYCL)
   project (gpu4pyscf C CXX Fortran)
