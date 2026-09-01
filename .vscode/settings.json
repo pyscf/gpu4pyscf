@@ -1,0 +1,8 @@
+{
+    "C_Cpp.errorSquiggles": "disabled",
+    "python.defaultInterpreterPath": "python3",
+    "editor.defaultFormatter": "ms-python.flake8",
+    "files.associations": {
+        "random": "cpp"
+    },
+}
