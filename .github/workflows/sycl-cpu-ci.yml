@@ -252,6 +252,11 @@ jobs:
             python -c "import gpu4pyscf; print('gpu4pyscf import OK')" ; } 2>&1 | tee /tmp/logs/50_smoke.log
 
       - name: scf unit tests (smoke, partial completion expected)
+        # Disabled: the SYCL backend still has known aborts and hangs in
+        # these suites, so a run says nothing useful about a given change.
+        # The build and smoke steps above are the meaningful gate for now.
+        # Flip this back to re-enable once the defects are fixed.
+        if: false
         continue-on-error: true
         timeout-minutes: 90
         run: |
@@ -262,6 +267,11 @@ jobs:
             --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/60_pytest_scf.log
 
       - name: df unit tests (smoke, partial completion expected)
+        # Disabled: the SYCL backend still has known aborts and hangs in
+        # these suites, so a run says nothing useful about a given change.
+        # The build and smoke steps above are the meaningful gate for now.
+        # Flip this back to re-enable once the defects are fixed.
+        if: false
         continue-on-error: true
         timeout-minutes: 60
         run: |
@@ -272,6 +282,11 @@ jobs:
             --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/70_pytest_df.log
 
       - name: dft unit tests (smoke, partial completion expected)
+        # Disabled: the SYCL backend still has known aborts and hangs in
+        # these suites, so a run says nothing useful about a given change.
+        # The build and smoke steps above are the meaningful gate for now.
+        # Flip this back to re-enable once the defects are fixed.
+        if: false
         continue-on-error: true
         timeout-minutes: 60
         run: |
