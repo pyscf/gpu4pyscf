@@ -789,3 +789,47 @@ for _fname in ("fftfreq", "rfftfreq"):
 cupy_fake.fft = _fft_mod
 sys.modules["cupy.fft"] = _fft_mod
 sys.modules["gpu4pyscf.cupy.fft"] = _fft_mod
+
+
+# ---------------------------------------------------------------------
+# cupy.testing submodule
+#
+# Upstream test files call cp.testing.assert_allclose(ref, test, atol=...)
+# with a mix of host (numpy) and device (dpnp) arrays. dpnp has no
+# `testing` namespace, so pull the operands back to the host and defer to
+# numpy.testing, which is what CuPy's version does anyway.
+# ---------------------------------------------------------------------
+_testing_mod = types.ModuleType("cupy.testing")
+
+
+def _to_host(a):
+    """dpnp/usm array -> numpy; anything else passes through untouched."""
+    if isinstance(a, dpnp.ndarray):
+        return dpnp.asnumpy(a)
+    if hasattr(a, "asnumpy"):
+        return a.asnumpy()
+    return a
+
+
+def _assert_allclose(actual, desired, *args, **kwargs):
+    return np.testing.assert_allclose(
+        _to_host(actual), _to_host(desired), *args, **kwargs)
+
+
+def _assert_array_equal(x, y, *args, **kwargs):
+    return np.testing.assert_array_equal(
+        _to_host(x), _to_host(y), *args, **kwargs)
+
+
+def _assert_array_almost_equal(x, y, *args, **kwargs):
+    return np.testing.assert_array_almost_equal(
+        _to_host(x), _to_host(y), *args, **kwargs)
+
+
+_testing_mod.assert_allclose = _assert_allclose
+_testing_mod.assert_array_equal = _assert_array_equal
+_testing_mod.assert_array_almost_equal = _assert_array_almost_equal
+
+cupy_fake.testing = _testing_mod
+sys.modules["cupy.testing"] = _testing_mod
+sys.modules["gpu4pyscf.cupy.testing"] = _testing_mod
