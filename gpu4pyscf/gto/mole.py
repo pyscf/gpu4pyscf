@@ -22,7 +22,7 @@ from pyscf import gto
 from pyscf.pbc import gto as pbcgto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
-from gpu4pyscf.lib.utils import load_library
+from gpu4pyscf.lib.utils import load_library, indices_within_groups
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import block_diag, asarray, ndarray
@@ -355,9 +355,22 @@ def extract_pgto_params(mol, op='diffuse'):
     if op != 'diffuse' and op != 'compact':
         raise RuntimeError(f'Unsupported operation {op}')
 
-    e = np.hstack(mol.bas_exps())
-    c = np.hstack([abs(mol._libcint_ctr_coeff(i)).max(axis=1)
-                   for i in range(mol.nbas)])
+    #:e = np.hstack(mol.bas_exps())
+    nprim = mol._bas[:,NPRIM_OF]
+    ptr = np.repeat(mol._bas[:,PTR_EXP], nprim)
+    e = mol._env[ptr + indices_within_groups(nprim)]
+
+    #:c = np.hstack([abs(mol._libcint_ctr_coeff(i)).max(axis=1)
+    #:               for i in range(mol.nbas)])
+    nctr = mol._bas[:,NCTR_OF]
+    sizes = nprim * nctr
+    ptr = np.repeat(mol._bas[:,PTR_COEFF], sizes)
+    idx = indices_within_groups(sizes)
+    offsets = np.append(0, np.cumsum(nprim)[:-1])
+    out_idx = np.repeat(offsets, sizes) + idx % np.repeat(nprim, sizes)
+    c = np.full(len(e), -np.inf)
+    np.maximum.at(c, out_idx, abs(mol._env[ptr + idx]))
+
     l = np.repeat(mol._bas[:,ANG_OF], mol._bas[:,NPRIM_OF])
     basis_id = np.repeat(np.arange(mol.nbas), mol._bas[:,NPRIM_OF])
     if isinstance(mol, pbcgto.Cell):
@@ -977,7 +990,7 @@ class SortedMole(Mole, SortedGTO):
     def shell_overlap_mask(self, hermi=1, precision=1e-16):
         '''absmax(<i|j>) > precision for each shell pair'''
         from gpu4pyscf.pbc.gto.int1e import _shell_overlap_mask
-        return _shell_overlap_mask(self, hermi, precision)
+        return _shell_overlap_mask(self, hermi, precision)[:,0]
 
     def generate_shl_pairs(self, hermi=1, mask=None):
         if mask is None:
@@ -1010,13 +1023,13 @@ class SortedMole(Mole, SortedGTO):
         bas_ij_idx = []
         shl_pair_offsets = []
         sp0 = sp1 = 0
-        l = self.uniq_l_ctr[:,0]
         for (i, j), bas_ij in bas_ij_cache.items():
             bas_ij_idx.append(cp.asarray(bas_ij))
             sp0, sp1 = sp1, sp1 + len(bas_ij)
             if isinstance(nsp_per_block, (int, np.integer)):
                 batch_size = nsp_per_block
             else:
+                l = self.uniq_l_ctr[:,0]
                 batch_size = nsp_per_block[l[i], l[j]]
             shl_pair_offsets.append(cp.arange(
                 sp0, sp1, batch_size, dtype=np.int32))
@@ -1086,8 +1099,8 @@ class RysIntEnvVars(ctypes.Structure):
 
 class PBCIntEnvVars(ctypes.Structure):
     _fields_ = [
-        ('natm', ctypes.c_int),
-        ('nbas', ctypes.c_int),
+        ('natm', ctypes.c_int), # number of atoms in unit cell
+        ('nbas', ctypes.c_int), # number of shells in unit cell
         ('atm', ctypes.c_void_p),
         ('bas', ctypes.c_void_p),
         ('env', ctypes.c_void_p),
@@ -1130,8 +1143,12 @@ def _scale_sp_ctr_coeff(mol):
     fac = ((ls[idx]*2+1) / (4*np.pi)) ** .5
     nprim = mol._bas[idx,NPRIM_OF]
     nctr = mol._bas[idx,NCTR_OF]
-    for p, n, f in zip(ptr, nprim*nctr, fac):
-        _env[p:p+n] *= f
+    #:for p, n, f in zip(ptr, nprim*nctr, fac):
+    #:    _env[p:p+n] *= f
+    sizes = nprim * nctr
+    ptr = np.repeat(ptr, sizes)
+    fac = np.repeat(fac, sizes)
+    _env[ptr + indices_within_groups(sizes)] *= fac
     return _env
 
 PTR_PBAS_IDX = 4
@@ -1281,48 +1298,41 @@ def _recontract_basis(mol, decontract=False, diffuse_cutoff=None):
     recontract_bas = []
     pbas_idx_size = 0
     ptr_coef = 0
-    aoslices = mol.aoslice_by_atom()
-    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
-        if ib0 == ib1:
-            continue
-        key = tuple(mol._bas[ib0:ib1,PTR_COEFF])
+
+    for shell in mol._bas:
+        ia = shell[ATOM_OF]
+        key = int(shell[PTR_COEFF])
         if key not in bas_templates:
-            bas_of_ia = []
             recontract = []
             pidx_offset = 0
-            for shell in mol._bas[ib0:ib1]:
-                l = shell[ANG_OF]
-                nprim = shell[NPRIM_OF]
-                nctr = shell[NCTR_OF]
+            l = shell[ANG_OF]
+            nprim = shell[NPRIM_OF]
+            nctr = shell[NCTR_OF]
 
-                if not decontract:
-                    shells, p2c_bas, c = _split_shell(shell, _env)
-                    nprim = len(shells)
-                    p2c_bas[:,PTR_COEFF] += ptr_coef
-                    p2c_bas[:,PTR_PBAS_IDX] += pidx_offset
-                    recontract.append(p2c_bas)
-                else:
-                    shells, c = _optimize_contraction(shell, _env, diffuse_cutoff)
-                    nprim = len(shells)
-                    recontract.append(
-                        np.array([ia, l, nprim, nctr, pidx_offset, 0, ptr_coef, 0], dtype=np.int32))
-                bas_of_ia.append(shells)
-                ctr_coef.append(c.ravel())
-                pidx_offset += len(shells)
-                ptr_coef += c.size
+            if not decontract:
+                shells, recontract, c = _split_shell(shell, _env)
+                nprim = len(shells)
+                recontract[:,PTR_COEFF] += ptr_coef
+                recontract[:,PTR_PBAS_IDX] += pidx_offset
+            else:
+                shells, c = _optimize_contraction(shell, _env, diffuse_cutoff)
+                nprim = len(shells)
+                recontract = np.array([[ia, l, nprim, nctr, pidx_offset, 0, ptr_coef, 0]], dtype=np.int32)
+            ctr_coef.append(c.ravel())
+            pidx_offset += len(shells)
+            ptr_coef += c.size
+            bas_templates[key] = (shells, recontract)
 
-            bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract))
-
-        bas_of_ia, recontract = bas_templates[key]
-        bas_of_ia = bas_of_ia.copy()
-        bas_of_ia[:,ATOM_OF] = ia
-        _bas.append(bas_of_ia)
+        shells, recontract = bas_templates[key]
+        shells = shells.copy()
+        shells[:,ATOM_OF] = ia
+        _bas.append(shells)
 
         recontract = recontract.copy()
         recontract[:,ATOM_OF] = ia
         recontract[:,PTR_PBAS_IDX] += pbas_idx_size
         recontract_bas.append(recontract)
-        pbas_idx_size += len(bas_of_ia)
+        pbas_idx_size += len(shells)
 
     pmol = mol.copy(deep=False)
     pmol.cart = True

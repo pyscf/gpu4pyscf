@@ -33,7 +33,8 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
-    extract_pgto_params, _scale_sp_ctr_coeff, RysIntEnvVars, SortedGTO)
+    extract_pgto_params, _scale_sp_ctr_coeff, RysIntEnvVars, SortedGTO,
+    SortedMole)
 
 __all__ = [
     'get_jk', 'get_j', 'get_k',
@@ -994,8 +995,8 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
     log(sqrt(absmax( (ij|ij) ))).
     Note the high angular momentum bases are excluded.
     '''
-    from gpu4pyscf.pbc.gto import int1e
     from gpu4pyscf.pbc.scf.rsjk import libpbc, _group_by_split_points
+    assert isinstance(mol, SortedMole)
     omega = mol.omega
     ls = np.arange(LMAX+1)
     li = ls[:,None]
@@ -1030,7 +1031,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
     l_ctr_offsets = np.append(0, np.cumsum(mol.l_ctr_counts))
     n = mol.l_ctr_counts.max()
     pair_buf = cp.empty(n**2, dtype=np.int64)
-    ovlp_mask = int1e._shell_overlap_mask(mol, precision=precision**2)
+    ovlp_mask = mol.shell_overlap_mask(precision=precision**2)
     if tril:
         ovlp_mask = cp.tril(ovlp_mask)
     ovlp_mask = ovlp_mask.ravel()

@@ -46,7 +46,7 @@ def conj_images_in_bvk_cell(kmesh, return_pair=False):
     mask = Ls_idx <= Ls_idx_conj
     return np.vstack((Ls_idx[mask], Ls_idx_conj[mask])).T
 
-def kk_adapted_iter(kmesh, with_gamma_point=True):
+def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
     '''Generates kpt which is adapted to the kpt_aux of the metric in RI
     for (ij| RI |kl). The metric is computed as (-kpt_aux|kpt_aux) where
     kpt_aux = kj - ki. The output is [idx(k), idx(-k), kpti_idx, kptj_idx].
@@ -70,10 +70,25 @@ def kk_adapted_iter(kmesh, with_gamma_point=True):
     pair %= kmesh # to apply wrap_around
     kp, kp_conj = np.where(pair.sum(axis=2) == 0)
     independent_idx = np.sort(np.where(kp <= kp_conj)[0])
+
+    if not return_pair_index:
+        return zip(kp[independent_idx], kp_conj[independent_idx])
+
     kk_conserv = k2gamma.double_translation_indices(kmesh)
-    for x in independent_idx:
-        ki, kj = np.where(kk_conserv == kp[x])
-        yield kp[x], kp_conj[x], ki, kj
+
+    # Evaluate ((kp[x], kp_conj[x], *np.where(kk_conserv == kp[x]))
+    #           for x in independent_idx)
+    # It is slow to execute np.where(kk_conserv == kp[x]).
+    # np.unique is significantly faster
+
+    _, inv_idx, counts = np.unique(
+        kk_conserv.ravel(), return_inverse=True, return_counts=True)
+    idx = np.argsort(inv_idx, stable=True)
+    splits = counts.cumsum()[:-1]
+    kk_addrs = np.split(idx, splits)
+
+    return ((kp[x], kp_conj[x], *divmod(kk_addrs[x], nkpts))
+            for x in independent_idx)
 
 def reset_kpts(kpts, cell):
     '''
