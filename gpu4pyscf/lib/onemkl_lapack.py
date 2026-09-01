@@ -175,43 +175,71 @@ def eigh(h, s, overwrite=False):
        lwork)
     return w, A.T
 
+# The oneMKL potrf path below is retained but unused: all production callers
+# (df.py, df_jk.py, grad/rhf.py, via cupy_helper) resolve cholesky to
+# dpnp_helper.cholesky, which wraps dpnp.linalg.cholesky directly. Only
+# lib/tests/test_cusolver.py imports cholesky from this module, and that test
+# is satisfied by the dpnp delegation below. Kept commented rather than
+# deleted in case oneMKL potrf is ever wanted for performance; the C wrappers
+# onemkl_dpotrf/onemkl_zpotrf still exist in onemkl_helper/onemkl_lapack.cpp.
+#
+# def cholesky(A):
+#     """
+#     Compute the Cholesky decomposition of a Hermitian positive-definite matrix.
+#
+#     Args:
+#         A: Hermitian positive-definite matrix
+#
+#     Returns:
+#         Lower triangular matrix L such that A = L * L.T
+#     """
+#     n = len(A)
+#     # cusolver.py transposes an F-contiguous input and copies to C order;
+#     # do the same rather than asserting, so callers passing a transposed
+#     # view behave identically on both backends.
+#     if A.flags.f_contiguous:
+#         A = A.T
+#     x = A.copy(order='C')
+#     if A.dtype == np.float64:
+#         potrf = libonemkl.onemkl_dpotrf
+#         potrf_bufferSize = libonemkl.onemkl_dpotrf_scratchpad_size
+#     else:
+#         potrf = libonemkl.onemkl_zpotrf
+#         potrf_bufferSize = libonemkl.onemkl_zpotrf_scratchpad_size
+#     scratchpad_size = potrf_bufferSize(n, n)
+#     scratchpad = dpnp.empty(scratchpad_size, dtype=A.dtype)
+#     info = potrf(n,
+#                  ctypes.cast(x.data.ptr, ctypes.c_void_p),
+#                  n,
+#                  ctypes.cast(scratchpad.data.ptr, ctypes.c_void_p),
+#                  scratchpad_size)
+#     # cusolver.py raises on a non-zero dev_info; df.py and grad/rhf.py catch
+#     # RuntimeError to fall back to an eigendecomposition for singular j2c.
+#     if info != 0:
+#         raise LinAlgError('failed to perform Cholesky Decomposition')
+#     x = dpnp.tril(x, k=0)
+#     return x
+
 def cholesky(A):
     """
-    Compute the Cholesky decomposition of a Hermitian positive-definite matrix.
+    Cholesky decomposition of a Hermitian positive-definite matrix.
+
+    Delegates to dpnp so the SYCL backend has a single implementation, and
+    re-raises as this module's LinAlgError (a RuntimeError, matching
+    cusolver.LinAlgError) because df.py, df_jk.py and grad/rhf.py catch
+    RuntimeError to fall back to an eigendecomposition on a singular j2c.
+    dpnp.linalg.LinAlgError derives from ValueError and would slip past them.
 
     Args:
         A: Hermitian positive-definite matrix
 
     Returns:
-        Lower triangular matrix L such that A = L * L.T
+        Lower triangular matrix L such that A = L @ L.T
     """
-    n = len(A)
-    # cusolver.py transposes an F-contiguous input and copies to C order;
-    # do the same rather than asserting, so callers passing a transposed
-    # view behave identically on both backends.
-    if A.flags.f_contiguous:
-        A = A.T
-    x = A.copy(order='C')
-    if A.dtype == np.float64:
-        potrf = libonemkl.onemkl_dpotrf
-        potrf_bufferSize = libonemkl.onemkl_dpotrf_scratchpad_size
-    else:
-        potrf = libonemkl.onemkl_zpotrf
-        potrf_bufferSize = libonemkl.onemkl_zpotrf_scratchpad_size
-    scratchpad_size = potrf_bufferSize(n, n)
-    scratchpad = dpnp.empty(scratchpad_size, dtype=A.dtype)
-    info = potrf(n,
-                 ctypes.cast(x.data.ptr, ctypes.c_void_p),
-                 n,
-                 ctypes.cast(scratchpad.data.ptr, ctypes.c_void_p),
-                 scratchpad_size)
-    # cusolver.py raises on a non-zero dev_info; df.py and grad/rhf.py catch
-    # RuntimeError to fall back to an eigendecomposition for singular j2c.
-    if info != 0:
-        raise LinAlgError('failed to perform Cholesky Decomposition')
-    x = dpnp.tril(x, k=0)
-    return x
-
+    try:
+        return dpnp.linalg.cholesky(A)
+    except dpnp.linalg.LinAlgError as e:
+        raise LinAlgError(str(e)) from e
 
 class LinAlgError(RuntimeError):
     """Mirrors cusolver.LinAlgError, which also derives from RuntimeError."""
