@@ -72,9 +72,10 @@ class CMakeBuildPy(build_py):
         self.announce('Configuring extensions', level=3)
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
-        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=ON']
-        # cmd.append('-DBUILD_LIBXC=OFF')
-        # cmd.append('-DUSE_SYCL=ON')
+        # -DUSE_SYCL=ON is required: gpu4pyscf/lib/CMakeLists.txt defaults it
+        # OFF so that setup.py builds the CUDA backend.
+        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}',
+               '-DBUILD_LIBXC=ON', '-DUSE_SYCL=ON']
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
             cmd.extend(configure_args.split(' '))
