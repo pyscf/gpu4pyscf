@@ -2,8 +2,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include "gvhf-rys/rys_roots.cu"
-#include "gvhf-rys/rys_contract_k.cuh"
+#include <cuda_runtime.h>
+#include <cuda.h>
+
 
 #define KERNEL_ARGS \
     double *out, PBCIntEnvVars& envs, uint32_t *img_pool, \
@@ -18,6 +19,7 @@
     KERNEL(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size, \
     ijk_tasks_info, c2s_pool, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc, \
     ao_pair_offset, aux_offset, nauxbas, naux, to_sph, thread_id, worker_id, shared_memory)
+
 
 __device__ __forceinline__
 void int3c2e_000(KERNEL_ARGS)

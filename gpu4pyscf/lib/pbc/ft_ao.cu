@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 
@@ -1208,12 +1209,18 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int
     return 0;
 }
 
-int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool,
+// `head` is the persistent-worker task counter upstream's kernel consumes via
+// atomicAdd. Both branches below map the grid statically instead, so the
+// pointer is unused -- but it stays in the signature because the ctypes
+// caller in pbc/df/ft_ao.py is upstream code and still passes it; dropping it
+// shifts every later argument by one and aborts the process.
+int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool, int *head,
                     int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
                     uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                     int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
                     double *grids, int ngrids, int *ao_loc, int compressing, int to_sph)
 {
+    (void)head;
     constexpr int nGv_per_block = NG_PER_BLOCK;
     int Gv_batches = (ngrids + nGv_per_block - 1) / nGv_per_block;
     #ifdef USE_SYCL

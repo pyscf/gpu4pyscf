@@ -11,29 +11,24 @@ set(GPU_SRCS
   unrolled_rys_k.cu
   nr_eval_gto.cu
   fill_triu.cu
-  )
+  sorting.c
+)
+
+add_library(pbc SHARED ${GPU_SRCS})
+
+set_target_properties(pbc PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 if (USE_SYCL)
-  set(C_SRCS sorting.c)
-  add_library(pbc SHARED ${GPU_SRCS} ${C_SRCS})
-
   # icx rejects the project-wide -std=gnu99 (CMAKE_C_STANDARD 99) together
   # with -fsycl, so plain-C sources are compiled as C++ here, matching
   # gvhf-md/md_pairdata.c. sorting.c carries an extern "C" guard.
-  set_source_files_properties(${C_SRCS} ${GPU_SRCS} PROPERTIES LANGUAGE CXX)
-  set_target_properties(pbc PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   target_compile_options(pbc PRIVATE -x c++ -nocudainc -nocudalib)
   target_link_libraries(pbc PRIVATE sycl_compat gsycl)
 else()
-  list(APPEND GPU_SRCS sorting.c)
-  add_library(pbc SHARED ${GPU_SRCS})
-
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
-
-  set_target_properties(pbc PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-    CUDA_SEPARABLE_COMPILATION ON)
+  set_target_properties(pbc PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 endif()
 
 target_link_libraries(pbc PRIVATE OpenMP::OpenMP_C)
