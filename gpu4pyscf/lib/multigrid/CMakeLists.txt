@@ -41,9 +41,11 @@ add_library(mgrid_v3 SHARED
   multigrid_v3/aft_eval_tau.cu
   multigrid_v3/aft_eval_lda_mat.cu
   multigrid_v3/aft_eval_mgga_mat.cu
-  multigrid_v3/eval_density_o1.cu
+  multigrid_v3/eval_density_v2.cu
+  multigrid_v3/eval_tau_v2.cu
 )
 
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 set_target_properties(mgrid_v3 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
   CUDA_SEPARABLE_COMPILATION ON
