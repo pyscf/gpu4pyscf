@@ -33,10 +33,28 @@ DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
 
-# Selects the compute backend for this build. Set GPU4PYSCF_BACKEND=sycl (or
-# pass -DUSE_SYCL=ON through CMAKE_CONFIGURE_ARGS) to build the SYCL backend;
-# anything else builds CUDA, which is the default and matches upstream.
+# Selects the compute backend for this build. CUDA is the default, matching
+# upstream, so an unmodified invocation is unchanged. To build SYCL:
+#
+#     python setup.py --sycl build
+#     GPU4PYSCF_BACKEND=sycl python setup.py build
+#     CMAKE_CONFIGURE_ARGS=-DUSE_SYCL=ON python setup.py build
+#
+# The env var form is what pip and other frontends can use, since they do not
+# forward unknown flags to setup.py.
 def build_backend():
+    # --sycl / --cuda are ours, not setuptools', so strip them from argv before
+    # setuptools parses it -- an unrecognised global option is a hard error.
+    # Precedence: command line, then GPU4PYSCF_BACKEND, then -DUSE_SYCL=ON in
+    # CMAKE_CONFIGURE_ARGS, else CUDA.
+    backend = None
+    for flag in ('--sycl', '--cuda'):
+        while flag in sys.argv:
+            sys.argv.remove(flag)
+            backend = flag[2:]
+    if backend is not None:
+        return backend
+
     backend = os.getenv('GPU4PYSCF_BACKEND', '').strip().lower()
     if backend in ('sycl', 'cuda'):
         return backend
