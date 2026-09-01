@@ -266,7 +266,7 @@ jobs:
           source /opt/intel/oneapi/setvars.sh --force
           source "$VENV/bin/activate"
           set -o pipefail; mkdir -p /tmp/logs
-          python setup_sycl.py build 2>&1 | tee /tmp/logs/40_gpu4pyscf_build.log
+          GPU4PYSCF_BACKEND=sycl python setup.py build 2>&1 | tee /tmp/logs/40_gpu4pyscf_build.log
           ccache -s || true
 
       - name: Save ccache (even on failure, partial objects speed up retries)
