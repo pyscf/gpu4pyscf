@@ -19,7 +19,7 @@
 
 extern "C" {
 __host__
-int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *src, int sstride,
+int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *src, int sstride, 
                 int rows, int cols)
 {
     void* host_ptr = (void *)dst;
@@ -28,25 +28,25 @@ int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *sr
     int spitch = sstride;
     int width = rows * sizeof(double);
     int height = cols * sizeof(double);
-
+    
 #ifdef USE_SYCL
     stream.ext_oneapi_memcpy2d(host_ptr, dpitch, device_ptr, spitch,
                                width, height);
 #else // USE_SYCL
-    cudaError_t err = cudaMemcpy2DAsync(host_ptr, dpitch, device_ptr, spitch,
+    cudaError_t err = cudaMemcpy2DAsync(host_ptr, dpitch, device_ptr, spitch, 
                                         width, height, cudaMemcpyDeviceToHost);
     /*
-    cudaError_t err = cudaMemcpy2D(dst, dpitch, src, spitch,
+    cudaError_t err = cudaMemcpy2D(dst, dpitch, src, spitch, 
                                     width, height, cudaMemcpyDeviceToHost);
     */
-    printf("%zd \n", sizeof(size_t));    
+    printf("%zd \n", sizeof(size_t));
     if(err != cudaSuccess){
         const char *err_str = cudaGetErrorString(err);
         fprintf(stderr, "CUDA error of d2h_2d\n");
         fprintf(stderr, "err reason %s\n", err_str);
         return 1;
 
-    }    
+    }
 #endif //USE_SYCL
     return 0;
 }

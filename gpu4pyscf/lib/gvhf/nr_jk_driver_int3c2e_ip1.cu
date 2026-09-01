@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
 #include "gint/gint.h"
 #include "gint/config.h"
