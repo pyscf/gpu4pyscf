@@ -1198,6 +1198,9 @@ def grouped_gemm(As, Bs, Cs=None):
     assuming (X, 64).T @ (X, Y)
     einsum('ki,kj->ij', A, B, C) C=A.T@B
     Compare with grouped_dot, this function handles the case M < 128
+
+    Pure DPNP implementation: the CUTLASS grouped-GEMM kernel is not built
+    under SYCL (BUILD_CUTLASS defaults OFF), so this loops over dpnp.matmul.
     '''
     assert len(As) > 0
     assert len(As) == len(Bs)
@@ -1215,32 +1218,13 @@ def grouped_gemm(As, Bs, Cs=None):
         for i in range(groups):
             Cs.append(dpnp.empty((Ms[i], Ns[i])))
 
-    As_ptr, Bs_ptr, Cs_ptr = [], [], []
-    for a, b, c in zip(As, Bs, Cs):
-        As_ptr.append(a.data.ptr)
-        Bs_ptr.append(b.data.ptr)
-        Cs_ptr.append(c.data.ptr)
-    As_ptr = np.array(As_ptr)
-    Bs_ptr = np.array(Bs_ptr)
-    Cs_ptr = np.array(Cs_ptr)
+    # Pure DPNP implementation using matmul with transpose
+    # C = A.T @ B  (einsum 'ki,kj->ij')
+    for i in range(groups):
+        # A.T: transpose A so that (K, M) -> (M, K)
+        # Result: (M, K) @ (K, N) -> (M, N)
+        Cs[i][...] = dpnp.matmul(As[i].T, Bs[i])
 
-    Ms = np.array(Ms)
-    Ns = np.array(Ns)
-    Ks = np.array(Ks)
-
-    stream = cupy.cuda.get_current_stream()
-    err = libdpnp_helper.grouped_gemm(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(Cs_ptr.ctypes.data, ctypes.c_void_p),
-        ctypes.cast(As_ptr.ctypes.data, ctypes.c_void_p),
-        ctypes.cast(Bs_ptr.ctypes.data, ctypes.c_void_p),
-        ctypes.cast(Ms.ctypes.data, ctypes.c_void_p),
-        ctypes.cast(Ns.ctypes.data, ctypes.c_void_p),
-        ctypes.cast(Ks.ctypes.data, ctypes.c_void_p),
-        ctypes.c_int(groups)
-    )
-    if err != 0:
-        raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
 
 # def condense(opname, a, loc_x, loc_y=None):
@@ -1479,6 +1463,20 @@ def batched_vec_norm2(vec, out=None):
     dpnp.einsum("ij,ij->i", vec, vec, out=out)
     return out
 
+def vec_dot(vec1, vec2):
+    '''
+    einsum('g,g->', vec1, vec2)
+
+    dpnp counterpart of cupy_helper.vec_dot. Both inputs are expected to be
+    device (dpnp) arrays; no host transfers.
+    '''
+    vec1 = dpnp.asarray(vec1)
+    vec2 = dpnp.asarray(vec2)
+    assert vec1.dtype == dpnp.float64
+    assert vec2.dtype == dpnp.float64
+    assert vec1.shape == vec2.shape
+    return dpnp.einsum("i,i->", vec1.ravel(), vec2.ravel())
+
 def batched_vec_dot(vec1, vec2, out=None):
     '''
     einsum('gx,gx->g', vec1, vec2)
@@ -1496,7 +1494,23 @@ def batched_vec_dot(vec1, vec2, out=None):
     dpnp.einsum("ij,ij->i", vec1, vec2, out=out)
     return out
 
-cholesky = dpnp.linalg.cholesky
+class LinAlgError(RuntimeError):
+    pass
+
+def cholesky(a, /, *, upper=False):
+    '''
+    dpnp counterpart of cupy_helper.cholesky (cusolver.cholesky).
+
+    dpnp.linalg.LinAlgError derives from ValueError, while the CUDA path's
+    cusolver.LinAlgError derives from RuntimeError. Several call sites
+    (df.py, df_jk.py, grad/rhf.py) rely on a failed Cholesky raising
+    RuntimeError to fall back to an eigendecomposition, so re-raise here
+    as this module's RuntimeError-derived LinAlgError.
+    '''
+    try:
+        return dpnp.linalg.cholesky(a, upper=upper)
+    except dpnp.linalg.LinAlgError as e:
+        raise LinAlgError(str(e)) from e
 
 def eigh(a, b=None, overwrite=False):
     '''
