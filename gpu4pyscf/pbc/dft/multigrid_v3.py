@@ -201,7 +201,6 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
             tauG = cp.zeros(ni.mesh, dtype=np.complex128)
 
     a = cell.lattice_vectors()
-    b = np.linalg.inv(a.T)
     vol = np.linalg.det(a)
     nkpts = len(ni.bvkmesh_Ls)
 
