@@ -667,7 +667,7 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
         self.__dict__.update(mf_obj.__dict__)
         self._last_mol_fp = mf_obj.mol.ao_loc
 
-    def __call__(self, mol_or_geom, **kwargs):
+    def __call__(self, mol_or_geom, init_guess_from_previous=True, **kwargs):
         if isinstance(mol_or_geom, gto.MoleBase):
             mol = mol_or_geom
         else:
@@ -676,7 +676,11 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
         # Cleanup intermediates associated to the previous mol object
         self.reset(mol)
 
-        if 'dm0' in kwargs:
+        if not init_guess_from_previous:
+            logger.info(self, 'Initial guess from previous point is disabled')
+            dm0 = None
+            self.mo_coeff = None # Avoid dm0 being generated from previous coeffs
+        elif 'dm0' in kwargs:
             dm0 = kwargs.pop('dm0')
         elif self.mo_coeff is None:
             dm0 = None
@@ -850,7 +854,7 @@ class SCF(pyscf_lib.StreamObject):
     do_disp                  = dispersion.check_disp
     get_dispersion           = dispersion.get_dispersion
     kernel = scf             = scf
-    as_scanner               = hf_cpu.SCF.as_scanner
+    as_scanner               = as_scanner
     _finalize                = hf_cpu.SCF._finalize
     init_direct_scf          = NotImplemented
     get_veff                 = NotImplemented

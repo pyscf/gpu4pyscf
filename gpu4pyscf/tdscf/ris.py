@@ -688,11 +688,7 @@ class TD_Scanner(lib.SinglePointScanner):
         mo_prev = mf_scanner.mo_coeff
         occ_prev = mf_scanner.mo_occ
 
-        if reuse_scf_dm:
-            mf_e = mf_scanner(mol)
-        else:
-            logger.info(self, 'Do not reuse the previous SCF density matrix')
-            mf_e = mf_scanner(mol, dm0=None)
+        mf_e = mf_scanner(mol, init_guess_from_previous=reuse_scf_dm)
 
         self.n_occ = None
         self.n_vir = None
@@ -727,7 +723,7 @@ class TD_Scanner(lib.SinglePointScanner):
                     # previous step as initial guess.
                     x0 = self.xy = None
         else:
-            logger.info(self, 'Do not reuse the previous TDDFT X/Y amplitudes')
+            logger.info(self, 'Disable initial guess from previous TDDFT X/Y amplitudes')
 
         self.kernel(x0=x0)
         return mf_e + self.energies/HARTREE2EV

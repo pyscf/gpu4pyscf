@@ -359,11 +359,7 @@ class TD_Scanner(lib.SinglePointScanner):
         mo_prev = mf_scanner.mo_coeff
         occ_prev = mf_scanner.mo_occ
 
-        if reuse_scf_dm:
-            mf_e = mf_scanner(mol)
-        else:
-            logger.info(self, 'Do not reuse the previous SCF density matrix')
-            mf_e = mf_scanner(mol, dm0=None)
+        mf_e = mf_scanner(mol, init_guess_from_previous=reuse_scf_dm)
 
         # Reuse the previous step for initial guess.
         if reuse_td_guess:
@@ -377,7 +373,7 @@ class TD_Scanner(lib.SinglePointScanner):
                     # from the previous step as initial guess.
                     x0 = self.xy = None
         else:
-            logger.info(self, 'Do not reuse the previous TDDFT X/Y amplitudes')
+            logger.info(self, 'Disable initial guess from previous TDDFT X/Y amplitudes')
             # Passing None would make the regular TDDFT kernels fall back to
             # self.xy, so explicitly construct a fresh diagonal initial guess.
             x0 = self.init_guess()
