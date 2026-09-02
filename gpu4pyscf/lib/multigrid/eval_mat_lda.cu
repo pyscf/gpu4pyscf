@@ -190,10 +190,11 @@ void eval_mat_lda_kernel(double *out, double *rho, MGridEnvVars envs,
 static size_t buflen_lda(int l, int tile)
 {
     int lj = MIN(l, LMAX);
-    size_t len1 = WARP_SIZE * tile * (l+1) * 2;
-    size_t len2 = WARP_SIZE * (lj+1)*(lj+1) * 3;
+    int warp = gpu4pyscf_effective_warp_size();
+    size_t len1 = warp * tile * (l+1) * 2;
+    size_t len2 = warp * (lj+1)*(lj+1) * 3;
     if (l < 5) {
-        len2 += WARP_SIZE * (l+1)*(l+2)/2*(l+1);
+        len2 += warp * (l+1)*(l+2)/2*(l+1);
     }
     return MAX(len1, len2) * sizeof(double);
 }

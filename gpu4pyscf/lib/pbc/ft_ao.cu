@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
+#include "../warp_size.h"   // WARP_SIZE (per-arch) + gpu4pyscf_effective_warp_size()
 #include "ft_ao.cuh"
 
 #define THREADS         256
@@ -1137,8 +1138,19 @@ while (1) {
 }
 
 extern "C" {
+// Effective wavefront width of the running device (32 on RDNA/NVIDIA, 64 on
+// GCN/CDNA). ft_ao.py queries this so the host-side nGv_per_block / shm_size it
+// passes to build_ft_aopair match the per-arch device WARP_SIZE in a single
+// multi-arch (fat-binary) build.
+int PBC_warp_size()
+{
+    return gpu4pyscf_effective_warp_size();
+}
+
 int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, cudaStream_t stream)
 {
+    // NG_PER_BLOCK and FT_AO_THREADS are fixed (ft_ao.cuh), so this host launch
+    // matches the device kernel on every arch of a multi-arch build.
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
     dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
