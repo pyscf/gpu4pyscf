@@ -270,7 +270,7 @@ def _get_spin_sad(cell, kpts, magmoms):
     return cp.asarray(np.real_if_close(dm_kpts))
 
 
-def get_init_guess_with_magmom(cell, kpts, magmoms_dict, method='valence',
+def get_init_guess_with_magmom(cell, kpts, magmoms_dict, method='spin_sad',
                                key='minao', dm_init=None):
     r'''Generate a KUHF/KUKS initial density with atom-resolved moments.
 
