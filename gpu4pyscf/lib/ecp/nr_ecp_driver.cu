@@ -44,6 +44,12 @@
 // allocates it as a sycl::local_accessor and forwards the pointer as a trailing
 // kernel argument, while CUDA raises the per-kernel dynamic-smem cap and passes
 // the size through the <<<>>> launch configuration as before.
+//
+// ECP_LAUNCH_SMEM is the same thing without the cap-raising call, for the two
+// kernels whose name is overloaded (a templated form plus a general one).
+// cudaFuncSetAttribute takes the function by address, which cannot be resolved
+// from an overload set, so naming one there is a compile error. Upstream never
+// raised the cap for these two either -- they stay within the default 48 KB.
 #define ECP_ARGS  gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env
 
 #ifdef USE_SYCL
@@ -68,6 +74,21 @@
 #else
 #define ECP_LAUNCH2(TAG, KPREFIX, LI, LJ, LC) \
     KPREFIX<LI,LJ,LC><<<blocks, threads>>>(ECP_ARGS)
+#endif
+
+#ifdef USE_SYCL
+#define ECP_LAUNCH_SMEM(TAG, SMEM, KFUNC, ...) \
+    stream.submit([&](sycl::handler &cgh) { \
+        sycl::local_accessor<double, 1> local_acc(sycl::range<1>(SMEM), cgh); \
+        cgh.parallel_for<class TAG>( \
+            sycl::nd_range<1>(blocks * threads, threads), \
+            [=](auto item) [[intel::kernel_args_restrict]] { \
+                KFUNC(__VA_ARGS__, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
+            }); \
+    })
+#else
+#define ECP_LAUNCH_SMEM(TAG, SMEM, KFUNC, ...) \
+    KFUNC<<<blocks, threads, (SMEM)*sizeof(double)>>>(__VA_ARGS__)
 #endif
 
 #ifdef USE_SYCL
@@ -145,9 +166,9 @@ int ECP_cart(double *gctr,
             int smem_size4 = lj1*nfj*ljc1; // angj
             int smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
 
-            ECP_LAUNCH_GENERAL(type2_cart_sycl, smem_size, type2_cart,
-                               gctr, li, lj, lc, ao_loc, nao,
-                               tasks, ntasks, ecpbas, ecploc, atm, bas, env);
+            ECP_LAUNCH_SMEM(type2_cart_sycl, smem_size, type2_cart,
+                            gctr, li, lj, lc, ao_loc, nao,
+                            tasks, ntasks, ecpbas, ecploc, atm, bas, env);
         }}
     } else {
         int task_type = li * 10 + lj;
@@ -167,9 +188,9 @@ int ECP_cart(double *gctr,
             const int lij3 = lij1*lij1*lij1;
             int smem_size = lij3 + lij1*lij1;
 
-            ECP_LAUNCH_GENERAL(type1_cart_kernel, smem_size, type1_cart,
-                               gctr, li, lj, ao_loc, nao,
-                               tasks, ntasks, ecpbas, ecploc, atm, bas, env);
+            ECP_LAUNCH_SMEM(type1_cart_kernel, smem_size, type1_cart,
+                            gctr, li, lj, ao_loc, nao,
+                            tasks, ntasks, ecpbas, ecploc, atm, bas, env);
         }
         }
     }
