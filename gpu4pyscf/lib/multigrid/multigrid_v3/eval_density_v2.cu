@@ -80,7 +80,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
         c_index1 = min(c_stop, c_index0 + c_stride);
     }
     int b_center = (b_start + b_stop) / 2;
-    int bc_offset = b_start * c_stride + c_start;
+    int bc_offset = b_start * c_stride + c_index0;
 
     int atom_mesh_bc = atom_mesh_b * c_stride;
     for (int n = thread_id; n < atom_mesh_bc; n += threads) {

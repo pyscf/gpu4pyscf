@@ -80,7 +80,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
         c_index1 = min(c_stop, c_index0 + c_stride);
     }
     int b_center = (b_start + b_stop) / 2;
-    int bc_offset = b_start * c_stride + c_start;
+    int bc_offset = b_start * c_stride + c_index0;
 
     int atom_mesh_bc = atom_mesh_b * c_stride;
     double *tau_cache = rho_cache + atom_mesh_bc;
@@ -237,7 +237,6 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
                 for (int b_index = b_center - 1; b_index >= b_start; b_index--,
                     inv_recursion_factor_b *= exp_db_squared) {
                     gaussian_xyz *= inv_recursion_factor_b;
-                    //if (fabs(gaussian_xyz) < negligible) break;
                     x -= c_dxyz_dabc[3];
                     y -= c_dxyz_dabc[4];
                     z -= c_dxyz_dabc[5];
@@ -308,7 +307,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
             (b_start + b_index + 100 * mesh_b) % mesh_b * mesh_c +
             (c_index + 100 * mesh_c) % mesh_c;
         atomicAdd(rho_c + abc_idx*2, rho_cache[n]);
-        atomicAdd(tau_c + abc_idx*2, tau_cache[n]);
+        atomicAdd(tau_c + abc_idx*2, tau_cache[n]/2);
     }
     __syncthreads();
 }

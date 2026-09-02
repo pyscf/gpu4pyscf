@@ -591,7 +591,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
     # The ke_cut estimated from cell.precision is sufficient for converging the
     # Coulomb integrals. However, XC potential is not as smooth near the core
     # region. Apply an additional penalty to improve the accuracy of XC integrals.
-    undressed_threshold = cell.precision * 1e-1
+    undressed_threshold = cell.precision / 3
 
     err = libmgrid.gaussian_prod_grid_ranges(
         ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
@@ -602,7 +602,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, ke_max, precision, xctype):
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.c_int(npairs),
         ctypes.c_int(li_inc), ctypes.c_int(lj_inc),
-        ctypes.c_float(math.log(precision)),
+        ctypes.c_float(math.log(precision/3)),
         ctypes.c_float(undressed_threshold),
         ctypes.c_float(ke_max))
     if err != 0:
@@ -761,6 +761,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
             atom_grid_ranges_cache = []
             atom_mesh_max = []
             for idx in idx_by_pattern:
+                assert len(idx) > 0
                 bas_ij_idx = filtered_pairs[idx]
                 bas_ij_cache.append(bas_ij_idx)
                 grid_ranges = filtered_grid_ranges[:,idx]
@@ -769,7 +770,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
                 p_atoms = cp.empty(len(idx) + 2, dtype=np.int32)
                 p_atoms[0] = -1
                 cp.take(filtered_p_atoms, idx, out=p_atoms[1:-1])
-                p_atoms[-1] = len(p_atoms)
+                p_atoms[-1] = 2**30
                 shl_pair_offsets = cp.asarray(cp.where(p_atoms[1:] != p_atoms[:-1])[0], dtype=np.int32)
                 atom_seg_offsets.append(shl_pair_offsets)
 

@@ -168,9 +168,9 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
             // Higher resolution is required for orbitals located on the same center.
             // Ecut ~= 2 * ke_two_centers
             // (Ecut/2/aij)**((li+lj)/2) * exp(-Ecut/(2*aij)) ~ cell.threshold
-            //float log_factor = (li+lj)*.5f * logf(ke_two_centers/aij) -
-            //    logf(undressed_threshold);
-            float log_factor = -logf(undressed_threshold);
+            float log_factor = (li+lj)*.5f * logf(ke_two_centers/aij) -
+                logf(undressed_threshold);
+            //float log_factor = -logf(undressed_threshold);
             float ke_raw = log_factor * aij * 2;
             ke_raw = min(ke_raw, ke_max);
             pair_ke[pair_id] = max(ke_raw, ke_two_centers);
