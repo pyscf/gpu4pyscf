@@ -22,6 +22,11 @@ from gpu4pyscf.md.fssh import FSSH, PES
 from gpu4pyscf.nac.tdrhf import _wfn_overlap
 
 class FSSH_TDDFT(FSSH):
+    # Reuse the previous MD step as iterative-solver initial guesses.
+    reuse_xy_z = True
+    # Reuse the previous MD step density matrix as the SCF initial guess.
+    reuse_scf_dm = True
+
     def __init__(self, td, states):
         nstates = len(states)
         assert td.nstates >= nstates-1
@@ -81,12 +86,20 @@ class FSSH_TDDFT(FSSH):
         # in these objects are always the initial mol (mol0).
         self.tdnac_grad.reset(mol)
         
-        excited_energies = cp.asnumpy(td_scanner(mol))
+        excited_energies = cp.asnumpy(td_scanner(
+            mol,
+            reuse_scf_dm=self.reuse_scf_dm,
+            reuse_td_guess=self.reuse_xy_z,
+        ))
         ground_energy = mf.e_tot
         energies = np.append(ground_energy, excited_energies)
         energy = energies[self.states]  # (Nstates,)  Unit: Ha
         converged = np.append(mf.converged, td_scanner.converged)
         assert all(converged[self.states])
+
+        if not self.reuse_xy_z:
+            self.tdnac_grad._z_prev = None
+            self.tdnac_grad._z_tasks = None
 
         if not with_nacv:
             # Calculate gradient only for the current state
