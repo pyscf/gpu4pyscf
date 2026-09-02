@@ -336,8 +336,24 @@ jobs:
           python -m pytest gpu4pyscf/dft/tests/ -v -x --timeout=900 \
             --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/80_pytest_dft.log
 
-      - name: Publish logs to a ci-logs branch (readable without API auth)
+      - name: Upload logs as a run artifact
         if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: sycl-cpu-ci-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Only a push to a branch in this repository has a writable
+      # GITHUB_TOKEN. On a pull request from a fork the token is read-only and
+      # github.repository names the base repository, so the push below is
+      # rejected with a 403. The artifact above covers every context; this
+      # step is the extra convenience of a browsable branch where it can run.
+      - name: Publish logs to a ci-logs branch (readable without API auth)
+        if: always() && github.event_name == 'push'
+        continue-on-error: true
         run: |
           mkdir -p /tmp/logs /tmp/ci-logs && cd /tmp/ci-logs
           for f in /tmp/logs/*.log; do
