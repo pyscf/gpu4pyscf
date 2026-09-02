@@ -70,6 +70,8 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
     atoms.calc = calculator
 
     if is_pbc and target in (None, 'atoms', 'cell'):
+        # This constraint cannot be used to lattice optimization
+        # because it fixes the atomic positions.
         atoms.set_constraint(FixCom())
 
     if target is None:
