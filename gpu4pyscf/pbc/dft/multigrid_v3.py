@@ -388,8 +388,6 @@ def _eval_xc_mat_v2(ni, vxcG, out=None, work=None):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        # _take_fft_submesh does not always make a copy. In the last bucket, the contents
-        # of vrhoG will be overwritten by ifft_in_place
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
         sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
@@ -458,8 +456,6 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        # _take_fft_submesh does not always make a copy. In the last bucket, the
-        # contents of vrhoG will be overwritten by ifft_in_place
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
         sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
@@ -529,8 +525,6 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
         dxyz_dabc = a / mesh[:,None]
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
 
-        # _take_fft_submesh does not always make a copy. In the last bucket, the
-        # contents of vrhoG will be overwritten by ifft_in_place
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
         sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
@@ -731,11 +725,17 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
 
     buckets = []
 
-    ke_lower, ke_upper = 0, init_ke
-    while ke_lower < ke_max:
-        mesh = np.minimum(mesh, mesh_final)
+    ke_upper = float(pair_ke.max().get())
+    ke_lower = init_ke
+    while ke_lower >= init_ke:
+        ke_lower = ke_upper * 0.7
+        if ke_lower < init_ke:
+            ke_lower = 0
         idx = cp.where((ke_lower < pair_ke) & (pair_ke <= ke_upper))[0]
         if len(idx) > 0:
+            mesh = ke_to_mesh(a, ke_upper)
+            mesh = np.minimum(mesh, mesh_final)
+
             filtered_pairs = supmol_bas_ij_idx[idx]
             filtered_grid_ranges = grid_frac_ranges[:,idx]
             filtered_p_atoms = primary_atoms[idx]
@@ -818,12 +818,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
             })
             log.debug('Add fft bucket: ke=%g mesh=%s, shl_pairs=%d',
                       ke_upper, mesh, len(filtered_pairs))
-
-        mesh = (mesh * 1.2).astype(np.int32)
-        # For very small initial mesh, such as [2,2,2], mesh*1.2 may not
-        # increase the mesh, causing the loop stuck
-        mesh[mesh < 8] = 8
-        ke_lower, ke_upper = ke_upper, mesh_to_ke(a, mesh).min()
+        ke_upper = ke_lower
     return buckets
 
 def _non_trivial_bvk_pairs(ni, precision):
@@ -969,9 +964,6 @@ def _take_fft_submesh(a, mesh, out=None):
     assert a.ndim >= 3
     out_shape = mesh = tuple(mesh)
     inp_shape = a.shape
-    if inp_shape[-3:] == out_shape:
-        return a
-
     counts = 1
     if a.ndim == 4:
         counts, inp_shape = inp_shape[0], inp_shape[1:]
@@ -2145,7 +2137,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         if self.allow_mesh_reduction:
             mesh = self.mesh
             if self.fft_buckets:
-                self.mesh = self.fft_buckets[-1]['mesh']
+                self.mesh = self.fft_buckets[0]['mesh']
             else:
                 self.mesh = self.aft_buckets[-1]['mesh']
             log.info('Reduce MultiGrid maximum mesh %s to %s', mesh, self.mesh)
