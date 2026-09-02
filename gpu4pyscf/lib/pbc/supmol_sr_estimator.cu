@@ -193,6 +193,7 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
     uint32_t sp_block_id = blockIdx.x;
     int threads = blockDim.x;
     int t_id = threadIdx.x;
+    extern __shared__ float shared_memory[];
     #endif
     int *bas = envs.bas;
     double *env = envs.env;
