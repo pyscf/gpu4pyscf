@@ -15,6 +15,7 @@
  */
 
 #include <stdint.h>
+#include "../warp_size.h"   // WARP_SIZE (per-arch) + gpu4pyscf_effective_warp_size()
 
 // WARP_SIZE: compile-time constant used for shared-memory sizing.
 // `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
