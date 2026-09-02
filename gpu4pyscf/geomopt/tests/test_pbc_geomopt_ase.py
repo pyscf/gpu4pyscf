@@ -16,8 +16,54 @@ try:
     import ase
 except ImportError:
     ase = None
+import numpy as np
 import pyscf
 import pytest
+from pyscf import lib
+from pyscf.data.nist import BOHR, HARTREE2EV
+
+if ase is not None:
+    from pyscf.pbc.tools.pyscf_ase import pyscf_to_ase_atoms
+
+
+class _FakeGradients:
+    def get_stress(self):
+        return np.eye(3)
+
+
+class _FakeScanner:
+    converged = True
+
+    def __call__(self, cell):
+        return 0.
+
+    def Gradients(self):
+        return _FakeGradients()
+
+
+class _FakeMethod(lib.StreamObject):
+    def __init__(self, cell):
+        self.cell = cell
+
+    def as_scanner(self):
+        return _FakeScanner()
+
+
+@pytest.mark.skipif(ase is None, reason='ASE not available')
+def test_ase_stress_units():
+    from gpu4pyscf.tools.ase_interface import PySCF
+
+    cell = pyscf.M(
+        atom='He 0 0 0', a=np.eye(3) * 4., unit='Angstrom',
+        basis='gth-szv', pseudo='gth-pade', precision=1e-8, verbose=0)
+    atoms = pyscf_to_ase_atoms(cell)
+
+    calculator = PySCF(method=_FakeMethod(cell))
+    calculator.calculate(atoms, properties=['stress'])
+
+    assert np.allclose(
+        calculator.results['stress'], np.eye(3) * HARTREE2EV / BOHR**3)
+
 
 @pytest.mark.skipif(ase is None, reason='ASE not available')
 def test_ase_optimize_cell():
