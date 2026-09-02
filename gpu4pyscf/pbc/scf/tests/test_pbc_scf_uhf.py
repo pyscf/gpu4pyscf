@@ -18,7 +18,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.pbc import scf as pscf
-from gpu4pyscf.pbc.scf import kuhf
+from gpu4pyscf.pbc.tools import magmom
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
@@ -78,7 +78,7 @@ class KnownValues(unittest.TestCase):
         kpts = magcell.make_kpts([2, 1, 1])
         magmoms = {0: 1., 1: -1.}
 
-        dm_uniform = kuhf.get_init_guess_with_magmom(
+        dm_uniform = magmom.get_init_guess_with_magmom(
             magcell, kpts, magmoms, method='uniform', key='atom')
         self.assertEqual(dm_uniform.shape, (2, 2, 8, 8))
         self.assert_magmom_constraints(magcell, kpts, dm_uniform, magmoms)
@@ -89,7 +89,7 @@ class KnownValues(unittest.TestCase):
             spin_diag, cp.asarray([.25] * 4 + [-.25] * 4),
             rtol=0, atol=1e-14)
 
-        dm_valence = kuhf.get_init_guess_with_magmom(
+        dm_valence = magmom.get_init_guess_with_magmom(
             magcell, kpts, magmoms, method='valence', key='atom')
         self.assertEqual(dm_valence.shape, (2, 2, 8, 8))
         self.assert_magmom_constraints(magcell, kpts, dm_valence, magmoms)
@@ -105,7 +105,7 @@ class KnownValues(unittest.TestCase):
         magcell = self._magmom_cell()
         kpts = magcell.make_kpts([2, 1, 1])
         magmoms = {0: 1., 1: -1.}
-        dm = kuhf.get_init_guess_with_magmom(
+        dm = magmom.get_init_guess_with_magmom(
             magcell, kpts, magmoms, method='spin_sad')
 
         self.assertEqual(dm.shape, (2, 2, 8, 8))
@@ -116,7 +116,7 @@ class KnownValues(unittest.TestCase):
         magcell = self._magmom_cell()
         kpts = magcell.make_kpts([2, 1, 1])
         magmoms = {0: .5, 1: -.5}
-        dm = kuhf.get_init_guess_with_magmom(
+        dm = magmom.get_init_guess_with_magmom(
             magcell, kpts, magmoms, method='spin_sad')
 
         self.assertEqual(dm.shape, (2, 2, 8, 8))
@@ -134,7 +134,7 @@ class KnownValues(unittest.TestCase):
         ).build()
         kpts = parity_cell.make_kpts([2, 1, 1])
         magmoms = {0: 1., 1: -1.}
-        dm = kuhf.get_init_guess_with_magmom(
+        dm = magmom.get_init_guess_with_magmom(
             parity_cell, kpts, magmoms, method='spin_sad')
         self.assert_magmom_constraints(parity_cell, kpts, dm, magmoms)
 
@@ -151,7 +151,7 @@ class KnownValues(unittest.TestCase):
         ).build()
         kpts = magcell.make_kpts([2, 1, 1])
         magmoms = {0: 2, 1: -2}
-        dm = kuhf.get_init_guess_with_magmom(
+        dm = magmom.get_init_guess_with_magmom(
             magcell, kpts, magmoms, method='spin_sad')
 
         # self.assertEqual(dm.shape, (2, 2, 2, 2))
@@ -164,7 +164,7 @@ class KnownValues(unittest.TestCase):
         dm_ref = pscf.KUHF(magcell, kpts=kpts).get_init_guess(key='atom')
 
         for magmoms in ({}, {0: 0., 1: 0.}):
-            dm = kuhf.get_init_guess_with_magmom(
+            dm = magmom.get_init_guess_with_magmom(
                 magcell, kpts, magmoms, method='valence', key='atom')
             cp.testing.assert_allclose(dm, dm_ref, rtol=0, atol=0)
             cp.testing.assert_allclose(dm[0], dm[1], rtol=0, atol=1e-14)
@@ -177,7 +177,7 @@ class KnownValues(unittest.TestCase):
         dm = dm.reshape(2, nkpts, nao, nao)
         dm_original = dm.copy()
 
-        flipped = kuhf.get_spin_flip_magmom(magcell, dm, [1])
+        flipped = magmom.get_spin_flip_magmom(magcell, dm, [1])
         expected = dm.copy()
         p0, p1 = magcell.aoslice_by_atom()[1, 2:]
         expected[0, :, p0:p1, p0:p1] = dm[1, :, p0:p1, p0:p1]
@@ -191,7 +191,7 @@ class KnownValues(unittest.TestCase):
         dm = cp.zeros((2, 2, magcell.nao_nr(),
                        magcell.nao_nr()))
 
-        flipped = kuhf.get_spin_flip_magmom(magcell, dm, [])
+        flipped = magmom.get_spin_flip_magmom(magcell, dm, [])
 
         self.assertIsNot(flipped, dm)
         cp.testing.assert_array_equal(flipped, dm)
