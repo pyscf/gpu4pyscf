@@ -4,7 +4,7 @@
 
 #ifdef USE_SYCL
 #include <sycl_device.hpp>
-#else
+#elif defined(__CUDACC__)
 #include <cuda_runtime.h>
 #endif
 
@@ -172,6 +172,9 @@ extern __constant__ Fold3Index c_i_in_fold3idx[];
 extern __constant__ int _c_cartesian_lexical_xyz[];
 extern __constant__ GXYZOffset c_gxyz_offset[];
 
+extern __constant__ int c_nf[];
+extern __constant__ float c_div_nf[];
+
 #elif defined(USE_SYCL)
 
 static inline unsigned get_smid()
@@ -209,8 +212,6 @@ extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
 // Here 625 is just a random MAX chosen from rys_constant.cu
 extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_rys_gxyz_offset;
 
-#endif // __CUDACC__
-
 __constant__ int c_nf[] = {
     1,
     3,
@@ -234,3 +235,5 @@ __constant__ float c_div_nf[] = {
     0.027778f,
     0.022223f,
 };
+
+#endif // __CUDACC__
