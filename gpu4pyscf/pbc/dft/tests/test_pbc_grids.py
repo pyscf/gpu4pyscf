@@ -21,21 +21,29 @@ from gpu4pyscf.pbc.dft import gen_grid
 from pyscf.pbc.dft import rks as rks_cpu
 from gpu4pyscf.pbc.dft import rks
 from pyscf.pbc.dft import krks as krks_cpu
-from gpu4pyscf.pbc.dft import krks
+from gpu4pyscf.pbc.dft import krks, kuks
 from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
 from gpu4pyscf.pbc.grad.krks import get_vxc_full_response, get_vxc
+from gpu4pyscf.pbc.grad.kuks import get_vxc_full_response as unrestricted_get_vxc_full_response
+from gpu4pyscf.pbc.grad.kuks import get_vxc as unrestricted_get_vxc
 from gpu4pyscf.dft.tests.test_grids import find_matching_index_between_two_grids
 
-def numerical_gradient_exc_becke(cell, xc, kpts, auxbasis, atom_grid, dm):
+def numerical_gradient_exc_becke(cell, xc, kpts, auxbasis, atom_grid, dm, unrestricted=False):
     def get_energy(cell):
-        mf = krks.KRKS(cell, xc=xc, kpts=kpts)
+        if unrestricted:
+            mf = kuks.KUKS(cell, xc=xc, kpts=kpts)
+        else:
+            mf = krks.KRKS(cell, xc=xc, kpts=kpts)
         if auxbasis is not None:
             mf = mf.density_fit(auxbasis=auxbasis)
         mf.grids = gen_grid.BeckeGrids(cell)
         mf.grids.atom_grid = atom_grid
 
         mf.initialize_grids(cell, dm, kpts)
-        n, exc, vxc = mf._numint.nr_rks(cell, mf.grids, mf.xc, dm, 0, hermi=1, kpts=kpts, kpts_band=None)
+        if unrestricted:
+            n, exc, vxc = mf._numint.nr_uks(cell, mf.grids, mf.xc, dm, 0, hermi=1, kpts=kpts, kpts_band=None)
+        else:
+            n, exc, vxc = mf._numint.nr_rks(cell, mf.grids, mf.xc, dm, 0, hermi=1, kpts=kpts, kpts_band=None)
         return exc
 
     numerical_gradient = np.zeros((cell.natm, 3))
@@ -56,6 +64,9 @@ def numerical_gradient_exc_becke(cell, xc, kpts, auxbasis, atom_grid, dm):
             E_m = get_energy(cell_copy)
 
             numerical_gradient[i_atom, i_xyz] = (E_p - E_m) / (2 * dx)
+
+    translation_invariance = np.sum(numerical_gradient, axis=0)
+    assert np.max(np.abs(translation_invariance)) < 1e-8, "Bad numerical gradient"
 
     # np.set_printoptions(precision=16, suppress=True, linewidth=np.inf)
     # print(repr(numerical_gradient))
@@ -380,6 +391,111 @@ class KnownValues(unittest.TestCase):
         ref_gradient = numerical_gradient_exc_becke(cell, "SCAN0", kpts, 'def2-universal-jkfit', (99,590), dm)
 
         assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-4
+
+    def test_xc_gradient_unrestricted_no_k_without_response(self):
+        cell = pyscf.M(
+            a = '''0.      1.7834  1.7834
+                   1.7834  0.      1.7834
+                   1.7834  1.7834  0.    ''',
+            atom = 'C 0.,  0.,  0.; C 0.8917,  0.9017,  0.8917',
+            basis = 'def2-svp',
+            verbose = 0,
+        )
+
+        kpts = cell.make_kpts((1,1,1))
+        mf = kuks.KUKS(cell, xc="HSE06", kpts=kpts).density_fit(auxbasis='def2-universal-jkfit')
+        mf.grids = gen_grid.BeckeGrids(cell)
+        mf.grids.atom_grid = (99,590)
+        mf.conv_tol = 1e-10
+
+        mf.kernel()
+
+        dm = mf.make_rdm1()
+        if dm.ndim == 3:
+            dm = dm[:,None,:,:]
+        test_gradient = unrestricted_get_vxc(mf._numint, cell, mf.grids, mf.xc, dm, kpts, hermi=1)
+
+        # ref_gradient = numerical_gradient_exc_becke(cell, "HSE06", kpts, 'def2-universal-jkfit', (99,590), dm, unrestricted=True)
+        ref_gradient = np.array([
+            [ 0.0000210273753964, -0.0175452356021566,  0.0000210258033206],
+            [-0.0000210273665147,  0.0175452356021566, -0.0000210257944389],
+        ])
+
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 2e-4
+
+    def test_xc_gradient_unrestricted_no_k_with_response(self):
+        cell = pyscf.M(
+            a = np.eye(3) * 3.5668,
+            atom = '''
+                C     0.      0.      0.
+                C     0.8917  0.8917  0.8917
+                C     1.7834  1.7834  0.
+                C     2.6751  2.6751  0.8917
+                C     1.7834  0.      1.7834
+                C     2.6751  0.8917  2.6751
+                C     0.      1.7834  1.7834
+                C     0.8917  2.6751  2.6751
+            ''',
+            basis = 'gth-tzvp',
+            pseudo = 'gth-pade',
+            verbose = 0,
+        )
+
+        kpts = cell.make_kpts((1,1,1))
+        mf = kuks.KUKS(cell, xc="r2scan", kpts=kpts).density_fit(auxbasis='def2-universal-jkfit')
+        mf.grids = gen_grid.BeckeGrids(cell)
+        mf.grids.atom_grid = (50,194)
+        mf.conv_tol = 1e-10
+
+        mf.kernel()
+
+        dm = mf.make_rdm1()
+        if dm.ndim == 3:
+            dm = dm[:,None,:,:]
+        test_gradient = unrestricted_get_vxc_full_response(mf._numint, cell, mf.grids, mf.xc, dm, kpts, hermi=1)
+
+        # ref_gradient = numerical_gradient_exc_becke(cell, "r2scan", kpts, 'def2-universal-jkfit', (50,194), dm, unrestricted=True)
+        ref_gradient = np.array([
+            [ 0.0000003321254383,  0.0000003318678665,  0.0000003322675468],
+            [-0.0003303815532263, -0.0003303816153988, -0.0003303810025557],
+            [-0.0000001970335006, -0.0000001969180374,  0.0000003920330727],
+            [ 0.0003302472517674,  0.0003302459639087, -0.0003304415585603],
+            [-0.000000197513117 ,  0.0000003920863634, -0.0000001963496032],
+            [ 0.0003302466300426, -0.0003304415407968,  0.0003302464079979],
+            [ 0.0000003911893032, -0.0000001970335006, -0.0000001977085162],
+            [-0.0003304409634808,  0.0003302473672306,  0.0003302460438448],
+        ])
+
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-9
+
+    def test_xc_gradient_unrestricted_k_with_response(self):
+        cell = pyscf.M(
+            a = '''0.      1.7934  1.7834
+                   1.7834  0.      1.7834
+                   1.7834  1.7834  0.    ''',
+            atom = 'C 0.,  0.,  0.; Si 0.8917,  0.8917,  0.8917',
+            basis = 'gth-tzvp',
+            pseudo = 'gth-pade',
+            verbose = 0,
+        )
+
+        kpts = cell.make_kpts((1,3,1))
+        mf = kuks.KUKS(cell, xc="lda", kpts=kpts)
+        mf.grids = gen_grid.BeckeGrids(cell)
+        mf.grids.atom_grid = (40,194)
+        mf.conv_tol = 1e-10
+
+        mf.kernel()
+
+        dm = mf.make_rdm1()
+        if dm.ndim == 3:
+            dm = dm[:,None,:,:]
+        test_gradient = unrestricted_get_vxc_full_response(mf._numint, cell, mf.grids, mf.xc, dm, kpts, hermi=1)
+
+        # dm is not very stable, and numerical gradient is super fast
+        ref_gradient = numerical_gradient_exc_becke(cell, "lda", kpts, None, (40,194), dm, unrestricted=True)
+
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-9
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.numint")

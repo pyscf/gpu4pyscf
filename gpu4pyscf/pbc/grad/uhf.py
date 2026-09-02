@@ -89,9 +89,6 @@ class Gradients(rhf.GradientsBase):
         if mo_occ is None:
             mo_occ = mf.mo_occ
 
-        if isinstance(mf, KohnShamDFT) and isinstance(mf.grids, BeckeGrids):
-            raise NotImplementedError('gradients for BeckeGrids not supported')
-
         if getattr(mf, 'with_x2c', None):
             raise NotImplementedError('X2C gradients')
 

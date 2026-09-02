@@ -93,16 +93,17 @@ class CDIIS(lib.diis.DIIS):
                     for k, (fk, sk) in enumerate(zip(f[0], s)):
                         self.Corth[k] = eigh(fk, sk)[1]
                 Corth = asarray(self.Corth)
-                sdf = cp.empty_like(f)
-                tmp = None
-                tmp = contract('Kij,Kjk->Kik', d[0], f[0], out=tmp)
-                contract('Kij,Kjk->Kik', s, tmp, out=sdf[0])
-                tmp = contract('Kpq,Kqj->Kpj', sdf[0], Corth, out=tmp)
+                assert f.ndim == 4
+                nmo = Corth.shape[-1]
+                sdf = cp.empty((f.shape[0], f.shape[1], nmo, nmo), dtype=f.dtype)
+                tmp = contract('Kij,Kjk->Kik', d[0], f[0])
+                sdf_a = contract('Kij,Kjk->Kik', s, tmp)
+                tmp = contract('Kpq,Kqj->Kpj', sdf_a, Corth)
                 contract('Kpj,Kpi->Kij', tmp, Corth.conj(), out=sdf[0])
 
-                tmp = contract('Kij,Kjk->Kik', d[1], f[1], out=tmp)
-                contract('Kij,Kjk->Kik', s, tmp, out=sdf[1])
-                tmp = contract('Kpq,Kqj->Kpj', sdf[1], Corth, out=tmp)
+                tmp = contract('Kij,Kjk->Kik', d[1], f[1])
+                sdf_b = contract('Kij,Kjk->Kik', s, tmp)
+                tmp = contract('Kpq,Kqj->Kpj', sdf_b, Corth)
                 contract('Kpj,Kpi->Kij', tmp, Corth.conj(), out=sdf[1])
                 errvec = sdf - sdf.conj().transpose(0,1,3,2)
         else: # RHF

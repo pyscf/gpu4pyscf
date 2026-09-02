@@ -123,6 +123,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
 
 def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     ''' dExc/dR for Becke grids, where grid response is included '''
+    # TODO: apply sparsity in ao_ks, remove zero-weight grids
     assert isinstance(grids, BeckeGrids)
     assert dm_kpts.ndim == 3
     assert hermi == 1, "Only hermitian dm_kpts is supported, otherwise grid density is not real, and we're not able to evaluate xc functional."
@@ -131,8 +132,6 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     natm = cell.natm
     nkpts = len(kpts)
     ngrids = grids.coords.shape[0]
-
-    log = logger.new_logger(cell)
 
     if xctype == 'LDA':
         ao_deriv = 0
@@ -178,6 +177,8 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
                 vtmp_k = _d1_dot_(ao_ks[kn,1:4], aow[kn])
                 dvmat_orbital_response[kn] += vtmp_k
                 de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_k, dm_kpts[kn]) * 2
+                del vtmp_k
+            del wv, aow, rho, vxc
 
         elif xctype == 'GGA':
             rho = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts, xctype=xctype, hermi=hermi)
@@ -189,6 +190,8 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
                 vtmp_k = _gga_grad_sum_(ao_ks[kn], wv)
                 dvmat_orbital_response[kn] += vtmp_k
                 de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_k, dm_kpts[kn]) * 2
+                del vtmp_k
+            del wv, rho, vxc
 
         elif xctype == 'MGGA':
             rho = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts, xctype=xctype, hermi=hermi)
@@ -201,12 +204,13 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
                 vtmp_k = _gga_grad_sum_(ao_ks[kn], wv[:4]) + _tau_grad_dot_(ao_ks[kn], wv[4])
                 dvmat_orbital_response[kn] += vtmp_k
                 de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_k, dm_kpts[kn]) * 2
+                del vtmp_k
+            del wv, rho, vxc
 
         else:
             raise NotImplementedError(f"Unrecognized xctype = {xctype}")
     assert g1 == ngrids
 
-    print(de_grid_response_rho.imag)
     exc = de_grid_response_rho.get().real
     exc -= krhf_grad.contract_h1e_dm(cell, dvmat_orbital_response, dm_kpts, hermi=1)
     exc *= 1.0 / nkpts
