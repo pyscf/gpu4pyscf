@@ -550,7 +550,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
     if sum_results:
         kern = libvhf_rys.sum_ejk_int3c2e_ip1
         ejk = cp.zeros((mol.natm, 3))
-        buf, buf1 = cp.empty((2, nao_pair*batch_size))
+        buf, buf3 = cp.empty((2, nao_pair*batch_size))
     else:
         kern = libvhf_rys.ejk_int3c2e_ip1
         ejk = cp.zeros((n_dm, mol.natm, 3))
@@ -560,7 +560,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
         naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         if sum_results:
-            compressed = ndarray((nao_pair, naux_in_batch), buffer=buf1)
+            compressed = ndarray((nao_pair, naux_in_batch), buffer=buf3)
             compressed.fill(0.)
         else:
             compressed = ndarray((n_dm, nao_pair, naux_in_batch), buffer=buf)
