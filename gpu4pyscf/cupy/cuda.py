@@ -285,18 +285,38 @@ def _get_sycl_queue_ptr(q: dpctl.SyclQueue) -> int:
 # Master-queue registry
 # =====================================================================
 def _gpu_devices():
-    """Enumerate GPU devices once (prefer level_zero). Cached in _state."""
+    """Enumerate compute devices once (prefer level_zero GPUs). Cached in _state.
+
+    Each candidate is tried in turn and the first non-empty result wins. A
+    query that succeeds but returns nothing has to fall through exactly like
+    one that raises: on a machine with no GPU -- a CPU-only CI runner, say --
+    the GPU queries return [] without error, and stopping there would leave
+    the master-queue registry empty. Every later layer assumes device 0
+    exists, so the shortfall would not surface here but as a std::terminate
+    out of libgsycl's sycl_set_device.
+
+    The final candidate is unfiltered, so the OpenCL CPU device is used when
+    that is all there is. Where a GPU is present the first query answers and
+    the rest are never reached, leaving that path unchanged.
+    """
     if _state["gpu_devices"] is not None:
         return _state["gpu_devices"]
-    try:
-        devs = dpctl.get_devices(backend="level_zero", device_type="gpu")
-    except Exception:
-        devs = []
-    if not devs:
+
+    candidates = (
+        lambda: dpctl.get_devices(backend="level_zero", device_type="gpu"),
+        lambda: dpctl.get_devices(device_type="gpu"),
+        lambda: dpctl.get_devices(),
+    )
+
+    devs = []
+    for query in candidates:
         try:
-            devs = dpctl.get_devices(device_type="gpu")
+            devs = query() or []
         except Exception:
-            devs = dpctl.get_devices()
+            devs = []
+        if devs:
+            break
+
     _state["gpu_devices"] = devs
     return devs
 
