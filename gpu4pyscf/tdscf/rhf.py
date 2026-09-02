@@ -345,7 +345,8 @@ class TD_Scanner(lib.SinglePointScanner):
         # whether basis set is changed in __call__
         self._basis_fp = np.hstack(td.mol.bas_exps())
 
-    def __call__(self, mol_or_geom, **kwargs):
+    def __call__(self, mol_or_geom, *, reuse_scf_dm=True,
+                 reuse_td_guess=True, **kwargs):
         assert self.device == 'gpu'
         if isinstance(mol_or_geom, gto.MoleBase):
             mol = mol_or_geom
@@ -358,18 +359,24 @@ class TD_Scanner(lib.SinglePointScanner):
         mo_prev = mf_scanner.mo_coeff
         occ_prev = mf_scanner.mo_occ
 
-        mf_e = mf_scanner(mol)
+        mf_e = mf_scanner(mol, init_guess_from_previous=reuse_scf_dm)
 
         # Reuse the previous step for initial guess.
-        x0 = self.xy
-        if x0 is not None:
-            if np.array_equal(self._basis_fp, np.hstack(mol.bas_exps())):
-                logger.info(self, 'Use cashed TDDFT guess (AO projected)')
-                x0 = self._transfer_initial_guess(x0, mo_prev, occ_prev)
-            else:
-                # When the basis set is changed, clear self.xy to avoid using xy
-                # from the previous step as initial guess.
-                x0 = self.xy = None
+        if reuse_td_guess:
+            x0 = self.xy
+            if x0 is not None:
+                if np.array_equal(self._basis_fp, np.hstack(mol.bas_exps())):
+                    logger.info(self, 'Use cashed TDDFT guess (AO projected)')
+                    x0 = self._transfer_initial_guess(x0, mo_prev, occ_prev)
+                else:
+                    # When the basis set is changed, clear self.xy to avoid using xy
+                    # from the previous step as initial guess.
+                    x0 = self.xy = None
+        else:
+            logger.info(self, 'Disable initial guess from previous TDDFT X/Y amplitudes')
+            # Passing None would make the regular TDDFT kernels fall back to
+            # self.xy, so explicitly construct a fresh diagonal initial guess.
+            x0 = self.init_guess()
 
         self.kernel(x0=x0, **kwargs)
         return mf_e + self.e
