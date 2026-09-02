@@ -202,7 +202,6 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
 
     a = cell.lattice_vectors()
     b = np.linalg.inv(a.T)
-    b_norm = np.linalg.norm(b, axis=1).astype(np.float32)
     vol = np.linalg.det(a)
     nkpts = len(ni.bvkmesh_Ls)
 
