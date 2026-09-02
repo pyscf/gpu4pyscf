@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from types import SimpleNamespace
-
 import numpy as np
 from gpu4pyscf.pbc.tools.discretization import freeze_mesh
 
