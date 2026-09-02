@@ -29,27 +29,6 @@
 #include "ecp_type1_ipip.cu"
 #include "ecp_type2_ipip.cu"
 
-// Kernel-launch abstraction, so the long `switch (task_type)` dispatch tables
-// below stay a single copy shared by both backends instead of being duplicated
-// under #ifdef.
-//
-// Under SYCL every launch needs a UNIQUE kernel-name class: SYCL derives the
-// kernel identity from that type, and its host-side registry symbols are
-// vague-linkage, so two launches sharing a name collapse at link time and
-// silently dispatch to the same body with no diagnostic. That is what the TAG
-// argument supplies -- one distinct tag per instantiation. It is unused (and
-// costs nothing) in the CUDA expansion.
-//
-// ECP_LAUNCH_GENERAL additionally carries the dynamic shared-memory size: SYCL
-// allocates it as a sycl::local_accessor and forwards the pointer as a trailing
-// kernel argument, while CUDA raises the per-kernel dynamic-smem cap and passes
-// the size through the <<<>>> launch configuration as before.
-//
-// ECP_LAUNCH_SMEM is the same thing without the cap-raising call, for the two
-// kernels whose name is overloaded (a templated form plus a general one).
-// cudaFuncSetAttribute takes the function by address, which cannot be resolved
-// from an overload set, so naming one there is a compile error. Upstream never
-// raised the cap for these two either -- they stay within the default 48 KB.
 #define ECP_ARGS  gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env
 
 #ifdef USE_SYCL

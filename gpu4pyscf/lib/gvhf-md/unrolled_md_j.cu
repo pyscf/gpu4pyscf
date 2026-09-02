@@ -8,31 +8,6 @@
 
 #ifdef USE_SYCL
 
-// ---------------------------------------------------------------------
-// SYCL overlay for the generated md_j kernels.
-//
-// Everything below the macro block in this file is auto-generated and is
-// kept byte-identical to upstream/master: the kernel bodies still spell
-// the launch geometry as blockIdx.x/.y and threadIdx.x/.y, and still
-// reach shared memory through vj_kl_cache. Only these three macros
-// differ between the CUDA and SYCL backends.
-//
-//   KERNEL_ARGS   appends the nd_item and the work-group local pointer,
-//                 which SYCL must thread through explicitly.
-//   KERNEL_SETUP  materialises blockIdx/threadIdx (md_j_index2, declared
-//                 in md_j.cuh) from the nd_item. nd_range dimension 1 is
-//                 the fast-varying axis and maps to CUDA's .x; dimension
-//                 0 maps to .y.
-//   LAUNCH_KERNEL builds the nd_range and the local_accessor. The block
-//                 counts arrive as the per-block task counts BLOCKS_IJ /
-//                 BLOCKS_KL so one macro covers both backends; the CUDA
-//                 side derives the same grid from them.
-//
-// KERNEL##_sycl gives every kernel a distinct name class. The names in
-// this file are unique across the whole gvhf_md library, so no per-TU tag
-// is needed here (contrast gvhf-rys/unrolled_kernels.cuh).
-// ---------------------------------------------------------------------
-
 #define KERNEL_ARGS \
     RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
     float *q_cond_ij, float *q_cond_kl, \

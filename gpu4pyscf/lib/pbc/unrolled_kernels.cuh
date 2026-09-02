@@ -18,33 +18,6 @@
 
 #ifdef USE_SYCL
 
-// ---------------------------------------------------------------------
-// SYCL overlay for the generated PBC rys_k kernels.
-//
-// unrolled_rys_k.cu and unrolled_int3c2e.cu are auto-generated upstream
-// and must stay byte-identical to upstream/master, so every backend
-// difference lives here rather than in those files.
-//
-//   JKMATRIX_KERNEL_ARGS   appends the nd_item and the work-group local
-//                          pointer, which SYCL must thread through.
-//   JKMATRIX_KERNEL_SETUP  materialises the thread/block indices from the
-//                          nd_item and replaces __shared__ scalars with
-//                          group_local_memory. nd_range dimension 1 is the
-//                          fast-varying axis and maps to CUDA's .x.
-//   LAUNCH_JKMATRIX_KERNEL builds the nd_range and the local_accessor.
-//
-// KERNEL##_pbc_k_sycl tags every kernel name class with the library it
-// belongs to: gvhf-rys/unrolled_rys_k.cu defines kernels with the SAME
-// names (rys_k_0000 ...) and different bodies, and the host-side SYCL
-// registry symbols are vague-linkage, so without a distinct suffix the
-// linker would collapse them and dispatch to the wrong body silently.
-//
-// The .cu file declares `dim3 threads(nsq_per_block, gout_stride);`
-// before the launch. Under SYCL that value is unused -- the launch macro
-// builds its own sycl::range with the axes swapped -- but the
-// declaration must still compile, so map dim3 onto sycl::range<2>.
-// ---------------------------------------------------------------------
-
 #define dim3 sycl::range<2>
 
 #define JKMATRIX_KERNEL_ARGS                                             \
