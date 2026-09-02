@@ -9,7 +9,7 @@
 #define KERNEL_ARGS \
     double *out, PBCIntEnvVars& envs, uint32_t *img_pool, \
     uint32_t *rem_task_idx, int num_ijk_tasks, int img_tile_size, \
-    ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool, \
+    ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool, double omega, \
     int shm_size, int iprim, int jprim, int kprim, uint32_t *bas_ij_idx, \
     int *ao_pair_loc, int ao_pair_offset, int aux_offset, \
     int nauxbas, int naux, int to_sph, \
@@ -17,7 +17,7 @@
 
 #define LAUNCH_KERNEL(KERNEL) \
     KERNEL(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size, \
-    ijk_tasks_info, c2s_pool, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc, \
+    ijk_tasks_info, c2s_pool, omega, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc, \
     ao_pair_offset, aux_offset, nauxbas, naux, to_sph, thread_id, worker_id, shared_memory)
 
 
@@ -89,7 +89,6 @@ void int3c2e_000(KERNEL_ARGS)
                 double ypq = yij - env[rk+1] - img_coords[kL*3+1];
                 double zpq = zij - env[rk+2] - img_coords[kL*3+2];
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
                 rys_roots(1, theta_rr, rw+st_id, nst_per_block, 0, 1);
@@ -190,7 +189,6 @@ void int3c2e_100(KERNEL_ARGS)
                 double ypq = yij - env[rk+1] - img_coords[kL*3+1];
                 double zpq = zij - env[rk+2] - img_coords[kL*3+2];
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
                 rys_roots(1, theta_rr, rw+st_id, nst_per_block, 0, 1);
@@ -302,7 +300,6 @@ void int3c2e_110(KERNEL_ARGS)
                 double ypq = yij - env[rk+1] - img_coords[kL*3+1];
                 double zpq = zij - env[rk+2] - img_coords[kL*3+2];
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
                 rys_roots(2, theta_rr, rw+st_id, nst_per_block, 0, 1);
@@ -430,7 +427,6 @@ void int3c2e_001(KERNEL_ARGS)
                 double ypq = yij - env[rk+1] - img_coords[kL*3+1];
                 double zpq = zij - env[rk+2] - img_coords[kL*3+2];
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
                 rys_roots(1, theta_rr, rw+st_id, nst_per_block, 0, 1);
@@ -542,7 +538,6 @@ void int3c2e_101(KERNEL_ARGS)
                 double ypq = yij - env[rk+1] - img_coords[kL*3+1];
                 double zpq = zij - env[rk+2] - img_coords[kL*3+2];
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
                 rys_roots(2, theta_rr, rw+st_id, nst_per_block, 0, 1);
@@ -604,7 +599,7 @@ void int3c2e_101(KERNEL_ARGS)
 }
 
 __device__ inline
-int int3c2e_unrolled(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
+int int3c2e_unrolled(double *out, double omega, PBCIntEnvVars& envs, uint32_t *img_pool,
                      uint32_t *rem_task_idx, int num_ijk_tasks, int img_tile_size,
                      ShellTripletTaskInfo *ijk_tasks_info, double *c2s_pool,
                      int shm_size, int iprim, int jprim, int kprim, int li, int lj, int lk,

@@ -461,6 +461,7 @@ class SRInt3c2eOpt:
                 return out
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.c_double(-self.omega),
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                 ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
@@ -536,6 +537,7 @@ class SRInt3c2eOpt:
         err = libpbc.PBCcontract_int3c2e_dm(
             ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(-self.omega),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
             ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
@@ -598,6 +600,7 @@ class SRInt3c2eOpt:
         err = libpbc.PBCcontract_int3c2e_auxvec(
             ctypes.cast(vj.data.ptr, ctypes.c_void_p),
             ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(-self.omega),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
             ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),

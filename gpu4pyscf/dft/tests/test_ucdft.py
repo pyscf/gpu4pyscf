@@ -19,6 +19,7 @@ from pyscf import lib
 from gpu4pyscf.dft import uks, ucdft
 from gpu4pyscf.dft.cdft_soscf import newton_cdft as newton_penalty
 from gpu4pyscf.dft.cdft_soscf_full import newton_cdft
+import pytest
 
 atom = '''
     O    0    0    0
@@ -191,6 +192,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(float(lumo), 0.0494326184909096, 6)
         self.assertAlmostEqual(float(v_lagrange[0]), 0.288396, 6)
 
+    @pytest.mark.slow
     def test_canonical_mo_energy(self):
         mf = self.output_lagrange_nested_cons2_minao_ao['mf']
         mf.xc = 'b3lyp'

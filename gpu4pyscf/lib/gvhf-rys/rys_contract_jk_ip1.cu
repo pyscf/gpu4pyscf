@@ -81,7 +81,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.lr_factor != 0) {
+    if (jk.omega >= 0) {
         _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                               q_cond_ij, q_cond_kl, dm_penalty,
                               (int *)shared_memory, envs, bounds);
@@ -89,7 +89,7 @@ while (1) {
         _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                                  q_cond_ij, q_cond_kl, dm_penalty,
                                  s_cond_ij, s_cond_kl, diffuse_exps,
-                                 (int *)shared_memory, envs, bounds);
+                                 (int *)shared_memory, jk.omega, envs, bounds);
     }
     if (ntasks == 0) {
         continue;
@@ -220,7 +220,8 @@ while (1) {
                     double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                     double theta = aij * akl / (aij + akl);
                     int nroots = bounds.nroots;
-                    rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                    rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor,
+                                    nsq_per_block, gout_stride, gout_id);
                     for (int irys = 0; irys < nroots; ++irys) {
                         int lij = li + lj + 1;
                         int lkl = lk + ll;
@@ -631,7 +632,8 @@ while (1) {
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor,
+                                nsq_per_block, gout_stride, gout_id);
                 for (int irys = 0; irys < nroots; ++irys) {
                     BUILD_4C_GXYZ(lj, ll, task_id < ntasks);
                     if (task_id >= ntasks) {
@@ -1035,9 +1037,9 @@ while (1) {
                 double aij = ai + aj;
                 double akl = ak + al;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
                 double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
@@ -1058,8 +1060,8 @@ while (1) {
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw,
-                                jk.omega, jk.lr_factor, jk.sr_factor);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor,
+                                nsq_per_block, gout_stride, gout_id);
                 for (int irys = 0; irys < nroots; ++irys) {
                     int lij = li + lj + 1;
                     int lkl = lk + ll + 1;
@@ -1483,9 +1485,9 @@ while (1) {
                 double aij = ai + aj;
                 double akl = ak + al;
                 double aj_aij = aj / aij;
-                double xij = ri[0] + (rjri[0]) * aj_aij;
-                double yij = ri[1] + (rjri[1]) * aj_aij;
-                double zij = ri[2] + (rjri[2]) * aj_aij;
+                double xij = ri[0] + rjri[0] * aj_aij;
+                double yij = ri[1] + rjri[1] * aj_aij;
+                double zij = ri[2] + rjri[2] * aj_aij;
                 double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
@@ -1506,8 +1508,8 @@ while (1) {
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw,
-                                jk.omega, jk.lr_factor, jk.sr_factor);
+                rys_roots_for_k(nroots, theta, rr, rw, jk.omega, jk.lr_factor, jk.sr_factor,
+                                nsq_per_block, gout_stride, gout_id);
                 for (int irys = 0; irys < nroots; ++irys) {
                     int lij = li + lj + 1;
                     int lkl = lk + ll + 1;
@@ -1653,6 +1655,7 @@ extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *b
 
 extern "C" {
 int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int atom_offset,
+                     double omega, double lr_factor, double sr_factor,
                      RysIntEnvVars envs, int *scheme, int *shls_slice,
                      int npairs_ij, int npairs_kl,
                      uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
@@ -1678,7 +1681,6 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
     int nfl = (ll+1)*(ll+2)/2;
     int order = li + lj + lk + ll;
     int nroots = (order + 1) / 2 + 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
@@ -1692,14 +1694,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         NULL, NULL, dm_cond, cutoff};
 
-    JKMatrix jk = {vj, vk, dm, n_dm, atom_offset, omega};
-    if (omega >= 0) {
-        jk.lr_factor = 1;
-        jk.sr_factor = 0;
-    } else {
-        jk.lr_factor = 0;
-        jk.sr_factor = 1;
-    }
+    JKMatrix jk = {vj, vk, dm, n_dm, atom_offset, omega, lr_factor, sr_factor};
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
@@ -1746,6 +1741,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
 
 int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         double *dm, int n_dm, int nao,
+                        double omega, double lr_factor, double sr_factor,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
@@ -1772,7 +1768,6 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     int nfl = (ll+1)*(ll+2)/2;
     int order = li + lj + lk + ll;
     int nroots = (order + 1) / 2 + 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
@@ -1794,14 +1789,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     // These give an overall factor of 4 in the J contraction.
     // In the K contraction, (dm_jk*dm_il+dm_jl*dm_ik) is constructed.
     // This introduces an additional factor of 1/2.
-    JKEnergy jk = {ejk, dm, 4*j_factor, -2*k_factor, n_dm, omega};
-    if (omega >= 0) {
-        jk.lr_factor = 1;
-        jk.sr_factor = 0;
-    } else {
-        jk.lr_factor = 0;
-        jk.sr_factor = 1;
-    }
+    JKEnergy jk = {ejk, dm, 4*j_factor, -2*k_factor, n_dm, omega, lr_factor, sr_factor};
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
@@ -1850,6 +1838,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
 int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_cpu,
                         double *k_factor, double *k_factor_cpu,
                         double *dm1, double *dm2, int n_dm, int nao,
+                        double omega, double lr_factor, double sr_factor,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
@@ -1876,7 +1865,6 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
     int nfl = (ll+1)*(ll+2)/2;
     int order = li + lj + lk + ll;
     int nroots = (order + 1) / 2 + 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
@@ -1890,14 +1878,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         NULL, NULL, dm_cond, cutoff};
 
-    JKEnergy jk = {ejk, NULL, 1., 1., n_dm, omega};
-    if (omega >= 0) {
-        jk.lr_factor = 1;
-        jk.sr_factor = 0;
-    } else {
-        jk.lr_factor = 0;
-        jk.sr_factor = 1;
-    }
+    JKEnergy jk = {ejk, NULL, 1., 1., n_dm, omega, lr_factor, sr_factor};
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
@@ -1956,6 +1937,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
 int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
                         double *k_factor, double *k_factor_cpu,
                         double *dm1, double *dm2, int n_dm, int nao,
+                        double omega, double lr_factor, double sr_factor,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
@@ -1983,7 +1965,6 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
     int nf = nfi * nfj * nfk * nfl;
     int order = li + lj + lk + ll;
     int nroots = (order + 1) / 2 + 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
@@ -1997,14 +1978,7 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         NULL, NULL, dm_cond, cutoff};
 
-    JKEnergy jk = {ejk, NULL, 0., 0., n_dm, omega};
-    if (omega >= 0) {
-        jk.lr_factor = 1;
-        jk.sr_factor = 0;
-    } else {
-        jk.lr_factor = 0;
-        jk.sr_factor = 1;
-    }
+    JKEnergy jk = {ejk, NULL, 0., 0., n_dm, omega, lr_factor, sr_factor};
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
