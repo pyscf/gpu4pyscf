@@ -375,9 +375,9 @@ class KnownValues(unittest.TestCase):
         )
 
         kpts = cell.make_kpts((1,2,3))
-        mf = krks.KRKS(cell, xc="SCAN0", kpts=kpts).density_fit(auxbasis='def2-universal-jkfit')
+        mf = krks.KRKS(cell, xc="r2scan0", kpts=kpts).density_fit(auxbasis='def2-universal-jkfit')
         mf.grids = gen_grid.BeckeGrids(cell)
-        mf.grids.atom_grid = (99,590)
+        mf.grids.atom_grid = (120,590)
         mf.conv_tol = 1e-10
 
         mf.kernel()
@@ -388,9 +388,9 @@ class KnownValues(unittest.TestCase):
         test_gradient = get_vxc(mf._numint, cell, mf.grids, mf.xc, dm, kpts, hermi=1)
 
         # dm is not very stable, and numerical gradient is super fast
-        ref_gradient = numerical_gradient_exc_becke(cell, "SCAN0", kpts, 'def2-universal-jkfit', (99,590), dm)
+        ref_gradient = numerical_gradient_exc_becke(cell, "r2scan0", kpts, 'def2-universal-jkfit', (120,590), dm)
 
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-4
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-4
 
     def test_xc_gradient_unrestricted_no_k_without_response(self):
         cell = pyscf.M(
