@@ -16,7 +16,10 @@
 
 #define NGV_PER_BLOCK   16
 
-inline __forceinline__ __device__
+#ifdef USE_SYCL
+inline
+#endif
+__forceinline__ __device__
 void vrr_hrr(double *gx, double *swap, int addrR, int li, int lj,
              int stride_j, double a2, double xjxi, double aj_aij,
              double xi, double kx, double theta_rr)
@@ -153,7 +156,10 @@ void vrr_hrr(double *gx, int addrR, int stride_j, double a2, double xjxi,
     }
 }
 
-inline __forceinline__ __device__
+#ifdef USE_SYCL
+inline
+#endif
+__forceinline__ __device__
 void dI_gx(double *gx, int addr, int stride_i, int li,
            double ai2, double &outR, double &outI)
 {
@@ -165,7 +171,10 @@ void dI_gx(double *gx, int addr, int stride_i, int li,
     }
 }
 
-inline __forceinline__ __device__
+#ifdef USE_SYCL
+inline
+#endif
+__forceinline__ __device__
 void dIdJ_gx(double *gx, int addr, int stride_i, int stride_j, int li, int lj,
              double ai2, double aj2, double &outR, double &outI)
 {
@@ -189,7 +198,10 @@ void dIdJ_gx(double *gx, int addr, int stride_i, int stride_j, int li, int lj,
     }
 }
 
-inline __forceinline__ __device__
+#ifdef USE_SYCL
+inline
+#endif
+__forceinline__ __device__
 void dIdJ_gx(double *gx, int addr, int stride_i, int li,
              double ai2, double kx, double &outR, double &outI)
 {
@@ -217,7 +229,10 @@ void dIdJ_gx(double *gx, int addr, int stride_i, int li,
     outI = f1R *  kx - outI;
 }
 
-inline __forceinline__ __device__
+#ifdef USE_SYCL
+inline
+#endif
+__forceinline__ __device__
 void d2IdJ_gx(double *gx, int addr, int stride_i, int stride_j, int li, int lj,
               double ai2, double aj2, double &outR, double &outI)
 {
