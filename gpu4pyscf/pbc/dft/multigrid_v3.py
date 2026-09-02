@@ -317,7 +317,7 @@ def _eval_xc_mat(ni, vxcG, out=None, work=None):
         # of vrhoG will be overwritten by ifft_in_place
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
-        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real
+        sub_vrhoR[:] = ifft_in_place(sub_vrhoG).real # Henry 20260902: If you got an illegal memory access error here, make sure your cupy version >= 14.2.0
         sub_vtauR = sub_vrhoR # placeholder
 
         if vtauG is not None:
