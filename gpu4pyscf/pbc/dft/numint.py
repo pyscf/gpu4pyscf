@@ -30,17 +30,18 @@ from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
+from gpu4pyscf.pbc.dft.gen_grid import UniformGrids, BeckeGrids
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (
     transpose_sum, contract, get_avail_mem, asarray, ndarray)
 from gpu4pyscf.lib import utils
+from gpu4pyscf import __config__
 
 __all__ = ['NumInt', 'KNumInt']
 
-MIN_BLK_SIZE = 16384
-ALIGNED = 256
+MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 4096)
+ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 LMAX = 4
 
 def eval_ao(cell, coords, kpt=np.zeros(3), deriv=0, relativity=0, shls_slice=None,
@@ -766,12 +767,15 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
             grids_coords = grids_coords[idx]
             grids_weights = grids_weights[idx]
 
-        #cupy.get_default_memory_pool().free_all_blocks()
-        mem_avail = get_avail_mem()
-        blksize = int((mem_avail*.2/8/((comp+1)*nao))/ ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
-        if blksize < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
+        if isinstance(grids, BeckeGrids):
+            blksize = MIN_BLK_SIZE # For gradient grid response, grids in one block always originate from the same atom in a unit cell and its images
+        else:
+            #cupy.get_default_memory_pool().free_all_blocks()
+            mem_avail = get_avail_mem()
+            blksize = int((mem_avail*.2/8/((comp+1)*nao))/ ALIGNED) * ALIGNED
+            blksize = min(blksize, MIN_BLK_SIZE)
+            if blksize < ALIGNED:
+                raise RuntimeError('Not enough GPU memory')
 
         if kpts is not None:
             kpts = kpts.reshape(-1, 3)

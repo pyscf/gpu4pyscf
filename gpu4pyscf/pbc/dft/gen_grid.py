@@ -53,7 +53,9 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     Ls = pbc_eval_gto.get_lattice_Ls(cell, rcut=rcut)
     logger.debug(cell, f'Becke grid rcut = {rcut}')
 
-    supatm_coords = Ls.reshape(-1,1,3) + cell.atom_coords()
+    from gpu4pyscf.pbc.dft.numint import MIN_BLK_SIZE
+
+    supatm_coords = cell.atom_coords()[:,None,:] + Ls[None,:,:]
     atom_grids_tab = gen_atomic_grids(cell, atom_grid, radi_method, level, prune)
     coords_all = []
     weights_all = []
@@ -62,10 +64,12 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     atm_idx = []
     k = 0
     tol = 1e-15
-    for iL, L in enumerate(Ls):
-        for ia in range(cell.natm):
+    for ia in range(cell.natm):
+        coords_of_atom = []
+        weights_of_atom = []
+        for iL, L in enumerate(Ls):
             coords, vol = atom_grids_tab[cell.atom_symbol(ia)]
-            coords = coords + supatm_coords[iL,ia]
+            coords = coords + supatm_coords[ia, iL]
             # search for grids in unit cell
             c = b.dot(coords.T)
 
@@ -90,11 +94,21 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
                     vol[abs(c[2]+.5) < tol] *= .5
                     vol[abs(c[2]-.5) < tol] *= .5
                 coords = coords[mask]
-                coords_all.append(coords)
-                weights_all.append(vol)
+                coords_of_atom.append(coords)
+                weights_of_atom.append(vol)
                 supatm_idx.append(k)
                 atm_idx.append(ia)
             k += 1
+        if len(weights_of_atom) > 0:
+            n_grids_of_atom = sum([w.size for w in weights_of_atom])
+            n_pad = ((n_grids_of_atom + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE) * MIN_BLK_SIZE - n_grids_of_atom
+            weights_of_atom[-1] = np.hstack([weights_of_atom[-1], np.zeros(n_pad)])
+
+            last_coords_of_atom = coords_of_atom[-1][-1]
+            coords_of_atom[-1] = np.vstack([coords_of_atom[-1], np.tile(last_coords_of_atom, (n_pad, 1))])
+
+            coords_all.extend(coords_of_atom)
+            weights_all.extend(weights_of_atom)
 
     supatm_coords = np.asarray(supatm_coords.reshape(-1,3)[supatm_idx], order='C')
     sup_natm = len(supatm_coords)
@@ -107,6 +121,7 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     ngrids = weights_all.size
     assert coords_all.shape == (ngrids, 3)
     assert supatm_idx.shape == (ngrids,)
+    assert ngrids % MIN_BLK_SIZE == 0
 
     weights_all = cp.asarray(weights_all, dtype = cp.float64)
     coords_all = cp.asarray(coords_all, dtype = cp.float64, order = "F")
@@ -148,7 +163,7 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
 
     return coords_all, weights_all, quadrature_weights_all, supatm_idx, supatm_coords, supatm_to_atm_idx
 
-def get_becke_weight_derivative(grids, natm):
+def get_becke_weight_derivative(grids, natm, grid_range = None):
     assert type(grids) is BeckeGrids
     ngrids = grids.coords.shape[0]
     assert grids.supatm_idx.shape[0] == ngrids
@@ -162,14 +177,28 @@ def get_becke_weight_derivative(grids, natm):
     from gpu4pyscf.dft.gen_grid import get_C_interface_scheme_id, original_becke
     scheme_id = get_C_interface_scheme_id(original_becke) # TODO: Support other partition scheme
 
-    grids_coords = cp.asarray(grids.coords, order = "F")
-    grids_quadrature_weights = cp.asarray(grids.quadrature_weights)
-    grids_supatm_idx = cp.asarray(grids.supatm_idx)
     grids_supatm_coords = cp.asarray(grids.supatm_coords, order = "F")
     grids_supatm_to_atm_idx = cp.asarray(grids.supatm_to_atm_idx)
 
     inv_atom_distance = 1 / cp.linalg.norm(grids_supatm_coords[:, None, :] - grids_supatm_coords[None, :, :], axis = 2)
     cp.fill_diagonal(inv_atom_distance, 0)
+
+    grids_coords = cp.asarray(grids.coords, order = "F")
+    grids_quadrature_weights = cp.asarray(grids.quadrature_weights)
+    grids_supatm_idx = cp.asarray(grids.supatm_idx)
+
+    if grid_range is not None:
+        assert np.asarray(grid_range).shape == (2,)
+        assert grid_range[1] > grid_range[0]
+        ngrids = grid_range[1] - grid_range[0]
+
+        grids_coords = cp.asfortranarray(grids_coords[grid_range[0] : grid_range[1]])
+        # The next two arrays are 1D, so slicing without copy is fine.
+        grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
+        grids_supatm_idx = grids_supatm_idx[grid_range[0] : grid_range[1]]
+        assert grids_coords.shape == (ngrids, 3)
+        assert grids_quadrature_weights.shape == (ngrids,)
+        assert grids_supatm_idx.shape == (ngrids,)
 
     Ar_distance = cp.linalg.norm(grids_supatm_coords[:, None, :] - grids_coords[None, :, :], axis = 2)
     assert Ar_distance.shape == (sup_natm, ngrids)
