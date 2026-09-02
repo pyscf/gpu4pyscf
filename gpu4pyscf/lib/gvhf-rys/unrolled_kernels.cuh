@@ -22,13 +22,7 @@
 // Per-translation-unit kernel-name disambiguation.
 //
 // unrolled_rys_jk.cu and unrolled_rys_k.cu BOTH define 19 kernels named
-// rys_k_0000 .. rys_k_3200 with DIFFERENT bodies. Their SYCL kernel-name
-// types would therefore be identical across the two objects. The device
-// images stay distinct, but the HOST-side registry symbols
-// (getDeviceKernelInfo<T>, CompileTimeKernelInfo<T>) are vague-linkage
-// and get collapsed by the linker: both launch sites then dispatch to
-// whichever body the linker saw first. This compiles clean, links clean,
-// and produces silently wrong numbers.
+// rys_k_0000 .. rys_k_3200 with DIFFERENT bodies. 
 //
 // RYS_UNROLLED_KERNEL_TAG is injected per source file by
 // gvhf-rys/CMakeLists.txt. Do NOT define it inside the .cu files --
@@ -42,10 +36,6 @@
 #define RYS_KERNEL_TAG_CAT(KERNEL, TAG)  RYS_KERNEL_TAG_CAT_(KERNEL, TAG)
 #define RYS_KERNEL_TAG(KERNEL)           RYS_KERNEL_TAG_CAT(KERNEL, RYS_UNROLLED_KERNEL_TAG)
 
-// The .cu files declare `dim3 threads(nsq_per_block, gout_stride);` before
-// the launch. Under SYCL that value is unused -- the launch macro builds its
-// own sycl::range with the axes swapped -- but the declaration must still
-// compile. Map it onto sycl::range<2>; the object is simply never read.
 #define dim3 sycl::range<2>
 
 #define JKMATRIX_KERNEL_ARGS \
