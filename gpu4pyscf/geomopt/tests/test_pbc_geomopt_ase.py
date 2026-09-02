@@ -23,10 +23,17 @@ from pyscf import lib
 from pyscf.data.nist import BOHR, HARTREE2EV
 
 if ase is not None:
+    from ase.constraints import FixCom
     from pyscf.pbc.tools.pyscf_ase import pyscf_to_ase_atoms
 
 
 class _FakeGradients:
+    def __init__(self, cell):
+        self.cell = cell
+
+    def kernel(self):
+        return np.arange(1, self.cell.natm * 3 + 1).reshape(-1, 3)
+
     def get_stress(self):
         return np.eye(3)
 
@@ -35,10 +42,11 @@ class _FakeScanner:
     converged = True
 
     def __call__(self, cell):
+        self.cell = cell
         return 0.
 
     def Gradients(self):
-        return _FakeGradients()
+        return _FakeGradients(self.cell)
 
 
 class _FakeMethod(lib.StreamObject):
@@ -64,6 +72,75 @@ def test_ase_stress_units():
     assert np.allclose(
         calculator.results['stress'], np.eye(3) * HARTREE2EV / BOHR**3)
 
+
+@pytest.mark.skipif(ase is None, reason='ASE not available')
+def test_pbc_optimizer_freezes_automatic_mesh():
+    from gpu4pyscf.geomopt import ase_solver
+
+    cell = pyscf.M(
+        atom='He 0 0 0', a=np.eye(3) * 4., unit='Angstrom',
+        basis='gth-szv', pseudo='gth-pade', precision=1e-8, verbose=0)
+    mesh = np.asarray(cell.mesh).copy()
+    assert cell._mesh_from_build
+
+    method = _FakeMethod(cell)
+    _, optimized_cell = ase_solver.kernel(method, max_steps=0)
+
+    assert not cell._mesh_from_build
+    assert method._geomopt_mesh == tuple(mesh)
+    np.testing.assert_array_equal(cell.mesh, mesh)
+    np.testing.assert_array_equal(optimized_cell.mesh, mesh)
+
+    strained_cell = optimized_cell.set_geom_(
+        optimized_cell.atom_coords(),
+        a=optimized_cell.lattice_vectors() * 1.01,
+        unit='Bohr',
+        inplace=False,
+    )
+    np.testing.assert_array_equal(strained_cell.mesh, mesh)
+
+
+@pytest.mark.skipif(ase is None, reason='ASE not available')
+def test_pbc_optimizer_fixcom(monkeypatch):
+    from gpu4pyscf.geomopt import ase_solver
+
+    optimized = []
+
+    class FakeBFGS:
+        def __init__(self, atoms, logfile=None):
+            optimized.append(atoms)
+
+        def run(self, fmax, steps):
+            return True
+
+    monkeypatch.setattr(ase_solver, 'BFGS', FakeBFGS)
+
+    for target in (None, 'atoms', 'cell', 'lattice'):
+        cell = pyscf.M(
+            atom='He 0 0 0; He 1 1 1',
+            a=np.eye(3) * 4.,
+            unit='Angstrom',
+            basis='gth-szv',
+            pseudo='gth-pade',
+            mesh=[15] * 3,
+            verbose=0,
+        )
+        ase_solver.kernel(
+            _FakeMethod(cell),
+            target=target,
+            max_steps=0,
+        )
+
+        system = optimized[-1]
+        atoms = getattr(system, 'atoms', system)
+        has_fixcom = any(
+            isinstance(constraint, FixCom)
+            for constraint in atoms.constraints
+        )
+        assert has_fixcom == (target != 'lattice')
+
+        if target == 'atoms':
+            assert np.allclose(atoms.get_forces().sum(axis=0), 0.)
 
 @pytest.mark.skipif(ase is None, reason='ASE not available')
 def test_ase_optimize_cell():

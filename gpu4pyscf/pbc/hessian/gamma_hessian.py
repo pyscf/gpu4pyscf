@@ -36,6 +36,7 @@ try:
 except ImportError:
     HAS_PHONOPY = False
 from gpu4pyscf.lib import logger
+from gpu4pyscf.pbc.tools.discretization import freeze_mesh
 
 GRAD_TO_FORCE = -(HARTREE2EV / BOHR_TO_ANGSTROM)
 EV_A2_TO_HA_BOHR2 = BOHR_TO_ANGSTROM**2 / HARTREE2EV
@@ -48,7 +49,9 @@ class GammaHessian(lib.StreamObject):
 
     ``primitive_matrix`` maps the input cell to the primitive cell and must
     be supplied explicitly. ``kernel`` stores the corresponding phonopy
-    object in ``phonon``.
+    object in ``phonon``. The current ``cell.mesh`` is fixed when ``kernel``
+    starts. If geometry-optimization mesh metadata is available, that mesh is
+    reused.
     """
 
     def __init__(
@@ -93,6 +96,12 @@ class GammaHessian(lib.StreamObject):
         mf = self.mf
         cell = mf.cell
         original_coords = cell.atom_coords() # Bohr
+        geomopt_mesh = getattr(
+            mf,
+            "_geomopt_mesh",
+            getattr(cell, "_geomopt_mesh", None),
+        )
+        reference_mesh = freeze_mesh(mf, cell, geomopt_mesh)
 
         # default calculator is vasp, default unit in phonopy for vasp:
         #           | Distance   Atomic mass   Force         Force constants
@@ -133,6 +142,7 @@ class GammaHessian(lib.StreamObject):
         for index, displaced in enumerate(displaced_cells, 1):
             disp_cell = cell.set_geom_(displaced.positions, unit="Angstrom", inplace=False)
             mf_disp = mf.copy().reset(disp_cell)
+            freeze_mesh(mf_disp, disp_cell, reference_mesh)
             logger.info(
                 mf,
                 "Running displaced SCF and gradient %d/%d",
