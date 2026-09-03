@@ -82,7 +82,7 @@ def numerical_hessian_range_separation_in_kernel(mol, xc, auxbasis, atom_grid, u
         mf.grids.atom_grid = atom_grid
         mf.conv_tol = 1e-12
 
-        e = mf.kernel()
+        mf.kernel()
         assert mf.converged
 
         gobj = mf.Gradients()
