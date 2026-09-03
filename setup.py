@@ -187,11 +187,10 @@ class CMakeBuildPy(build_py):
     def _setup_hip_build(self):
         """Environment and CMake flags for an AMD HIP/ROCm build.
 
-        Mirrors rocm/build_gpu4pyscf.sh so ``pip install`` reproduces the
-        script's build: export the ROCm paths and select the HIP language via
-        -DUSE_HIP=ON. The GPU architecture is auto-detected (rocm_agent_enumerator);
-        override with GPU_ARCHITECTURES=gfxXXXX. Missing prerequisites raise an
-        actionable error before CMake runs.
+        Locate ROCm, export its paths, and select the HIP language via
+        -DUSE_HIP=ON. The GPU architecture is auto-detected (rocm_agent_enumerator)
+        or chosen with GPU_TARGET / GPU_ARCHITECTURES. Missing prerequisites raise
+        an actionable error before CMake runs.
         """
         rocm_path = find_rocm_path()
         if not rocm_path:

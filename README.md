@@ -69,7 +69,7 @@ Build and install:
 ```sh
 git clone https://github.com/pyscf/gpu4pyscf.git
 cd gpu4pyscf
-USE_HIP=1 pip install . --no-build-isolation        # autodetect this machine's GPU
+USE_HIP=1 pip install .        # autodetect this machine's GPU
 # add -e for an editable/development install
 ```
 
@@ -85,13 +85,12 @@ Use `GPU_TARGET` to choose what hardware to build for (an explicit
 | `all`                    | all of the above, in a single binary (CDNA + RDNA)            |
 
 ```sh
-USE_HIP=1 GPU_TARGET=all  pip install . --no-build-isolation   # one binary for all AMD GPUs
-USE_HIP=1 GPU_TARGET=cdna pip wheel . --no-build-isolation -w dist/   # redistributable wheel
+USE_HIP=1 GPU_TARGET=all  pip install .          # one binary for all AMD GPUs
+USE_HIP=1 GPU_TARGET=cdna pip wheel . -w dist/    # redistributable wheel
 ```
 
-`rocm/build_gpu4pyscf.sh` is a thin convenience wrapper around the same build
-(handy for recompiling an editable checkout in place) and accepts the same
-`GPU_TARGET`.
+When working against an editable install, recompile the libraries in place with
+`USE_HIP=1 python setup.py build_py` (it accepts the same `GPU_TARGET`).
 
 > [!NOTE]
 > AMD has no portable-IR fallback (unlike CUDA's PTX), so device code is emitted
