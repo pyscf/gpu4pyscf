@@ -31,10 +31,10 @@ from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc
-from gpu4pyscf.pbc.df.int3c2e import (
-    fill_triu_bvk, L_AUX_MAX, THREADS
-)
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+
+L_AUX_MAX = 6
+THREADS = 256
 
 __all__ = [
     'int1e_ovlp',

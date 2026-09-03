@@ -27,8 +27,6 @@ from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.grad.rks_stress import (
     _get_pp_nonloc_strain_derivatives, ewald)
 
-ALIGNED = 256
-
 def kernel(mf_grad):
     '''Compute the energy derivatives for strain tensor (e_ij)
 

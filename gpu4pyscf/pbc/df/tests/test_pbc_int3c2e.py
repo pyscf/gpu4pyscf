@@ -19,6 +19,7 @@ import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.df import int3c2e
+from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, fill_triu_bvk
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 from gpu4pyscf.lib.cupy_helper import contract
@@ -328,7 +329,6 @@ C    D
     assert abs(vj - ref).max() < 1e-10
 
 def test_int3c2e_batch_evaluation():
-    from gpu4pyscf.df.int3c2e_bdiv import argsort_aux
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
@@ -373,7 +373,6 @@ C    D
     i, j = divmod(pair_address, nao)
     j3c = cp.zeros((nao, nao, naux))
     j3c[j, i] = j3c[i, j] = dat[:,0].dot(opt.auxcell.ctr_coeff)
-    cp.cuda.get_current_stream().synchronize()
 
     cell.precision=1e-10
     cell.build()
@@ -420,3 +419,34 @@ C    D
     for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         dat[:,:,p0:p1] = eval_j3c(aux_batch_id=i)
     assert abs(dat - ref).max() < 1e-10
+
+def test_int2c2e_strain_deriv_vs_finite_difference():
+    from gpu4pyscf.pbc.df import int2c2e
+    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]
+                     ),
+               'C2': 'ccpvdz'},
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    omega = -0.2
+    nao = cell.nao
+    dm = cp.random.seed(9)
+    dm = cp.random.rand(nao, nao)
+    dm = dm + dm.T
+    sorted_cell = SortedCell.from_cell(cell)
+    _, dat = int2c2e.int2c2e_energy_derivatives(
+        cell, sorted_cell.apply_C_mat_CT(dm), omega=omega)
+
+    disp = 1e-4
+    for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+        cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
+        e1 = .5 * cp.einsum('ij,ji->', dm, int2c2e.sr_int2c2e(cell1, omega))
+        e2 = .5 * cp.einsum('ij,ji->', dm, int2c2e.sr_int2c2e(cell2, omega))
+        assert abs(dat[i,j] - (e1-e2)/disp/2) < 1e-6
