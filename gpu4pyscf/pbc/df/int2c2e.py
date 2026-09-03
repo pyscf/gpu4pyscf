@@ -333,9 +333,12 @@ class Int2c2eOpt:
         if self.bas_ij_cache is None:
             self.build()
         cell = self.cell
-        assert omega < 0
         assert dm.shape[-1] == cell.nao
-        lr_factor, sr_factor = 0, 1
+        if omega is None:
+            omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, None, None)
+        else:
+            assert omega < 0
+            lr_factor, sr_factor = 0, 1
 
         nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, deriv=(1,0))
         lmax = cell.uniq_l_ctr[:,0].max()
@@ -362,4 +365,4 @@ class Int2c2eOpt:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError('e_int2c2e_ip1 failed')
-        return grad.get(), sigma.get()
+        return grad, sigma

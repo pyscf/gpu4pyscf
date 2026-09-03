@@ -443,6 +443,7 @@ def test_int2c2e_strain_deriv_vs_finite_difference():
     sorted_cell = SortedCell.from_cell(cell)
     _, dat = int2c2e.int2c2e_energy_derivatives(
         cell, sorted_cell.apply_C_mat_CT(dm), omega=omega)
+    dat = cp.asnumpy(dat)
 
     disp = 1e-4
     for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:

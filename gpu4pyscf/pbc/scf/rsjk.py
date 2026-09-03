@@ -1158,8 +1158,9 @@ class PBCJKMatrixOpt:
                 wcoulG += wcoulG_SR
 
             aft_envs = ft_opt.aft_envs
-            kern = libpbc.PBC_ft_aopair_ej_ip1
+            kern = libpbc.PBC_ft_aopair_ej_deriv
             ej = cp.zeros((cell.natm, 3))
+            sigma = cp.zeros((3, 3))
             for p0, p1 in lib.prange(0, ngrids, blksize):
                 nGv = p1 - p0
                 Gpq = ft_kern(Gv[p0:p1])
@@ -1169,6 +1170,7 @@ class PBCJKMatrixOpt:
                 GvT = cp.asarray(Gv[p0:p1].T.ravel())
                 err = kern(
                     ctypes.cast(ej.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
                     ctypes.cast(vG.data.ptr, ctypes.c_void_p),
                     ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -1222,8 +1224,9 @@ class PBCJKMatrixOpt:
                 diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao)
 
             aft_envs = ft_opt.aft_envs
-            kern = libpbc.PBC_ft_aopair_ek_ip1
+            kern = libpbc.PBC_ft_aopair_ek_deriv
             ek = cp.zeros((cell.natm, 3))
+            sigma1 = cp.zeros((3, 3))
             for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
                 kpt = kpts[kp]
                 wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
@@ -1258,6 +1261,7 @@ class PBCJKMatrixOpt:
                     GvT = (Gv[p0:p1].T + cp.asarray(kpt[:,None])).ravel()
                     err = kern(
                         ctypes.cast(ek.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                         ctypes.byref(aft_envs),
@@ -1606,7 +1610,7 @@ class PBCJKMatrixOpt:
                 wcoulG_1 += wcoulG_SR_1
 
             aft_envs = ft_opt.aft_envs
-            kern = libpbc.PBC_ft_aopair_ej_strain_deriv
+            kern = libpbc.PBC_ft_aopair_ej_deriv
             ej = cp.zeros((cell.natm, 3))
             sigma = cp.zeros((3, 3))
             for p0, p1 in lib.prange(0, ngrids, blksize):
@@ -1675,7 +1679,7 @@ class PBCJKMatrixOpt:
                 diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao)
 
             aft_envs = ft_opt.aft_envs
-            kern = libpbc.PBC_ft_aopair_ek_strain_deriv
+            kern = libpbc.PBC_ft_aopair_ek_deriv
             ek = cp.zeros((cell.natm, 3))
             sigma = cp.zeros((3, 3))
             sigma1 = cp.zeros((3, 3))

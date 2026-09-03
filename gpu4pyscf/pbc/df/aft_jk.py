@@ -452,8 +452,9 @@ def get_ej_ip1(mydf, dm, kpts=None):
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
-    kern = libpbc.PBC_ft_aopair_ej_ip1
+    kern = libpbc.PBC_ft_aopair_ej_deriv
     ej = cp.zeros((cell.natm, 3))
+    sigma1 = cp.zeros((3, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation
@@ -466,6 +467,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
         Gpq = None
         err = kern(
             ctypes.cast(ej.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
             ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
             ctypes.cast(vG.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -535,8 +537,9 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
-    kern = libpbc.PBC_ft_aopair_ek_ip1
+    kern = libpbc.PBC_ft_aopair_ek_deriv
     ek = cp.zeros((cell.natm, 3))
+    sigma1 = cp.zeros((3, 3))
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
         wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, omega, kpts,
@@ -606,6 +609,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
             GvT = cp.asarray((Gv[p0:p1]+kpt).T.ravel())
             err = kern(
                 ctypes.cast(ek.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),
@@ -719,7 +723,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
-    kern = libpbc.PBC_ft_aopair_ej_strain_deriv
+    kern = libpbc.PBC_ft_aopair_ej_deriv
     ej = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
@@ -810,7 +814,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
-    kern = libpbc.PBC_ft_aopair_ek_strain_deriv
+    kern = libpbc.PBC_ft_aopair_ek_deriv
     ek = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
     sigma1 = cp.zeros((3, 3))
