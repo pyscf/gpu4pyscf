@@ -228,11 +228,10 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
             tauR = ndarray(mesh, dtype=np.complex128, buffer=work1)
             tauR.fill(0)
 
-        for (li, lj), bas_ij_idx, grid_frac_ranges, atom_grid_ranges, \
-                shl_pair_offsets, atom_mesh in zip(
-                    bucket['lij_patterns'], bucket['bas_ij_cache'],
-                    bucket['grid_ranges_cache'], bucket['atom_grid_ranges'],
-                    bucket['atom_seg_offsets'], bucket['atom_mesh_max']):
+        for (li, lj), bas_ij_idx, atom_grid_ranges, shl_pair_offsets, atom_mesh in zip(
+                bucket['lij_patterns'], bucket['bas_ij_cache'],
+                bucket['atom_grid_ranges'], bucket['atom_seg_offsets'],
+                bucket['atom_mesh_max']):
             if len(bas_ij_idx) == 0: continue
 
             err = kern(
@@ -802,7 +801,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
             #     Shell-pair indices contributing to the tiles in grid_tile_idx.
             #   - shl_pair_offsets:
             #     Partition the shell pairs in supmol_pair_idx by grid tile.
-            ao_val_threshold = precision * 1e-5
+            ao_val_threshold = precision * 1e-6
             buckets.append({
                 'ke_cutoff': ke_upper,
                 'mesh': np.asarray(mesh, dtype=np.int32),
