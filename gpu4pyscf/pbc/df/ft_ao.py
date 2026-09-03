@@ -362,7 +362,7 @@ class FTOpt:
             dims, tmp = np.empty_like(dims), dims
             dims[cell.sorted_idx] = tmp
             ao_loc = cp.asarray(np.append(0, np.cumsum(dims.ravel())))
-            ao_loc = np.append(ao_loc[cell.sorted_idx], nao)
+            ao_loc = cp.append(ao_loc[cell.sorted_idx], nao)
         ao_loc = cp.asarray(ao_loc, dtype=np.int32)
 
         if batch_size is None:
