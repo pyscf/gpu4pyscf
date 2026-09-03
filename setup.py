@@ -124,6 +124,36 @@ VERSION = get_version()
 USE_HIP = use_hip()
 
 
+# AMD GPU build presets. GPU_TARGET selects what hardware to build for; an
+# explicit GPU_ARCHITECTURES always overrides it. CDNA lists specific datacenter
+# chips (best perf); RDNA uses per-generation "generic" targets (one code object
+# per family, covers member GPUs incl. APUs). Edit these to add hardware.
+HIP_CDNA_ARCHS = 'gfx908;gfx90a;gfx942;gfx950'
+HIP_RDNA_ARCHS = 'gfx10-3-generic;gfx11-generic;gfx12-generic'
+
+
+def resolve_gpu_architectures():
+    """Resolve the AMD GPU target to a GPU_ARCHITECTURES list (or None to autodetect).
+
+    An explicit GPU_ARCHITECTURES wins. Otherwise GPU_TARGET is a convenience
+    selector: native/auto (default) -> autodetect the installed GPU(s);
+    all/cdna/rdna -> curated family lists; anything else -> an explicit gfx arch
+    or ';'-list (e.g. gfx942 or "gfx942;gfx1100").
+    """
+    explicit = os.getenv('GPU_ARCHITECTURES')
+    if explicit:
+        return explicit
+    target = os.getenv('GPU_TARGET', 'native').strip()
+    key = target.lower()
+    if key in ('', 'native', 'auto'):
+        return None
+    return {
+        'all': f'{HIP_CDNA_ARCHS};{HIP_RDNA_ARCHS}',
+        'cdna': HIP_CDNA_ARCHS,
+        'rdna': HIP_RDNA_ARCHS,
+    }.get(key, target)
+
+
 class CMakeBuildPy(build_py):
     def run(self):
         self.plat_name = get_platform()
@@ -195,17 +225,21 @@ class CMakeBuildPy(build_py):
                 "(e.g. $ROCM_PATH/llvm/bin/clang++)")
         args = ['-DUSE_HIP=ON', f'-DCMAKE_HIP_COMPILER={hip_compiler}']
 
-        # GPU architecture: an explicit override wins; otherwise pre-flight the
-        # auto-detection so a missing enumerator / invisible GPU gives a clear
-        # message here instead of a mid-configure CMake fatal error.
-        gpu_arch = os.getenv('GPU_ARCHITECTURES')
+        # Default to an optimized Release build (overridable via
+        # CMAKE_CONFIGURE_ARGS="-DCMAKE_BUILD_TYPE=...", which is appended later).
+        args.append('-DCMAKE_BUILD_TYPE=Release')
+
+        # GPU architecture: an explicit GPU_ARCHITECTURES / GPU_TARGET preset wins;
+        # otherwise pre-flight the auto-detection so a missing enumerator / invisible
+        # GPU gives a clear message here instead of a mid-configure CMake fatal error.
+        gpu_arch = resolve_gpu_architectures()
         if gpu_arch:
             args.append(f'-DGPU_ARCHITECTURES={gpu_arch}')
         elif not os.getenv('CMAKE_HIP_ARCHITECTURES'):
             if not self._detect_hip_archs(rocm_path):
                 raise _hip_missing(
                     "Could not determine the AMD GPU architecture automatically.",
-                    "pass GPU_ARCHITECTURES=gfxXXXX "
+                    "pass GPU_TARGET=all|rdna|cdna or GPU_ARCHITECTURES=gfxXXXX "
                     "(e.g. gfx90a, gfx942, gfx1100, gfx1151),",
                     "or make 'rocm_agent_enumerator' available with a GPU visible")
         return args
