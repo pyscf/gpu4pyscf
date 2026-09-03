@@ -43,12 +43,12 @@ class KnownValues(unittest.TestCase):
 
         spin_dm = dm[0] - dm[1]
         aoslices = cell.aoslice_by_atom()
-        for ia, magmom in magmoms.items():
+        for ia, expected_magmom in magmoms.items():
             p0, p1 = aoslices[ia, 2:]
             local_magmom = cp.einsum(
                 'kij,kji->', spin_dm[:, p0:p1], s[:, :, p0:p1]
             ).real.get() / nkpts
-            self.assertAlmostEqual(local_magmom, magmom, places)
+            self.assertAlmostEqual(local_magmom, expected_magmom, places)
 
     def test_init_guess_with_magmom_uniform_and_valence(self):
         magcell = self._magmom_cell()
