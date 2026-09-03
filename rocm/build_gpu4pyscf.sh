@@ -42,43 +42,11 @@ export ROCM_PATH
 # stray nvcc is on PATH; setup.py handles the rest of the ROCm environment.
 export USE_HIP=1
 
-# Reproduce the validated release build (setup.py otherwise uses CMake's default
-# RELWITHDEBINFO). setup.py forwards CMAKE_CONFIGURE_ARGS to the CMake configure.
-if [[ -n "${CMAKE_CONFIGURE_ARGS:-}" ]]; then
-    export CMAKE_CONFIGURE_ARGS="$CMAKE_CONFIGURE_ARGS -DCMAKE_BUILD_TYPE=Release"
-else
-    export CMAKE_CONFIGURE_ARGS="-DCMAKE_BUILD_TYPE=Release"
-fi
-
-echo ">>> ROCm:      $ROCM_PATH"
-
-# --- GPU target selection ----------------------------------------------------
-# GPU_TARGET is a convenience selector for what hardware to build for (an
-# explicit GPU_ARCHITECTURES always overrides it):
-#   native | auto  (default) build for the GPU(s) installed in this machine
-#   all            all supported AMD families in ONE fat binary (CDNA + RDNA)
-#   cdna           AMD Instinct datacenter GPUs  (MI100/MI200/MI300/MI350, wave64)
-#   rdna           AMD Radeon RDNA2+ GPUs / APUs (RX 6000/7000/9000, wave32)
-#   gfxNNNN[;...]  an explicit arch or ;-list, e.g. gfx942  or  "gfx942;gfx1100"
-#
-# Curated arch lists -- edit here to add hardware. CDNA lists specific chips
-# (few datacenter parts, best perf); RDNA uses per-generation "generic" targets
-# (one code object per family, verified to run on the member GPUs incl. APUs).
-CDNA_ARCHS="gfx908;gfx90a;gfx942;gfx950"
-RDNA_ARCHS="gfx10-3-generic;gfx11-generic;gfx12-generic"
-
-GPU_TARGET="${GPU_TARGET:-native}"
-if [[ -z "${GPU_ARCHITECTURES:-}" ]]; then
-    case "${GPU_TARGET,,}" in
-        native|auto|"") : ;;                                    # autodetect installed GPU(s)
-        all)  export GPU_ARCHITECTURES="${CDNA_ARCHS};${RDNA_ARCHS}" ;;
-        cdna) export GPU_ARCHITECTURES="${CDNA_ARCHS}" ;;
-        rdna) export GPU_ARCHITECTURES="${RDNA_ARCHS}" ;;
-        *)    export GPU_ARCHITECTURES="${GPU_TARGET}" ;;       # explicit gfx arch(es)
-    esac
-fi
-
-echo ">>> GPU target: ${GPU_TARGET}  (arch: ${GPU_ARCHITECTURES:-<auto-detect>})"
+# setup.py owns the rest of the build: it defaults the HIP build to Release and
+# reads CMAKE_CONFIGURE_ARGS / GPU_TARGET / GPU_ARCHITECTURES from the environment
+# (resolve_gpu_architectures()), so nothing is duplicated here.
+echo ">>> ROCm:       $ROCM_PATH"
+echo ">>> GPU target: ${GPU_TARGET:-native}  (GPU_ARCHITECTURES=${GPU_ARCHITECTURES:-<auto>})"
 echo ">>> Building via setup.py (USE_HIP=1 python setup.py build_py) ..."
 
 cd "$REPO_ROOT"
