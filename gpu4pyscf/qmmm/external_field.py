@@ -53,7 +53,7 @@ class EXTFSCF(EXTF):
 
         if electric_field is not None:
             electric_field = cp.asarray(electric_field)
-            assert type(electric_field) is cp.ndarray
+            assert isinstance(electric_field, cp.ndarray)
             assert electric_field.shape == (3,)
         self.electric_field = electric_field
 
@@ -61,7 +61,7 @@ class EXTFSCF(EXTF):
             origin = np.zeros(3)
         else:
             origin = cp.asarray(origin).get()
-            assert type(origin) is np.ndarray
+            assert isinstance(origin, np.ndarray)
             assert origin.shape == (3,)
         self.origin = origin
 

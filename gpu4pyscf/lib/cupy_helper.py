@@ -1265,7 +1265,7 @@ def batched_vec3_norm2(batched_vec3):
     '''
     einsum('gx,gx->g', vec3, vec3) for the (N,3)-array vec3
     '''
-    assert type(batched_vec3) is cupy.ndarray
+    assert isinstance(batched_vec3, cupy.ndarray)
     assert batched_vec3.dtype == cupy.float64
     assert batched_vec3.ndim == 2
     assert batched_vec3.shape[0] == 3 or batched_vec3.shape[1] == 3

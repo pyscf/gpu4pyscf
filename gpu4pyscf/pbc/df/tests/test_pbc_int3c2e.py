@@ -324,7 +324,7 @@ C    D
     np.random.seed(9)
     auxvec = np.random.rand(auxcell.nao)
     vj = opt.contract_auxvec(opt.auxcell.apply_C_dot(auxvec), kpts=kpts)
-    ref = cp.einsum('kpqr,r->kpq', j3c, auxvec)
+    ref = cp.einsum('kpqr,r->kpq', j3c, cp.asarray(auxvec))  # auxvec is host data
     assert abs(vj - ref).max() < 1e-10
 
 def test_int3c2e_batch_evaluation():
