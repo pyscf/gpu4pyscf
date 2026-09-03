@@ -23,6 +23,7 @@
 
 #include "vhf.cuh"
 
+#ifndef USE_SYCL
 __constant__ int c_nf[] = {
     1,
     3,
@@ -46,6 +47,7 @@ __constant__ float c_div_nf[] = {
     0.027778f,
     0.022223f,
 };
+#endif
 
 extern "C" {
 int cuda_version()

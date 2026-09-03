@@ -17,8 +17,8 @@
 template <int LI, int LJ, int LK, int NROOTS> __device__
 static void GINTgout3c2e_ip1ip2(GINTEnvVars envs, double* __restrict__ gout, double *g0, double ai2, double ak2)
 {
-    int * __restrict__ c_idy = c_idx + TOT_NF;
-    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
+    const int * __restrict__ c_idy = c_idx + TOT_NF;
+    const int * __restrict__ c_idz = c_idx + TOT_NF * 2;
 
     const int di = envs.stride_i;
     const int dj = envs.stride_j;
@@ -105,8 +105,7 @@ void GINTfill_int3c2e_ip1ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOf
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    KERNEL_SETUP();
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
@@ -153,6 +152,7 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
     double* __restrict__ g0, const double ai2, const double ak2,
     const int ish, const int jsh, const int ksh)
 {
+    KERNEL_SETUP_LOCAL();
     int *ao_loc = c_bpcache.ao_loc;
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
@@ -164,8 +164,8 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
     const int k0 = ao_loc[ksh  ] - eri.ao_offsets_k;
     const int k1 = ao_loc[ksh+1] - eri.ao_offsets_k;
 
-    int * __restrict__ c_idy = c_idx + TOT_NF;
-    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
+    const int * __restrict__ c_idy = c_idx + TOT_NF;
+    const int * __restrict__ c_idz = c_idx + TOT_NF * 2;
 
     const int di = envs.stride_i;
     const int dj = envs.stride_j;
@@ -177,7 +177,7 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
     const int lk = envs.k_l;
     const int nrys_roots = envs.nrys_roots;
 
-    for (int tx = threadIdx.x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim.x) {
+    for (int tx = threadIdx_x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim_x) {
         const int k = tx / ((j1-j0)*(i1-i0));
         const int j = (tx / (i1-i0)) % (j1-j0);
         const int i = tx % (i1-i0);
@@ -272,10 +272,21 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
 
 // General version
 __global__
-void GINTfill_int3c2e_ip1ip2_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
+void GINTfill_int3c2e_ip1ip2_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets
+#ifdef USE_SYCL
+					    , sycl::nd_item<2> item, double* g0
+#endif
+    )
 {
+#ifdef USE_SYCL
+    const int task_ij = item.get_group(1);
+    const int task_kl = item.get_group(0);
+    const auto& c_bpcache = s_bpcache.get();
+#else
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
+    extern __shared__ double g0[];
+#endif
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -287,8 +298,6 @@ void GINTfill_int3c2e_ip1ip2_general_kernel(GINTEnvVars envs, ERITensor eri, Bas
     const int ish = bas_pair2bra[bas_ij];
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
-
-    extern __shared__ double g0[];
 
     const int as_ish = envs.ibase ? ish: jsh;
     const int as_jsh = envs.ibase ? jsh: ish;
@@ -308,8 +317,7 @@ static void GINTfill_int3c2e_ip1ip2_kernel000(GINTEnvVars envs, ERITensor eri, B
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    KERNEL_SETUP();
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }

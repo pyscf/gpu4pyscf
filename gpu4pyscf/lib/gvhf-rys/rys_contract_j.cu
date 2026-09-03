@@ -24,28 +24,68 @@
 #include "rys_roots.cu"
 #include "create_tasks.cu"
 
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
+SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
+#else
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
+#endif
 
 __global__ static
 void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                  uint32_t *pool, int *head, int reserved_shm_size)
+                  uint32_t *pool, int *head, int reserved_shm_size
+                  #ifdef USE_SYCL
+                  , sycl::nd_item<2> &item, double *shared_memory
+                  #endif
+                  )
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    #ifdef USE_SYCL
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    int blockDim_x = item.get_local_range(1);
+    int blockDim_y = item.get_local_range(0);
+    int blockIdx_x = item.get_group(1);
+
+    auto c_i_in_fold2idx = s_rys_i_in_fold2idx.get();
+    auto c_i_in_fold3idx = s_rys_i_in_fold3idx.get();
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    int blockDim_x = blockDim.x;
+    int blockDim_y = blockDim.y;
+    int blockIdx_x = blockIdx.x;
+
     extern __shared__ double shared_memory[];
+
     __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
+    __shared__ int ish;
+    __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    #endif
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -499,21 +539,55 @@ __global__ static
 void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                             float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                            uint32_t *pool, int *head, int reserved_shm_size)
+                            uint32_t *pool, int *head, int reserved_shm_size
+                            #ifdef USE_SYCL
+                            , sycl::nd_item<2> &item, double *shared_memory
+                            #endif
+                            )
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    #ifdef USE_SYCL
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    int blockDim_x = item.get_local_range(1);
+    int blockDim_y = item.get_local_range(0);
+    int blockIdx_x = item.get_group(1);
+
+    auto c_i_in_fold3idx = s_rys_i_in_fold3idx.get();
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    #else
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    int blockDim_x = blockDim.x;
+    int blockDim_y = blockDim.y;
+    int blockIdx_x = blockIdx.x;
+
     extern __shared__ double shared_memory[];
+
     __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
+    __shared__ int ish;
+    __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    #endif
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -877,12 +951,25 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         int nmax = MAX(lij, lkl);
         int nf3_ij = (lij+1)*(lij+2)*(lij+3)/6;
         int nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         if (with_gout) {
             buflen += nf3_ij*nf3_kl * quartets_per_block;
             int reserved_shm_size = buflen;
             buflen += iprim * jprim;
+            #ifdef USE_SYCL
+            sycl::range<2> blocks(1, workers);
+            sycl::range<2> threads(gout_stride, quartets_per_block);
+            auto dev_envs = *envs;
+            sycl_get_queue()->submit([&](sycl::handler &cgh) {
+              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
+              cgh.parallel_for<class rys_j_with_gout_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                rys_j_with_gout_kernel(dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                   s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size,
+                   item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              });
+            });
+            #else
+            dim3 threads(quartets_per_block, gout_stride);
             buflen *= sizeof(double);
             if (buflen > 48000) {
                 cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
@@ -896,11 +983,26 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             rys_j_with_gout_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
+            #endif
         } else {
             buflen += (nf3_ij+nf3_kl*2+(lij+1)*(lkl+1)*(nmax+2)) * quartets_per_block;
             int reserved_shm_size = buflen;
             buflen += iprim * jprim;
             buflen += nf3_ij; // dm_ij_cache
+            #ifdef USE_SYCL
+            sycl::range<2> blocks(1, workers);
+            sycl::range<2> threads(gout_stride, quartets_per_block);
+            auto dev_envs = *envs;
+            sycl_get_queue()->submit([&](sycl::handler &cgh) {
+              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
+              cgh.parallel_for<class rys_j_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                rys_j_kernel(dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                   s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size,
+                   item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              });
+            });
+            #else
+            dim3 threads(quartets_per_block, gout_stride);
             buflen *= sizeof(double);
             if (buflen > 48000) {
                 cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
@@ -914,6 +1016,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             rys_j_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
+            #endif
         }
     }
     cudaError_t err = cudaGetLastError();
@@ -949,8 +1052,13 @@ int RYS_init_rysj_constant()
             }
         } }
     }
+    #ifdef USE_SYCL
+    sycl_get_queue()->memcpy(s_rys_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
+    sycl_get_queue()->memcpy(s_rys_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();
+    #else
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
+    #endif
     return 0;
 }
 }

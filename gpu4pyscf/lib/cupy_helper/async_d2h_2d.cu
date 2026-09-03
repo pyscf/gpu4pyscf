@@ -29,6 +29,10 @@ int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *sr
     int width = rows * sizeof(double);
     int height = cols * sizeof(double);
     
+#ifdef USE_SYCL
+    stream.ext_oneapi_memcpy2d(host_ptr, dpitch, device_ptr, spitch,
+                               width, height);
+#else // USE_SYCL
     cudaError_t err = cudaMemcpy2DAsync(host_ptr, dpitch, device_ptr, spitch, 
                                         width, height, cudaMemcpyDeviceToHost);
     /*
@@ -43,6 +47,7 @@ int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *sr
         return 1;
 
     }
+#endif //USE_SYCL
     return 0;
 }
 }

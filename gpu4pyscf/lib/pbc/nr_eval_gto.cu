@@ -25,6 +25,18 @@
 #define LMAX 4
 #define THREADS 256
 
+// Abstracts CUDA/SYCL 2D thread-index setup for GTO eval kernels. Used 8x in this file.
+#ifdef USE_SYCL
+#define SETUP_GTO_KERNEL() \
+    auto item = syclex::this_work_item::get_nd_item<2>(); \
+    int grid_id = item.get_global_id(1); \
+    int bas_id = item.get_group(0);
+#else
+#define SETUP_GTO_KERNEL() \
+    int grid_id = blockIdx.x * blockDim.x + threadIdx.x; \
+    int bas_id = blockIdx.y;
+#endif
+
 template <int ANG> __device__ __forceinline__
 void _cart_gto_ip2(double gto[], double gx[], double gy[], double gz[],
                    double a2, double rx, double ry, double rz)
@@ -157,7 +169,12 @@ void _eval_cart_deriv1_strain_tensor(
         double xi, double yi, double zi, double rrcutoff,
         int *bas, int nimgs, int nao, int ngrids)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int bas_id = item.get_group(0);
+#else
     int bas_id = blockIdx.y;
+#endif
     int nprim = bas[NPRIM_OF+bas_id*BAS_SLOTS];
     double *expi = env + bas[bas_id*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[bas_id*BAS_SLOTS+PTR_COEFF];
@@ -212,11 +229,10 @@ __global__
 static void _cart_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                 size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -312,11 +328,10 @@ __global__
 static void _cart_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                 size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -535,11 +550,10 @@ __global__
 static void _cart_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
                              size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -636,11 +650,10 @@ __global__
 static void _sph_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -768,11 +781,10 @@ __global__
 static void _sph_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1021,11 +1033,10 @@ __global__
 static void _sph_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
                             size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1163,11 +1174,10 @@ static void _cart_deriv0_strain_tensor_kernel(
         double *out, PBCIntEnvVars envs, double *grids,
         size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1450,11 +1460,10 @@ static void _cart_deriv1_strain_tensor_kernel(
         double *out, PBCIntEnvVars envs, double *grids,
         size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1497,6 +1506,40 @@ int PBCeval_gto_deriv(double *out, PBCIntEnvVars *envs,
 {
     constexpr int ngrids_per_block = THREADS;
     int threads = ngrids_per_block;
+
+    #ifdef USE_SYCL
+    sycl::range<2> thread(1, threads);
+    sycl::range<2> blocks(nbas, (ngrids+ngrids_per_block-1)/ngrids_per_block);
+    auto dev_envs = *envs;
+    switch (deriv) {
+    case 0:
+      if (cart) {
+        sycl_get_queue()->parallel_for<class _cart_deriv0_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _cart_deriv0_kernel(out, dev_envs, grids, ngrids, nao, rcut); });
+      } else {
+        sycl_get_queue()->parallel_for<class _sph_deriv0_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _sph_deriv0_kernel(out, dev_envs, grids, ngrids, nao, rcut); });
+      }
+      break;
+    case 1:
+      if (cart) {
+        sycl_get_queue()->parallel_for<class _cart_deriv1_kernel1_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _cart_deriv1_kernel(out, dev_envs, grids, ngrids, nao, rcut); });
+      } else {
+        sycl_get_queue()->parallel_for<class _sph_deriv1_kernel1_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _sph_deriv1_kernel(out, dev_envs, grids, ngrids, nao, rcut); });
+      }
+      break;
+    case 2:
+      if (cart) {
+        sycl_get_queue()->parallel_for<class _cart_deriv1_kernel2_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _cart_deriv1_kernel(out, dev_envs, grids, ngrids, nao, rcut); });
+        sycl_get_queue()->parallel_for<class _cart_ip2_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _cart_ip2_kernel(out+4*nao*ngrids, dev_envs, grids, ngrids, nao, rcut); });
+      } else {
+        sycl_get_queue()->parallel_for<class _sph_deriv1_kernel2_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _sph_deriv1_kernel(out, dev_envs, grids, ngrids, nao, rcut); });
+        sycl_get_queue()->parallel_for<class _sph_ip2_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _sph_ip2_kernel(out+4*nao*ngrids, dev_envs, grids, ngrids, nao, rcut); });
+      }
+      break;
+    default:
+      fprintf(stderr, "PBCeval_gto deriv = %d not supported\n", deriv);
+      return 1;
+    }
+    #else
     dim3 blocks((ngrids+ngrids_per_block-1)/ngrids_per_block, nbas);
     switch (deriv) {
     case 0:
@@ -1531,6 +1574,7 @@ int PBCeval_gto_deriv(double *out, PBCIntEnvVars *envs,
         fprintf(stderr, "CUDA Error in PBCeval_gto: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 
@@ -1544,6 +1588,22 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
     }
     constexpr int ngrids_per_block = THREADS;
     int threads = ngrids_per_block;
+    #ifdef USE_SYCL
+    sycl::range<2> thread(1, threads);
+    sycl::range<2> blocks(nbas, (ngrids+ngrids_per_block-1)/ngrids_per_block);
+    auto dev_envs = *envs;
+    switch (deriv) {
+    case 0:
+        sycl_get_queue()->parallel_for<class _cart_deriv0_strain_tensor_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _cart_deriv0_strain_tensor_kernel(out, dev_envs, grids, ngrids, nao, rcut); });
+        break;
+    case 1:
+        sycl_get_queue()->parallel_for<class _cart_deriv1_strain_tensor_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) { _cart_deriv1_strain_tensor_kernel(out, dev_envs, grids, ngrids, nao, rcut); });
+        break;
+    default:
+        fprintf(stderr, "PBCeval_gto_strain_tensor deriv = %d not supported\n", deriv);
+        return 1;
+    }
+    #else
     dim3 blocks((ngrids+ngrids_per_block-1)/ngrids_per_block, nbas);
     switch (deriv) {
     case 0:
@@ -1561,6 +1621,9 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
         fprintf(stderr, "CUDA Error in PBCeval_gto_strain_tensor: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 }
+
+#undef SETUP_GTO_KERNEL

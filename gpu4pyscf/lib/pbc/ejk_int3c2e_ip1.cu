@@ -34,14 +34,64 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux, double *dm, double *de
                             int *img_idx, uint32_t *sp_img_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
                             float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                            int *head, int sp_blocks, int ksh_blocks)
+                            int *head, int sp_blocks, int ksh_blocks
+                            #ifdef USE_SYCL
+                            , sycl::nd_item<1> &item, std::byte *shm_mem
+                            #endif
+                            )
 {
-    int thread_id = threadIdx.x;
+#ifdef USE_SYCL
+    int threadIdx_x = item.get_local_id(0);
+    int blockIdx_x = item.get_group(0);
+
+    auto thread_block = item.get_group();
+    int &sp_block_id   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh_block_id  = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh0_cell0    = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh1_cell0    = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair0     = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair1     = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &li            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lk            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nroots        = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nf            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim         = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim         = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &kprim         = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nao           = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &g_size        = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nst_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
+
+    int &num_ijk_tasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &num_sub_tasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &img_not_processed = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &img_tile_size = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+#else
+    int threadIdx_x = threadIdx.x;
+    int blockIdx_x = blockIdx.x;
+
     __shared__ int sp_block_id, ksh_block_id;
-    uint32_t *img_pool = pool + blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    __shared__ int ksh0_cell0, ksh1_cell0;
+    __shared__ int shl_pair0, shl_pair1;
+    __shared__ int li, lj, lk, nroots, nf;
+    __shared__ int iprim, jprim, kprim;
+    __shared__ int nao;
+    __shared__ int g_size, gout_stride, nst_per_block;
+
+    extern __shared__ double shared_memory[];
+    __shared__ int num_ijk_tasks;
+    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
+#endif
+
+    int thread_id = threadIdx_x;
+    uint32_t *img_pool = pool + blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx_x * POOL_SIZE;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
@@ -58,12 +108,6 @@ while (1) {
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    __shared__ int ksh0_cell0, ksh1_cell0;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int nao;
-    __shared__ int g_size, gout_stride, nst_per_block;
     if (thread_id == 0) {
         int bvk_nbas = envs.nbas * ncells;
         shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -99,7 +143,6 @@ while (1) {
 
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
@@ -108,7 +151,6 @@ while (1) {
     int idx_j = lex_xyz_offset(lj);
     int idx_k = lex_xyz_offset(lk);
 
-    __shared__ int num_ijk_tasks;
     if (thread_id == 0) {
         int nshl_pairs = shl_pair1 - shl_pair0;
         int nksh = ksh1_cell0 - ksh0_cell0;
@@ -122,7 +164,6 @@ while (1) {
     while (num_ijk_tasks > 0) {
     _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
                       envs, img_idx);
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
     if (thread_id == 0) {
         img_tile_size = 8;
         img_not_processed = MAX_IMGS_PER_TASK;
@@ -391,11 +432,27 @@ int PBCsr_ejk_int3c2e_ip1(double *ejk, double*ejk_aux, double *dm, double *densi
                           int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
+
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
+    #ifdef USE_SYCL
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class ejk_int3c2e_ip1_pbc_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
+        ejk_int3c2e_ip1_kernel(
+            ejk, ejk_aux, dm, density_auxvec, omega, dev_envs, pool, task_pool,
+            bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,
+            gout_stride_lookup, ao_pair_loc, aux_offset, nauxbas, naux,
+            diffuse_exps, diffuse_coefs, log_cutoff,
+            head, nbatches_shl_pair, nbatches_ksh,
+            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
+    cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     ejk_int3c2e_ip1_kernel<<<workers, THREADS, shm_size>>>(
             ejk, ejk_aux, dm, density_auxvec, omega, *envs, pool, task_pool,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,
@@ -407,6 +464,7 @@ int PBCsr_ejk_int3c2e_ip1(double *ejk, double*ejk_aux, double *dm, double *densi
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

@@ -18,7 +18,7 @@
 #define BLKSIZEY        16
 
 __global__
-void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao);
+void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, int ngrids, int nao);
 __global__
 void GDFTscale_ao_kernel(double *out, double *ket, double *wv,
                          int ngrids, int nao, int nvar);

@@ -18,8 +18,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cmath>
+#ifndef USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
@@ -58,7 +60,12 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
                         int npairs, float log_threshold,
                         float undressed_threshold, float ke_max)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int pair_id = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
+#else
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     if (pair_id >= npairs) return;
 
     int *bas = envs.bas;
@@ -183,7 +190,12 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *dressed_bas_ij,
                                 int mesh_x, int mesh_y, int mesh_z, int npairs,
                                 int nbas, int *head)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int pair_id = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
+#else
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     if (pair_id >= npairs) return;
 
     int64_t bas_ij = bas_ij_idx[pair_id];
@@ -274,8 +286,14 @@ __global__ static
 void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, PBCIntEnvVars envs,
                                  double *img_coords, int nimgs, float log_cutoff)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int jsh = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
+    int ish = item.get_group(1) * item.get_local_range(1) + item.get_local_id(1);
+#else
     int jsh = blockIdx.x * blockDim.x + threadIdx.x;
     int ish = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     int nbas = envs.nbas;
     int bvk_nbas = envs.nbas * envs.bvk_ncells;
     if (ish >= nbas || jsh >= bvk_nbas) {
@@ -338,7 +356,12 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars en
                               double *img_coords, int nimgs, int npairs,
                               float log_cutoff, float Ecut_max, int is_mgga)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int pair_id = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
+#else
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     if (pair_id >= npairs) {
         return;
     }
@@ -412,13 +435,20 @@ void supmol_non_trivial_pairs_kernel(int64_t *supmol_bas_ij, int64_t *bas_ij_idx
                                      PBCIntEnvVars envs, int npairs, float log_cutoff,
                                      int is_mgga, int *head)
 {
+    constexpr int batch_size = 64;
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+    int pair_id = item.get_group(0) * item.get_local_range(0) + thread_id;
+    auto &img_cache = *sycl::ext::oneapi::group_local_memory_for_overwrite<int8_t[THREADS*batch_size]>(item.get_group());
+#else
     int thread_id = threadIdx.x;
     int pair_id = blockIdx.x * blockDim.x + thread_id;
+    __shared__ int8_t img_cache[THREADS*batch_size];
+#endif
     if (pair_id >= npairs) {
         return;
     }
-    constexpr int batch_size = 64;
-    __shared__ int8_t img_cache[THREADS*batch_size];
     int bvk_nbas = envs.nbas * envs.bvk_ncells;
     int nimgs = envs.nimgs;
     int *bas = envs.bas;
@@ -498,9 +528,20 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
                               float undressed_threshold, float ke_max)
 {
     int batches = (npairs + THREADS-1) / THREADS;
+#ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> grids(batches);
+    sycl_get_queue()->parallel_for<class grid_ranges_kernel_mgv3_sycl>
+        (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            grid_ranges_kernel(
+                grid_frac_ranges, pair_ke, Ecut_by_shell, *envs, bas_ij_idx,
+                li_inc, lj_inc, npairs, log_threshold, undressed_threshold, ke_max);
+        }).wait();
+#else
     grid_ranges_kernel<<<batches, THREADS>>>(
         grid_frac_ranges, pair_ke, Ecut_by_shell, *envs, bas_ij_idx,
         li_inc, lj_inc, npairs, log_threshold, undressed_threshold, ke_max);
+#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in gaussian_prod_grid_ranges: %s\n", cudaGetErrorString(err));
@@ -521,9 +562,20 @@ int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
     int mesh_y = mesh[1];
     int mesh_z = mesh[2];
     int batches = (npairs + THREADS-1) / THREADS;
+#ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> grids(batches);
+    sycl_get_queue()->parallel_for<class grid_range_to_tiles_kernel_mgv3_sycl>
+        (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            grid_range_to_tiles_kernel(
+                grid_tile_idx, dressed_bas_ij, bas_ij_idx, grid_frac_ranges,
+                nimgs_x, nimgs_y, nimgs_z, mesh_x, mesh_y, mesh_z, npairs, nbas, head);
+        }).wait();
+#else
     grid_range_to_tiles_kernel<<<batches, THREADS>>>(
         grid_tile_idx, dressed_bas_ij, bas_ij_idx, grid_frac_ranges,
         nimgs_x, nimgs_y, nimgs_z, mesh_x, mesh_y, mesh_z, npairs, nbas, head);
+#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in grid_range_to_tiles: %s\n", cudaGetErrorString(err));
@@ -537,10 +589,20 @@ int bvk_ovlp_mask_estimation(int8_t *ovlp_mask, PBCIntEnvVars *envs,
 {
     int nbas = envs->nbas;
     int bvk_nbas = nbas * envs->bvk_ncells;
+#ifdef USE_SYCL
+    sycl::range<2> threads(16, 16);
+    sycl::range<2> grids((bvk_nbas + 15) / 16, (nbas + 15) / 16);
+    sycl_get_queue()->parallel_for<class ovlp_mask_estimation_kernel_mgv3_sycl>
+        (sycl::nd_range<2>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            ovlp_mask_estimation_kernel(
+                ovlp_mask, *envs, img_coords, nimgs, log_cutoff);
+        }).wait();
+#else
     dim3 threads(16, 16);
     dim3 blocks((bvk_nbas + 15) / 16, (nbas + 15) / 16);
     ovlp_mask_estimation_kernel<<<blocks, threads>>>(
             ovlp_mask, *envs, img_coords, nimgs, log_cutoff);
+#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_mask_estimation: %s\n", cudaGetErrorString(err));
@@ -554,8 +616,18 @@ int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
 {
     cudaMemset(head, 0, sizeof(int));
     int blocks = (npairs + THREADS-1)/THREADS;
+#ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> grids(blocks);
+    sycl_get_queue()->parallel_for<class supmol_non_trivial_pairs_kernel_mgv3_sycl>
+        (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            supmol_non_trivial_pairs_kernel(
+                supmol_bas_ij, bas_ij_idx, *envs, npairs, log_cutoff, is_mgga, head);
+        }).wait();
+#else
     supmol_non_trivial_pairs_kernel<<<blocks, THREADS>>>(
             supmol_bas_ij, bas_ij_idx, *envs, npairs, log_cutoff, is_mgga, head);
+#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_mask_estimation: %s\n", cudaGetErrorString(err));
@@ -569,9 +641,20 @@ int estimate_aft_Ecut(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
                       float log_cutoff, float Ecut_max, int is_mgga)
 {
     int blocks = (npairs + THREADS-1)/THREADS;
+#ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> grids(blocks);
+    sycl_get_queue()->parallel_for<class estimate_aft_Ecut_kernel_mgv3_sycl>
+        (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            estimate_aft_Ecut_kernel(
+                Ecut, bas_ij_idx, *envs, img_coords, nimgs, npairs, log_cutoff,
+                Ecut_max, is_mgga);
+        }).wait();
+#else
     estimate_aft_Ecut_kernel<<<blocks, THREADS>>>(
         Ecut, bas_ij_idx, *envs, img_coords, nimgs, npairs, log_cutoff,
         Ecut_max, is_mgga);
+#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in raw_ovlp_mask: %s\n", cudaGetErrorString(err));

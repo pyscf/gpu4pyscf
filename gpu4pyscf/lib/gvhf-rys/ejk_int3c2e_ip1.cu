@@ -29,7 +29,20 @@
 #define DM_BLOCK        7
 #define GOUT_WIDTH      54
 
+// unrolled_ejk_int3c2e_ip1.cu is auto-generated upstream and must stay
+// byte-identical. Its kernels use __syncthreads() but never declare an
+// nd_item, so swap in an item-free barrier for the duration of the include.
+// The kernels are only ever instantiated from 2-D nd_range launches, so
+// get_nd_item<2>() is well-formed.
+#ifdef USE_SYCL
+#pragma push_macro("__syncthreads")
+#undef __syncthreads
+#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<2>().get_group()))
+#endif
 #include "unrolled_ejk_int3c2e_ip1.cu"
+#ifdef USE_SYCL
+#pragma pop_macro("__syncthreads")
+#endif
 
 __global__ static
 void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
@@ -38,12 +51,48 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             double omega, double lr_factor, double sr_factor,
                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int naux)
+                            int *ao_pair_loc, int aux_offset, int naux
+                            #ifdef USE_SYCL
+                            , sycl::nd_item<2> &item, char *shm_mem
+                            #endif
+                            )
 {
-    // For better load balance, consume blocks in the reversed order
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    #ifdef USE_SYCL
+    int threadIdx_x = item.get_local_id(1);
+    int blockIdx_x = item.get_group(1);
+    int blockIdx_y = item.get_group(0);
+    int gridDim_x = item.get_group_range(1);
+    int gridDim_y = item.get_group_range(0);
+
+    auto thread_block = item.get_group();
+    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nksh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lk = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nroots = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nf = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &kprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &g_size = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nao = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nst_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &aux_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
+    #else
+    int threadIdx_x = threadIdx.x;
+    int blockIdx_x = blockIdx.x;
+    int blockIdx_y = blockIdx.y;
+    int gridDim_x = gridDim.x;
+    int gridDim_y = gridDim.y;
+
     extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1, nksh;
@@ -52,7 +101,12 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     __shared__ int g_size;
     __shared__ int nao;
     __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
+    #endif
 
+    // For better load balance, consume blocks in the reversed order
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -389,12 +443,48 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             RysIntEnvVars envs,
                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int npairs, int naux)
+                            int *ao_pair_loc, int aux_offset, int npairs, int naux
+                            #ifdef USE_SYCL
+                            , sycl::nd_item<2> &item, char *shm_mem
+                            #endif
+                            )
 {
-    // For better load balance, consume blocks in the reversed order
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    #ifdef USE_SYCL
+    int threadIdx_x = item.get_local_id(1);
+    int blockIdx_x = item.get_group(1);
+    int blockIdx_y = item.get_group(0);
+    int gridDim_x = item.get_group_range(1);
+    int gridDim_y = item.get_group_range(0);
+
+    auto thread_block = item.get_group();
+    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nksh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lk = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nroots = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nf = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &kprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &g_size = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nao = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nst_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &aux_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
+    #else
+    int threadIdx_x = threadIdx.x;
+    int blockIdx_x = blockIdx.x;
+    int blockIdx_y = blockIdx.y;
+    int gridDim_x = gridDim.x;
+    int gridDim_y = gridDim.y;
+
     extern __shared__ double shared_memory[];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1, nksh;
@@ -403,7 +493,12 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     __shared__ int g_size;
     __shared__ int nao;
     __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
+    #endif
 
+    // For better load balance, consume blocks in the reversed order
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -741,6 +836,22 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int *ao_pair_loc, int aux_offset,
                     int nao, int npairs, int naux, int natm)
 {
+#ifdef USE_SYCL
+    sycl::range<2> threads(1, THREADS);
+    sycl::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl::queue* q = sycl_get_queue();
+    q->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class sum_ejk_int3c2e_ip1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        sum_ejk_int3c2e_ip1_kernel(ejk, ejk_aux, dm, density_auxvec, n_dm, dev_envs,
+                                   omega, lr_factor, sr_factor,
+                                   shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
+                                   ao_pair_loc, aux_offset, naux,
+                                   item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+#else
     cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     sum_ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
@@ -753,6 +864,7 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -765,9 +877,33 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int *ao_pair_loc, int aux_offset,
                     int nao, int npairs, int naux, int natm)
 {
+    size_t nao2 = nao * nao;
+
+#ifdef USE_SYCL
+    sycl::range<2> threads(1, THREADS);
+    sycl::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
+    auto dev_envs = *envs;
+    for (int n = 0; n < n_dm; n += DM_BLOCK) {
+        sycl_get_queue()->submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+          cgh.parallel_for<class ejk_int3c2e_ip1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            ejk_int3c2e_ip1_kernel(ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n,
+                                   omega, lr_factor, sr_factor, dev_envs,
+                                   shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
+                                   ao_pair_loc, aux_offset, npairs, naux,
+                                   item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+          });
+        });
+        if (density_auxvec == NULL) { // for exchange
+            dm += DM_BLOCK * (size_t)npairs * naux;
+        } else {
+            dm += DM_BLOCK * nao2;
+            density_auxvec += DM_BLOCK * naux;
+        }
+    }
+#else
     cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    size_t nao2 = nao * nao;
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
         ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
                 ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n,
@@ -786,6 +922,7 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

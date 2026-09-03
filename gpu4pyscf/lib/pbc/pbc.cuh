@@ -15,6 +15,8 @@
  */
 
 #pragma once
+#include <cuda_runtime.h>
+
 #ifdef __CUDACC__
 extern __constant__ int16_t c_pair_idx[];
 extern __constant__ int c_pair_offsets[];

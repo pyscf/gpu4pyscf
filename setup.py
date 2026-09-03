@@ -33,6 +33,42 @@ DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
 
+# Selects the compute backend for this build. CUDA is the default. To build
+# SYCL:
+#
+#     python setup.py --sycl build
+#     CMAKE_CONFIGURE_ARGS=-DUSE_SYCL=ON pip install .
+#
+# The second form covers pip and other PEP 517 frontends, which do not forward
+# unknown flags to setup.py; CMAKE_CONFIGURE_ARGS has to be set for a SYCL
+# build regardless, to point cmake at icpx.
+def build_backend():
+    # --sycl / --cuda are ours, not setuptools', so strip them from argv before
+    # setuptools parses it -- an unrecognised global option is a hard error.
+    # Precedence: command line, then -DUSE_SYCL=ON in CMAKE_CONFIGURE_ARGS,
+    # else CUDA.
+    backend = None
+    for flag in ('--sycl', '--cuda'):
+        while flag in sys.argv:
+            sys.argv.remove(flag)
+            backend = flag[2:]
+    if backend is not None:
+        return backend
+
+    if 'USE_SYCL=ON' in os.getenv('CMAKE_CONFIGURE_ARGS', ''):
+        return 'sycl'
+    return 'cuda'
+
+
+BACKEND = build_backend()
+
+
+def get_sycl_version():
+    icpx_out = subprocess.check_output(["icpx", "--version"]).decode('utf-8')
+    m = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", icpx_out)
+    return m.group(0)
+
+
 def get_cuda_version():
     nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
     m = re.search(r"V[0-9]+.[0-9]+", nvcc_out)
@@ -70,7 +106,20 @@ class CMakeBuildPy(build_py):
         self.announce('Configuring extensions', level=3)
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
-        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=OFF']
+        if BACKEND == 'sycl':
+            # USE_SYCL defaults OFF in gpu4pyscf/lib/CMakeLists.txt so that a
+            # plain CUDA build needs no flags at all. SYCL uses ExchCXX where
+            # CUDA uses libxc, and there is no wheel for ExchCXX, so it has to
+            # be built from source, hence BUILD_LIBXC=ON rather than the OFF
+            # that CUDA passes.
+            libxc_arg = '-DBUILD_LIBXC=ON'
+            backend_args = ['-DUSE_SYCL=ON']
+        else:
+            # CUDA takes libxc from the gpu4pyscf-libxc-cuda* wheel listed in
+            # install_requires rather than building it (upstream, since #110).
+            libxc_arg = '-DBUILD_LIBXC=OFF'
+            backend_args = []
+        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', libxc_arg] + backend_args
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
             cmd.extend(configure_args.split(' '))
@@ -115,9 +164,31 @@ if 'sdist' in sys.argv:
     # The sdist release
     package_name = NAME
     CUDA_VERSION = '12x'
+elif BACKEND == 'sycl':
+    package_name = NAME + '-sycl' + get_sycl_version()
 else:
     CUDA_VERSION = get_cuda_version()
     package_name = NAME + '-cuda' + CUDA_VERSION
+
+if BACKEND == 'sycl':
+    # dpnp replaces cupy, and the SYCL build supplies libxc through ExchCXX.
+    INSTALL_REQUIRES = [
+        'pyscf>=2.8.0',
+        'pyscf-dispersion',
+        'dpnp',
+        'geometric',
+        'packaging',
+    ]
+else:
+    INSTALL_REQUIRES = [
+        'pyscf>=2.8.0',
+        'pyscf-dispersion',
+        # Due to expm in cupyx.scipy.linalg and cutensor 2.0
+        f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0',
+        'geometric',
+        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}==0.8.1',
+        'packaging',
+    ]
 
 setup(
     name=package_name,
@@ -138,12 +209,5 @@ setup(
         "pytest-coverage==0.0",
     ],
     cmdclass={'build_py': CMakeBuildPy},
-    install_requires=[
-        'pyscf>=2.8.0',
-        'pyscf-dispersion',
-        f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
-        'geometric',
-        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}==0.8.1',
-        'packaging',
-    ]
+    install_requires=INSTALL_REQUIRES,
 )

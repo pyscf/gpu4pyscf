@@ -58,12 +58,12 @@ static void rys_roots(int nroots, double x, double *rw,
         return;
     }
 
-    double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
+    const double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
     int it = (int)(x * .4);
     double u = (x - it * 2.5) * 0.8 - 1.;
     double u2 = u * 2.;
     for (int i = rt_id; i < nroots*2; i += stride) {
-        double *c = datax + i * DEGREE1 * INTERVALS;
+        const double *c = datax + i * DEGREE1 * INTERVALS;
         //for i in range(2, degree + 1):
         //    c0, c1 = c[degree-i] - c1, c0 + c1*u2
         double c0 = c[it + DEGREE   *INTERVALS];
@@ -87,10 +87,17 @@ static void rys_roots(int nroots, double x, double *rw,
 }
 
 // rys_roots for range-separation Coulomb
-__device__ __forceinline__
+// NOTE (SYCL/PVC): see rys_roots_for_k.cu -- the barriers are skipped when
+// stride == 1, because such callers evaluate every root on the calling
+// work-item and invoke this routine from a work-item dependent loop, where a
+// group barrier deadlocks on Level Zero.
+__device__ __forceinline__ static
 void rys_roots_rs(int nroots, double theta, double rr, double omega,
                   double *rw, int block_size, int rt_id, int stride)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    #endif
     double theta_rr = theta * rr;
     if (omega == 0) {
         rys_roots(nroots, theta_rr, rw, block_size, rt_id, stride);
@@ -115,5 +122,5 @@ void rys_roots_rs(int nroots, double theta, double rr, double omega,
             rw1[ irys*2   *block_size] *= theta_fac;
             rw1[(irys*2+1)*block_size] *= sqrt_theta_fac;
         }
-    }
+    }    
 }

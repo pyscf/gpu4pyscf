@@ -20,6 +20,23 @@ void type1_cart_unrolled_kernel(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
+    constexpr int LIJ1 = LI+LJ+1;
+    constexpr int LIJ3 = LIJ1*LIJ1*LIJ1;
+
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+
+    auto thread_block = item.get_group();
+    double (&rad_ang)[LIJ3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ3]>(thread_block);
+#else // USE_SYCL
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+
+    __shared__ double rad_ang[LIJ3];
+#endif // USE_SYCL
+
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
     const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
@@ -47,10 +64,6 @@ void type1_cart_unrolled_kernel(double *gctr,
         ur += rad_part(kbas, ecpbas, env);
     }
 
-    constexpr int LIJ1 = LI+LJ+1;
-    constexpr int LIJ3 = LIJ1*LIJ1*LIJ1;
-
-    __shared__ double rad_ang[LIJ3];
     set_shared_memory(rad_ang, LIJ3);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
@@ -65,7 +78,11 @@ void type1_cart_unrolled_kernel(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai_prim + aj_prim;
 
+            #ifdef USE_SYCL
+            double (&rad_all)[LIJ1*LIJ1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ1*LIJ1]>(thread_block);
+            #else
             __shared__ double rad_all[LIJ1*LIJ1];
+            #endif
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
             __syncthreads();
 
@@ -87,7 +104,7 @@ void type1_cart_unrolled_kernel(double *gctr,
 
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int mi = ij%nfi;
         const int mj = ij/nfi;
 
@@ -123,14 +140,26 @@ void type1_cart_unrolled_kernel(double *gctr,
     }
 }
 
+// `smem` is passed in rather than declared here as `extern __shared__`:
+// under SYCL the dynamic local memory comes from a sycl::local_accessor
+// created by the enclosing submit(), which cannot be reached from a
+// device function. The CUDA callers pass their own `extern __shared__`
+// block, so behaviour is unchanged.
 template <int orderi, int orderj> __device__
-void type1_cart_kernel(double *gctr,
+void type1_cart_kernel(double *smem, double *gctr,
                 const int LI, const int LJ,
                 const int ish, const int jsh, const int ksh,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    extern __shared__ double smem[];
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+#else // USE_SYCL
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+#endif // USE_SYCL
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
@@ -163,7 +192,7 @@ void type1_cart_kernel(double *gctr,
     const int LIJ3 = LIJ1*LIJ1*LIJ1;
 
     double *rad_ang = smem;
-    for (int i = threadIdx.x; i < LIJ3; i+=blockDim.x) {
+    for (int i = threadIdx_x; i < LIJ3; i+=blockDim_x) {
         rad_ang[i] = 0;
     }
     __syncthreads();
@@ -200,7 +229,7 @@ void type1_cart_kernel(double *gctr,
 
     const int nfi = (LI+1) * (LI+2) / 2;
     const int nfj = (LJ+1) * (LJ+2) / 2;
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int mi = ij%nfi;
         const int mj = ij/nfi;
 
@@ -244,7 +273,24 @@ void type1_cart_ip1(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
+    constexpr int nfi = (LI+1) * (LI+2) / 2;
+    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
+    constexpr int nfi1 = (LI+2)*(LI+3)/2;
+
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int task_id = item.get_group(0);
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    double (&gctr_smem)[nfi*nfj*3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi*nfj*3]>(item.get_group());
+    double (&buf)[nfi1*nfj] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi1*nfj]>(item.get_group());
+#else // USE_SYCL
     const int task_id = blockIdx.x;
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    __shared__ double gctr_smem[nfi*nfj*3];
+    __shared__ double buf[nfi1*nfj];
+#endif // USE_SYCL
     if (task_id >= ntasks){
         return;
     }
@@ -257,16 +303,10 @@ void type1_cart_ip1(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
-    constexpr int nfi = (LI+1) * (LI+2) / 2;
-    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-    __shared__ double gctr_smem[nfi*nfj*3];
-    for (int ij = threadIdx.x; ij < nfi*nfj*3; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
-
-    constexpr int nfi1 = (LI+2)*(LI+3)/2;
-    __shared__ double buf[nfi1*nfj];
 
     type1_cart_unrolled_kernel<1,0,LI+1,LJ>(
         buf, ish, jsh, ksh,
@@ -286,7 +326,7 @@ void type1_cart_ip1(double *gctr,
         __syncthreads();
     }
 
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij%nfi;
         const int j = ij/nfi;
         double *gx = gctr;
@@ -305,9 +345,29 @@ void type1_cart_ip1_general(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env)
+                const int *atm, const int *bas, const double *env
+#ifdef USE_SYCL
+                , sycl::nd_item<1> &item, double* smem
+#endif
+                            )
 {
+    constexpr int nfi_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
+
+#ifdef USE_SYCL
+    const int task_id = item.get_group(0);
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    double (&gctr_smem)[NF_MAX*NF_MAX*3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NF_MAX*NF_MAX*3]>(item.get_group());
+    double (&buf)[nfi_max*nfj_max] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi_max*nfj_max]>(item.get_group());
+#else // USE_SYCL
     const int task_id = blockIdx.x;
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
+    __shared__ double buf[nfi_max*nfj_max];
+    extern __shared__ double smem[];
+#endif // USE_SYCL
     if (task_id >= ntasks){
         return;
     }
@@ -320,17 +380,12 @@ void type1_cart_ip1_general(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
-    __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
-    for (int ij = threadIdx.x; ij < NF_MAX*NF_MAX*3; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < NF_MAX*NF_MAX*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
 
-    constexpr int nfi_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    __shared__ double buf[nfi_max*nfj_max];
-
-    type1_cart_kernel<1,0>(
+    type1_cart_kernel<1,0>(smem,
         buf, LI+1, LJ,
         ish, jsh, ksh,
         ecpbas, ecploc,
@@ -340,7 +395,7 @@ void type1_cart_ip1_general(double *gctr,
     __syncthreads();
 
     if (LI > 0){
-        type1_cart_kernel<0,0>(
+        type1_cart_kernel<0,0>(smem,
             buf, LI-1, LJ,
             ish, jsh, ksh,
             ecpbas, ecploc,
@@ -352,7 +407,7 @@ void type1_cart_ip1_general(double *gctr,
 
     const int nfi = (LI+1) * (LI+2) / 2;
     const int nfj = (LJ+1) * (LJ+2) / 2;
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij%nfi;
         const int j = ij/nfi;
         double *gx = gctr;

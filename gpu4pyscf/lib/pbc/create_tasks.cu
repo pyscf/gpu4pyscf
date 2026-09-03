@@ -29,6 +29,9 @@
 __device__ inline
 int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     tmp_storage[t_id] = keep;
     __syncthreads();
     for (int offset = 1; offset < threads; offset <<= 1) {
@@ -54,8 +57,16 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                        int *swap,
                        JKMatrix& kmat, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int thread_id = item.get_local_id(1) + item.get_local_range(1) * item.get_local_id(0);
+    int threads = item.get_local_range(1) * item.get_local_range(0);
+    int threadIdx_y = item.get_local_id(0);
+#else
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
     int threads = blockDim.x * blockDim.y;
+    int threadIdx_y = threadIdx.y;
+#endif
     __syncthreads();
     if (thread_id == 0) {
         ntasks = 0;
@@ -182,7 +193,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+thread_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -198,8 +209,16 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                         int *swap,
                         JKEnergy& jk, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int thread_id = item.get_local_id(1) + item.get_local_range(1) * item.get_local_id(0);
+    int threads = item.get_local_range(1) * item.get_local_range(0);
+    int threadIdx_y = item.get_local_id(0);
+#else
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
     int threads = blockDim.x * blockDim.y;
+    int threadIdx_y = threadIdx.y;
+#endif
     __syncthreads();
     if (thread_id == 0) {
         ntasks = 0;
@@ -330,7 +349,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+thread_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();

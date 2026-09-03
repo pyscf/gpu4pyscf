@@ -17,14 +17,26 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifndef USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuComplex.h>
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
 #include "utils.cuh"
 #include "aft_recursion.cuh"
+
+#ifdef USE_SYCL
+// CUDA cuDoubleComplex stand-in. No SYCL analogue exists anywhere in the
+// codebase; this POD exactly matches cuDoubleComplex's memory layout (two
+// doubles) so device-pointer reinterpretation from Python callers is
+// unaffected. Unlike sycl::double2 (whose .x()/.y() are methods), this is a
+// real struct with real members, so existing .x/.y field-access and
+// brace-init call sites need zero further changes.
+struct alignas(16) cuDoubleComplex { double x, y; };
+#endif
 
 #define WARP_SIZE       32
 #define WARPS           8
@@ -47,11 +59,33 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
                          int *mesh_cum, int *nimgs_cum,
                          int npair, int ntiles_x, int ntiles_y, int ntiles_z)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+    int pair_id = item.get_group(0) % npair;
+#else
     int thread_id = threadIdx.x;
+    int pair_id = blockIdx.x % npair;
+#endif
     int x_id = thread_id / NGV_PER_BLOCK;
     int Gv_id = thread_id % NGV_PER_BLOCK;
+#ifdef USE_SYCL
+    auto &tile_batch = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    if (thread_id == 0) {
+        tile_batch = item.get_group(0) / npair;
+    }
+    auto &gx = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NGV_PER_BLOCK*3*2*LMAX1*LMAX1]>(item.get_group());
+    auto &swap = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)]>(item.get_group());
+    auto &mesh_start = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[3]>(item.get_group());
+    auto &vjR = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NCART_MAX*NCART_MAX * WARPS]>(item.get_group());
+    auto &ri = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &rj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    auto &ai = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+    auto &aj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
+#else
     __shared__ int tile_batch;
-    int pair_id = blockIdx.x % npair;
     if (thread_id == 0) {
         tile_batch = blockIdx.x / npair;
     }
@@ -61,6 +95,7 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
     __shared__ double vjR[NCART_MAX*NCART_MAX * WARPS];
     __shared__ int ri, rj, li, lj;
     __shared__ double ai, aj;
+#endif
 
     int mesh_x = mesh_cum[1] - mesh_cum[0];
     int mesh_y = mesh_cum[2] - mesh_cum[1];
@@ -245,9 +280,20 @@ int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeh
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
+#ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> grids(ntile_batch*npair);
+    sycl_get_queue()->parallel_for<class orth_lda_mat_kernel_mgv3_sycl>
+        (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
+            orth_lda_mat_kernel(
+                out, vxcG, *envs, bas_ij_idx, G_bases, L_bases,
+                mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
+        }).wait();
+#else
     orth_lda_mat_kernel<<<ntile_batch*npair, THREADS>>>(
         out, vxcG, *envs, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
+#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_lda_mat_kernel: %s\n", cudaGetErrorString(err));

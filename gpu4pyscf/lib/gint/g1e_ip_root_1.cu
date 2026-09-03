@@ -24,8 +24,15 @@ static void GINTfill_int3c1e_ip_kernel00(double* output, const BasisProdOffsets 
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_grid = item.get_global_id(0);
+    const auto& c_bpcache = s_bpcache.get();
+    #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -124,7 +131,17 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel00(double* output, cons
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int thread_y_id = item.get_global_id(0);
+    const int total_threads_y = item.get_global_range(0);
+    const auto& c_bpcache = s_bpcache.get();
+    #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
+    const int total_threads_y = gridDim.y * blockDim.y;
+    #endif
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -154,7 +171,7 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel00(double* output, cons
     double deri_dAx_grid_sum = 0;
     double deri_dAy_grid_sum = 0;
     double deri_dAz_grid_sum = 0;
-    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+    for (int task_grid = thread_y_id; task_grid < ngrids; task_grid += total_threads_y) {
         const double* grid_point = grid_points + task_grid * 4;
         const double Cx = grid_point[0];
         const double Cy = grid_point[1];
@@ -218,11 +235,19 @@ __global__
 static void GINTfill_int3c1e_ip1_density_contracted_kernel00(double* output, const BasisProdOffsets offsets, const int nprim_ij,
                                                              const double* density, const int* aoslice, const int nao,
                                                              const double omega, const double* grid_points, const double* charge_exponents)
+
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_grid = item.get_global_id(0);
+    const auto& c_bpcache = s_bpcache.get();
+    #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -317,7 +342,18 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel00(double* output, con
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int task_grid = item.get_global_id(0);
+    const int thread_x_id = item.get_global_id(1);
+    const int total_threads_x = item.get_global_range(1);
+    const auto& c_bpcache = s_bpcache.get();
+    #else
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
+    const int thread_x_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total_threads_x = gridDim.x * blockDim.x;
+    #endif
+
     if (task_grid >= ngrids) {
         return;
     }
@@ -331,7 +367,7 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel00(double* output, con
     double deri_dCx_pair_sum = 0.0;
     double deri_dCy_pair_sum = 0.0;
     double deri_dCz_pair_sum = 0.0;
-    for (int task_ij = blockIdx.x * blockDim.x + threadIdx.x; task_ij < ntasks_ij; task_ij += gridDim.x * blockDim.x) {
+    for (int task_ij = thread_x_id; task_ij < ntasks_ij; task_ij += total_threads_x) {
         const int bas_ij = offsets.bas_ij + task_ij;
         const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
 
@@ -392,9 +428,15 @@ static void GINTfill_int3c1e_ip2_charge_contracted_kernel00(double* output, cons
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_grid = item.get_global_id(0);
+    const auto& c_bpcache = s_bpcache.get();
+    #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
-
+    #endif
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
     }

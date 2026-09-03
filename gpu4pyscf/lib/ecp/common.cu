@@ -44,6 +44,12 @@ Cartesian<(l+1)*(l+2)/2> ang_nuc_l(double rx, double ry, double rz){
 
 __device__
 double rad_part(const int ish, const int *ecpbas, const double *env){
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    #endif
     const int npk = ecpbas[ish*BAS_SLOTS+NPRIM_OF];
     const int r_order = ecpbas[ish*BAS_SLOTS+RADI_POWER];
     const int exp_ptr = ecpbas[ish*BAS_SLOTS+PTR_EXP];
@@ -51,8 +57,8 @@ double rad_part(const int ish, const int *ecpbas, const double *env){
 
     double u1 = 0.0;
     double r = 0.0;
-    if (threadIdx.x < NGAUSS){
-        r = r128[threadIdx.x];
+    if (threadIdx_x < NGAUSS){
+        r = r128[threadIdx_x];
     }
     for (int kp = 0; kp < npk; kp++){
         const double ak = env[exp_ptr+kp];
@@ -60,8 +66,8 @@ double rad_part(const int ish, const int *ecpbas, const double *env){
         u1 += ck * exp(-ak * r * r);
     }
     double w = 0.0;
-    if (threadIdx.x < NGAUSS){
-        w = w128[threadIdx.x];
+    if (threadIdx_x < NGAUSS){
+        w = w128[threadIdx_x];
     }
     return u1 * pow(r, r_order) * w;
 }
@@ -118,8 +124,14 @@ void cache_fac(double *fx, double *ri){
 
 __device__
 void block_reduce(double val, double *d_out) {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    double (&sdata)[THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS]>(item.get_group());
+    const unsigned int tid = item.get_local_id(0);
+#else // USE_SYCL
     __shared__ double sdata[THREADS];
     const unsigned int tid = threadIdx.x;
+#endif
 
     sdata[tid] = val;
     __syncthreads();
@@ -150,7 +162,15 @@ void block_reduce(double val, double *d_out) {
 
 __device__ __forceinline__
 void set_shared_memory(double *smem, const int size) {
-    for (int i = threadIdx.x; i < size; i += blockDim.x) {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
+    for (int i = threadIdx_x; i < size; i += blockDim_x) {
         smem[i] = 0.0;
     }
     __syncthreads();
@@ -158,6 +178,14 @@ void set_shared_memory(double *smem, const int size) {
 
 __device__
 void _li_up(double *out, double *buf, const int li, const int lj){
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi = (li+1) * (li+2) / 2;
     const int nfi0 = li * (li+1) / 2;
@@ -165,7 +193,7 @@ void _li_up(double *out, double *buf, const int li, const int lj){
     double *outy = outx + nfi*nfj;
     double *outz = outy + nfi*nfj;
     const double fac = 1.0 / _ecp_fac[li-1];
-    for (int ij = threadIdx.x; ij < nfi0*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi0*nfj; ij+=blockDim_x){
         const int i = ij % nfi0;
         const int j = ij / nfi0;
         const double yfac = fac * (_cart_pow_y[i] + 1);
@@ -180,6 +208,14 @@ void _li_up(double *out, double *buf, const int li, const int lj){
 
 __device__
 void _li_up_and_write(double *out, double *buf, const int li, const int lj, const int nao){
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     const int nfi0 = li * (li+1) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     double *outxx = out ;
@@ -192,7 +228,7 @@ void _li_up_and_write(double *out, double *buf, const int li, const int lj, cons
     double *outzy = out + 7*nao*nao;
     double *outzz = out + 8*nao*nao;
     const double fac = 1.0 / _ecp_fac[li-1];
-    for (int ij = threadIdx.x; ij < nfi0*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi0*nfj; ij+=blockDim_x){
         const int i = ij % nfi0;
         const int j = ij / nfi0;
         const double yfac = fac * (_cart_pow_y[i] + 1);
@@ -217,6 +253,14 @@ void _li_up_and_write(double *out, double *buf, const int li, const int lj, cons
 
 __device__
 void _li_down(double *out, double *buf, const int li, const int lj){
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi1= (li+2) * (li+3) / 2;
@@ -225,7 +269,7 @@ void _li_down(double *out, double *buf, const int li, const int lj){
     double *outz = outy + nfi*nfj;
     const double fac = _ecp_fac[li];
 
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij % nfi;
         const int j = ij / nfi;
         atomicAdd(outx + j*nfi+i, fac * buf[j*nfi1+i]);
@@ -236,6 +280,14 @@ void _li_down(double *out, double *buf, const int li, const int lj){
 
 __device__
 void _li_down_and_write(double *out, double *buf, const int li, const int lj, const int nao){
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi1= (li+2) * (li+3) / 2;
@@ -250,7 +302,7 @@ void _li_down_and_write(double *out, double *buf, const int li, const int lj, co
     double *outzz = out + 8*nao*nao;
     const double fac = _ecp_fac[li];
 
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij % nfi;
         const int j = ij / nfi;
         const int i_addr[3] = {i, _y_addr[i], _z_addr[i]};
@@ -272,6 +324,14 @@ void _li_down_and_write(double *out, double *buf, const int li, const int lj, co
 
 __device__
 void _lj_up_and_write(double *out, double *buf, const int li, const int lj, const int nao){
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     const int nfi = (li+1)*(li+2)/2;
     const int nfj0 = lj * (lj+1) / 2;
     double *outxx = out;
@@ -284,7 +344,7 @@ void _lj_up_and_write(double *out, double *buf, const int li, const int lj, cons
     double *outzy = out + 7*nao*nao;
     double *outzz = out + 8*nao*nao;
     const double fac = 1.0 / _ecp_fac[lj-1];
-    for (int ij = threadIdx.x; ij < nfi*nfj0; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj0; ij+=blockDim_x){
         const int i = ij % nfi;
         const int j = ij / nfi;
         const double yfac = fac * (_cart_pow_y[j] + 1);
@@ -308,6 +368,14 @@ void _lj_up_and_write(double *out, double *buf, const int li, const int lj, cons
 
 __device__
 void _lj_down_and_write(double *out, double *buf, const int li, const int lj, const int nao){
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfj1 = (lj+2) * (lj+3) / 2;
@@ -321,7 +389,7 @@ void _lj_down_and_write(double *out, double *buf, const int li, const int lj, co
     double *outzy = out + 7*nao*nao;
     double *outzz = out + 8*nao*nao;
     const double fac = _ecp_fac[lj];
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij % nfi;
         const int j = ij / nfi;
         const int j_addr[3] = {j, _y_addr[j], _z_addr[j]};

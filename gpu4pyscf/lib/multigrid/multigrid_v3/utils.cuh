@@ -21,6 +21,9 @@ __host__ __device__ T distance_squared(const T x, const T y, const T z) {
   return x * x + y * y + z * z;
 }
 
+#ifdef USE_SYCL
+inline
+#endif
 __device__ __forceinline__
 void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI)
 {
@@ -30,9 +33,15 @@ void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI
     cI = outI;
 }
 
+#ifdef USE_SYCL
+inline
+#endif
 __device__ __forceinline__
 double reduce(double val, double *swap, int thread_id)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+#endif
     constexpr int WARP_SIZE = 32;
     for (int offset = 16; offset > 0; offset >>= 1) {
         val += __shfl_down_sync(0xffffffff, val, offset);

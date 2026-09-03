@@ -36,17 +36,40 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         float *q_cond_ij, float *q_cond_kl,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                         int64_t *pool, double *dd_pool, int *head,
-                        int reserved_shm_size)
+                        int reserved_shm_size
+                        #ifdef USE_SYCL
+                        , sycl::nd_item<2> &item, double *shared_memory
+                        #endif
+                        )
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    int threads = blockDim.x * blockDim.y;
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
-    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
+#ifdef USE_SYCL
+    int blockDim_x = item.get_local_range(1);
+    int blockDim_y = item.get_local_range(0);
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+#else
+    int blockDim_x = blockDim.x;
+    int blockDim_y = blockDim.y;
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    int blockIdx_x = blockIdx.x;
+
     extern __shared__ double shared_memory[];
     __shared__ int ntasks, pair_ij, pair_kl0;
     __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
@@ -55,7 +78,13 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-
+#endif
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    int threads = blockDim_x * blockDim_y;
+    int thread_id = threadIdx_x + blockDim_x * threadIdx_y;
     int *bas = envs.bas;
     double *env = envs.env;
     int li = bounds.li;
@@ -88,15 +117,19 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
     double *cicj_cache = shared_memory + reserved_shm_size;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lk);
-    int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.ll);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lj);
+    const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lk);
+    const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.ll);
 
     int do_j = jk.j_factor != 0.;
     int do_k = jk.k_factor != 0.;
     int *ao_loc = envs.ao_loc;
     double *dm = jk.dm;
+
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
+    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
 while (1) {
     __syncthreads();
     if (thread_id == 0) {
@@ -459,17 +492,41 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
                         float *q_cond_ij, float *q_cond_kl,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                         int64_t *pool, double *dd_pool, int *head,
-                        int reserved_shm_size)
+                        int reserved_shm_size
+                        #ifdef USE_SYCL
+                        , sycl::nd_item<2> &item, double *shared_memory
+                        #endif
+                        )
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    int threads = blockDim.x * blockDim.y;
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
-    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
+#ifdef USE_SYCL
+    int blockDim_x = item.get_local_range(1);
+    int blockDim_y = item.get_local_range(0);
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rj)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+#else
+    int blockDim_x = blockDim.x;
+    int blockDim_y = blockDim.y;
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    int blockIdx_x = blockIdx.x;
+
     extern __shared__ double shared_memory[];
     __shared__ int ntasks, pair_ij, pair_kl0;
     __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
@@ -479,7 +536,13 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-
+#endif
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    int threads = blockDim_x * blockDim_y;
+    int thread_id = threadIdx_x + blockDim_x * threadIdx_y;
     int *bas = envs.bas;
     double *env = envs.env;
     int li = bounds.li;
@@ -512,16 +575,19 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
     double *cicj_cache = shared_memory + reserved_shm_size;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lk);
-    int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.ll);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lj);
+    const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lk);
+    const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.ll);
 
     int do_j = jk.j_factor != 0.;
     int do_k = jk.k_factor != 0.;
     int *ao_loc = envs.ao_loc;
     double *dm = jk.dm;
 
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
+    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
     double sigma_xx = 0;
     double sigma_xy = 0;
     double sigma_xz = 0;
@@ -962,9 +1028,6 @@ while (1) {
     atomicAdd(sigma+8, sigma_zz);
 }
 
-//extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-//                        int *pool, double *dd_pool);
-
 extern "C" {
 int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         double *dm, int n_dm, int nao,
@@ -1013,6 +1076,9 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     // Additional factor 1/2 from the two-electron Coulomb operator
     JKEnergy jk = {ejk, dm, 2.*j_factor, -k_factor, n_dm, omega, 0, 1};
 
+    #ifdef USE_SYCL
+    sycl::queue& stream = *sycl_get_queue();
+    #endif
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
@@ -1023,24 +1089,42 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
-        buflen = (reserved_shm_size + ij_prims)*sizeof(double);
-        if (buflen > 48000) {
-            cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+        buflen = reserved_shm_size + ij_prims;
+        #ifdef USE_SYCL
+        sycl::range<2> threads(gout_stride, quartets_per_block);
+        sycl::range<2> blocks(1, workers);
+        auto dev_envs = *envs;
+        stream.submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
+          cgh.parallel_for<class rys_ejk_ip1_pbc_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            rys_ejk_ip1_kernel(dev_envs, jk, bounds, pair_ij_mapping, pair_kl_mapping,
+                               bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                               q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                               pool, dd_pool, head, reserved_shm_size,
+                               item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+
+          });
+        });
+        #else
+        dim3 threads(quartets_per_block, gout_stride);
+        int buflen_bytes = buflen * sizeof(double);
+        if (buflen_bytes > 48000) {
+            cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen_bytes);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen_bytes,
                         cudaGetErrorString(err));
                 return 1;
             }
         }
-        rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_ip1_kernel<<<workers, threads, buflen_bytes>>>(
                 *envs, jk, bounds, pair_ij_mapping, pair_kl_mapping,
                 bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, dd_pool, head, reserved_shm_size);
+        #endif
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1100,6 +1184,9 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
     jk.lr_factor = 0;
     jk.sr_factor = 1;
 
+    #ifdef USE_SYCL
+    sycl::queue& stream = *sycl_get_queue();
+    #endif
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
@@ -1110,24 +1197,41 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
-        buflen = (reserved_shm_size + ij_prims)*sizeof(double);
-        if (buflen > 48000) {
-            cudaFuncSetAttribute(rys_ejk_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+        buflen = reserved_shm_size + ij_prims;
+        #ifdef USE_SYCL
+        sycl::range<2> blocks(1, workers);
+        sycl::range<2> threads(gout_stride, quartets_per_block);
+        auto dev_envs = *envs;
+        stream.submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
+          cgh.parallel_for<class rys_ejk_strain_deriv_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            rys_ejk_strain_deriv_kernel(dev_envs, jk, bounds, sigma, pair_ij_mapping, pair_kl_mapping,
+                                        bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                                        q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                                        pool, dd_pool, head, reserved_shm_size,
+                                        item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+          });
+        });
+        #else
+        dim3 threads(quartets_per_block, gout_stride);
+        int buflen_bytes = buflen * sizeof(double);
+        if (buflen_bytes > 48000) {
+            cudaFuncSetAttribute(rys_ejk_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen_bytes);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen_bytes,
                         cudaGetErrorString(err));
                 return 1;
             }
         }
-        rys_ejk_strain_deriv_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_strain_deriv_kernel<<<workers, threads, buflen_bytes>>>(
                 *envs, jk, bounds, sigma, pair_ij_mapping, pair_kl_mapping,
                 bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, dd_pool, head, reserved_shm_size);
+        #endif
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -35,9 +35,18 @@ endif()
 add_library(cupy_helper SHARED ${cupy_helper_src})
 
 if(BUILD_CUTLASS)
-add_dependencies(cupy_helper cutlass)
-target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
+  add_dependencies(cupy_helper cutlass)
+  target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
 endif()
 
-set_target_properties(cupy_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-set_target_properties(cupy_helper PROPERTIES CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+set_target_properties(cupy_helper PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+if (USE_SYCL)
+  set_source_files_properties(${cupy_helper_src} PROPERTIES LANGUAGE CXX)
+  target_compile_options(cupy_helper PRIVATE -x c++ -nocudainc -nocudalib -DCUTLASS_ENABLE_SYCL=1)
+  target_link_libraries(cupy_helper PRIVATE sycl_compat gsycl)
+else()
+  set_target_properties(cupy_helper PROPERTIES
+    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+endif()

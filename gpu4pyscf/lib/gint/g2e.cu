@@ -26,6 +26,9 @@
 template <int NROOTS> __device__
 static void GINTg0_2e_2d4d(GINTEnvVars envs, double* __restrict__ g, double norm, int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)
 {
+#ifdef USE_SYCL
+    const auto& c_bpcache = s_bpcache.get();
+#endif
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
@@ -430,6 +433,15 @@ static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
     const int ish, const int jsh, const int ksh,
     const int prim_ij, const int prim_kl)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int threadIdx_x = item.get_local_id(1);
+    const int blockDim_x = item.get_local_range(1);
+    const auto& c_bpcache = s_bpcache.get();
+#else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+#endif
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
@@ -486,14 +498,14 @@ static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
     const int gsize = envs.g_size;
 
     __syncthreads();
-    for (int i = threadIdx.x; i < nrys_roots; i += blockDim.x) {
+    for (int i = threadIdx_x; i < nrys_roots; i += blockDim_x) {
         g0[i] = envs.fac;
         g0[i+gsize] = fac;
         g0[i+2*gsize] = weight;
     }
     __syncthreads();
 
-    for (int tx = threadIdx.x; tx < nrys_roots*3; tx += blockDim.x) {
+    for (int tx = threadIdx_x; tx < nrys_roots*3; tx += blockDim_x) {
         const int iroot = tx % nrys_roots;
         const int ix = tx / nrys_roots;
         double *gx = g0 + ix * envs.g_size + iroot;
@@ -603,6 +615,10 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     const double norm, const int ish, const int jsh, const int ksh,
     const int prim_ij, const int prim_kl)
 {
+#ifdef USE_SYCL
+    const auto& c_bpcache = s_bpcache.get();
+#endif
+
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
@@ -918,6 +934,10 @@ static void GINTg0_int3c2e(GINTEnvVars envs, double* __restrict__ g,
     const int ish, const int jsh, const int ksh,
     const int prim_ij, const int prim_kl)
 {
+#ifdef USE_SYCL
+    const auto& c_bpcache = s_bpcache.get();
+#endif
+
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;

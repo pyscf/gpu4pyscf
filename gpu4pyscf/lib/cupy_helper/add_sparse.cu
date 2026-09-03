@@ -22,8 +22,20 @@
 __global__
 void _add_sparse(double *a, double *b, int *indices, int n, int m, int count)
 {
-	int row = blockIdx.x * BLOCK_DIM + threadIdx.x;
-    int col = blockIdx.y * BLOCK_DIM + threadIdx.y;
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int blockIdx_x = item.get_group(1);
+    int blockIdx_y = item.get_group(0);
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+#else
+    int blockIdx_x = blockIdx.x;
+    int blockIdx_y = blockIdx.y;
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+#endif
+    int row = blockIdx_x * BLOCK_DIM + threadIdx_x;
+    int col = blockIdx_y * BLOCK_DIM + threadIdx_y;
     if (row >= m || col >= m){
         return;
     }
@@ -38,6 +50,15 @@ extern "C" {
 __host__
 int add_sparse(cudaStream_t stream, double *a, double *b, int *indices, int n, int m, int count){
     int ntile = (m + THREADS - 1) / THREADS;
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(ntile, ntile);
+
+    stream.parallel_for<class _add_sparse_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _add_sparse(a, b, indices, n, m, count);          
+    });
+    
+#else // USE_SYCL
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile);
     _add_sparse<<<blocks, threads, 0, stream>>>(a, b, indices, n, m, count);
@@ -45,6 +66,7 @@ int add_sparse(cudaStream_t stream, double *a, double *b, int *indices, int n, i
     if (err != cudaSuccess) {
         return 1;
     }
+#endif
     return 0;
 }
 }
