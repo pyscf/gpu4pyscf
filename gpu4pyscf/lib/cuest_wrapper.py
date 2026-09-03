@@ -4799,8 +4799,7 @@ class CuESTWrapper(lib.StreamObject):
     def get_j(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
         return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[0]
 
-    def get_k(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None, range_separated_mode=None):
-        # range_separated_mode is intentionally ignored here
+    def get_k(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
         return self.get_jk(mol, dm, hermi, with_j=False, with_k=True, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[1]
 
     def Gradients(self):

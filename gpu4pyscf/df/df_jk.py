@@ -118,11 +118,12 @@ class _DFHF:
         return self.get_jk(mol, dm, hermi, with_j=True, with_k=False, omega=omega)[0]
 
     def get_k(self, mol=None, dm=None, hermi=1,
-              omega=None, lr_factor=None, sr_factor=None, range_separated_mode='mix_outside_kernel'):
+              omega=None, lr_factor=None, sr_factor=None):
         if mol is None:
             mol = self.mol
         omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
+        range_separated_mode = getattr(self, 'range_separated_mode', 'mix_outside_kernel')
         if range_separated_mode == 'mix_inside_kernel':
             return self.get_jk(mol, dm, hermi, False, True, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[1]
         else:
@@ -340,7 +341,7 @@ class _DFHF:
                             vk += vklr
                         elif range_separated_mode == 'mix_inside_kernel':
                             vj = self.get_j(mol, dm, hermi)
-                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb, range_separated_mode=range_separated_mode)
+                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb)
                         else:
                             raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
                     else: # omega == 0
@@ -384,7 +385,7 @@ class _DFHF:
                             vk += vklr
                         elif range_separated_mode == 'mix_inside_kernel':
                             vj = self.get_j(mol, dm, hermi)
-                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb, range_separated_mode=range_separated_mode)
+                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb)
                         else:
                             raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
                     else: # omega == 0
@@ -453,7 +454,7 @@ class _DFHF:
                                 vk += vklr
                         elif range_separated_mode == 'mix_inside_kernel':
                             vj = self.get_j(mol, dm, hermi)
-                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb, range_separated_mode=range_separated_mode)
+                            vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb)
                         else:
                             raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
                     vxc += vj - vk

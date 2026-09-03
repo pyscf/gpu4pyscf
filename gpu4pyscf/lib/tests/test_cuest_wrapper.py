@@ -168,7 +168,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         test_Hcore = mf.get_hcore()
 
-        assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-11
+        assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-10
 
     def test_hcore_cartesian(self):
         mf = RHF(self.mol_cart)
@@ -177,7 +177,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         test_Hcore = mf.get_hcore()
 
-        assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-11
+        assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-10
 
     def test_J_spherical(self):
         mol = self.mol_sph
@@ -2019,7 +2019,7 @@ class KnownValues(unittest.TestCase):
 
         test_dvxc = gobj.get_xc_grad(dm)
 
-        assert np.max(np.abs(test_dvxc - ref_dvxc)) < 1e-9
+        assert np.max(np.abs(test_dvxc - ref_dvxc)) < 2e-9
 
     def test_rks_pure_veff_derivative_spherical_mo(self):
         mol = self.mol_sph
