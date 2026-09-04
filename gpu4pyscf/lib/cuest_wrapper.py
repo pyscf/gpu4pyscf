@@ -5005,11 +5005,15 @@ class CuESTGradientWrapper(lib.StreamObject):
         omega = abs(omega)
 
         if not self.base.turn_on_cuest_jk:
-            if omega != 0.0:
-                raise NotImplementedError("JK gradient does not support range-separated hybrids yet")
-            assert sr_factor == lr_factor
-            k_factor = sr_factor
-            return super().jk_energy_per_atom(dm = dm, j_factor = 1.0, k_factor = k_factor, omega = None, verbose = None)
+            if omega != 0:
+                range_separated_mode = getattr(self.base, 'range_separated_mode', 'mix_outside_kernel')
+                assert range_separated_mode == 'mix_inside_kernel'
+                dj = super().jk_energy_per_atom(dm = dm, j_factor = 1.0, k_factor = 0.0, verbose = None)
+                dk = super().jk_energy_per_atom(dm = dm, j_factor = 0.0, k_factor = 1.0, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor, verbose = None)
+                return dj + dk
+            else:
+                assert lr_factor == sr_factor
+                return super().jk_energy_per_atom(dm = dm, j_factor = 1.0, k_factor = sr_factor, verbose = None)
 
         dms, dm = dm, None
         mo_coeffs = None
