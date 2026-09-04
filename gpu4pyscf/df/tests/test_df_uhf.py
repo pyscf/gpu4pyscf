@@ -81,8 +81,8 @@ def _check_grad(mol, tol=1e-5, disp=None):
     grad_fd = np.array(grad_fd).reshape(-1,3)
     print('finite difference gradient:')
     print(grad_fd)
-    print('difference between analytical and finite difference gradient:', cupy.linalg.norm(g_analy - grad_fd))
-    assert(cupy.linalg.norm(g_analy - grad_fd) < tol)
+    print('difference between analytical and finite difference gradient:', np.linalg.norm(g_analy - grad_fd))
+    assert(np.linalg.norm(g_analy - grad_fd) < tol)
 
 class KnownValues(unittest.TestCase):
     '''

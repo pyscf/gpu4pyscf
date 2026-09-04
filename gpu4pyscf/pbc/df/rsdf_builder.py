@@ -404,8 +404,14 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs),
                 ctypes.c_int(p0), ctypes.c_int(p1))
             j3c = None
-            if num_devices > 1:
-                stream.synchronize()
+            # store_col_segment enqueues its device->host write asynchronously
+            # and does not itself block. The next reader of `cderi` is a
+            # plain host-side read (mydf.loop()) with no ordering relationship
+            # to this stream, so this segment must be drained here every
+            # time -- not only when num_devices > 1. Skipping this on a
+            # single device happened to be safe on this stream/allocator
+            # combination but is not guaranteed in general.
+            stream.synchronize()
             t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
@@ -572,8 +578,9 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
                 if err != 0:
                     raise RuntimeError('store_col_segment kernel failed')
             j3c = None
-            if num_devices > 1:
-                stream.synchronize()
+            # See the matching comment in compressed_cderi_j_only: this must
+            # run unconditionally, not only when num_devices > 1.
+            stream.synchronize()
             t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
     multi_gpu.run(proc, non_blocking=True)

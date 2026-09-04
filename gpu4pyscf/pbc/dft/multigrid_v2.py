@@ -84,7 +84,7 @@ def ifft_in_place(x):
 def unique_with_sort(x):
     # This function does the same thing as cp.unique(x, return_inverse=True).
     # It's not super optimized, but for whatever reason, cp.unique is very slow, so this one is better.
-    assert type(x) is cp.ndarray and (x.dtype == cp.int32 or x.dtype == cp.int64) and x.ndim == 1
+    assert isinstance(x, cp.ndarray) and (x.dtype == cp.int32 or x.dtype == cp.int64) and x.ndim == 1
     n = x.shape[0]
     if n <= 1:
         return x, cp.zeros(n)
@@ -1398,7 +1398,7 @@ def convert_xc_on_g_mesh_to_fock_gradient(
 def get_nuc(ni, kpts=None):
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1417,7 +1417,7 @@ def get_pp(ni, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:

@@ -196,21 +196,21 @@ def eval_nucG_SI_gradient(cell, mesh, rho_g):
 
 class KnownValues(unittest.TestCase):
     def test_get_pp(self):
-        ref = MultiGridNumInt_cpu(cell_orth).get_pp()
-        out = multigrid.MultiGridNumInt(cell_orth).get_pp().get()
-        self.assertEqual(out.shape, ref.shape)
+        nao = cell_orth.nao
+        ref = MultiGridNumInt_cpu(cell_orth).get_pp().reshape(nao, nao)
+        out = multigrid.MultiGridNumInt(cell_orth).get_pp().get().reshape(nao, nao)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
     def test_get_nuc(self):
-        ref = MultiGridNumInt_cpu(cell_orth).get_nuc()
-        out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
-        self.assertEqual(out.shape, ref.shape)
+        nao = cell_orth.nao
+        ref = MultiGridNumInt_cpu(cell_orth).get_nuc().reshape(nao, nao)
+        out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get().reshape(nao, nao)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
     def test_get_nuc_nonorth(self):
-        ref = MultiGridNumInt_cpu(cell_nonorth).get_nuc()
-        out = multigrid.MultiGridNumInt(cell_nonorth).get_nuc().get()
-        self.assertEqual(out.shape, ref.shape)
+        nao = cell_nonorth.nao
+        ref = MultiGridNumInt_cpu(cell_nonorth).get_nuc().reshape(nao, nao)
+        out = multigrid.MultiGridNumInt(cell_nonorth).get_nuc().get().reshape(nao, nao)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
 
     def test_get_nuc_kpts(self):
@@ -224,6 +224,22 @@ class KnownValues(unittest.TestCase):
         out = multigrid.MultiGridNumInt(cell_nonorth).get_nuc(kpts).get()
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
+
+    def test_get_nuc_get_pp_single_kpt_ndim(self):
+        nao = cell_orth.nao
+        ni = multigrid.MultiGridNumInt(cell_orth)
+        self.assertEqual(ni.get_nuc().ndim, 2)
+        self.assertEqual(ni.get_nuc().shape, (nao, nao))
+        self.assertEqual(ni.get_pp().ndim, 2)
+        self.assertEqual(ni.get_pp().shape, (nao, nao))
+
+        single_kpt = np.zeros(3)
+        self.assertEqual(ni.get_nuc(single_kpt).ndim, 2)
+        self.assertEqual(ni.get_pp(single_kpt).ndim, 2)
+
+        multi_kpts = np.zeros((1, 3))
+        self.assertEqual(ni.get_nuc(multi_kpts).ndim, 3)
+        self.assertEqual(ni.get_pp(multi_kpts).ndim, 3)
 
     def test_get_rho(self):
         nao = cell_orth.nao
