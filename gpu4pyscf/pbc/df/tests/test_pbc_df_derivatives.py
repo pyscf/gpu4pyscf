@@ -63,7 +63,7 @@ C    D
     return cell, auxcell
 
 
-def _check_gradient(grad, cell, auxcell, eval_energy, disp=1e-3, tol=5e-6):
+def _check_gradient(grad, cell, auxcell, eval_energy, disp=1e-4, tol=1e-7):
     atom_coords = cell.atom_coords()
     for ia, axis in [(0, 0), (0, 1), (0, 2)]:
         coords = atom_coords.copy()
@@ -77,6 +77,27 @@ def _check_gradient(grad, cell, auxcell, eval_energy, disp=1e-3, tol=5e-6):
         auxcell2 = auxcell.set_geom_(coords, unit='Bohr', inplace=False)
         e2 = eval_energy(cell2, auxcell2)
         assert abs((e1-e2)/(2*disp) - grad[ia,axis]) < tol
+
+
+def _ewald_exx_energy(cell, dm, kpts, k_factor, unrestricted=False,
+                      omega=0):
+    nkpts = len(kpts)
+    s0 = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    if unrestricted:
+        if dm.ndim == 3:
+            dm = dm[:,None]
+        k_dm = contract('nkpq,kqr->nkpr', dm, s0)
+        k_dm = contract('nkpr,nkrs->kps', k_dm, dm)
+        prefactor = -.5
+    else:
+        if dm.ndim == 2:
+            dm = dm[None]
+        k_dm = contract('kpq,kqr->kpr', dm, s0)
+        k_dm = contract('kpr,krs->kps', k_dm, dm)
+        prefactor = -.25
+    ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get()
+    return (prefactor * k_factor / nkpts *
+            madelung(cell, kpts, omega=omega) * ek_G0)
 
 def test_ej_strain_deriv_gamma_point_without_long_range():
     cell, auxcell = create_cell_auxcell()
@@ -151,9 +172,11 @@ def test_ejk_strain_deriv_gamma_point_without_long_range():
     dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     omega = -0.3
+    k_factor = 1
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
     ek, sigma = rhf_stress._get_ejk_strain_deriv(
-        opt, dm, hermi=1, j_factor=1, k_factor=1, omega=omega)
+        opt, dm, hermi=1, j_factor=1, k_factor=k_factor, omega=omega,
+        exxdiv='ewald')
     assert abs(ek.sum(axis=0)).max() < 1e-11
 
     disp = 1e-4
@@ -162,6 +185,7 @@ def test_ejk_strain_deriv_gamma_point_without_long_range():
         cderi = cderi.transpose(1,2,0)
         ref = .5 * cp.einsum('ijp,klp,ji,lk->', cderi, cderi, dm, dm, optimize=True)
         ref -= .25 * cp.einsum('ijp,klp,jk,li->', cderi, cderi, dm, dm, optimize=True)
+        ref += _ewald_exx_energy(c, dm, np.zeros((1,3)), k_factor, omega=omega)
         return float(ref.get())
 
     _check_gradient(ek, cell, auxcell, eval_jk)
@@ -217,7 +241,8 @@ def test_ejk_strain_deriv_gamma_point_with_long_range():
     hermi = 1
     j_factor = 1
     k_factor = 1
-    ek, sigma = rhf_stress._get_ejk_strain_deriv(opt, dm, hermi, j_factor, k_factor)
+    ek, sigma = rhf_stress._get_ejk_strain_deriv(
+        opt, dm, hermi, j_factor, k_factor, exxdiv='ewald')
     assert abs(ek.sum(axis=0)).max() < 1e-11
 
     disp = 1e-4
@@ -226,6 +251,7 @@ def test_ejk_strain_deriv_gamma_point_with_long_range():
         cderi = cderi.transpose(1,2,0)
         ref = .5 * cp.einsum('ijp,klp,ji,lk->', cderi, cderi, dm, dm, optimize=True)
         ref -= .25 * cp.einsum('ijp,klp,jk,li->', cderi, cderi, dm, dm, optimize=True)
+        ref += _ewald_exx_energy(c, dm, np.zeros((1,3)), k_factor)
         return float(ref.get())
 
     _check_gradient(ek, cell, auxcell, eval_jk)
@@ -314,12 +340,14 @@ def test_ejk_strain_deriv_kpts_without_long_range():
     k_factor = 1
 
     ejk0, sigma0 = krhf_stress._get_ejk_strain_deriv(
-        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor, omega=omega)
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        omega=omega, exxdiv='ewald')
     assert abs(ejk0.sum(axis=0)).max() < 2e-11
 
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     ejk, sigma = krhf_stress._get_ejk_strain_deriv(
-        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor, omega=omega)
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        omega=omega, exxdiv='ewald')
     assert abs(ejk0 - ejk).max() < 1e-9
     assert abs(sigma0 - sigma).max() < 1e-9
 
@@ -346,10 +374,11 @@ def test_ejk_strain_deriv_kpts_without_long_range():
                                 dm[ki], cderi_ji, optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .25 / nkpts**2 * k_factor
+        ref += _ewald_exx_energy(c, dm, kpts, k_factor, omega=omega)
 
         return ref
 
-    _check_gradient(ejk, cell, auxcell, eval_jk, tol=1e-6)
+    _check_gradient(ejk, cell, auxcell, eval_jk)
 
     for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
@@ -403,14 +432,10 @@ def test_ejk_strain_deriv_kpts_with_long_range():
         ek = float(ek.real.get())
         ref -= ek * .25 / nkpts**2 * k_factor
 
-        s0 = cp.asarray(c.pbc_intor('int1e_ovlp', kpts=kpts))
-        k_dm = contract('kpq,kqr->kpr', dm, s0)
-        k_dm = contract('kpr,krs->kps', k_dm, dm)
-        ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get()
-        ref += (.25 * k_factor / nkpts * madelung(c, kpts, omega=0) * ek_G0)
+        ref += _ewald_exx_energy(c, dm, kpts, k_factor)
         return ref
 
-    _check_gradient(ejk, cell, auxcell, eval_jk, tol=1e-6)
+    _check_gradient(ejk, cell, auxcell, eval_jk)
 
     for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
@@ -449,7 +474,8 @@ def test_ejk_strain_deriv_kpts_with_long_range1():
 
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     ejk, sigma = krhf_stress._get_ejk_strain_deriv(
-        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor)
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        exxdiv='ewald')
     assert abs(ejk.sum(axis=0)).max() < 1e-11
 
     disp = 1e-4
@@ -474,9 +500,10 @@ def test_ejk_strain_deriv_kpts_with_long_range1():
                 ek += cp.einsum('pij,jk,li,pkl->', cderi_ij, dm[kj], dm[ki], cderi_ji)
         ek = float(ek.real.get())
         ref -= ek * .25 / nkpts**2 * k_factor
+        ref += _ewald_exx_energy(c, dm, kpts, k_factor)
         return ref
 
-    _check_gradient(ejk, cell, auxcell, eval_jk, tol=1e-6)
+    _check_gradient(ejk, cell, auxcell, eval_jk)
 
     for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
@@ -497,7 +524,8 @@ def test_uhf_ejk_strain_deriv_gamma_point_without_long_range():
     omega = -0.3
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
     ek, sigma = uhf_stress._get_ejk_strain_deriv(
-        opt, dm, hermi=1, j_factor=1, k_factor=1, omega=omega)
+        opt, dm, hermi=1, j_factor=1, k_factor=1, omega=omega,
+        exxdiv='ewald')
     assert abs(ek.sum(axis=0)).max() < 1e-11
 
     dm_sf = dm[0] + dm[1]
@@ -507,6 +535,7 @@ def test_uhf_ejk_strain_deriv_gamma_point_without_long_range():
         cderi = cderi.transpose(1,2,0)
         ref = .5 * cp.einsum('ijp,klp,ji,lk->', cderi, cderi, dm_sf, dm_sf, optimize=True)
         ref -= .5 * cp.einsum('ijp,klp,sjk,sli->', cderi, cderi, dm, dm, optimize=True)
+        ref += _ewald_exx_energy(c, dm, np.zeros((1,3)), 1, unrestricted=True, omega=omega)
         return float(ref.get())
 
     _check_gradient(ek, cell, auxcell, eval_jk)
@@ -534,7 +563,8 @@ def test_uhf_ejk_strain_deriv_gamma_point_with_long_range():
     j_factor = 1
     k_factor = 1
     ek, sigma = uhf_stress._get_ejk_strain_deriv(
-        opt, dm, hermi=hermi, j_factor=j_factor, k_factor=k_factor)
+        opt, dm, hermi=hermi, j_factor=j_factor, k_factor=k_factor,
+        exxdiv='ewald')
     assert abs(ek.sum(axis=0)).max() < 1e-11
 
     dm_sf = dm[0] + dm[1]
@@ -544,9 +574,10 @@ def test_uhf_ejk_strain_deriv_gamma_point_with_long_range():
         cderi = cderi.transpose(1,2,0)
         ref = .5 * cp.einsum('ijp,klp,ji,lk->', cderi, cderi, dm_sf, dm_sf, optimize=True)
         ref -= .5 * cp.einsum('ijp,klp,sjk,sli->', cderi, cderi, dm, dm, optimize=True)
+        ref += _ewald_exx_energy(c, dm, np.zeros((1,3)), k_factor, unrestricted=True)
         return float(ref.get())
 
-    _check_gradient(ek, cell, auxcell, eval_jk, tol=3e-6)
+    _check_gradient(ek, cell, auxcell, eval_jk)
 
     for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
@@ -574,12 +605,14 @@ def test_uhf_ejk_strain_deriv_kpts_without_long_range():
     j_factor = 1
     k_factor = 1
     ejk0, sigma0 = kuhf_stress._get_ejk_strain_deriv(
-        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor, omega=omega)
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        omega=omega, exxdiv='ewald')
     assert abs(ejk0.sum(axis=0)).max() < 2e-11
 
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     ejk, sigma = kuhf_stress._get_ejk_strain_deriv(
-        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor, omega=omega)
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        omega=omega, exxdiv='ewald')
     assert abs(ejk0 - ejk).max() < 1e-9
     assert abs(sigma0 - sigma).max() < 1e-9
 
@@ -607,9 +640,10 @@ def test_uhf_ejk_strain_deriv_kpts_without_long_range():
                                 dm[:,ki], cderi_ji, optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .5 / nkpts**2 * k_factor
+        ref += _ewald_exx_energy(c, dm, kpts, k_factor, unrestricted=True, omega=omega)
         return ref
 
-    _check_gradient(ejk, cell, auxcell, eval_jk, tol=3e-6)
+    _check_gradient(ejk, cell, auxcell, eval_jk)
 
     for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
@@ -638,7 +672,8 @@ def test_uhf_ejk_strain_deriv_kpts_with_long_range():
     k_factor = 1
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     ejk, sigma = kuhf_stress._get_ejk_strain_deriv(
-        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor)
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        exxdiv='ewald')
     assert abs(ejk.sum(axis=0)).max() < 3e-9
 
     dm_sf = dm[0] + dm[1]
@@ -665,9 +700,10 @@ def test_uhf_ejk_strain_deriv_kpts_with_long_range():
                                 dm[:,ki], cderi_ji, optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .5 / nkpts**2 * k_factor
+        ref += _ewald_exx_energy(c, dm, kpts, k_factor, unrestricted=True)
         return ref
 
-    _check_gradient(ejk, cell, auxcell, eval_jk, tol=1e-6)
+    _check_gradient(ejk, cell, auxcell, eval_jk)
 
     for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
@@ -705,7 +741,8 @@ def test_uhf_ejk_strain_deriv_kpts_with_long_range1():
     k_factor = 1
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     ejk, sigma = kuhf_stress._get_ejk_strain_deriv(
-        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor)
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        exxdiv='ewald')
     assert abs(ejk.sum(axis=0)).max() < 1e-11
 
     dm_sf = dm[0] + dm[1]
@@ -732,9 +769,10 @@ def test_uhf_ejk_strain_deriv_kpts_with_long_range1():
                 ek += cp.einsum('pij,sjk,sli,pkl->', cderi_ij, dm[:,kj], dm[:,ki], cderi_ji)
         ek = float(ek.real.get())
         ref -= ek * .5 / nkpts**2 * k_factor
+        ref += _ewald_exx_energy(c, dm, kpts, k_factor, unrestricted=True)
         return ref
 
-    _check_gradient(ejk, cell, auxcell, eval_jk, tol=1e-6)
+    _check_gradient(ejk, cell, auxcell, eval_jk)
 
     for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)

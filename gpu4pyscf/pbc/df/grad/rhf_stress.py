@@ -473,11 +473,10 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         # contributions: the cell dependence of the Madelung coefficient and
         # the response of the two overlap factors in Tr(S D S D).
         ek_G0 = float(cp.einsum('ij,ji->', s0, k_dm).real.get())
-        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(
-            cell.cell, kpts, -omega)
-        sigma += cp.asarray(.5 * k_factor * exx_1 * ek_G0)
-        sigma += k_factor * exx_0 * int1e.ovlp_strain_deriv(
-            cell.cell, k_dm, kpts)
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
+        sigma -= cp.asarray(.5 * k_factor * exx_1 * ek_G0)
+        sigma -= cp.asarray(
+            k_factor * exx_0 * int1e.ovlp_strain_deriv(cell.cell, k_dm, kpts))
     return ejk.get(), sigma.get()
 
 def _get_ej_strain_deriv(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
