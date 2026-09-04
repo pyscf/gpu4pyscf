@@ -38,7 +38,7 @@ void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI
 // inlcuding both nuclear gradients and strain derivatives
 __global__
 void ft_aopair_deriv_kernel(double *grad, double *sigma,
-                            double *dm, double2 *vG, double *Gv,
+                            double *dm, double2 *dm_vG, double *Gv,
                             PBCIntEnvVars envs, int nGv, int shm_size,
                             int *bas_ij_idx, int *bas_ij_img_idx,
                             int *shl_pair_offsets, int permutation_symmetry)
@@ -133,18 +133,18 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
         int jsh = bas_ij % nbas;
         int ish_cell0 = ish;
         int jsh_cell0 = jsh % envs.cell0_nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xi = ri[0];
-        double yi = ri[1];
-        double zi = ri[2];
-        double xj = rj[0] + img_coords[jL*3+0];
-        double yj = rj[1] + img_coords[jL*3+1];
-        double zj = rj[2] + img_coords[jL*3+2];
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+            double xi = env[ri+0];
+            double yi = env[ri+1];
+            double zi = env[ri+2];
+            double xj = env[rj+0] + img_coords[jL*3+0];
+            double yj = env[rj+1] + img_coords[jL*3+1];
+            double zj = env[rj+2] + img_coords[jL*3+2];
         if (Gv_gout_id == 0) {
             double xjxi = xj - xi;
             double yjyi = yj - yi;
@@ -155,13 +155,7 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
         }
         int i0 = ao_loc[ish];
         int j0 = ao_loc[jsh];
-        // Note the density matrix is assumed to be real in get_ej_ip1 function
-        double *dm_ij;
-        if (vG == NULL) {
-            dm_ij = dm + (Gv_id + (size_t)(j0*nao+i0) * nGv) * OF_COMPLEX;
-        } else {
-            dm_ij = dm + (j0*nao+i0);
-        }
+        int ij_offset = j0 * nao + i0;
 
         double v_ix = 0;
         double v_iy = 0;
@@ -179,8 +173,8 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
             __syncthreads();
             int ip = ijp / jprim;
             int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
+            double ai = env[expi+ip];
+            double aj = env[expj+jp];
             double ai2 = ai * 2;
             double aj2 = aj * 2;
             double aij = ai + aj;
@@ -188,7 +182,7 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
             double a2 = .5 / aij;
             if (gout_id == 0) {
                 double theta_ij = ai * aj_aij;
-                double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
+                double fac = OVERLAP_FAC * env[ci+ip] * env[cj+jp] / (aij * sqrt(aij));
                 if (permutation_symmetry && ish_cell0 == jsh_cell0) {
                     fac *= .5;
                 }
@@ -198,9 +192,9 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
                 double xjxi = rjri[0*nsp_per_block];
                 double yjyi = rjri[1*nsp_per_block];
                 double zjzi = rjri[2*nsp_per_block];
-                double xij = xjxi * aj_aij + ri[0];
-                double yij = yjyi * aj_aij + ri[1];
-                double zij = zjzi * aj_aij + ri[2];
+                double xij = xjxi * aj_aij + env[ri+0];
+                double yij = yjyi * aj_aij + env[ri+1];
+                double zij = zjzi * aj_aij + env[ri+2];
                 double kR = kx * xij + ky * yij + kz * zij;
                 sincos(-kR, gzI, gzR);
                 double rr = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
@@ -272,13 +266,15 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
                 uint32_t j = ij * div_nfi;
                 uint32_t i = ij - nfi * j;
                 double dm_vR, dm_vI;
-                if (vG == NULL) {
-                    size_t addr = (size_t)(j*nao+i)*nGv * OF_COMPLEX;
-                    dm_vR = dm_ij[addr];
-                    dm_vI = dm_ij[addr+1];
+                if (dm == NULL) {
+                    size_t addr = (ij_offset + j*nao+i) * (size_t)nGv + Gv_id;
+                    double2 tmp_vG = dm_vG[addr];
+                    dm_vR = tmp_vG.x;
+                    dm_vI = tmp_vG.y;
                 } else {
-                    double tmp = dm_ij[j*nao+i];
-                    double2 tmp_vG = vG[Gv_id];
+                    // Note the density matrix is assumed to be real in get_ej_ip1
+                    double tmp = dm[ij_offset + j*nao+i];
+                    double2 tmp_vG = dm_vG[Gv_id];
                     dm_vR = tmp * tmp_vG.x;
                     dm_vI = tmp * tmp_vG.y;
                 }
@@ -340,20 +336,37 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
                 v_iz += fizR * prod_xyR - fizI * prod_xyI;
                 // <i|\nabla_(e_xy) exp(-iGr)|j> = <i|-iy exp(-iGr)|j> Gx
                 //   = -i <(y-Yi + Yi)i|exp(-iGr)|j> Gx
-                goutx += (gixR + xi * IxR) * prod_yzI + (gixI + xi * IxI) * prod_yzR;
-                gouty += (giyR + yi * IyR) * prod_xzI + (giyI + yi * IyI) * prod_xzR;
-                goutz += (gizR + zi * IzR) * prod_xyI + (gizI + zi * IzI) * prod_xyR;
+                // naively, sigma_xx can be computed as
+                // goutx += (gixR + xi * IxR) * prod_yzI + (gixI + xi * IxI) * prod_yzR;
+                // gouty += (giyR + yi * IyR) * prod_xzI + (giyI + yi * IyI) * prod_xzR;
+                // goutz += (gizR + zi * IzR) * prod_xyI + (gizI + zi * IzI) * prod_xyR;
+                // sigma_xx += v_ix * xi + v_jx * xj - kx * goutx;
+                // sigma_xy += v_ix * yi + v_jx * yj - kx * gouty;
+                // sigma_xz += v_ix * zi + v_jx * zj - kx * goutz;
+                // sigma_yx += v_iy * xi + v_jy * xj - ky * goutx;
+                // sigma_yy += v_iy * yi + v_jy * yj - ky * gouty;
+                // sigma_yz += v_iy * zi + v_jy * zj - ky * goutz;
+                // sigma_zx += v_iz * xi + v_jz * xj - kz * goutx;
+                // sigma_zy += v_iz * yi + v_jz * yj - kz * gouty;
+                // sigma_zz += v_iz * zi + v_jz * zj - kz * goutz;
+                // However, v_ix * xi + v_jx * xj - kx * goutx, could be cancelled out, leaving
+                goutx += gixR * prod_yzI + gixI * prod_yzR;
+                gouty += giyR * prod_xzI + giyI * prod_xzR;
+                goutz += gizR * prod_xyI + gizI * prod_xyR;
             }
         }
-        sigma_xx += v_ix * xi + v_jx * xj - kx * goutx;
-        sigma_xy += v_ix * yi + v_jx * yj - kx * gouty;
-        sigma_xz += v_ix * zi + v_jx * zj - kx * goutz;
-        sigma_yx += v_iy * xi + v_jy * xj - ky * goutx;
-        sigma_yy += v_iy * yi + v_jy * yj - ky * gouty;
-        sigma_yz += v_iy * zi + v_jy * zj - ky * goutz;
-        sigma_zx += v_iz * xi + v_jz * xj - kz * goutx;
-        sigma_zy += v_iz * yi + v_jz * yj - kz * gouty;
-        sigma_zz += v_iz * zi + v_jz * zj - kz * goutz;
+        double xjxi = rjri[0*nsp_per_block];
+        double yjyi = rjri[1*nsp_per_block];
+        double zjzi = rjri[2*nsp_per_block];
+        sigma_xx += v_jx * xjxi - kx * goutx;
+        sigma_xy += v_jx * yjyi - kx * gouty;
+        sigma_xz += v_jx * zjzi - kx * goutz;
+        sigma_yx += v_jy * xjxi - ky * goutx;
+        sigma_yy += v_jy * yjyi - ky * gouty;
+        sigma_yz += v_jy * zjzi - ky * goutz;
+        sigma_zx += v_jz * xjxi - kz * goutx;
+        sigma_zy += v_jz * yjyi - kz * gouty;
+        sigma_zz += v_jz * zjzi - kz * goutz;
 
         double *reduce = shared_memory + thread_id;
         __syncthreads();
@@ -396,8 +409,8 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
 
 // inlcuding both nuclear gradients and strain derivatives
 __global__ static
-void ft_ao_deriv_kernel(double *grad, double *sigma, double2 *dm_auxG, double *Gv,
-                        RysIntEnvVars envs, int nGv)
+void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm_auxG,
+                        double *Gv, RysIntEnvVars envs, int nGv)
 {
     int sh_block_id = gridDim.y - blockIdx.y - 1;
     int Gv_block_id = blockIdx.x;
@@ -405,28 +418,22 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double2 *dm_auxG, double *G
     int sh_id_in_block = threadIdx.y;
     int Gv_id_in_block = threadIdx.x;
     int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
-    if (sh_id >= envs.nbas) {
+    int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
+    if (sh_id >= envs.nbas || Gv_id >= nGv) {
         return;
     }
 
-    int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
     int li = bas[sh_id*BAS_SLOTS+ANG_OF];
-    int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
-    double kx = 0;
-    double ky = 0;
-    double kz = 0;
-    if (Gv_id < nGv) {
-        kx = Gv[Gv_id];
-        ky = Gv[Gv_id + nGv];
-        kz = Gv[Gv_id + nGv * 2];
-    }
+    double kx = Gv[Gv_id];
+    double ky = Gv[Gv_id + nGv];
+    double kz = Gv[Gv_id + nGv * 2];
     double kk = kx * kx + ky * ky + kz * kz;
 
     constexpr int aux_l = AUXL + 1;
     int gx_len = (aux_l+1) * FT_AO_THREADS;
-    int i_1 =  NG_PER_BLOCK;
+    int i_1 = NG_PER_BLOCK;
     __shared__ double g[(aux_l+1)*FT_AO_THREADS * 6];
     double *gxR = g + (aux_l+1) * NG_PER_BLOCK * sh_id_in_block + Gv_id_in_block;
     double *gxI = gxR + gx_len;
@@ -446,17 +453,15 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double2 *dm_auxG, double *G
     double v_Gz = 0;
     double prod = 0;
 
-    int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
     int expi = bas[sh_id*BAS_SLOTS+PTR_EXP];
     int ci = bas[sh_id*BAS_SLOTS+PTR_COEFF];
-    int ri = atm[ia*ATM_SLOTS+PTR_COORD];
+    int ri = bas[sh_id*BAS_SLOTS+PTR_BAS_COORD];
     double xi = env[ri+0];
     double yi = env[ri+1];
     double zi = env[ri+2];
     int i0 = envs.ao_loc[sh_id];
     int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
     for (int ip = 0; ip < iprim; ++ip) {
-        __syncthreads();
         double ai = env[expi+ip];
         double kR = kx * xi + ky * yi + kz * zi;
         sincos(-kR, &s0zI, &s0zR);
@@ -518,86 +523,84 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double2 *dm_auxG, double *G
             s1zR = s2zR;
             s1zI = s2zI;
         }
-        __syncthreads();
-        if (Gv_id < nGv) {
-            int nfi = c_nf[li];
+
+        int nfi = c_nf[li];
 #pragma unroll
-            for (int n = 0; n < AUXNF; ++n) {
-                if (n >= nfi) break;
+        for (int n = 0; n < AUXNF; ++n) {
+            if (n >= nfi) break;
+            double dm_vR, dm_vI;
+            if (auxvec == NULL) {
                 size_t addr = (i0+n) * (size_t)nGv + Gv_id;
                 double2 dm_v = dm_auxG[addr];
-                double dm_vR = dm_v.x;
-                double dm_vI = -dm_v.y;
-                int addrx = idx[n*3+0] * NG_PER_BLOCK;
-                int addry = idx[n*3+1] * NG_PER_BLOCK;
-                int addrz = idx[n*3+2] * NG_PER_BLOCK;
-                double xR = gxR[addrx];
-                double xI = gxI[addrx];
-                double yR = gyR[addry];
-                double yI = gyI[addry];
-                double zR = gzR[addrz];
-                double zI = gzI[addrz];
-                double prod_xyR, prod_xyI;
-                double prod_xzR, prod_xzI;
-                double prod_yzR, prod_yzI;
-                multiply(xR, xI, yR, yI, prod_xyR, prod_xyI);
-                multiply(xR, xI, zR, zI, prod_xzR, prod_xzI);
-                multiply(yR, yI, zR, zI, prod_yzR, prod_yzI);
-                multiply(prod_xyR, prod_xyI, dm_vR, dm_vI, prod_xyR, prod_xyI);
-                multiply(prod_xzR, prod_xzI, dm_vR, dm_vI, prod_xzR, prod_xzI);
-                multiply(prod_yzR, prod_yzI, dm_vR, dm_vI, prod_yzR, prod_yzI);
-                // Gradients ~ auxG*-1j*Gv * dm_auxG.conj()
-                // prod = Re(auxG * dm_axuG.conj() * -1j)
-                prod += prod_xyR * zI + prod_xyI * zR;
-                // \nabla_(e_xy) exp(-iGr) = -iy exp(-iGr) Gx
-                //   = -i (y-Yi + Yi) * exp(-iGr) Gx
-                double gixR = gxR[addrx+i_1];
-                double gixI = gxI[addrx+i_1];
-                double giyR = gyR[addry+i_1];
-                double giyI = gyI[addry+i_1];
-                double gizR = gzR[addrz+i_1];
-                double gizI = gzI[addrz+i_1];
-                // naively, sigma_xx can be computed as
-                // v_Gx += (gixR + xi * xR) * prod_yzI + (gixI + xi * xI) * prod_yzR;
-                // v_Gy += (giyR + yi * yR) * prod_xzI + (giyI + yi * yI) * prod_xzR;
-                // v_Gz += (gizR + zi * zR) * prod_xyI + (gizI + zi * zI) * prod_xyR;
-                // sigma_xx = prod * kx * xi - kx * v_Gx;
-                // sigma_xy = prod * kx * yi - kx * v_Gy;
-                // sigma_xz = prod * kx * zi - kx * v_Gz;
-                // sigma_yx = prod * ky * xi - ky * v_Gx;
-                // sigma_yy = prod * ky * yi - ky * v_Gy;
-                // sigma_yz = prod * ky * zi - ky * v_Gz;
-                // sigma_zx = prod * kz * xi - kz * v_Gx;
-                // sigma_zy = prod * kz * yi - kz * v_Gy;
-                // sigma_zz = prod * kz * zi - kz * v_Gz;
-                // However, prod * kx * xi can be cancelled, leaving the effective terms
-                v_Gx += gixR * prod_yzI + gixI * prod_yzR;
-                v_Gy += giyR * prod_xzI + giyI * prod_xzR;
-                v_Gz += gizR * prod_xyI + gizI * prod_xyR;
+                dm_vR = dm_v.x;
+                dm_vI = -dm_v.y;
+            } else {
+                double tmp = auxvec[i0+n];
+                double2 dm_v = dm_auxG[Gv_id];
+                dm_vR = tmp * dm_v.x;
+                dm_vI = tmp * -dm_v.y;
             }
+            int addrx = idx[n*3+0] * NG_PER_BLOCK;
+            int addry = idx[n*3+1] * NG_PER_BLOCK;
+            int addrz = idx[n*3+2] * NG_PER_BLOCK;
+            double xR = gxR[addrx];
+            double xI = gxI[addrx];
+            double yR = gyR[addry];
+            double yI = gyI[addry];
+            double zR = gzR[addrz];
+            double zI = gzI[addrz];
+            double prod_xyR, prod_xyI;
+            double prod_xzR, prod_xzI;
+            double prod_yzR, prod_yzI;
+            multiply(xR, xI, yR, yI, prod_xyR, prod_xyI);
+            multiply(xR, xI, zR, zI, prod_xzR, prod_xzI);
+            multiply(yR, yI, zR, zI, prod_yzR, prod_yzI);
+            multiply(prod_xyR, prod_xyI, dm_vR, dm_vI, prod_xyR, prod_xyI);
+            multiply(prod_xzR, prod_xzI, dm_vR, dm_vI, prod_xzR, prod_xzI);
+            multiply(prod_yzR, prod_yzI, dm_vR, dm_vI, prod_yzR, prod_yzI);
+            // Gradients ~ auxG*-1j*Gv * dm_auxG.conj()
+            // prod = Re(auxG * dm_axuG.conj() * -1j)
+            prod += prod_xyR * zI + prod_xyI * zR;
+            // \nabla_(e_xy) exp(-iGr) = -iy exp(-iGr) Gx
+            //   = -i (y-Yi + Yi) * exp(-iGr) Gx
+            double gixR = gxR[addrx+i_1];
+            double gixI = gxI[addrx+i_1];
+            double giyR = gyR[addry+i_1];
+            double giyI = gyI[addry+i_1];
+            double gizR = gzR[addrz+i_1];
+            double gizI = gzI[addrz+i_1];
+            // naively, sigma_xx can be computed as
+            // v_Gx += (gixR + xi * xR) * prod_yzI + (gixI + xi * xI) * prod_yzR;
+            // v_Gy += (giyR + yi * yR) * prod_xzI + (giyI + yi * yI) * prod_xzR;
+            // v_Gz += (gizR + zi * zR) * prod_xyI + (gizI + zi * zI) * prod_xyR;
+            // sigma_xx = prod * kx * xi - kx * v_Gx;
+            // sigma_xy = prod * kx * yi - kx * v_Gy;
+            // sigma_xz = prod * kx * zi - kx * v_Gz;
+            // sigma_yx = prod * ky * xi - ky * v_Gx;
+            // sigma_yy = prod * ky * yi - ky * v_Gy;
+            // sigma_yz = prod * ky * zi - ky * v_Gz;
+            // sigma_zx = prod * kz * xi - kz * v_Gx;
+            // sigma_zy = prod * kz * yi - kz * v_Gy;
+            // sigma_zz = prod * kz * zi - kz * v_Gz;
+            // However, prod * kx * xi can be cancelled out, leaving the effective terms
+            v_Gx += gixR * prod_yzI + gixI * prod_yzR;
+            v_Gy += giyR * prod_xzI + giyI * prod_xzR;
+            v_Gz += gizR * prod_xyI + gizI * prod_xyR;
         }
     }
     double grad_x = prod * kx;
     double grad_y = prod * ky;
     double grad_z = prod * kz;
-    //double sigma_xx = grad_x * xi - kx * v_Gx;
-    //double sigma_xy = grad_x * yi - kx * v_Gy;
-    //double sigma_xz = grad_x * zi - kx * v_Gz;
-    //double sigma_yx = grad_y * xi - ky * v_Gx;
-    //double sigma_yy = grad_y * yi - ky * v_Gy;
-    //double sigma_yz = grad_y * zi - ky * v_Gz;
-    //double sigma_zx = grad_z * xi - kz * v_Gx;
-    //double sigma_zy = grad_z * yi - kz * v_Gy;
-    //double sigma_zz = grad_z * zi - kz * v_Gz;
-    double sigma_xx = - kx * v_Gx;
-    double sigma_xy = - kx * v_Gy;
-    double sigma_xz = - kx * v_Gz;
-    double sigma_yx = - ky * v_Gx;
-    double sigma_yy = - ky * v_Gy;
-    double sigma_yz = - ky * v_Gz;
-    double sigma_zx = - kz * v_Gx;
-    double sigma_zy = - kz * v_Gy;
-    double sigma_zz = - kz * v_Gz;
+    double sigma_xx = -kx * v_Gx;
+    double sigma_xy = -kx * v_Gy;
+    double sigma_xz = -kx * v_Gz;
+    double sigma_yx = -ky * v_Gx;
+    double sigma_yy = -ky * v_Gy;
+    double sigma_yz = -ky * v_Gz;
+    double sigma_zx = -kz * v_Gx;
+    double sigma_zy = -kz * v_Gy;
+    double sigma_zz = -kz * v_Gz;
+    int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
     atomicAdd(grad+ia*3+0, grad_x);
     atomicAdd(grad+ia*3+1, grad_y);
     atomicAdd(grad+ia*3+2, grad_z);
@@ -613,7 +616,7 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double2 *dm_auxG, double *G
 }
 
 extern "C" {
-int PBC_ft_ao_deriv(double *grad, double *sigma, double2 *dm_auxG,
+int PBC_ft_ao_deriv(double *grad, double *sigma, double *auxvec, double2 *dm_auxG,
                     double *GvT, RysIntEnvVars *envs, int ngrids)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
@@ -622,7 +625,7 @@ int PBC_ft_ao_deriv(double *grad, double *sigma, double2 *dm_auxG,
     int nbatches_shls = (envs->nbas + nsh_per_block - 1) / nsh_per_block;
     dim3 blocks(nbatches_grids, nbatches_shls);
     ft_ao_deriv_kernel<<<blocks, threads>>>(
-            grad, sigma, dm_auxG, GvT, *envs, ngrids);
+            grad, sigma, auxvec, dm_auxG, GvT, *envs, ngrids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_ao_deriv: %s\n", cudaGetErrorString(err));
@@ -653,7 +656,7 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
 }
 
 int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
-                         double *dm_vG, double *GvT, PBCIntEnvVars *envs,
+                         double2 *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int permutation_symmetry)
@@ -663,7 +666,7 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_deriv_kernel<<<blocks, threads, shm_size>>>(
-            out, sigma, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
+            out, sigma, NULL, dm_vG, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

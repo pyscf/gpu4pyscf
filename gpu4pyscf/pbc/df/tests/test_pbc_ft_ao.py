@@ -17,6 +17,7 @@ import unittest
 import ctypes
 import numpy as np
 import cupy as cp
+from pyscf import lib
 from pyscf.pbc import gto as pgto
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from pyscf.pbc.lib.kpts_helper import kk_adapted_iter

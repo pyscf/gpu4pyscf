@@ -480,7 +480,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.c_int(int(ft_opt.permutation_symmetry)))
         if err != 0:
-            raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
+            raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
     if not ft_opt.permutation_symmetry:
         ej *= .5
     ej = ej.get()
@@ -552,7 +552,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
             # pqG.conj() can be computed effectively as
             pqG_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts, kj_idx).transpose(0,2,3,1)
 
-            # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
+            # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
             # dms must be symmetric, to make dm_vG symmetric between i and j
             if is_gamma_point:
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
@@ -571,7 +571,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                 # contract('nlkg,nlkg->', dm_vG.conj(), nlkG)                ...(1)
                 # The expLk for index k in nlkG can be combined to dm_vG, as
                 #:dm_vG = contract('Ln,nlkg->Lklg', expLk[:,kj_idx].conj(), dm_vG).conj()
-                # The PBC_ft_aopair_ek_ip1 kernel will perform the
+                # The PBC_ft_aopair_ek_deriv kernel will perform the
                 # contract('Lklg,lLkg->', dm_vG, pqG-derivative)
                 #
                 # 2. When applying derivatives to nijG[kj_idx]
@@ -591,7 +591,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                 tmp = contract('snjk,nlkg->snljg', dms, pqG_conj)
                 tmp = contract('snljg,snli->nijg', tmp, dms[:,idx])
                 dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
-                # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_ip1 kernel
+                # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_deriv kernel
                 # only processes the lower triangular parts (p>=q in pLqG). By using the
                 # other transformation for nijG
                 #     nijG = contract('Ln,jLiG->nijG', expLk[:,ki_idx].conj(), qLpG)
@@ -622,7 +622,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                 ctypes.c_int(int(ft_opt.permutation_symmetry)))
             pqG_conj = tmp = dm_vG = None
             if err != 0:
-                raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+                raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
     ek *= .5
     ek = ek.get()

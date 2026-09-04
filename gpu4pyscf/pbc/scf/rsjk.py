@@ -1183,7 +1183,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(int(ft_opt.permutation_symmetry)))
                 if err != 0:
-                    raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
+                    raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
                     Gpq[:,diffuse_i,diffuse_j] = 0.
                     vG = contract('kji,kijg->g', dm_sf, Gpq).conj()
@@ -1202,7 +1202,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
-                        raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
+                        raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 Gpq = None
             if not ft_opt.permutation_symmetry:
                 ej *= .5
@@ -1273,7 +1273,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
-                        raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+                        raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
                     if exclude_dd_block and len(bas_ij_wo_dd) > 0:
                         pqG_conj[:,diffuse_i,diffuse_j] = 0.
@@ -1295,6 +1295,7 @@ class PBCJKMatrixOpt:
                         dm_vG = cp.asarray(dm_vG, order='C')
                         err = kern(
                             ctypes.cast(ek.data.ptr, ctypes.c_void_p),
+                            ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
                             ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                             ctypes.byref(aft_envs),
@@ -1306,7 +1307,7 @@ class PBCJKMatrixOpt:
                             ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.c_int(int(ft_opt.permutation_symmetry)))
                         if err != 0:
-                            raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+                            raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                     Gpq = pqG_conj = tmp = dm_vG = None
                 cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
             ek *= .5 / nkpts**2

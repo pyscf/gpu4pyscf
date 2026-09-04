@@ -313,8 +313,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
-        kern = libpbc.PBC_ft_aopair_ek_ip1
+        kern = libpbc.PBC_ft_aopair_ek_deriv
         ejk_lr = cp.zeros((cell.natm, 3))
+        sigma = cp.zeros((3, 3))
         partial_daux = cp.zeros((3, naux))
         vG = cp.empty(ngrids, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
@@ -372,7 +373,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
                 auxG_conj = auxG[:,j2c_idx].conj()
                 auxG_conj *= coulG_LR[j2c_idx,p0:p1]
-                # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
+                # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
                 # dm_oo must be symmetric
                 dm_ooG = contract('rkji,rG->kijG', dm_oo_k, auxG_conj)
                 tmp = contract('kijG,kpi->kpjG', dm_ooG, dm_factor_r)
@@ -418,12 +419,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                     #:    ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                     #:    ctypes.c_int(ft_opt.permutation_symmetry))
                     #:if err != 0:
-                    #:    raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+                    #:    raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                 dm_vG = cp.asarray(LpqG, order='C')
 
                 GvT = cp.asarray((Gv[p0:p1]+kpts[kp]).T.ravel())
                 err = kern(
                     ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                     ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                     ctypes.byref(aft_envs),
@@ -435,7 +437,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(ft_opt.permutation_symmetry))
                 if err != 0:
-                    raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+                    raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                 dm_oo_k = dm_ooG = tmp = dm_vG = LpqG = None
 
         dims = aux_loc[1:] - aux_loc[:-1]
@@ -746,14 +748,16 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
         ej_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
 
         ej_lr = cp.zeros((cell.natm, 3))
+        sigma = cp.zeros((3, 3))
         vG_conj, vG = vG.conj(), None
         GvT = cp.asarray(Gv.T.ravel())
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        err = libpbc.PBC_ft_aopair_ej_ip1(
+        err = libpbc.PBC_ft_aopair_ej_deriv(
             ctypes.cast(ej_lr.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.cast(vG_conj.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -766,7 +770,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ft_opt.permutation_symmetry))
         if err != 0:
-            raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
+            raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 
         ej_lr = ej_lr.get() * 2
         if len(ej_aux) < cell.natm:

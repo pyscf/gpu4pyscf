@@ -72,8 +72,8 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     int nfij = nfi * nfj;
     int stride_j = li + 2;
     int i_1 =          nsp_per_block;
-    int j_1 = stride_j*nsp_per_block;
-    int g_size = stride_j * (lj + 2);
+    //int j_1 = stride_j*nsp_per_block;
+    int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sp_id;
@@ -86,9 +86,9 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         double v_ix = 0;
         double v_iy = 0;
         double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        //double v_jx = 0;
+        //double v_jy = 0;
+        //double v_jz = 0;
         __syncthreads();
         int bas_ij;
         if (pair_ij < shl_pair1) {
@@ -110,21 +110,18 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         int i0 = envs.ao_loc[ish];
         int j0 = envs.ao_loc[jsh];
         double *dm_local = dm + j0 * nao + i0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int img = 0; img < envs.nimgs; img++) {
             __syncthreads();
             if (gout_id == 0) {
-                double xjL = img_coords[img*3+0];
-                double yjL = img_coords[img*3+1];
-                double zjL = img_coords[img*3+2];
-                double xpq = ri[0] - (rj[0] + xjL);
-                double ypq = ri[1] - (rj[1] + yjL);
-                double zpq = ri[2] - (rj[2] + zjL);
+                double xpq = env[ri+0] - (env[rj+0] + img_coords[img*3+0]);
+                double ypq = env[ri+1] - (env[rj+1] + img_coords[img*3+1]);
+                double zpq = env[ri+2] - (env[rj+2] + img_coords[img*3+2]);
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 Rpq[0*nsp_per_block] = xpq;
                 Rpq[1*nsp_per_block] = ypq;
@@ -136,14 +133,14 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 __syncthreads();
                 int ip = ijp % iprim;
                 int jp = ijp / iprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double ai2 = ai * 2;
-                double aj2 = aj * 2;
+                //double aj2 = aj * 2;
                 double aij = ai + aj;
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
-                    double cicj = ci[ip] * cj[jp];
+                    double cicj = env[ci+ip] * env[cj+jp];
                     gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
@@ -155,7 +152,7 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                         gx[gx_len*2] = rw[(irys*2+1)*nsp_per_block];
                     }
                     double rt = rw[ irys*2   *nsp_per_block];
-                    vrr(gx, Rpq, ai, aj, rt, li+1, lj+1, gout_id, gout_stride, nsp_per_block);
+                    vrr(gx, Rpq, ai, aj, rt, li+1, lj, gout_id, gout_stride, nsp_per_block);
                     if (pair_ij < shl_pair1) {
                         float div_nfi = c_div_nf[li];
 #pragma unroll
@@ -181,23 +178,23 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                             double fix = ai2 * gx[addrx+i_1]; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
                             double fiy = ai2 * gx[addry+i_1]; if (iy > 0) { fiy -= iy * gx[addry-i_1]; } v_iy += fiy * prod_xz;
                             double fiz = ai2 * gx[addrz+i_1]; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; } v_iz += fiz * prod_xy;
-                            double fjx = aj2 * gx[addrx+j_1]; if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
-                            double fjy = aj2 * gx[addry+j_1]; if (jy > 0) { fjy -= jy * gx[addry-j_1]; } v_jy += fjy * prod_xz;
-                            double fjz = aj2 * gx[addrz+j_1]; if (jz > 0) { fjz -= jz * gx[addrz-j_1]; } v_jz += fjz * prod_xy;
+                            //double fjx = aj2 * gx[addrx+j_1]; if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
+                            //double fjy = aj2 * gx[addry+j_1]; if (jy > 0) { fjy -= jy * gx[addry-j_1]; } v_jy += fjy * prod_xz;
+                            //double fjz = aj2 * gx[addrz+j_1]; if (jz > 0) { fjz -= jz * gx[addrz-j_1]; } v_jz += fjz * prod_xy;
                         }
                     }
                 }
             }
         }
         if (pair_ij < shl_pair1) {
-            int ia = bas[ish*BAS_SLOTS+ATOM_OF];
-            int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+            int ia = bas[ish*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
+            int ja = bas[jsh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
             atomicAdd(out+ia*3+0, v_ix);
             atomicAdd(out+ia*3+1, v_iy);
             atomicAdd(out+ia*3+2, v_iz);
-            atomicAdd(out+ja*3+0, v_jx);
-            atomicAdd(out+ja*3+1, v_jy);
-            atomicAdd(out+ja*3+2, v_jz);
+            atomicAdd(out+ja*3+0, -v_ix);
+            atomicAdd(out+ja*3+1, -v_iy);
+            atomicAdd(out+ja*3+2, -v_iz);
         }
     }
 }
@@ -384,8 +381,8 @@ void int2c2e_deriv_kernel(double *de, double *sigma, double *dm, PBCIntEnvVars e
             grad_iz += v_iz;
         }
         if (pair_ij < shl_pair1) {
-            int ia = bas[ish*BAS_SLOTS+ATOM_OF];
-            int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+            int ia = bas[ish*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
+            int ja = bas[jsh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
             double grad_jx = -grad_ix;
             double grad_jy = -grad_iy;
             double grad_jz = -grad_iz;

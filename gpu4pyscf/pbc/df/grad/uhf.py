@@ -210,8 +210,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
-        kern = libpbc.PBC_ft_aopair_ek_ip1
+        kern = libpbc.PBC_ft_aopair_ek_deriv
         ejk_lr = cp.zeros((cell.natm, 3))
+        sigma = cp.zeros((3, 3))
         partial_daux = cp.zeros((3, naux))
         buf  = cp.empty(max(nao**2,2*nocc**2,naux)*Gblksize, dtype=np.complex128)
         buf1 = cp.empty(max(2*nao*nocc*2,naux)*Gblksize, dtype=np.complex128)
@@ -257,7 +258,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             auxG_conj *= coulG_LR[p0:p1]
             auxG_conj = auxG_conj.view(np.float64)
 
-            # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
+            # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
             # dm_oo must be symmetric
             dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
             dm_ooG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
@@ -273,6 +274,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             GvT = cp.asarray(Gv[p0:p1].T.ravel())
             err = kern(
                 ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),
@@ -284,7 +286,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ft_opt.permutation_symmetry))
             if err != 0:
-                raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+                raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
         dims = aux_loc[1:] - aux_loc[:-1]
         atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
