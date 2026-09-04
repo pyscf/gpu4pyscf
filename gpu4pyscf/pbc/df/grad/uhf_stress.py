@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright 2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,6 +31,7 @@ from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, int3c
 from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_kpts, LINEAR_DEP_THR
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.df.grad.rhf import _gen_metric_solver, _get_shl_pair_batch_size
+from gpu4pyscf.pbc.df.grad.rhf_stress import _get_ej_strain_deriv
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
@@ -53,7 +53,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         j_factor = 0
     if k_factor == 0:
         ej, sigma = _get_ej_strain_deriv(
-            int3c2e_opt, dm, hermi, omega, verbose, linear_dep_threshold)
+            int3c2e_opt, dm[0]+dm[1], hermi, omega, verbose, linear_dep_threshold)
         return ej * j_factor, sigma * j_factor
 
     assert hermi == 1 or hermi == 2
@@ -65,13 +65,13 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
     # transform to the AO order in sorted_cell
-    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=0)
+    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=1)
     assert dm_factor_l.dtype == np.float64
     if dm_factor_r is None:
         dm_factor_r = dm_factor_l
     else:
-        dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=0)
-    nao, nocc = dm_factor_l.shape
+        dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=1)
+    nao, nocc = dm_factor_l.shape[1:]
     log.debug1('dm_factor shape %s', dm_factor_l.shape)
 
     pair_addresses = int3c2e_opt.pair_and_diag_indices(
@@ -82,14 +82,14 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     naux = int(aux_loc[-1])
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
-    mem_avail = mem_free - naux*nocc**2*8 - nao**2*8
+    mem_avail = mem_free - 2*naux*nocc**2*8 - nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8*bvk_ncells))))
     assert batch_size < POOL_SIZE
     eval_j3c, _, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, cart=True)
     aux_batches = len(aux_offsets) - 1
 
-    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*2*8))//8*8))
+    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*8))//8*8))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
@@ -97,7 +97,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((batch_size, nao_pair))
     buf1 = cp.empty((blksize, nocc, nao))
-    j3c_oo = cp.empty((naux, nocc, nocc))
+    j3c_oo = cp.empty((2, naux, nocc, nocc))
     for kbatch in range(aux_batches):
         compressed = eval_j3c(aux_batch_id=kbatch, out=buf)[:,0,:]
         naux_in_batch = compressed.shape[1]
@@ -107,8 +107,10 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             j3c = j3c_full[:,:,:dk]
             j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
             tmp = ndarray((nocc, nao, dk), buffer=buf1)
-            contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
-            contract('iqr,qj->rij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
+            contract('pqr,pi->iqr', j3c, dm_factor_r[0], out=tmp)
+            contract('iqr,qj->rij', tmp, dm_factor_l[0], out=j3c_oo[0,aux0:aux1])
+            contract('pqr,pi->iqr', j3c, dm_factor_r[1], out=tmp)
+            contract('iqr,qj->rij', tmp, dm_factor_l[1], out=j3c_oo[1,aux0:aux1])
     j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
     t0 = log.timer_debug1('contract dm', *t0)
 
@@ -155,8 +157,8 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         assert Gblksize > 0
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
                    mem_avail*1e-9, Gblksize)
-        buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty(max(nao*nocc,naux)*Gblksize, dtype=np.complex128)
+        buf  = cp.empty(max(nao**2,2*nocc**2,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(max(2*nao*nocc*2,naux)*Gblksize, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
@@ -169,11 +171,11 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             pqG = eval_ft(Gv[p0:p1], out=buf)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
             pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
-            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
-            ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
-            contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
-            contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
-            contract('rG,ijG->rij', auxGw, ijG, beta=1, out=j3c_oo)
+            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
+            ijG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
+            contract('pqG,npi->niqG', pqG, dm_factor_r, out=tmp)
+            contract('niqG,nqj->nijG', tmp, dm_factor_l, out=ijG)
+            contract('rG,nijG->nrij', auxGw, ijG, beta=1, out=j3c_oo)
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
 
@@ -188,20 +190,19 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             j2c, linear_dep_threshold, auxcell.dimension)
         metric = aux_coeff.dot(solve_j2c(aux_coeff.T))
     j2c = aux_coeff = None
-    dm_oo = cp.einsum('uv,vij->uij', metric, j3c_oo)
+    dm_oo = cp.einsum('uv,nvij->nuij', metric, j3c_oo)
     metric = j3c_oo = None
     if j_factor != 0:
-        auxvec = dm_oo.trace(axis1=1, axis2=2)
-        dm_sorted = dm_factor_l.dot(dm_factor_r.T)
+        auxvec = dm_oo.trace(axis1=2, axis2=3).sum(axis=0)
+        dm_sorted = contract('spi,sqi->pq', dm_factor_l, dm_factor_r)
 
     if j_factor == 0:
         dm_aux = None
     else:
         dm_aux = auxvec[:,None] * auxvec
     # dm_aux should be symmetric
-    dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
-                      alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
-    # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
+    dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
+                      alpha=-k_factor, beta=j_factor, out=dm_aux)
     ejk, sigma = int2c2e_opt.energy_derivatives(dm_aux, omega=-int3c2e_opt.omega)
     ejk = cp.asarray(-ejk)
     sigma = cp.asarray(-sigma)
@@ -233,8 +234,8 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         kern = libpbc.PBC_ft_aopair_ek_deriv
         kern_auxG = libpbc.PBC_ft_ao_deriv
         null_ptr = lib.c_null_ptr()
-        buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty(max(nao*nocc,naux)*Gblksize, dtype=np.complex128)
+        buf  = cp.empty(max(nao**2,2*nocc**2,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(max(2*nao*nocc*2,naux)*Gblksize, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
@@ -249,20 +250,19 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
                 beta = j_factor
             # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqG, c, c, dm_oo, 1j*Gv, conj(auxG))
-            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
-            ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
-            contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
-            contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
+            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
+            ijG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
             # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
             # contracting all [0] order terms -> dm_auxG
-            contract('rji,ijG->rG', dm_oo, ijG, -.5*k_factor, beta, out=dm_auxG)
+            contract('pqG,npi->niqG', pqG, dm_factor_r, out=tmp)
+            contract('niqG,nqj->nijG', tmp, dm_factor_l, out=ijG)
+            contract('nrji,nijG->rG', dm_oo, ijG, -k_factor, beta, out=dm_auxG)
             dm_auxG = dm_auxG.view(np.complex128)
 
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf1).T
             vG = cp.einsum('rg,rg->g', dm_auxG, auxG.conj()).real
 
             # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
-            # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
             dm_auxG1 = contract('sr,sG->rG', dm_aux, auxG.view(np.float64),
                                 out=ndarray((naux,nGv*2), buffer=buf)).view(np.complex128)
             vG *= 2
@@ -273,23 +273,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             dm_auxG *= wcoulG_LR0[p0:p1]
             dm_auxG = dm_auxG.view(np.float64)
 
-            # contract to (r|G)^{[1]}.
-            # (r|G)^{[1]} = IFT(nabla_A aux) = IFT(-nabla aux) = (iG IFT(aux))
-            # Contributions to derivatives are
-            # 1/2 * einsum('ag,ag->a', (iG IFT(aux)), dm_auxG).real
-            # = 1/2 * einsum('ag,ag->a', conj(-iG FT(aux)), dm_auxG).real
-            # = 1/2 *(einsum('ag,ag->a', Re(-iG FT(aux)), Re(dm_auxG))
-            #        +einsum('ag,ag->a', Im(-iG FT(aux)), Im(dm_auxG)))
-            # The derivatives also include a term that is contracted to (G|r)^{[1]},
-            # which is complex conjugated to this term. The overall
-            # contributions are
-            # 1/2 * einsum('ag,ag->a', (iG IFT(aux)), dm_auxG) + c.c
-            # = (einsum('ag,ag->a', Re(-iG FT(aux)), Re(dm_auxG))
-            #   +einsum('ag,ag->a', Im(-iG FT(aux)), Im(dm_auxG)))
-            #:ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf)
-            #:for i in range(3):
-            #:    cp.multiply(auxG, -1j*Gv[p0:p1,i], out=ip_auxG)
-            #:    partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
+            # contract to (r|G)^{[1]}
             GvT = cp.asarray(Gv[p0:p1].T.ravel())
             err = kern_auxG(
                 ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p),
@@ -311,17 +295,16 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
             # dm_oo must be symmetric
             dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
-            dm_ooG = ndarray((nocc**2, nGv*2), buffer=buf)
-            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
-            dm_oo.reshape(naux, nocc*nocc).T.dot(auxG_conj, out=dm_ooG)
-            dm_ooG = dm_ooG.reshape(nocc,nocc,nGv*2)
-            contract('jiG,qi->jqG', dm_ooG, dm_factor_r, out=tmp)
+            dm_ooG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
+            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
+            contract('nrji,rG->njiG', dm_oo, auxG_conj, out=dm_ooG)
+            contract('njiG,nqi->njqG', dm_ooG, dm_factor_r, out=tmp)
             beta = 0
             if j_factor != 0:
                 vG = auxvec.dot(auxG_conj)
                 cp.multiply(dm_sorted[:,:,None], vG, out=dm_vG)
                 beta = j_factor
-            contract('jqG,pj->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
+            contract('njqG,npj->pqG', tmp, dm_factor_l, -k_factor, beta, out=dm_vG)
             err = kern(
                 ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
                 ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
@@ -338,11 +321,11 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
-        ejk_lr *= 2 # due to i>=j symmetry in CUDA kernel
+        ejk_lr *= 2
         ejk_lr += ejk_aux
-        sigma *= 2 # due to i>=j symmetry in CUDA kernel
+        sigma *= 2
         sigma += sigma_aux + sigma_G
-        return ejk_lr, sigma
+        return ejk_lr
 
     ejk_lr, sigma_lr = lr_3c2e_response()
     ejk += ejk_lr
@@ -390,7 +373,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
     buf1 = cp.empty((blksize, nao, nao))
-    buf2 = cp.empty((blksize, nao, nao))
+    buf2 = cp.empty(blksize*nao*max(2*nocc, nao))
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         naux_in_batch = aux_loc[ksh_offsets_cpu[kbatch+1]] - aux_ao_offset
@@ -399,13 +382,13 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
             dm_tensor = ndarray((nao,nao,dk), buffer=buf1)
-            tmp = ndarray((nocc,nao,dk), buffer=buf2)
+            tmp = ndarray((2,nocc,nao,dk), buffer=buf2)
             beta = 0
             if j_factor != 0:
                 cp.multiply(dm_sorted[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
                 beta = j_factor
-            contract('rji,qj->iqr', dm_oo[aux0:aux1], dm_factor_l, out=tmp)
-            contract('iqr,pi->pqr', tmp, dm_factor_r, -.5*k_factor, beta, out=dm_tensor)
+            contract('nrji,nqj->niqr', dm_oo[:,aux0:aux1], dm_factor_l, out=tmp)
+            contract('niqr,npi->pqr', tmp, dm_factor_r, -k_factor, beta, out=dm_tensor)
             if hermi == 1:
                 cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0,
                         out=compressed[:,k0:k1])
@@ -457,278 +440,14 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
         s0 = int1e.int1e_ovlp(cell)
         s1 = int1e.int1e_ipovlp(cell)
-        k_dm = contract('pq,qr->pr', dm, s0)
-        k_dm = contract('pr,rs->ps', k_dm, dm)
+        k_dm = contract('npq,qr->npr', dm, s0)
+        k_dm = contract('npr,nrs->ps', k_dm, dm)
         # The cell object reorders the AOs. s1 and k_dm are stored in the order
         # of the original cell. It's necessary to pass the original cell to
         # contract_h1e_dm
         ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
         weighted_coulG_at_G0 = madelung(cell, np.zeros((1, 3)), omega=-omega)
         # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
-        ejk_ewald *= .5 * k_factor * weighted_coulG_at_G0
+        ejk_ewald *= k_factor * weighted_coulG_at_G0
         ejk += ejk_ewald
     return ejk.get(), sigma.get()
-
-def _get_ej_strain_deriv(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
-                         linear_dep_threshold=LINEAR_DEP_THR):
-    '''
-    Computes the first-order derivatives of the Coulomb energy
-    '''
-    from gpu4pyscf.pbc.grad.rks_stress import (
-        _get_weighted_coulG_strain_derivatives as get_wcoulG)
-    cell = int3c2e_opt.cell
-    auxcell = int3c2e_opt.auxcell
-    bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
-    log = logger.new_logger(cell, verbose)
-    t0 = log.init_timer()
-
-    assert dm.dtype == np.float64
-
-    dm = cell.apply_C_mat_CT(dm)
-    if hermi != 1:
-        dm = transpose_sum(dm, inplace=True)
-        dm[:] *= .5
-    auxvec = int3c2e_opt.contract_dm(dm, hermi=1)
-    t0 = log.timer_debug1('contract dm', *t0)
-
-    aux_loc = auxcell.ao_loc
-    naux = int(aux_loc[-1])
-
-    precision = auxcell.precision * 1e-6
-    log.debug('Set 2c2e integrals precision %g', precision)
-    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, int3c2e_opt.omega, precision)
-    int2c2e_opt = Int2c2eOpt(auxcell)
-    j2c = int2c2e_opt.int2c2e(sort_output=False)
-
-    ################################
-    # LR part 0th order
-    if omega is None:
-        omega = 0
-    else:
-        omega = abs(omega)
-    with_long_range = omega < int3c2e_opt.omega
-    if with_long_range:
-        mesh = int3c2e_opt.mesh
-        log.debug('mesh for LR coulG %s', mesh)
-        Gv, _, kws = get_Gv_weights(cell, mesh)
-        ngrids = len(Gv)
-        wcoulG_LR0, wcoulG_LR1 = get_wcoulG(cell, Gv, int3c2e_opt.omega)
-        if omega != 0:
-            wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gv, omega)
-            wcoulG_LR0 -= wcoulG_0
-            wcoulG_LR1 -= wcoulG_1
-        wcoulG_SR_at_G0 = np.pi / int3c2e_opt.omega**2 * kws
-        wcoulG_LR0[0] -= wcoulG_SR_at_G0
-        wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
-        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-    else:
-        assert cell.dimension == 3
-
-    Gv = asarray(auxcell.get_Gv(int3c2e_opt.mesh))
-    def lr_3c2e():
-        eval_ft = ft_opt.ft_evaluator(
-            compressing=True, cart=True, original_ao_order=False)[0]
-        pair_addresses, diag_idx = ft_opt.pair_and_diag_indices(
-            cart=True, original_ao_order=False)
-        dm_tril = dm.ravel()[pair_addresses]
-        dm_tril[diag_idx] *= .5
-        dm_tril *= 2
-
-        mem_avail = get_avail_mem(exclude_memory_pool=True)
-        nao_pair = len(dm_tril)
-        Gblksize = int(mem_avail//((nao_pair+naux*2)*16))//32*32
-        Gblksize = min(Gblksize, ngrids)
-        assert Gblksize > 0
-        log.debug1('%.3f GB free memory. blksize=%d for LR part',
-                   mem_avail*1e-9, Gblksize)
-
-        auxvec_LR = cp.zeros(naux)
-        rhoG = cp.empty(ngrids, dtype=np.complex128)
-        buf  = cp.empty(max(nao_pair,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty((naux,Gblksize), dtype=np.complex128)
-        for p0, p1 in lib.prange(0, ngrids, Gblksize):
-            nGv = p1 - p0
-            # conj((r|G)^{[0]}) (ij|G)^{[0]}
-            pqG = eval_ft(Gv[p0:p1], out=buf)
-            rhoGz = cp.einsum('pG,p->G', pqG.view(np.float64), dm_tril)
-            rhoG[p0:p1] = rhoGz.view(np.complex128)
-
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
-            auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
-            cp.multiply(auxG, wcoulG_LR0[p0:p1], out=auxGw)
-            auxGw = auxGw.view(np.float64)
-            contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
-            auxvec_LR += auxGw.dot(rhoGz)
-        return auxvec_LR, rhoG
-
-    if with_long_range:
-        auxvec_LR, rhoG = lr_3c2e()
-        auxvec += auxcell.apply_CT_dot(auxvec_LR)
-        auxvec_LR = None
-        t0 = log.timer_debug1('lr_int3c2e via aft', *t0)
-
-    ################################
-    # (d/dX P|Q) contributions
-    j2c = auxcell.apply_CT_mat_C(j2c)
-    if auxcell.cell.cart:
-        raise NotImplementedError
-    else:
-        auxvec = _gen_metric_solver(
-            j2c, linear_dep_threshold, auxcell.dimension)(auxvec)
-    auxvec = auxcell.C_dot_mat(auxvec)
-    assert auxvec.dtype == np.float64
-    j2c = None
-
-    dm_aux = auxvec[:,None] * auxvec
-    ej, sigma = int2c2e_opt.energy_derivatives(dm_aux, omega=-int3c2e_opt.omega)
-    ej = cp.asarray(-ej)
-    sigma = cp.asarray(-sigma)
-    dm_aux = None
-    t0 = log.timer_debug1('contract int2c2e_deriv', *t0)
-
-    #########################
-    # LR part response
-    def lr_3c2e_response():
-        aft_envs = ft_opt.aft_envs
-        shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gblksize = int(mem_avail//(naux*2*16))//32*32
-        Gblksize = min(Gblksize, ngrids)
-        rho_auxG = cp.empty(ngrids, dtype=np.complex128)
-        buf = cp.empty(naux*Gblksize, dtype=np.complex128)
-        for p0, p1 in lib.prange(0, ngrids, Gblksize):
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
-            rho_auxG[p0:p1] = auxvec.dot(auxG.view(np.float64)).view(np.complex128)
-
-            # (ii|r)^{[0]} * metric * (r|G)^{[1]} (jj|G)^{[0]}
-            # = auxvec * (r|G)^{[1]} (jj|G)^{[0]}
-            # IFT(nabla_A aux) = IFT(-nabla aux) = (iG IFT(aux)) = (iG conj(FT(aux)))
-            #ip_vG = rhoG[p0:p1] * wcoulG_LR0[p0:p1] * 1j * Gv[p0:p1].T
-            # (ii|r)^{[0]} * metric * -J2c^{[1]} * metric * (jj|r)^{[0]}
-            # = auxvec * J2c^{[1]} * auxvec
-            #ip_vG -= rho_auxG[p0:p1] * wcoulG_LR0[p0:p1] * 1j * Gv[p0:p1].T
-            #partial_daux += cp.einsum('xg,ag->xa', ip_vG.view(np.float64),
-            #                          auxG.view(np.float64))
-        vG = (rhoG - rho_auxG) * wcoulG_LR0
-        GvT = cp.asarray(Gv.T.ravel())
-        ej_aux = cp.zeros((cell.natm, 3))
-        sigma_aux = cp.zeros((3, 3))
-        aux_ft_envs = RysIntEnvVars.new(
-            auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
-            _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
-        err = libpbc.PBC_ft_ao_deriv(
-            ctypes.cast(ej_aux.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma_aux.data.ptr, ctypes.c_void_p),
-            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
-            ctypes.cast(vG.data.ptr, ctypes.c_void_p),
-            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-            ctypes.byref(aux_ft_envs),
-            ctypes.c_int(ngrids))
-        if err != 0:
-            raise RuntimeError('ft_ao_deriv failed')
-
-        vG_conj = rho_auxG.conj() * wcoulG_LR0
-        ej_lr = cp.zeros((cell.natm, 3))
-        sigma = cp.zeros((3, 3))
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
-        err = libpbc.PBC_ft_aopair_ej_deriv(
-            ctypes.cast(ej_lr.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-            ctypes.cast(vG_conj.data.ptr, ctypes.c_void_p),
-            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-            ctypes.byref(aft_envs),
-            ctypes.c_int(nbatches_shl_pair),
-            ctypes.c_int(ngrids),
-            ctypes.c_int(shm_size),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ft_opt.permutation_symmetry))
-        if err != 0:
-            raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
-
-        ej_lr *= 2 # due to i>=j symmetry in CUDA kernel
-        ej_lr += ej_aux
-        sigma *= 2 # due to i>=j symmetry in CUDA kernel
-        sigma += sigma_aux
-        sigma += .5 * cp.einsum('g,g,xyg->xy', rho_auxG,
-                                (rhoG*2-rho_auxG).conj(), wcoulG_LR1).real
-        return ej_lr, sigma
-
-    if with_long_range:
-        ej_lr, sigma_lr = lr_3c2e_response()
-        ej += ej_lr
-        sigma += sigma_lr
-        t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
-        ft_opt = None
-
-    ################################
-    # SR int3c2e response
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
-        gout_width=54, deriv=(1,0,0))
-    lmax = cell.uniq_l_ctr[:,0].max()
-    laux = auxcell.uniq_l_ctr[:,0].max()
-    shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-
-    l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
-    l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
-        l_ctr_aux_offsets, auxcell.uniq_l_ctr, POOL_SIZE)
-    ksh_offsets_cpu = l_ctr_aux_offsets
-    ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
-
-    nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
-    shl_pair_batch_size = _get_shl_pair_batch_size(
-        nksh_per_batch, bvk_ncells)
-    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
-        int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
-
-    diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
-    diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
-    log_cutoff = math.log(int3c2e_opt.cutoff)
-
-    assert cell.natm == auxcell.natm
-    ej_sr = cp.zeros((cell.natm, 3))
-    ej_aux_sr = cp.zeros((cell.natm, 3))
-    sigma_sr = cp.zeros((3, 3))
-    workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
-    head = pool[-1:]
-    task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
-    int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libpbc.PBCsr_ejk_int3c2e_deriv
-    err = kern(
-        ctypes.cast(ej_sr.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ej_aux_sr.data.ptr, ctypes.c_void_p),
-        ctypes.cast(sigma_sr.data.ptr, ctypes.c_void_p),
-        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-        ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
-        ctypes.c_double(-int3c2e_opt.omega),
-        ctypes.byref(int3c2e_envs),
-        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-        ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
-        ctypes.cast(head.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(shm_size_max),
-        ctypes.c_int(len(shl_pair_offsets) - 1),
-        ctypes.c_int(len(ksh_offsets_gpu) - 1),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
-        ctypes.cast(int3c2e_opt.img_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(int3c2e_opt.img_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-        lib.c_null_ptr(),
-        ctypes.c_int(0),
-        ctypes.c_int(auxcell.nbas),
-        ctypes.c_int(naux),
-        ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
-        ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-        ctypes.c_float(log_cutoff))
-    if err != 0:
-        raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
-    ej_sr += ej_aux_sr
-    ej += ej_sr * 2
-    sigma += sigma_sr * 2
-    t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
-    return ej.get(), sigma.get()
