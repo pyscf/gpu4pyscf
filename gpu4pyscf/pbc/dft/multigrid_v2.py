@@ -1398,7 +1398,7 @@ def convert_xc_on_g_mesh_to_fock_gradient(
 def get_nuc(ni, kpts=None):
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1417,7 +1417,7 @@ def get_pp(ni, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:

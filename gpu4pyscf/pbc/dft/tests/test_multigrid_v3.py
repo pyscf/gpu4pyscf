@@ -225,6 +225,22 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
 
+    def test_get_nuc_get_pp_single_kpt_ndim(self):
+        nao = cell_orth.nao
+        ni = multigrid.MultiGridNumInt(cell_orth)
+        self.assertEqual(ni.get_nuc().ndim, 2)
+        self.assertEqual(ni.get_nuc().shape, (nao, nao))
+        self.assertEqual(ni.get_pp().ndim, 2)
+        self.assertEqual(ni.get_pp().shape, (nao, nao))
+
+        single_kpt = np.zeros(3)
+        self.assertEqual(ni.get_nuc(single_kpt).ndim, 2)
+        self.assertEqual(ni.get_pp(single_kpt).ndim, 2)
+
+        multi_kpts = np.zeros((1, 3))
+        self.assertEqual(ni.get_nuc(multi_kpts).ndim, 3)
+        self.assertEqual(ni.get_pp(multi_kpts).ndim, 3)
+
     def test_get_rho(self):
         nao = cell_orth.nao
         np.random.seed(2)

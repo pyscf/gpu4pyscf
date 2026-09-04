@@ -1535,7 +1535,7 @@ def get_rho(ni, dm_kpts, kpts=None):
 
 def get_nuc(ni, kpts=None):
     cell = ni.cell
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1561,7 +1561,7 @@ def get_pp(ni, kpts=None):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
 
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
