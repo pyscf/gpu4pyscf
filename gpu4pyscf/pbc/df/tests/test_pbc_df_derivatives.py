@@ -24,6 +24,7 @@ from gpu4pyscf.pbc.df.grad import krhf_stress, kuhf_stress
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 from gpu4pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.tools.pbc import madelung
 
 def create_cell_auxcell():
     np.random.seed(3)
@@ -345,6 +346,7 @@ def test_ejk_strain_deriv_kpts_without_long_range():
                                 dm[ki], cderi_ji, optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .25 / nkpts**2 * k_factor
+
         return ref
 
     _check_gradient(ejk, cell, auxcell, eval_jk, tol=1e-6)
@@ -374,7 +376,7 @@ def test_ejk_strain_deriv_kpts_with_long_range():
 
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     ejk, sigma = krhf_stress._get_ejk_strain_deriv(
-        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor)
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor, exxdiv='ewald')
     assert abs(ejk.sum(axis=0)).max() < 1e-11
 
     disp = 1e-4
@@ -400,6 +402,12 @@ def test_ejk_strain_deriv_kpts_with_long_range():
                                 dm[ki], cderi_ji, optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .25 / nkpts**2 * k_factor
+
+        s0 = cp.asarray(c.pbc_intor('int1e_ovlp', kpts=kpts))
+        k_dm = contract('kpq,kqr->kpr', dm, s0)
+        k_dm = contract('kpr,krs->kps', k_dm, dm)
+        ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get()
+        ref += (.25 * k_factor / nkpts * madelung(c, kpts, omega=0) * ek_G0)
         return ref
 
     _check_gradient(ejk, cell, auxcell, eval_jk, tol=1e-6)

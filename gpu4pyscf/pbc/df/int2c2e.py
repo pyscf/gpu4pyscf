@@ -329,6 +329,9 @@ class Int2c2eOpt:
         '''Compute nuclear gradients and strain derivatives of the 2c2e energy for
         the short-range (SR) Coulomb interaction
         1/2 * erfc(omega * r12) / r12.
+
+        Note: When ``kpts`` is supplied, derivatives of the total energy are
+        computed. They are not scaled by ``1/nkpts`` to produce per-cell values.
         '''
         if self.bas_ij_cache is None:
             self.build()
