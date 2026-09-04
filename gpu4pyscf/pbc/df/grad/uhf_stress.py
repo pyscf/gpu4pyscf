@@ -23,12 +23,12 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned)
+    contract, ndarray, get_avail_mem, empty_aligned)
 from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern, get_ao_pair_loc
 from gpu4pyscf.df.grad.rhf import factorize_dm
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, int3c2e_scheme
-from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_kpts, LINEAR_DEP_THR
+from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.df.grad.rhf import _gen_metric_solver, _get_shl_pair_batch_size
 from gpu4pyscf.pbc.df.grad.rhf_stress import _get_ej_strain_deriv
@@ -152,13 +152,13 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
 
     def lr_3c2e(j3c_oo):
-        Gblksize = int(mem_avail//((nao+nocc)*nao*16))//32*32
+        Gblksize = int(mem_avail//2//((nao+nocc)*nao*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
                    mem_avail*1e-9, Gblksize)
         buf  = cp.empty(max(nao**2,2*nocc**2,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty(max(2*nao*nocc*2,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(max(nao*nocc*2,naux)*Gblksize, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
@@ -219,7 +219,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
 
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        Gblksize = int(mem_avail//((nao+nocc)*nao*16))//32*32
+        Gblksize = int(mem_avail//2//((nao+nocc)*nao*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
@@ -325,7 +325,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         ejk_lr += ejk_aux
         sigma *= 2
         sigma += sigma_aux + sigma_G
-        return ejk_lr
+        return ejk_lr, sigma
 
     ejk_lr, sigma_lr = lr_3c2e_response()
     ejk += ejk_lr
@@ -446,8 +446,16 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         # of the original cell. It's necessary to pass the original cell to
         # contract_h1e_dm
         ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
-        weighted_coulG_at_G0 = madelung(cell, np.zeros((1, 3)), omega=-omega)
+        kpts = np.zeros((1, 3))
+        weighted_coulG_at_G0 = madelung(cell, kpts, omega=-omega)
         # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
         ejk_ewald *= k_factor * weighted_coulG_at_G0
         ejk += ejk_ewald
+
+        ek_G0 = float(cp.einsum('ij,ji->', s0, k_dm).real.get())
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(
+            cell.cell, kpts, -omega)
+        sigma += cp.asarray(k_factor * exx_1 * ek_G0)
+        sigma += 2 * k_factor * exx_0 * int1e.ovlp_strain_deriv(
+            cell.cell, k_dm, kpts)
     return ejk.get(), sigma.get()

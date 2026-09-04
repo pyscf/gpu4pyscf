@@ -206,7 +206,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
     else:
         assert cell.dimension == 3
         mesh = [1] * 3
-    Gv, _, kws = get_Gv_weights(cell, mesh)
+    Gv, _, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
     wcoulG_LR0 = cp.empty((nkpts_uniq, ngrids))
     wcoulG_LR1 = cp.empty((nkpts_uniq, 3, 3, ngrids))
@@ -224,7 +224,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
 
     def lr_3c2e(j3c_oo):
         mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gblksize = int(mem_avail//((nao*2+nocc)*nao*16*nkpts))//32*32
+        Gblksize = int(mem_avail*.8//((nao*2+nocc)*nao*16*nkpts))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
@@ -321,7 +321,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
         mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gblksize = int(mem_avail//((nao*2+nocc)*nao*16*nkpts))//32*32
+        Gblksize = int(mem_avail*.8//((nao*2+nocc)*nao*16*nkpts))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
@@ -624,6 +624,14 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
         # The k_factor was previously scaled by 1/nkpts^2. The ewald term
         # requires a factor of 1/nkpts. Rescale k_factor by nkpts
         # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
-        ejk_ewald *= k_factor * nkpts * weighted_coulG_at_G0
+        ewald_k_factor = k_factor * nkpts
+        ejk_ewald *= ewald_k_factor * weighted_coulG_at_G0
         ejk += cp.asarray(ejk_ewald)
+
+        ek_G0 = float(cp.einsum('kij,kji->', s0, k_dm).real.get()) / nkpts
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(
+            cell.cell, kpts, -omega)
+        sigma += cp.asarray(ewald_k_factor * exx_1 * ek_G0)
+        sigma += 2 * ewald_k_factor * exx_0 * int1e.ovlp_strain_deriv(
+            cell.cell, k_dm, kpts)
     return ejk.get(), sigma.get()

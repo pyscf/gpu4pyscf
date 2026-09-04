@@ -186,41 +186,7 @@ def test_ejk_strain_deriv_gamma_point_with_long_range():
         assert abs(sigma[i, j] - (e1-e2)/2/disp) < 5e-7
 
 def test_ej_strain_deriv_kpts_without_long_range():
-    #cell, auxcell = create_cell_auxcell()
-    np.random.seed(3)
-    cell = pyscf.M(
-        atom='''C1   1.3   2.2       .3
-                C2   .19   .1      1.1
-        ''',
-        unit = 'Bohr',
-        basis={'C1': ('ccpvdz',
-                      [[3, [1.1, 1.]],
-                       [4, [2., 1.]]]),
-               'C2': 'ccpvdz'},
-        a=np.diag([8.5, 7.5, 9.2])+np.random.rand(3,3)
-    )
-
-    auxcell = cell.copy()
-    auxcell.basis = {
-        'C1':'''
-C    S
-      0.5000000000           1.0000000000
-C    P
-    102.9917624900           1.0000000000
-     28.1325940100           1.0000000000
-      9.8364318200           1.0000000000
-C    P
-      3.3490545000           1.0000000000
-C    P
-      1.4947618600           1.0000000000
-C    P
-      0.4000000000           1.0000000000
-C    D
-      0.1995412500           1.0000000000 ''',
-        'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
-    }
-    auxcell.build()
-
+    cell, auxcell = create_cell_auxcell()
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
     dm = cp.asarray(np.linalg.inv(cell.pbc_intor('int1e_ovlp', kpts=kpts))*.5)
@@ -257,7 +223,6 @@ def test_ej_strain_deriv_kpts_with_long_range():
         opt, dm, hermi=1, kpts=kpts, k_factor=0)
 
     disp = 1e-4
-    dm = opt.cell.apply_C_mat_CT(dm)
     def eval_j(c, ac):
         kpts = c.make_kpts(kmesh)
         cderi = rsdf_builder.build_cderi(c, ac, kpts, kmesh, j_only=True)[0]
@@ -410,7 +375,7 @@ def test_ejk_strain_deriv_kpts_with_long_range1():
         opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor)
     assert abs(ejk.sum(axis=0)).max() < 1e-11
 
-    disp = 1e-3
+    disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
         cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh)[0]
@@ -529,7 +494,7 @@ def test_uhf_ejk_strain_deriv_kpts_without_long_range():
         opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor, omega=omega)
 
     dm_sf = dm[0] + dm[1]
-    disp = 1e-3
+    disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
         cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh, omega=omega)[0]
@@ -650,7 +615,7 @@ def test_uhf_ejk_strain_deriv_kpts_with_long_range1():
     assert abs(ejk.sum(axis=0)).max() < 1e-11
 
     dm_sf = dm[0] + dm[1]
-    disp = 1e-3
+    disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
         cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh)[0]
