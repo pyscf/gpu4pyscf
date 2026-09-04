@@ -466,7 +466,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         weighted_coulG_at_G0 = madelung(cell, np.zeros((1, 3)), omega=-omega)
         # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
         ejk_ewald *= .5 * k_factor * weighted_coulG_at_G0
-        ejk += ejk_ewald
+        ejk += cp.asarray(ejk_ewald)
     return ejk.get(), sigma.get()
 
 def _get_ej_strain_deriv(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,

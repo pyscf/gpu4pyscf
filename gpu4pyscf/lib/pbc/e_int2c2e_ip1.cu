@@ -274,11 +274,13 @@ void int2c2e_deriv_kernel(double *de, double *sigma, double *dm, PBCIntEnvVars e
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
+        int ish_cell0 = ish;
+        int jsh_cell0 = jsh % envs.nbas;
         if (gout_id == 0) {
             double fac = PI_FAC;
-            if (ish == jsh) {
+            if (ish_cell0 == jsh_cell0) {
                 fac *= .5;
-            } else if (ish < jsh) {
+            } else if (ish_cell0 < jsh_cell0) {
                 fac = 0;
             }
             gx[gx_len] = fac;
@@ -381,8 +383,8 @@ void int2c2e_deriv_kernel(double *de, double *sigma, double *dm, PBCIntEnvVars e
             grad_iz += v_iz;
         }
         if (pair_ij < shl_pair1) {
-            int ia = bas[ish*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
-            int ja = bas[jsh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
+            int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
+            int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
             double grad_jx = -grad_ix;
             double grad_jy = -grad_iy;
             double grad_jz = -grad_iz;

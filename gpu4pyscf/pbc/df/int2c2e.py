@@ -334,6 +334,12 @@ class Int2c2eOpt:
             self.build()
         cell = self.cell
         assert dm.shape[-1] == cell.nao
+
+        if kpts is not None:
+            assert dm.ndim == 3 and dm.shape[0] == len(kpts)
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            dm = cp.asarray(contract('Lk,kpq->Lpq', expLk, dm).real, order='C')
+
         if omega is None:
             omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, None, None)
         else:

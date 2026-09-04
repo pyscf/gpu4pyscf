@@ -451,25 +451,6 @@ C    D
         atom_coords[i,x] -= disp
         return ref
 
-        j3c_kk = int3c2e.sr_aux_e2(cell1, auxcell1, omega, kpts, kmesh)
-        j2c = sr_int2c2e(auxcell1, omega, kpts, kmesh)
-        j2c_inv = cp.linalg.inv(j2c)
-        jaux = cp.einsum('IIijp,Iji->p', j3c_kk, dm)
-        ref = cp.einsum('p,pq,q->', jaux, j2c_inv[0], jaux).real.get()
-        ref *= .5 / nkpts**2 * j_factor
-
-        kk_conserv = krhf.double_translation_indices(kmesh)
-        ek = 0
-        for ki in range(nkpts):
-            for kj in range(nkpts):
-                kp = kk_conserv[ki,kj]
-                ek += cp.einsum('ijp,jk,li,qp,klq->', j3c_kk[ki,kj], dm[kj],
-                                dm[ki], j2c_inv[kp], j3c_kk[kj,ki], optimize=True)
-        ek = float(ek.real.get())
-        ref -= ek * .25 / nkpts**2 * k_factor
-        atom_coords[i,x] -= disp
-        return ref
-
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
