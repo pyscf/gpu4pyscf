@@ -1275,13 +1275,13 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     return h1mo
 
 def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
-               hermi=1, with_j=True, with_k=True, omega=None):
+               hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
     mf = hessobj.base
     dfobj = mf.with_df
-    with dfobj.range_coulomb(omega) as dfobj:
-        return _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi, with_j, with_k, omega)
+    with dfobj.range_coulomb(omega, lr_factor, sr_factor) as dfobj:
+        return _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi, with_j, with_k, omega, lr_factor, sr_factor)
 
-def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, omega=None):
+def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, omega=None, lr_factor=None, sr_factor=None):
     ''' Compute J/K in MO for CPHF
     '''
     assert hermi == 1
@@ -1301,7 +1301,7 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
     if dfobj._cderi is None:
         log.debug('Build CDERI ...')
         mem_avail = get_avail_mem()
-        dfobj.build(omega=omega)
+        dfobj.build(omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
         if (isinstance(dfobj._cderi[0], cp.ndarray) and
             # Leave space for storing Krylov subspace vectors. This can be
             # dropped after opimizing the storage model of Krylov solver.
