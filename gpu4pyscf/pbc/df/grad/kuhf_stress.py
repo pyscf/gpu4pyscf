@@ -265,7 +265,6 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
     dm_aux = cp.empty((nkpts_uniq, naux, naux), dtype=np.complex128)
     # Contractions for kp and kp_conj are complex conjugated.
     # A factor of 2 is applied due to this symmetry.
-    time_reversal_sym_weights = cp.full(nkpts_uniq, 2.)
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
         j2c_k = j2c[j2c_idx]
         if kp == kp_conj:
@@ -297,12 +296,13 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
 
         dm_aux_k = contract('urkij,uskji->rs', dm_oo_k, dm_oo_kconj,
                             alpha=-k_factor, beta=beta, out=dm_aux[j2c_idx])
-        if kp == kp_conj:
-            time_reversal_sym_weights[j2c_idx] = 1
+        # Contractions for kp and kp_conj are complex conjugated.
+        # A factor of 2 is applied due to this time-reversal symmetry.
+        if kp != kp_conj:
+            dm_aux[j2c_idx] *= 2
         metric = j3c_oo_k = dm_oo_k = dm_oo_kconj = dm_aux_k = None
     ejk, sigma = int2c2e_opt.energy_derivatives(
-        dm_aux * time_reversal_sym_weights[:,None,None], uniq_kpts,
-        omega=-int3c2e_opt.omega)
+        dm_aux, uniq_kpts, omega=-int3c2e_opt.omega)
     ejk = cp.asarray(-ejk)
     sigma = cp.asarray(-sigma)
     j2c = j3c_oo = None
@@ -362,38 +362,22 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
                 # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
                 # contracting all [0] order terms -> dm_auxG
                 dm_oo_k = dm_oo[:,:,kj_idx,ki_idx]
-                contract('srkji,skijG->rG', dm_oo_k, ijG,
-                         -k_factor, beta, out=dm_auxG)
+                if kp != kp_conj:
+                    dm_oo_k *= 2
+                contract('srkji,skijG->rG', dm_oo_k, ijG, -k_factor, beta, out=dm_auxG)
 
                 # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
                 # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
                 dm_auxG1 = contract('sr,sG->rG', dm_aux[j2c_idx], auxG[:,j2c_idx])
-                vG_metric = cp.einsum(
-                    'rg,rg->g', dm_auxG1, auxG[:,j2c_idx].conj()).real
-                vG_total = cp.einsum(
-                    'rg,rg->g', dm_auxG, auxG[:,j2c_idx].conj()).real * 2
-                vG_total -= vG_metric
-                sym_fac = 2 if kp != kp_conj else 1
-                sigma_G += .5 * sym_fac * cp.einsum(
-                    'g,xyg->xy', vG_total, wcoulG_LR1[j2c_idx,:, :,p0:p1])
+                rhoG_metric = cp.einsum('rg,rg->g', dm_auxG, auxG[:,j2c_idx].conj()).real * 2
+                rhoG_metric -= cp.einsum('rg,rg->g', dm_auxG1, auxG[:,j2c_idx].conj()).real
+                sigma_G += .5 * cp.einsum(
+                    'g,xyg->xy', rhoG_metric, wcoulG_LR1[j2c_idx,:, :,p0:p1])
                 dm_auxG -= dm_auxG1
                 dm_auxG *= wcoulG_LR0[j2c_idx, p0:p1]
-                if kp != kp_conj:
-                    dm_auxG *= 2
                 dm_auxG = dm_auxG.view(np.float64)
 
                 # contract to (r|G)^{[1]} = einsum('ag,ag->a', (iG IFT(aux)), dm_auxG)
-                # when kp != kp_conj, contributions of kp_conj are identical to the kp part.
-                #:if kp != kp_conj:
-                #:    tmp = contract('kqpG,kpi->kiqG', pqG.conj(), dm_factor_r[kj_idx])
-                #:    ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l)
-                #:    dm_auxG = contract('rkji,kijG->rG', dm_oo[:,ki_idx,kj_idx], ijG, -.5*k_factor)
-                #:    dm_auxG -= contract('rs,sG->rG', dm_aux[j2c_idx], auxG[:,j2c_idx].conj())
-                #:    dm_auxG *= coulG_LR[j2c_idx, p0:p1]
-                #:    dm_auxG = dm_auxG.view(np.float64)
-                #:    for i in range(3):
-                #:        ip_auxG = auxG[:,j2c_idx].conj() * (1j*Gk[j2c_idx,p0:p1,i])
-                #:        partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
                 GkT = cp.asarray(Gk[j2c_idx,p0:p1].T.ravel())
                 err = kern_auxG(
                     ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p),
@@ -412,8 +396,7 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
                 # dm_oo must be symmetric
                 dm_ooG = contract('srkji,rG->skijG', dm_oo_k, auxG_conj)
                 tmp = contract('skijG,skpi->skpjG', dm_ooG, dm_factor_r)
-                dm_vG = contract('skpjG,skqj->kpqG', tmp,
-                                 dm_factor_l[:,kj_idx], -k_factor)
+                dm_vG = contract('skpjG,skqj->kpqG', tmp, dm_factor_l[:,kj_idx], -k_factor)
                 LpqG = contract('Lk,kpqG->LqpG', expLk[:,kj_idx], dm_vG)
                 if ft_opt.permutation_symmetry:
                     #TODO: This transformation is likely identical to the
@@ -426,36 +409,6 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
                         vG *= 2
                     bvk_dm = contract('Lk,kpq->Lpq', expLk, dm_sorted)
                     LpqG += bvk_dm[:,:,:,None] * vG
-
-                if kp != kp_conj:
-                    # The contribution of the kp_conj can be computed using the
-                    # following code. Their contribution is identical to the kp part.
-                    LpqG *= 2
-                    #:auxG1 = ft_ao.ft_ao(auxcell, (Gv+kpts[kp_conj])).T
-                    #:auxG_conj = auxG1.conj()
-                    #:auxG_conj *= _weighted_coulG_LR(auxcell, Gv, omega, kws, kpts[kp_conj])
-                    #:dm_oo_k = dm_oo[:,ki_idx,kj_idx]
-                    #:dm_ooG = contract('rkji,rG->kijG', dm_oo_k, auxG_conj)
-                    #:tmp = contract('kijG,kpi->kpjG', dm_ooG, dm_factor_r[kj_idx])
-                    #:kpqG = contract('kpjG,kqj->kpqG', tmp, dm_factor_l, -.5*k_factor)
-                    #:dm_vG = contract('Lk,kpqG->LqpG', expLk, kpqG)
-                    #:dm_vG += contract('Lk,kpqG->LpqG', expLk[:,kj_idx].conj(), kpqG)
-                    #:dm_vG = cp.asarray(dm_vG, order='C')
-                    #:GvT = cp.asarray((Gv[p0:p1]+kpts[kp_conj]).T.ravel())
-                    #:err = kern(
-                    #:    ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
-                    #:    ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
-                    #:    ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                    #:    ctypes.byref(aft_envs),
-                    #:    ctypes.c_int(nbatches_shl_pair),
-                    #:    ctypes.c_int(nGv),
-                    #:    ctypes.c_int(shm_size),
-                    #:    ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                    #:    ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                    #:    ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    #:    ctypes.c_int(ft_opt.permutation_symmetry))
-                    #:if err != 0:
-                    #:    raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                 dm_vG = cp.asarray(LpqG, order='C')
 
                 GvT = cp.asarray((Gv[p0:p1]+kpts[kp]).T.ravel())
