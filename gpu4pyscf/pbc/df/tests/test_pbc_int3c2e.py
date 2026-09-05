@@ -429,8 +429,7 @@ def test_int2c2e_strain_deriv_vs_finite_difference():
         ''',
         basis={'C1': ('ccpvdz',
                       [[3, [1.1, 1.]],
-                       [4, [2., 1.]]]
-                     ),
+                       [4, [2., 1.]]]),
                'C2': 'ccpvdz'},
         precision = 1e-8,
         a=np.diag([2.5, 1.9, 2.2])*3)

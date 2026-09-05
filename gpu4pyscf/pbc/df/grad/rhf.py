@@ -1,4 +1,4 @@
-# Copyright 2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,37 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+'''
+Functions for computing nuclear gradients and strain derivatives
+'''
+
 import math
 import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned)
 from gpu4pyscf.lib.utils import nearest_power2
-from gpu4pyscf.df.int3c2e_bdiv import (
-    _split_l_ctr_pattern, get_ao_pair_loc, SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
+from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern, get_ao_pair_loc
 from gpu4pyscf.df.grad.rhf import factorize_dm
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, int3c2e_scheme
-from gpu4pyscf.pbc.df.rsdf_builder import (
-    _weighted_coulG_kpts, decompose_j2c, LINEAR_DEP_THR)
+from gpu4pyscf.pbc.df.rsdf_builder import decompose_j2c, LINEAR_DEP_THR
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
-from gpu4pyscf.gto.mole import groupby
+from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
+from gpu4pyscf.pbc.grad.rks_stress import (
+    _get_weighted_coulG_strain_derivatives as get_wcoulG)
 from gpu4pyscf.pbc.tools.pbc import madelung
 from gpu4pyscf.__config__ import props as gpu_specs
 
 
 def _gen_metric_solver(j2c, linear_dep_threshold=LINEAR_DEP_THR,
                        dimension=3):
-    '''
-    Generate a pseudo-inverse solver consistent with the CDERI metric.
-    Mostly copied from pyscf.df.rsdf_builder._precontract_j2c_aux_coeff.
-    '''
+    '''Generate a pseudo-inverse solver consistent with the CDERI metric.'''
     metric, metric_negative, _ = decompose_j2c(
         j2c, prefer_ed=True, linear_dep_threshold=linear_dep_threshold)
     if metric_negative is not None and dimension != 2:
@@ -61,7 +62,7 @@ def _gen_metric_solver(j2c, linear_dep_threshold=LINEAR_DEP_THR,
 
 
 def _get_shl_pair_batch_size(nksh_per_batch, bvk_ncells):
-    '''add the constraint of the bvk_ncells to the max_pairs'''
+    '''Add the BvK-cell constraint to the maximum number of shell pairs.'''
     max_nksh = int(np.max(nksh_per_batch))
     max_pairs = POOL_SIZE // (max_nksh * bvk_ncells)
     if max_pairs < 1:
@@ -71,19 +72,19 @@ def _get_shl_pair_batch_size(nksh_per_batch, bvk_ncells):
     return nearest_power2(max_pairs)
 
 
-def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, omega=None, verbose=None,
-                        linear_dep_threshold=LINEAR_DEP_THR):
+def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
+                         exxdiv=None, omega=None, verbose=None,
+                         linear_dep_threshold=LINEAR_DEP_THR):
     '''
-    Computes the first-order derivatives of the energy contributions from
-    J and K terms per atom.
+    Computes the first-order derivatives (nuclear gradients and strain
+    derivatives) of the energy contributions from J and K terms per atom.
     '''
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
-        return _j_energy_per_atom(
-            int3c2e_opt, dm, hermi, omega, verbose,
-            linear_dep_threshold) * j_factor
+        ej, sigma = _get_ej_derivatives(
+            int3c2e_opt, dm, hermi, omega, verbose, linear_dep_threshold)
+        return ej * j_factor, sigma * j_factor
 
     assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
@@ -167,10 +168,16 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     else:
         assert cell.dimension == 3
         mesh = [1] * 3
-    coulG_LR = _weighted_coulG_kpts(cell, mesh, omega, int3c2e_opt.omega)
-    Gv = auxcell.get_Gv(mesh)
-    Gv = asarray(Gv)
+    Gv, _, kws = get_Gv_weights(cell, mesh)
     ngrids = len(Gv)
+    wcoulG_LR0, wcoulG_LR1 = get_wcoulG(cell, Gv, int3c2e_opt.omega)
+    if omega != 0:
+        wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gv, omega)
+        wcoulG_LR0 -= wcoulG_0
+        wcoulG_LR1 -= wcoulG_1
+    wcoulG_SR_at_G0 = np.pi / int3c2e_opt.omega**2 * kws
+    wcoulG_LR0[0] -= wcoulG_SR_at_G0
+    wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
 
     def lr_3c2e(j3c_oo):
         Gblksize = int(mem_avail//((nao+nocc)*nao*16))//32*32
@@ -185,7 +192,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             nGv = p1 - p0
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf1).T
             auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
-            cp.multiply(auxG, coulG_LR[p0:p1], out=auxGw)
+            cp.multiply(auxG, wcoulG_LR0[p0:p1], out=auxGw)
             auxGw = auxGw.view(np.float64)
             contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
@@ -225,8 +232,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
     # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
-    ejk = -int2c2e_opt.energy_ip1_per_atom(dm_aux)
-    t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
+    ejk, sigma = int2c2e_opt.energy_derivatives(dm_aux, omega=-int3c2e_opt.omega)
+    ejk = cp.asarray(-ejk)
+    sigma = cp.asarray(-sigma)
+    t0 = log.timer_debug1('contract int2c2e_deriv', *t0)
 
     ################################
     # LR part response
@@ -234,17 +243,26 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         aft_envs = ft_opt.aft_envs
+        aux_ft_envs = RysIntEnvVars.new(
+            auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
+            _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
+
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        Gblksize = int(mem_avail//((nao+nocc)*nao*16))//32*32
+        Gblksize = int(mem_avail//2//((nao+nocc)*nao*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
-        kern = libpbc.PBC_ft_aopair_ek_deriv
         ejk_lr = cp.zeros((cell.natm, 3))
+        ejk_aux = cp.zeros((cell.natm, 3))
         sigma = cp.zeros((3, 3))
-        partial_daux = cp.zeros((3, naux))
+        sigma_aux = cp.zeros((3, 3))
+        sigma_G = cp.zeros((3, 3))
+
+        kern = libpbc.PBC_ft_aopair_ek_deriv
+        kern_auxG = libpbc.PBC_ft_ao_deriv
+        null_ptr = lib.c_null_ptr()
         buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
         buf1 = cp.empty(max(nao*nocc,naux)*Gblksize, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
@@ -268,14 +286,21 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
             # contracting all [0] order terms -> dm_auxG
             contract('rji,ijG->rG', dm_oo, ijG, -.5*k_factor, beta, out=dm_auxG)
+            dm_auxG = dm_auxG.view(np.complex128)
 
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf1).T
+            vG = cp.einsum('rg,rg->g', dm_auxG, auxG.conj()).real
 
             # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
             # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
-            contract('sr,sG->rG', dm_aux, auxG.view(np.float64), -1, 1, out=dm_auxG)
-            dm_auxG = dm_auxG.view(np.complex128)
-            dm_auxG *= coulG_LR[p0:p1]
+            dm_auxG1 = contract('sr,sG->rG', dm_aux, auxG.view(np.float64),
+                                out=ndarray((naux,nGv*2), buffer=buf)).view(np.complex128)
+            vG *= 2
+            vG -= cp.einsum('rg,rg->g', dm_auxG1, auxG.conj()).real
+            sigma_G += .5 * cp.einsum('g,xyg->xy', vG, wcoulG_LR1[:,:,p0:p1])
+
+            dm_auxG -= dm_auxG1
+            dm_auxG *= wcoulG_LR0[p0:p1]
             dm_auxG = dm_auxG.view(np.float64)
 
             # contract to (r|G)^{[1]}.
@@ -291,15 +316,26 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # 1/2 * einsum('ag,ag->a', (iG IFT(aux)), dm_auxG) + c.c
             # = (einsum('ag,ag->a', Re(-iG FT(aux)), Re(dm_auxG))
             #   +einsum('ag,ag->a', Im(-iG FT(aux)), Im(dm_auxG)))
-            ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf)
-            for i in range(3):
-                cp.multiply(auxG, -1j*Gv[p0:p1,i], out=ip_auxG)
-                partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
+            #:ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf)
+            #:for i in range(3):
+            #:    cp.multiply(auxG, -1j*Gv[p0:p1,i], out=ip_auxG)
+            #:    partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
+            GvT = cp.asarray(Gv[p0:p1].T.ravel())
+            err = kern_auxG(
+                ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sigma_aux.data.ptr, ctypes.c_void_p),
+                null_ptr,
+                ctypes.cast(dm_auxG.data.ptr, ctypes.c_void_p),
+                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                ctypes.byref(aux_ft_envs),
+                ctypes.c_int(p1-p0))
+            if err != 0:
+                raise RuntimeError('ft_ao_deriv failed')
 
             # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
             auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
             auxG_conj = cp.conj(auxG, out=auxG_conj)
-            auxG_conj *= coulG_LR[p0:p1]
+            auxG_conj *= wcoulG_LR0[p0:p1]
             auxG_conj = auxG_conj.view(np.float64)
 
             # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
@@ -316,7 +352,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 cp.multiply(dm_sorted[:,:,None], vG, out=dm_vG)
                 beta = j_factor
             contract('jqG,pj->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
-            GvT = cp.asarray(Gv[p0:p1].T.ravel())
             err = kern(
                 ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
                 ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
@@ -333,19 +368,15 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
-        dims = aux_loc[1:] - aux_loc[:-1]
-        atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
-        partial_daux = partial_daux.T.get()
-        ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
-        ejk_lr = ejk_lr.get() * 2
-        if len(ejk_aux) < cell.natm:
-            ejk_lr[np.unique(atm_id_for_aux)] += ejk_aux
-        else:
-            ejk_lr += ejk_aux
-        return ejk_lr
+        ejk_lr *= 2 # due to i>=j symmetry in CUDA kernel
+        ejk_lr += ejk_aux
+        sigma *= 2 # due to i>=j symmetry in CUDA kernel
+        sigma += sigma_aux + sigma_G
+        return ejk_lr, sigma
 
-    ejk_lr = lr_3c2e_response()
+    ejk_lr, sigma_lr = lr_3c2e_response()
     ejk += ejk_lr
+    sigma += sigma_lr
     log.timer_debug1('LR coulomb', *t0)
     ft_opt = eval_ft = None
     dm_aux = None
@@ -376,14 +407,16 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
+    assert cell.natm == auxcell.natm
     ejk_sr = cp.zeros((cell.natm, 3))
     ejk_aux_sr = cp.zeros((cell.natm, 3))
+    sigma_sr = cp.zeros((3, 3))
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
     head = pool[-1:]
     task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libpbc.PBCsr_ejk_int3c2e_ip1
+    kern = libpbc.PBCsr_ejk_int3c2e_deriv
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
     buf1 = cp.empty((blksize, nao, nao))
@@ -415,8 +448,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         err = kern(
             ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
             ctypes.cast(ejk_aux_sr.data.ptr, ctypes.c_void_p),
-            ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sigma_sr.data.ptr, ctypes.c_void_p),
             lib.c_null_ptr(),
+            ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
             ctypes.c_double(-int3c2e_opt.omega),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
@@ -439,13 +473,17 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
         if err != 0:
-            raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+            raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
     if hermi == 1:
         ejk_sr *= 2.
         ejk_aux_sr *= 2.
-    ejk_sr += ejk_aux_sr
-    ejk += ejk_sr.get()
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
+        sigma_sr *= 2.
+    ejk += ejk_sr + ejk_aux_sr
+    sigma += sigma_sr
+    t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+
+    ejk = ejk.get()
+    sigma = sigma.get()
 
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
@@ -458,14 +496,26 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         # of the original cell. It's necessary to pass the original cell to
         # contract_h1e_dm
         ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
-        weighted_coulG_at_G0 = madelung(cell, np.zeros((1, 3)), omega=-omega)
+        kpts = np.zeros((1, 3))
+        weighted_coulG_at_G0 = madelung(cell, kpts, omega=-omega)
         # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
         ejk_ewald *= .5 * k_factor * weighted_coulG_at_G0
         ejk += ejk_ewald
-    return ejk
 
-def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
-                       linear_dep_threshold=LINEAR_DEP_THR):
+        # Strain response of the Ewald exchange correction.  There are two
+        # contributions: the cell dependence of the Madelung coefficient and
+        # the response of the two overlap factors in Tr(S D S D).
+        ek_G0 = float(cp.einsum('ij,ji->', s0, k_dm).real.get())
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
+        # *.5 for the factor 1/2 in Coulomb operator; second *.5 for J-K/2 in RHF
+        fac = k_factor * .5 * .5
+        sigma -= fac * exx_1 * ek_G0
+        # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
+        sigma -= 2 * fac * exx_0 * int1e.ovlp_strain_deriv(cell.cell, k_dm, kpts)
+    return ejk, sigma
+
+def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
+                        linear_dep_threshold=LINEAR_DEP_THR):
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
@@ -474,6 +524,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
+
+    assert dm.dtype == np.float64
 
     dm = cell.apply_C_mat_CT(dm)
     if hermi != 1:
@@ -500,11 +552,17 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     with_long_range = omega < int3c2e_opt.omega
     if with_long_range:
         mesh = int3c2e_opt.mesh
-        coulG_LR = _weighted_coulG_kpts(cell, mesh, omega, int3c2e_opt.omega)[0]
         log.debug('mesh for LR coulG %s', mesh)
-        Gv = auxcell.get_Gv(mesh)
-        ngrids = Gv.shape[0]
-        Gv = asarray(Gv)
+        Gv, _, kws = get_Gv_weights(cell, mesh)
+        ngrids = len(Gv)
+        wcoulG_LR0, wcoulG_LR1 = get_wcoulG(cell, Gv, int3c2e_opt.omega)
+        if omega != 0:
+            wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gv, omega)
+            wcoulG_LR0 -= wcoulG_0
+            wcoulG_LR1 -= wcoulG_1
+        wcoulG_SR_at_G0 = np.pi / int3c2e_opt.omega**2 * kws
+        wcoulG_LR0[0] -= wcoulG_SR_at_G0
+        wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
         ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
     else:
         assert cell.dimension == 3
@@ -520,7 +578,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
 
         mem_avail = get_avail_mem(exclude_memory_pool=True)
         nao_pair = len(dm_tril)
-        Gblksize = int(mem_avail//((nao_pair+naux*2)*16))//32*32
+        Gblksize = int(mem_avail//2//((nao_pair+naux*2)*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
@@ -539,7 +597,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
 
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
             auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
-            cp.multiply(auxG, coulG_LR[p0:p1], out=auxGw)
+            cp.multiply(auxG, wcoulG_LR0[p0:p1], out=auxGw)
             auxGw = auxGw.view(np.float64)
             contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
             auxvec_LR += auxGw.dot(rhoGz)
@@ -560,51 +618,62 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         auxvec = _gen_metric_solver(
             j2c, linear_dep_threshold, auxcell.dimension)(auxvec)
     auxvec = auxcell.C_dot_mat(auxvec)
+    assert auxvec.dtype == np.float64
     j2c = None
 
     dm_aux = auxvec[:,None] * auxvec
-    ej = -int2c2e_opt.energy_ip1_per_atom(dm_aux)
+    ej, sigma = int2c2e_opt.energy_derivatives(dm_aux, omega=-int3c2e_opt.omega)
+    ej = cp.asarray(-ej)
+    sigma = cp.asarray(-sigma)
     dm_aux = None
-    t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
+    t0 = log.timer_debug1('contract int2c2e_deriv', *t0)
 
     #########################
     # LR part response
     def lr_3c2e_response():
+        aft_envs = ft_opt.aft_envs
+        shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
         mem_avail = get_avail_mem(exclude_memory_pool=True)
         Gblksize = int(mem_avail//(naux*2*16))//32*32
         Gblksize = min(Gblksize, ngrids)
-        partial_daux = cp.zeros((3, naux))
-        vG = cp.empty(ngrids, dtype=np.complex128)
+        rho_auxG = cp.empty(ngrids, dtype=np.complex128)
         buf = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
-            rho_auxG = auxvec.dot(auxG.view(np.float64))
-            vG[p0:p1] = rho_auxG.view(np.complex128)
-            vG[p0:p1] *= coulG_LR[p0:p1]
+            rho_auxG[p0:p1] = auxvec.dot(auxG.view(np.float64)).view(np.complex128)
 
             # (ii|r)^{[0]} * metric * (r|G)^{[1]} (jj|G)^{[0]}
             # = auxvec * (r|G)^{[1]} (jj|G)^{[0]}
             # IFT(nabla_A aux) = IFT(-nabla aux) = (iG IFT(aux)) = (iG conj(FT(aux)))
-            ip_vG = rhoG[p0:p1] * coulG_LR[p0:p1] * 1j * Gv[p0:p1].T
+            #ip_vG = rhoG[p0:p1] * wcoulG_LR0[p0:p1] * 1j * Gv[p0:p1].T
             # (ii|r)^{[0]} * metric * -J2c^{[1]} * metric * (jj|r)^{[0]}
             # = auxvec * J2c^{[1]} * auxvec
-            ip_vG -= vG[p0:p1] * 1j * Gv[p0:p1].T
-            partial_daux += cp.einsum('xg,ag->xa', ip_vG.view(np.float64),
-                                      auxG.view(np.float64))
-        partial_daux *= auxvec
-        dims = aux_loc[1:] - aux_loc[:-1]
-        atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
-        partial_daux = partial_daux.T.real.get()
-        ej_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
+            #ip_vG -= rho_auxG[p0:p1] * wcoulG_LR0[p0:p1] * 1j * Gv[p0:p1].T
+            #partial_daux += cp.einsum('xg,ag->xa', ip_vG.view(np.float64),
+            #                          auxG.view(np.float64))
+        vG = (rhoG - rho_auxG) * wcoulG_LR0
+        GvT = cp.asarray(Gv.T.ravel())
+        ej_aux = cp.zeros((cell.natm, 3))
+        sigma_aux = cp.zeros((3, 3))
+        aux_ft_envs = RysIntEnvVars.new(
+            auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
+            _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
+        err = libpbc.PBC_ft_ao_deriv(
+            ctypes.cast(ej_aux.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sigma_aux.data.ptr, ctypes.c_void_p),
+            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
+            ctypes.cast(vG.data.ptr, ctypes.c_void_p),
+            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+            ctypes.byref(aux_ft_envs),
+            ctypes.c_int(ngrids))
+        if err != 0:
+            raise RuntimeError('ft_ao_deriv failed')
 
+        vG_conj = rho_auxG.conj() * wcoulG_LR0
         ej_lr = cp.zeros((cell.natm, 3))
         sigma = cp.zeros((3, 3))
-        vG_conj, vG = vG.conj(), None
-        GvT = cp.asarray(Gv.T.ravel())
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
-        aft_envs = ft_opt.aft_envs
-        shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
         err = libpbc.PBC_ft_aopair_ej_deriv(
             ctypes.cast(ej_lr.data.ptr, ctypes.c_void_p),
             ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
@@ -622,17 +691,19 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 
-        ej_lr = ej_lr.get() * 2
-        if len(ej_aux) < cell.natm:
-            ej_lr[np.unique(atm_id_for_aux)] += ej_aux
-        else:
-            ej_lr += ej_aux
-        return ej_lr
+        ej_lr *= 2 # due to i>=j symmetry in CUDA kernel
+        ej_lr += ej_aux
+        sigma *= 2 # due to i>=j symmetry in CUDA kernel
+        sigma += sigma_aux
+        sigma += .5 * cp.einsum('g,g,xyg->xy', rho_auxG,
+                                (rhoG*2-rho_auxG).conj(), wcoulG_LR1).real
+        return ej_lr, sigma
 
     if with_long_range:
-        ej_lr = lr_3c2e_response()
+        ej_lr, sigma_lr = lr_3c2e_response()
         ej += ej_lr
-        t0 = log.timer_debug1('lr_int3c2e_ip1 via aft', *t0)
+        sigma += sigma_lr
+        t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
         ft_opt = None
 
     ################################
@@ -659,17 +730,20 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
+    assert cell.natm == auxcell.natm
     ej_sr = cp.zeros((cell.natm, 3))
     ej_aux_sr = cp.zeros((cell.natm, 3))
+    sigma_sr = cp.zeros((3, 3))
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
     head = pool[-1:]
     task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libpbc.PBCsr_ejk_int3c2e_ip1
+    kern = libpbc.PBCsr_ejk_int3c2e_deriv
     err = kern(
         ctypes.cast(ej_sr.data.ptr, ctypes.c_void_p),
         ctypes.cast(ej_aux_sr.data.ptr, ctypes.c_void_p),
+        ctypes.cast(sigma_sr.data.ptr, ctypes.c_void_p),
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
         ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
         ctypes.c_double(-int3c2e_opt.omega),
@@ -694,8 +768,25 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
         ctypes.c_float(log_cutoff))
     if err != 0:
-        raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+        raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
     ej_sr += ej_aux_sr
-    ej += ej_sr.get() * 2
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
-    return ej
+    ej += ej_sr * 2
+    sigma += sigma_sr * 2
+    t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+    return ej.get(), sigma.get()
+
+
+def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
+                        exxdiv=None, omega=None, verbose=None,
+                        linear_dep_threshold=LINEAR_DEP_THR):
+    '''Compatibility wrapper returning only the atomic J/K derivatives.'''
+    return _get_ejk_derivatives(
+        int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, omega, verbose,
+        linear_dep_threshold)[0]
+
+
+def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
+                       linear_dep_threshold=LINEAR_DEP_THR):
+    '''Compatibility wrapper returning only the atomic Coulomb derivatives.'''
+    return _get_ej_derivatives(
+        int3c2e_opt, dm, hermi, omega, verbose, linear_dep_threshold)[0]
