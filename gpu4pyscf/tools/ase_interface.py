@@ -28,6 +28,7 @@ from pyscf.data.nist import BOHR, HARTREE2EV
 from pyscf.gto.mole import charge
 from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.tools.pyscf_ase import ase_atoms_to_pyscf
+from gpu4pyscf.pbc.tools.discretization import freeze_mesh
 
 # These functions are copied from the development branch of PySCF and will be
 # provided by the pyscf.pbc.tools.pyscf_ase module in PySCF 2.11.
@@ -119,7 +120,7 @@ class PySCF(Calculator):
     default_parameters = {}
 
     def __init__(self, restart=None, label='PySCF', atoms=None, directory='.',
-                 method=None, **kwargs):
+                 method=None, fixed_mesh=False, **kwargs):
         """Construct PySCF-calculator object.
 
         Parameters
@@ -138,8 +139,12 @@ class PySCF(Calculator):
 
         self.method = method
         self.pbc = hasattr(method, 'cell')
+        self.fixed_mesh = fixed_mesh
+        self.mesh = None
         if self.pbc:
             mol = method.cell
+            if fixed_mesh:
+                self.mesh = freeze_mesh(method)
         else:
             mol = method.mol
         self.mol = mol
@@ -169,6 +174,11 @@ class PySCF(Calculator):
             self.mol.set_geom_(_atoms, a=np.asarray(atoms.cell), unit='Angstrom')
         else:
             self.mol.set_geom_(_atoms, unit='Angstrom')
+        if self.pbc and self.fixed_mesh:
+            base_method = self.method
+            if self.method_scan is not None:
+                base_method = self.method_scan
+            freeze_mesh(base_method, self.mol, self.mesh)
 
         with_grad = 'forces' in properties or 'stress' in properties
         with_energy = with_grad or 'energy' in properties or 'dipole' in properties
