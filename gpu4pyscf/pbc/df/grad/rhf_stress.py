@@ -452,6 +452,9 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     sigma += sigma_sr
     t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
 
+    ejk = ejk.get()
+    sigma = sigma.get()
+
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
@@ -467,17 +470,19 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         weighted_coulG_at_G0 = madelung(cell, kpts, omega=-omega)
         # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
         ejk_ewald *= .5 * k_factor * weighted_coulG_at_G0
-        ejk += cp.asarray(ejk_ewald)
+        ejk += ejk_ewald
 
         # Strain response of the Ewald exchange correction.  There are two
         # contributions: the cell dependence of the Madelung coefficient and
         # the response of the two overlap factors in Tr(S D S D).
         ek_G0 = float(cp.einsum('ij,ji->', s0, k_dm).real.get())
         exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
-        sigma -= cp.asarray(.5 * k_factor * exx_1 * ek_G0)
-        sigma -= cp.asarray(
-            k_factor * exx_0 * int1e.ovlp_strain_deriv(cell.cell, k_dm, kpts))
-    return ejk.get(), sigma.get()
+        # *.5 for the factor 1/2 in Coulomb operator; second *.5 for J-K/2 in RHF
+        fac = k_factor * .5 * .5
+        sigma -= fac * exx_1 * ek_G0
+        # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
+        sigma -= 2 * fac * exx_0 * int1e.ovlp_strain_deriv(cell.cell, k_dm, kpts)
+    return ejk, sigma
 
 def _get_ej_strain_deriv(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
                          linear_dep_threshold=LINEAR_DEP_THR):

@@ -608,6 +608,9 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
     sigma += sigma_sr * 2
     t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
 
+    ejk = ejk.get()
+    sigma = sigma.get()
+
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
@@ -626,11 +629,13 @@ def _get_ejk_strain_deriv(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fa
         # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
         ewald_k_factor = k_factor * nkpts
         ejk_ewald *= ewald_k_factor * weighted_coulG_at_G0
-        ejk += cp.asarray(ejk_ewald)
+        ejk += ejk_ewald
 
         ek_G0 = float(cp.einsum('kij,kji->', s0, k_dm).real.get()) / nkpts
         exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
-        sigma -= cp.asarray(ewald_k_factor * exx_1 * ek_G0)
-        sigma -= cp.asarray(
-            2 * ewald_k_factor * exx_0 * int1e.ovlp_strain_deriv(cell.cell, k_dm, kpts))
-    return ejk.get(), sigma.get()
+        # *.5 for the factor 1/2 in Coulomb operator
+        fac = ewald_k_factor * .5
+        sigma -= fac * exx_1 * ek_G0
+        # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
+        sigma -= 2 * fac * exx_0 * int1e.ovlp_strain_deriv(cell.cell, k_dm, kpts)
+    return ejk, sigma
