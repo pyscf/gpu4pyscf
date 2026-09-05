@@ -17,6 +17,7 @@ import unittest
 import ctypes
 import numpy as np
 import cupy as cp
+from pyscf import lib
 from pyscf.pbc import gto as pgto
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from pyscf.pbc.lib.kpts_helper import kk_adapted_iter
@@ -231,6 +232,64 @@ class KnownValues(unittest.TestCase):
 
             ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=kpt, kptjs=kpts)
             self.assertAlmostEqual(abs(ref-dat.get()).max(), 0, 9)
+
+    def test_ft_ao_strain_deriv(self):
+        from gpu4pyscf.gto.mole import SortedGTO
+        from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+        cell = pgto.M(
+            verbose=5, output='/dev/null',
+            atom='''N1   .19   .1      1.4
+                    N2   .5   2.4      .7 ''',
+            basis={'N1': [[3, [.5, 1.]], [6, [2., 1.]]], 'N2': 'ccpvdz'},
+            a=np.diag([2.5, 3.9, 2.2]),
+            unit='B',
+            precision=1e-8)
+
+        ft_opt = ft_ao_gpu.FTOpt(cell).build()
+        nao = ft_opt.cell.nao
+        cp.random.seed(6)
+        dm = cp.random.rand(nao, nao) * .4
+        dm = dm + dm.T
+        mesh = [5, 5, 5]
+        Gv = cell.get_Gv(mesh)
+        GvT = cp.asarray(Gv.T, order='C')
+        auxG = ft_ao_gpu.ft_ao(ft_opt.cell, Gv, sort_output=False).T
+        dm_auxG = dm.dot(auxG)
+        grad = cp.zeros((2, 3))
+        sigma = cp.zeros((3, 3))
+        libpbc.PBC_ft_ao_deriv(
+            ctypes.cast(grad.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm_auxG.data.ptr, ctypes.c_void_p),
+            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+            ctypes.byref(ft_opt._aft_envs),
+            ctypes.c_int(len(Gv)))
+
+        grad = grad.get()
+        sigma = sigma.get()
+        assert abs(grad.sum(axis=0)).max() < 1e-10
+
+        disp = 1e-5
+        def eval_aux(c):
+            Gv = c.get_Gv(mesh)
+            auxG = ft_ao_gpu.ft_ao(SortedGTO.from_cell(c), Gv, sort_output=False).T
+            return cp.einsum('ag,ag->', auxG.conj(), dm_auxG).real.get()
+
+        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 1), (2, 0), (2, 2)]:
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
+            e1 = eval_aux(cell1)
+            e2 = eval_aux(cell2)
+            assert abs(sigma[i, j] - (e1-e2)/2/disp) < 3e-8
+
+        coords = cell.atom_coords()
+        for i in range(cell.natm):
+            for j in range(3):
+                coords[i,j] += disp
+                e1 = eval_aux(cell.set_geom_(coords, inplace=False))
+                coords[i,j] -= 2*disp
+                e2 = eval_aux(cell.set_geom_(coords, inplace=False))
+                coords[i,j] += disp
+                assert abs(grad[i, j] - (e1-e2)/2/disp) < 3e-8
 
 if __name__ == '__main__':
     print('Full Tests for ft_ao')

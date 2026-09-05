@@ -31,6 +31,7 @@ from gpu4pyscf.gto.mole import (
 from gpu4pyscf.df.int3c2e_bdiv import (
     _nearest_power2, SHM_SIZE, L_AUX_MAX, THREADS, _check_rsh_factors)
 from gpu4pyscf.pbc.df.ft_ao import libpbc
+from gpu4pyscf.pbc.gto.int1e import _bvkcell_lattice_sum_Ls
 
 __all__ = [
     'int2c2e', 'sr_int2c2e', 'Int2c2eOpt'
@@ -62,10 +63,26 @@ def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
 
 def int2c2e_ip1_per_atom(auxcell, dm, kpts=None,
                          omega=None, lr_factor=None, sr_factor=None):
-    '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+    '''Compute nuclear gradients of the 2c2e Coulomb energy
+    '''
     opt = Int2c2eOpt(auxcell)
     return opt.energy_ip1_per_atom(
         dm, kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
+
+def int2c2e_energy_derivatives(auxcell, dm, kpts=None, omega=None):
+    '''Compute nuclear gradients and strain derivatives of the 2c2e energy for
+    the short-range (SR) Coulomb interaction
+    1/2 * erfc(omega * r12) / r12.
+    '''
+    kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
+    omega = _check_rsh_factors(auxcell, omega, None, None)[0]
+    rcut = _estimate_sr_2c2e_rcut(auxcell, omega, auxcell.precision)
+    try:
+        auxcell.rcut, rcut_backup = rcut, auxcell.rcut
+        opt = Int2c2eOpt(auxcell, kmesh)
+        return opt.energy_derivatives(dm, kpts, omega)
+    finally:
+        auxcell.rcut = rcut_backup
 
 def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True,
                 omega=None, lr_factor=None, sr_factor=None):
@@ -98,18 +115,23 @@ def _estimate_sr_2c2e_rcut(cell, omega, precision=None):
     rcut = (np.log(fac * rcut**(lk*2-1) + 1.) / theta)**.5
     return rcut
 
-def int2c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
+def int2c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE, deriv=None,
+                   cache_cart_idx=False):
+    if deriv is None:
+        deriv = (0, 0)
+    i_inc, j_inc = deriv
     li = np.arange(L_AUX_MAX+1)[:,None]
     lj = np.arange(L_AUX_MAX+1)
     nfi = (li + 1) * (li + 2) // 2
     nfj = (lj + 1) * (lj + 2) // 2
-    order = li + lj
+    order = li + lj + i_inc + j_inc
     nroots = order//2 + 1
     if omega < 0:
         nroots *= 2 # for short-range
-    g_size = (li+1)*(lj+1)
+    g_size = (li+1+i_inc) * (lj+1+j_inc)
     unit = g_size*3 + nroots*2 + 4
-    shm_size = shm_size - (nfi + nfj) * 3 * 4
+    if cache_cart_idx:
+        shm_size = shm_size - (nfi + nfj) * 3 * 4
     nsp_max = _nearest_power2(shm_size // (unit*8))
     nsp_per_block = THREADS
     if gout_width is not None:
@@ -118,10 +140,11 @@ def int2c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
         # Round up to the next 2^n
         gout_stride = _nearest_power2(gout_stride, return_leq=False)
         nsp_per_block = THREADS // gout_stride
-    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
+    nsp_per_block = np.minimum(nsp_max, nsp_per_block)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
-    shm_size += (nfi + nfj) * 3 * 4
+    if cache_cart_idx:
+        shm_size += (nfi + nfj) * 3 * 4
     return nsp_per_block, gout_stride, shm_size
 
 class Int2c2eOpt:
@@ -147,7 +170,7 @@ class Int2c2eOpt:
                 # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
                 bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-            Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
+            Ls = asarray(_bvkcell_lattice_sum_Ls(bvkcell, cell.rcut))
             Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
 
         self.bvkcell = bvkcell
@@ -188,10 +211,10 @@ class Int2c2eOpt:
         bvk_ncells = len(self.bvkmesh_Ls)
         omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
-        nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, gout_width=60)
+        nsp_per_block, gout_stride, shm_size = int2c2e_scheme(
+            omega, gout_width=60, cache_cart_idx=True)
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
-        gout_stride = cp.asarray(gout_stride, dtype=np.int32)
 
         bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
             self.bas_ij_cache, nsp_per_block*4)
@@ -234,29 +257,8 @@ class Int2c2eOpt:
         assert bvk_ncells == 1
         omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
-        shm_size = SHM_SIZE
-        li = np.arange(L_AUX_MAX+1)[:,None]
-        lj = np.arange(L_AUX_MAX+1)
-        nfi = (li + 1) * (li + 2) // 2
-        nfj = (lj + 1) * (lj + 2) // 2
-        order = li + lj + 1
-        nroots = order//2 + 1
-        if omega < 0:
-            nroots *= 2 # for short-range
-        g_size = (li+2)*(lj+1)
-        unit = g_size*3 + nroots*2 + 4
-        nsp_max = _nearest_power2(shm_size // (unit*8))
-        nsp_per_block = THREADS
-        gout_width = 20
-        if gout_width is not None:
-            gout_size = nfi * nfj
-            gout_stride = (gout_size + gout_width-1) // gout_width
-            # Round up to the next 2^n
-            gout_stride = _nearest_power2(gout_stride, return_leq=False)
-            nsp_per_block = THREADS // gout_stride
-        nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
-        gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-        shm_size = nsp_per_block * (unit*8)
+        nsp_per_block, gout_stride, shm_size = int2c2e_scheme(
+            omega, gout_width=20, deriv=(1,0))
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
 
@@ -291,24 +293,14 @@ class Int2c2eOpt:
 
     def energy_ip1_per_atom(self, dm, kpts=None,
                             omega=None, lr_factor=None, sr_factor=None):
-        '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+        '''Compute nuclear gradients of the 2c2e Coulomb energy'''
         if self.bas_ij_cache is None:
             self.build()
         cell = self.cell
         omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
+        assert dm.shape[-1] == cell.nao
 
-        li = np.arange(L_AUX_MAX+1)[:,None]
-        lj = np.arange(L_AUX_MAX+1)
-        order = li + lj + 1
-        nroots = order//2 + 1
-        if omega < 0:
-            nroots *= 2 # for short-range
-        g_size = (li+2)*(lj+2)
-        unit = g_size*3 + nroots*2 + 4
-        nsp_max = _nearest_power2(SHM_SIZE // (unit*8))
-        nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
-        gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-        shm_size = nsp_per_block * (unit*8)
+        nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, deriv=(1,0))
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
 
@@ -332,3 +324,54 @@ class Int2c2eOpt:
         if err != 0:
             raise RuntimeError('e_int2c2e_ip1 failed')
         return out.get()
+
+    def energy_derivatives(self, dm, kpts=None, omega=None):
+        '''Compute nuclear gradients and strain derivatives of the 2c2e energy for
+        the short-range (SR) Coulomb interaction
+        1/2 * erfc(omega * r12) / r12.
+
+        Note: When ``kpts`` is supplied, derivatives of the total energy are
+        computed. They are not scaled by ``1/nkpts`` to produce per-cell values.
+        '''
+        if self.bas_ij_cache is None:
+            self.build()
+        cell = self.cell
+        assert dm.shape[-1] == cell.nao
+
+        if kpts is not None:
+            assert dm.ndim == 3 and dm.shape[0] == len(kpts)
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            dm = cp.asarray(contract('Lk,kpq->Lpq', expLk, dm).real, order='C')
+
+        if omega is None:
+            omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, None, None)
+        else:
+            assert omega < 0
+            lr_factor, sr_factor = 0, 1
+
+        nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, deriv=(1,0))
+        lmax = cell.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:lmax+1,:lmax+1].max()
+
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+            self.bas_ij_cache, nsp_per_block)
+
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
+        rys_envs = self._rys_envs
+        grad = cp.zeros((cell.natm, 3))
+        sigma = cp.zeros((3, 3))
+        libpbc.e_int2c2e_ip1.restype = ctypes.c_int
+        err = libpbc.int2c2e_deriv(
+            ctypes.cast(grad.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.byref(rys_envs), ctypes.c_double(omega),
+            ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
+            ctypes.c_int(shm_size_max),
+            ctypes.c_int(nbatches_shl_pair),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+        if err != 0:
+            raise RuntimeError('e_int2c2e_ip1 failed')
+        return grad, sigma

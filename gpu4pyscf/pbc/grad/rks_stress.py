@@ -62,7 +62,8 @@ from gpu4pyscf.pbc.grad import rks as rks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.ft_ao import libpbc
-from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
+from gpu4pyscf.lib.cupy_helper import (
+    contract, asarray, sandwich_dot, batched_vec_norm2)
 
 ALIGNED = 256
 
@@ -99,7 +100,7 @@ def _get_coulG_strain_derivatives(cell, Gv, omega=None):
     '''derivatives of 4pi/G^2'''
     remove_G0 = is_zero(cp.asnumpy(Gv[0]))
     Gv = asarray(Gv)
-    G2 = cp.einsum('gx,gx->g', Gv, Gv)
+    G2 = batched_vec_norm2(Gv)
     if remove_G0:
         G2[0] = np.inf
     coulG_0 = 4 * np.pi / G2
