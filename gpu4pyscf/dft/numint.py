@@ -2261,7 +2261,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
         ngrids = rho.shape[-1]
         if work is None:
-            blksize = int(MEMPOOL_THRESHOLD / 8 / nvar)
+            blksize = int(MEMPOOL_THRESHOLD // 8 // nvar)
             blksize = min(ngrids, blksize // 64 * 64)
             work = cupy.empty((nvar, blksize))
         else:

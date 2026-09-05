@@ -83,7 +83,7 @@ def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
 
     _, inv_idx, counts = np.unique(
         kk_conserv.ravel(), return_inverse=True, return_counts=True)
-    idx = np.argsort(inv_idx, stable=True)
+    idx = np.argsort(inv_idx, kind='stable')
     splits = counts.cumsum()[:-1]
     kk_addrs = np.split(idx, splits)
 
