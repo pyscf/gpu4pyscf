@@ -1162,12 +1162,15 @@ def convert_xc_on_g_mesh_to_fock(
     xc_on_g_mesh = xc_on_g_mesh.reshape(n_channels, density_slices, *mydf.mesh)
 
     if kpts is None:
-        n_k_points = 1
-        at_gamma_point = True
-    else:
-        assert kpts.ndim == 2
-        n_k_points = len(kpts)
-        at_gamma_point = multigrid.gamma_point(kpts)
+        kpts = np.zeros((1,3))
+    elif isinstance(kpts, KPoints):
+        kpts = kpts.kpts
+    is_single_kpt = kpts.ndim == 1
+    if is_single_kpt:
+        kpts = kpts.reshape(1, 3)
+    assert kpts.ndim == 2
+    n_k_points = len(kpts)
+    at_gamma_point = multigrid.gamma_point(kpts)
 
     if hermi != 1:
         raise NotImplementedError
@@ -2030,6 +2033,9 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         elif isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
 
+        is_single_kpt = kpts.ndim == 1
+        if is_single_kpt:
+            kpts = kpts.reshape(1, 3)
         assert kpts.ndim == 2
         assert dms.ndim == 4
         nset, nkpts, nao = dms.shape[:3]
@@ -2094,6 +2100,9 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         elif isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
 
+        is_single_kpt = kpts.ndim == 1
+        if is_single_kpt:
+            kpts = kpts.reshape(1, 3)
         assert kpts.ndim == 2
         assert dms.ndim == 5
         nset, nkpts, nao = dms.shape[1:4]
