@@ -63,10 +63,7 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
     is_pbc = isinstance(cell, gto.Cell)
 
     atoms = pyscf_to_ase_atoms(cell)
-    calculator = PySCF(
-        method=method,
-        fixed_mesh=is_pbc,
-    )
+    calculator = PySCF(method=method)
     atoms.calc = calculator
 
     if is_pbc and target in (None, 'atoms', 'cell'):

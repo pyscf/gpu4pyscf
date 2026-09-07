@@ -120,7 +120,7 @@ class PySCF(Calculator):
     default_parameters = {}
 
     def __init__(self, restart=None, label='PySCF', atoms=None, directory='.',
-                 method=None, fixed_mesh=False, **kwargs):
+                 method=None, **kwargs):
         """Construct PySCF-calculator object.
 
         Parameters
@@ -139,12 +139,10 @@ class PySCF(Calculator):
 
         self.method = method
         self.pbc = hasattr(method, 'cell')
-        self.fixed_mesh = fixed_mesh
         self.mesh = None
         if self.pbc:
             mol = method.cell
-            if fixed_mesh:
-                self.mesh = freeze_mesh(method)
+            self.mesh = freeze_mesh(method)
         else:
             mol = method.mol
         self.mol = mol
@@ -174,7 +172,7 @@ class PySCF(Calculator):
             self.mol.set_geom_(_atoms, a=np.asarray(atoms.cell), unit='Angstrom')
         else:
             self.mol.set_geom_(_atoms, unit='Angstrom')
-        if self.pbc and self.fixed_mesh:
+        if self.pbc:
             base_method = self.method
             if self.method_scan is not None:
                 base_method = self.method_scan

@@ -87,7 +87,7 @@ def test_pbc_optimizer_freezes_automatic_mesh():
     _, optimized_cell = ase_solver.kernel(method, max_steps=0)
 
     assert not cell._mesh_from_build
-    assert method._geomopt_mesh == tuple(mesh)
+    np.testing.assert_array_equal(method._geomopt_mesh, mesh)
     np.testing.assert_array_equal(cell.mesh, mesh)
     np.testing.assert_array_equal(optimized_cell.mesh, mesh)
 

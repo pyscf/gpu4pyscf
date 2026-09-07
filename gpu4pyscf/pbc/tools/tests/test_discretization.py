@@ -47,9 +47,10 @@ def test_freezes_automatic_cell_mesh_and_synchronizes_objects():
 
     mesh = freeze_mesh(method)
 
-    assert mesh == (20, 22, 24)
+    np.testing.assert_array_equal(mesh, (20, 22, 24))
     assert method.cell._mesh_from_build is False
     for obj in (method.cell, method._numint, method.with_df, method.grids):
+        assert obj.mesh is mesh
         np.testing.assert_array_equal(obj.mesh, mesh)
 
 
@@ -58,6 +59,7 @@ def test_reuses_reference_mesh():
 
     mesh = freeze_mesh(method, mesh=(20, 22, 24))
 
-    assert mesh == (20, 22, 24)
+    np.testing.assert_array_equal(mesh, (20, 22, 24))
     for obj in (method.cell, method._numint, method.with_df, method.grids):
+        assert obj.mesh is mesh
         np.testing.assert_array_equal(obj.mesh, mesh)

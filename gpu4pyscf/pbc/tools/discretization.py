@@ -24,8 +24,8 @@ def freeze_mesh(method, cell=None, mesh=None):
     if mesh is None:
         raise RuntimeError("PBC mesh is not initialized")
 
-    mesh = np.asarray(mesh, dtype=np.int32).copy()
-    cell.mesh = mesh.copy()
+    mesh = np.asarray(mesh, dtype=np.int32)
+    cell.mesh = mesh
     objects = (
         getattr(method, "_numint", None),
         getattr(method, "with_df", None),
@@ -33,5 +33,5 @@ def freeze_mesh(method, cell=None, mesh=None):
     )
     for obj in objects:
         if obj is not None and hasattr(obj, "mesh"):
-            obj.mesh = mesh.copy()
-    return tuple(int(value) for value in mesh)
+            obj.mesh = mesh
+    return mesh
