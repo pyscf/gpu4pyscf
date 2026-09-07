@@ -14,7 +14,7 @@
 
 import unittest
 import numpy as np
-import cupy
+import cupy as cp
 import pyscf
 from pyscf import lib
 from pyscf import scf as cpu_scf
@@ -140,6 +140,17 @@ class KnownValues(unittest.TestCase):
         assert isinstance(mf, gpu_dft.rks.RKS)
         assert 'gpu' in mf.grids.__module__
         assert np.abs(e_cpu - e_gpu) < 1e-5
+
+    def test_scanner(self):
+        mol = pyscf.M(atom='H 0 0 0; H 0 0 6')
+        dm = np.zeros((2,2,2))
+        dm[0,0,0] = dm[1,1,1] = 1
+        mf = mol.UHF().to_gpu()
+        mf.kernel(dm0=dm)
+
+        mf_scan = mf.as_scanner()
+        mf_scan(pyscf.M(atom='H 0 0 0; H 0 0 3.5'), init_guess_from_previous=False)
+        assert abs(mf_scan.e_tot - -0.6298201101212485) < 1e-7
 
 if __name__ == "__main__":
     print("Full Tests for SCF")
