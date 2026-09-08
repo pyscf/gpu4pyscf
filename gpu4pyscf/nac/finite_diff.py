@@ -18,8 +18,85 @@ from gpu4pyscf import scf, dft
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import ris
 from scipy.optimize import linear_sum_assignment
-from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize_tda
 
+def diagonalize(a, b, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    b = b.reshape(nov, nov)
+    h = np.block([[a, b],
+                  [-b.conj(), -a.conj()]])
+    e, xy = np.linalg.eig(np.asarray(h))
+    assert np.max(np.abs(e.imag)) < 1e-14
+    assert np.max(np.abs(xy.imag)) < 1e-14
+    e = e.real
+    xy = xy.real
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eigh(np.asarray(a))
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+def diagonalize_u(a, b, nroots=5):
+    a_aa, a_ab, a_bb = a
+    b_aa, b_ab, b_bb = b
+    nocc_a, nvir_a, nocc_b, nvir_b = a_ab.shape
+    a_aa = a_aa.reshape((nocc_a * nvir_a, nocc_a * nvir_a))
+    a_ab = a_ab.reshape((nocc_a * nvir_a, nocc_b * nvir_b))
+    a_bb = a_bb.reshape((nocc_b * nvir_b, nocc_b * nvir_b))
+    b_aa = b_aa.reshape((nocc_a * nvir_a, nocc_a * nvir_a))
+    b_ab = b_ab.reshape((nocc_a * nvir_a, nocc_b * nvir_b))
+    b_bb = b_bb.reshape((nocc_b * nvir_b, nocc_b * nvir_b))
+    a = np.block([[a_aa, a_ab], [a_ab.T, a_bb]])
+    b = np.block([[b_aa, b_ab], [b_ab.T, b_bb]])
+    abba = np.asarray(np.block([[a, b], [-b.conj(), -a.conj()]]))
+    e, xy = np.linalg.eig(abba)
+    assert np.max(np.abs(e.imag)) < 1e-14
+    assert np.max(np.abs(xy.imag)) < 1e-14
+    e = e.real
+    xy = xy.real
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+def diagonalize_tda_u(a, nroots=5):
+    a_aa, a_ab, a_bb = a
+    nocc_a, nvir_a, nocc_b, nvir_b = a_ab.shape
+    a_aa = a_aa.reshape((nocc_a * nvir_a, nocc_a * nvir_a))
+    a_ab = a_ab.reshape((nocc_a * nvir_a, nocc_b * nvir_b))
+    a_bb = a_bb.reshape((nocc_b * nvir_b, nocc_b * nvir_b))
+    a = np.block([[a_aa, a_ab], [a_ab.T, a_bb]])
+    e, xy = np.linalg.eigh(a)
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 def change_sign(s12_ao, mo_coeff_b ,mo_coeff):
     mo_coeff_new = mo_coeff*1.0
@@ -50,16 +127,16 @@ def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
     below_threshold_mask = abs_mo_overlap < threshold
     infinity_cost = mo_coeff_b.shape[1] + 1
     cost_matrix[below_threshold_mask] = infinity_cost
-    
+
     row_ind, col_ind = linear_sum_assignment(cost_matrix.get())
 
     matching_indices = col_ind
-    
+
     mo2_reordered = mo_coeff[:, matching_indices]
 
     final_chosen_overlaps = abs_mo_overlap[row_ind, col_ind]
     invalid_matches_mask = final_chosen_overlaps < threshold
-    
+
     if cp.any(invalid_matches_mask):
         num_invalid = cp.sum(invalid_matches_mask)
         print(
@@ -137,7 +214,7 @@ def get_nacv_ge(td_nac, x_yI, delta=0.001, with_ris=False, singlet=True, atmlst=
         yI = cp.zeros_like(xI)
     yI = yI.reshape(nocc, nvir)
 
-    gamma = np.block([[np.zeros((nocc, nocc)), xI.get()], 
+    gamma = np.block([[np.zeros((nocc, nocc)), xI.get()],
                       [(xI.T*0.0).get(), np.zeros((nvir, nvir))]])
     gamma = cp.asarray(gamma)*2
     gamma_ao = mo_coeff @ gamma @ mo_coeff.T
@@ -160,7 +237,7 @@ def get_nacv_ge(td_nac, x_yI, delta=0.001, with_ris=False, singlet=True, atmlst=
     offsetdic = mol.offset_nr_by_atom()
     s12_deriv = mol.intor('int1e_ipovlp')
     s12_deriv = cp.asarray(s12_deriv)
-    for k, ia in enumerate(atmlst): 
+    for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
         s12_deriv_tmp = s12_deriv*1.0
         ds1_tmp = s12_deriv_tmp.transpose(0,2,1)
@@ -192,7 +269,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, nJ, delta=0.001, with_ris=False, singlet=Tru
     if not isinstance(yJ, np.ndarray) and not isinstance(yJ, cp.ndarray):
         yJ = cp.zeros_like(xJ)
     yJ = cp.asarray(yJ).reshape(nocc, nvir)
-    gamma = np.block([[(-xJ@xI.T).get(), np.zeros((nocc, nvir))], 
+    gamma = np.block([[(-xJ@xI.T).get(), np.zeros((nocc, nvir))],
                     [np.zeros((nvir, nocc)), (xI.T@xJ).get()]]) * 2
     gamma = cp.asarray(gamma)
     gamma_ao = mo_coeff @ gamma @ mo_coeff.T
@@ -213,20 +290,20 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, nJ, delta=0.001, with_ris=False, singlet=Tru
                 sign1 = -1.0
             if (xJ*xJ_minus).sum() < 0.0:
                 sign2 = -1.0
-            
+
             mo_diff = (mf_add.mo_coeff - mf_minus.mo_coeff)/(delta*2.0)*0.52917721092
             dpq = mo_coeff.T @ s @ mo_diff
             nac[iatm, icart] = (gamma*dpq).sum()
 
             t_diff = (xJ_add*sign1 - xJ_minus*sign2)/(delta*2.0)*0.52917721092
             nac3[iatm, icart] = (xI*t_diff).sum()*2 # for double occupancy
-    
+
     nac2 = np.zeros((natm, 3))
     atmlst = range(mol.natm)
     offsetdic = mol.offset_nr_by_atom()
     s12_deriv = mol.intor('int1e_ipovlp')
     s12_deriv = cp.asarray(s12_deriv)
-    for k, ia in enumerate(atmlst): 
+    for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
         s12_deriv_tmp = s12_deriv*1.0
         ds1_tmp = s12_deriv_tmp.transpose(0,2,1)
@@ -234,4 +311,3 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, nJ, delta=0.001, with_ris=False, singlet=Tru
         ds1_tmp[:,:,p1:] = 0
         nac2[k] = cp.einsum('xij,ij->x', ds1_tmp, gamma_ao).get()
     return nac - nac2 + nac3
-   
