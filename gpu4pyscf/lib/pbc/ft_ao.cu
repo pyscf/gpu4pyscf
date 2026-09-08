@@ -29,8 +29,11 @@
 #define WARP_SIZE       32
 #endif
 #define WARPS           8
-#define NG_PER_BLOCK    WARP_SIZE
 #define FT_AO_THREADS   (WARP_SIZE*4)
+// One shell per block (nsh_per_block == 1): every thread in the block then
+// sees the same shell's iprim, so the primitive loop's __syncthreads() trip
+// count is uniform without needing a per-block max-iprim workaround.
+#define NG_PER_BLOCK    FT_AO_THREADS
 #define GOUT_WIDTH      29
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
@@ -42,6 +45,7 @@
 __global__ static
 void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 {
+    int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
 
@@ -60,18 +64,23 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     __shared__ double g[(AUXL+1)*FT_AO_THREADS * 6];
     #endif
 
-    int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
     int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
-    if (sh_id >= envs.nbas) {
-        return;
-    }
+    // A work-item whose shell index falls outside envs.nbas cannot return
+    // here: every __syncthreads() below is a real SYCL group_barrier, which
+    // -- unlike CUDA's warp-retirement semantics -- requires every work-item
+    // in the group to reach it. Clamp to a valid shell instead so out-of-
+    // range lanes take the identical control-flow path (and therefore the
+    // same barrier count) as their neighbours; the final write-out below is
+    // masked so the clamped, discarded computation never reaches memory.
+    int valid = sh_id < envs.nbas;
+    int sh_id_clamped = valid ? sh_id : envs.nbas - 1;
 
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
-    int li = bas[sh_id*BAS_SLOTS+ANG_OF];
+    int li = bas[sh_id_clamped*BAS_SLOTS+ANG_OF];
     int nfi = c_nf[li];
-    int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
+    int iprim = bas[sh_id_clamped*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
     double kx = 0;
     double ky = 0;
@@ -107,9 +116,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double s0zR, s1zR, s2zR;
     double s0zI, s1zI, s2zI;
 
-    int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
-    double *expi = env + bas[sh_id*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[sh_id*BAS_SLOTS+PTR_COEFF];
+    int ia = bas[sh_id_clamped*BAS_SLOTS+ATOM_OF];
+    double *expi = env + bas[sh_id_clamped*BAS_SLOTS+PTR_EXP];
+    double *ci = env + bas[sh_id_clamped*BAS_SLOTS+PTR_COEFF];
     double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
     for (int ip = 0; ip < iprim; ++ip) {
         __syncthreads();
@@ -199,9 +208,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
         }
     }
 
-    if (Gv_id < nGv) {
+    if (valid && Gv_id < nGv) {
         size_t stride = (size_t)nGv * OF_COMPLEX;
-        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
+        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id_clamped] * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
         for (int n = 0; n < aux_nf; ++n) {
             if (n >= nfi) break;

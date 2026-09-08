@@ -135,7 +135,13 @@ _STATE_ATTR = "__gpu4pyscf_cuda_state__"
 _state = getattr(dpnp, _STATE_ATTR, None)
 if _state is None:
     _state = {
-        "master_lock":        threading.Lock(),
+        # RLock, not Lock: a GC pass can fire mid-critical-section (any
+        # allocation can cross the threshold) and run a weakref finalizer
+        # that calls back into _master_queue() from the same thread --
+        # _deferred_release -> _flush_deferred_frees_locked -> _master_queue().
+        # A plain Lock self-deadlocks there (caught with gdb on a hung
+        # test_pbc_df_grad.py).
+        "master_lock":        threading.RLock(),
         "master_queues":      {},      # int -> dpctl.SyclQueue
         "gpu_devices":        None,    # cached device list
         "stream_cache":       {},      # int -> Stream
