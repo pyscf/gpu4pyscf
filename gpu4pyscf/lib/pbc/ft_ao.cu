@@ -34,7 +34,7 @@
 // sees the same shell's iprim, so the primitive loop's __syncthreads() trip
 // count is uniform without needing a per-block max-iprim workaround.
 #define NG_PER_BLOCK    FT_AO_THREADS
-#define GOUT_WIDTH      29
+#define GOUT_WIDTH      30
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
 #define OF_COMPLEX      2
@@ -269,7 +269,10 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     extern __shared__ double shared_memory[];
     #endif
 
-    constexpr int nGv_per_block = NG_PER_BLOCK;
+    // ft_aopair_kernel's grid-points-per-block is independent of ft_ao_bdiv_kernel's
+    // NG_PER_BLOCK (bumped to FT_AO_THREADS for that kernel's divergence fix); upstream
+    // hardcodes WARP_SIZE here and sizes shm_size/grid dims on the host to match.
+    constexpr int nGv_per_block = WARP_SIZE;
     int thread_id = Gv_id_in_block + nGv_per_block * warp_id;
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
@@ -1230,7 +1233,7 @@ int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool, int *head,
                     double *grids, int ngrids, int *ao_loc, int compressing, int to_sph)
 {
     (void)head;
-    constexpr int nGv_per_block = NG_PER_BLOCK;
+    constexpr int nGv_per_block = WARP_SIZE;
     int Gv_batches = (ngrids + nGv_per_block - 1) / nGv_per_block;
     #ifdef USE_SYCL
     sycl::range<2> threads(WARPS, nGv_per_block);
