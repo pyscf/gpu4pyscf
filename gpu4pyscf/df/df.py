@@ -105,6 +105,7 @@ class DF(lib.StreamObject):
         intopt.mol = SortedMole.from_mol(mol, decontract=True)
         intopt.build()
         if build_cderi:
+            log.debug(f"Building cderi for omega={omega}, lr_factor={lr_factor}, sr_factor={sr_factor}")
             self._rsh_parameters = (omega, lr_factor, sr_factor)
             self._cderi, self._cderi_idx = _cholesky_eri(
                 intopt, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor,
@@ -167,12 +168,7 @@ class DF(lib.StreamObject):
             assert omega is None or omega == 0
             return df_jk.get_j(self, dm, hermi), None
 
-        # When lr_factor or sr_factor are specified, the DF cderi will be
-        # constructed using the aggregated Coulomb potential.
-        # Temporarily disable this feature for backward compatibility.
-        assert lr_factor is None and sr_factor is None
-
-        with self.range_coulomb(omega) as dfobj:
+        with self.range_coulomb(omega, lr_factor, sr_factor) as dfobj:
             if getattr(dfobj, '_rsh_parameters', None):
                 assert dfobj._rsh_parameters == (omega, lr_factor, sr_factor)
             if with_j and (omega is not None and omega != 0):
@@ -297,7 +293,7 @@ class DF(lib.StreamObject):
         return self
 
     @contextlib.contextmanager
-    def range_coulomb(self, omega):
+    def range_coulomb(self, omega, lr_factor, sr_factor):
         if omega is None:
             omega = 0
 
@@ -305,7 +301,9 @@ class DF(lib.StreamObject):
             yield self
             return
 
-        key = '%.6f' % omega
+        lr_factor = "%.6f" % lr_factor if lr_factor is not None else "None"
+        sr_factor = "%.6f" % sr_factor if sr_factor is not None else "None"
+        key = 'omega_%.6f_lr_factor_%s_sr_factor_%s' %(omega, lr_factor, sr_factor)
         if key in self._rsh_df:
             rsh_df = self._rsh_df[key]
         else:

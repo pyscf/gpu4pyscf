@@ -1902,17 +1902,25 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
         v1vo[:,nmoa*nocca:] += vnlcb.reshape(-1, nmob*noccb)
 
     if hybrid:
-        vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
-        vk *= hyb
-        if omega > 1e-10:
-            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
-                                         hermi, with_j=False, omega=omega)
-            vk_lr *= (alpha-hyb)
-            vk += vk_lr
+        range_separated_mode = getattr(mf, 'range_separated_mode', 'mix_outside_kernel') # Direct SCF defaults to mix_outside_kernel
+        if omega != 0:  # For range separated Coulomb
+            if range_separated_mode == 'mix_outside_kernel':
+                vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
+                vk *= hyb
+                _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi, with_j=False, omega=omega)
+                vk_lr *= (alpha-hyb)
+                vk += vk_lr
+            elif range_separated_mode == 'mix_inside_kernel':
+                vj, _ = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1, with_k=False)
+                _, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1, with_j=False, omega=omega, lr_factor=alpha, sr_factor=hyb)
+            else:
+                raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
+        else:
+            vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
+            vk *= hyb
         v1vo += vj - vk
     else:
-        v1vo += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
-                                  hermi=1, with_k=False)[0]
+        v1vo += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1, with_k=False)[0]
     return v1vo
 
 def nr_uks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo=True):

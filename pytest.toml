@@ -1,0 +1,4 @@
+[pytest]
+markers = [
+    "slow", "benchmark", "high_memory", "special",
+]
