@@ -13,13 +13,14 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
 import re
 import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib
 from gpu4pyscf.md.wigner_sampling import wigner_samples
-from gpu4pyscf.md.fssh_tddft import FSSH
+from gpu4pyscf.md.fssh_tddft import FSSH, _get_x_amplitudes
 from gpu4pyscf.md.fssh import h5_to_xyz
 from gpu4pyscf.md.distributions import maxwell_boltzmann_velocities
 
@@ -35,6 +36,59 @@ def extract_energies(filename):
     return np.array(energies)
 
 class KnownValues(unittest.TestCase):
+    def test_state_validation(self):
+        class Mol:
+            elements = []
+
+        class Scanner:
+            def NACGradients(self):
+                return object()
+
+        class TD:
+            mol = Mol()
+            nstates = 2
+
+            def as_scanner(self):
+                return Scanner()
+
+        fssh = FSSH(TD(), [2, 1])
+        self.assertEqual(fssh.states, [1, 2])
+        self.assertEqual(fssh.cur_state, 1)
+
+        with self.assertRaisesRegex(ValueError, "must be unique"):
+            FSSH(TD(), [1, 1])
+
+        with self.assertRaisesRegex(ValueError, "td.nstates=2"):
+            FSSH(TD(), [1, 3])
+
+    def test_state_amplitude_mapping(self):
+        class Scanner:
+            xy = [
+                (np.array([[1., 2.]]), None),
+                (np.array([[3., 4.]]), None),
+                (np.array([[5., 6.]]), None),
+            ]
+
+        xs = _get_x_amplitudes(Scanner(), [0, 1, 2, 3], 1, 2)
+        self.assertIsNone(xs[0])
+        np.testing.assert_array_equal(xs[1], [[1., 2.]])
+        np.testing.assert_array_equal(xs[2], [[3., 4.]])
+        np.testing.assert_array_equal(xs[3], [[5., 6.]])
+
+        class RisScanner:
+            xy = (
+                np.array([[1., 2.], [3., 4.], [5., 6.]]),
+                np.zeros((3, 2)),
+            )
+
+        with mock.patch('gpu4pyscf.tdscf.ris.RisBase', RisScanner):
+            xs = _get_x_amplitudes(
+                RisScanner(), [0, 1, 2, 3], 1, 2)
+        self.assertIsNone(xs[0])
+        np.testing.assert_allclose(xs[1], np.array([[1., 2.]]) / np.sqrt(2))
+        np.testing.assert_allclose(xs[2], np.array([[3., 4.]]) / np.sqrt(2))
+        np.testing.assert_allclose(xs[3], np.array([[5., 6.]]) / np.sqrt(2))
+
     def test_wigner_sampling(self):
         mol = pyscf.M(
             atom='''

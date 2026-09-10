@@ -21,10 +21,32 @@ from gpu4pyscf.tdscf.rhf import TD_Scanner
 from gpu4pyscf.md.fssh import FSSH, PES
 from gpu4pyscf.nac.tdrhf import _wfn_overlap
 
+def _get_x_amplitudes(td_scanner, states, nocc, nvir):
+    from gpu4pyscf.tdscf.ris import RisBase, rescale_spin_free_amplitudes
+
+    if isinstance(td_scanner, RisBase):
+        return {
+            state: None if state == 0 else
+            rescale_spin_free_amplitudes(td_scanner.xy, state-1)[0].reshape(nocc, nvir)
+            for state in states
+        }
+    return {
+        state: None if state == 0 else td_scanner.xy[state-1][0]
+        for state in states
+    }
+
+
 class FSSH_TDDFT(FSSH):
     def __init__(self, td, states):
-        nstates = len(states)
-        assert td.nstates >= nstates-1
+        super().__init__(td.mol, states)
+        if len(self.states) != len(set(self.states)):
+            raise ValueError("State indices must be unique")
+        self.states.sort()
+        self.cur_state = self.states[0]
+        if self.states[-1] > td.nstates:
+            raise ValueError(
+                f"State {self.states[-1]} requires at least "
+                f"{self.states[-1]} TD excited states, but td.nstates={td.nstates}")
 
         self.tddft = td.as_scanner()
         # Initialize with the batched multi-state NAC module
@@ -32,7 +54,6 @@ class FSSH_TDDFT(FSSH):
 
         # to track the phase of the ground state and excited states
         self._sign = np.ones(td.nstates+1)
-        super().__init__(td.mol, states)
 
     def evaluate_pes(self, position, cur_state, with_nacv=True):
         """
@@ -51,7 +72,6 @@ class FSSH_TDDFT(FSSH):
                 - force: Nuclear forces for current state (Natoms * 3) in Ha/Bohr
                 - Nacv: Nonadiabatic coupling vectors for all states (Nstates, Nstates, Natoms, 3) in 1/bohr
         """
-        from gpu4pyscf.tdscf.ris import RisBase, rescale_spin_free_amplitudes
         from gpu4pyscf.tdscf.ris import TD_Scanner as TD_ris_Scanner
         td_scanner = self.tddft
         assert isinstance(td_scanner, (TD_Scanner, TD_ris_Scanner))
@@ -66,14 +86,8 @@ class FSSH_TDDFT(FSSH):
             nmo = mo_coeff0.shape[1]
             nocc = int((mf.mo_occ > 0).sum())
             nvir = nmo - nocc
-            if isinstance(td_scanner, RisBase):
-                xs0 = td_scanner.xy[0]
-                xs0 = [xs0[i-1].reshape(nocc, nvir) if i > 0 else None
-                       for i in self.states]
-            else:
-                # Use "None" to label the ground state
-                xs0 = [td_scanner.xy[i-1][0] if i > 0 else None
-                       for i in self.states]
+            xs0 = _get_x_amplitudes(
+                td_scanner, self.states, nocc, nvir)
 
         # Calculate energy for the current state
         mol = mol0.set_geom_(position, unit='Bohr', inplace=False)
@@ -95,11 +109,7 @@ class FSSH_TDDFT(FSSH):
             return PES(energy=energy, force=force)
 
         mo_coeff = cp.asarray(mf.mo_coeff)
-        if isinstance(td_scanner, RisBase):
-            xs1 = td_scanner.xy[0]
-            xs1 = [xs1[i-1].reshape(nocc, nvir) for i in self.states]
-        else:
-            xs1 = [td_scanner.xy[i-1][0] for i in self.states]
+        xs1 = _get_x_amplitudes(td_scanner, self.states, nocc, nvir)
 
         states_reorder = []
 
@@ -107,15 +117,17 @@ class FSSH_TDDFT(FSSH):
 
         # Ground state overlap
         s_mo_ground = mo_coeff0[:, :nocc].T.dot(s).dot(mo_coeff[:, :nocc])
-        state_ovlp = cp.linalg.det(s_mo_ground).get()
-        if abs(state_ovlp) < 0.3:
-            states_reorder.append(0)
-        self._sign[0] *= np.sign(state_ovlp)
+        ground_ovlp = cp.linalg.det(s_mo_ground).get()
+        if 0 in self.states:
+            if abs(ground_ovlp) < 0.3:
+                states_reorder.append(0)
+            self._sign[0] *= np.sign(ground_ovlp)
 
         for i in self.states:
             if i == 0:
                 continue
-            state_ovlp = _wfn_overlap(mo_coeff0, mo_coeff, xs0[i-1], xs1[i-1], s)
+            state_ovlp = _wfn_overlap(
+                mo_coeff0, mo_coeff, xs0[i], xs1[i], s)
             logger.debug(mol0, f'State {i} overlap {state_ovlp:.4f}.')
             if abs(state_ovlp) < 0.3:
                 states_reorder.append(i)
@@ -145,8 +157,11 @@ class FSSH_TDDFT(FSSH):
             cross_ovlp = np.empty((len(states_reorder), len(states_reorder)))
             for i, I in enumerate(states_reorder):
                 for j, J in enumerate(states_reorder):
-                    cross_ovlp[i,j] = _wfn_overlap(
-                        mo_coeff0, mo_coeff, xs0[I-1], xs1[J-1], s)
+                    if I == 0 and J == 0:
+                        cross_ovlp[i,j] = ground_ovlp
+                    else:
+                        cross_ovlp[i,j] = _wfn_overlap(
+                            mo_coeff0, mo_coeff, xs0[I], xs1[J], s)
             cost_matrix = -abs(cross_ovlp)
             row_ind, col_ind = linear_sum_assignment(cost_matrix)
             prev_sign = self._sign.copy()
