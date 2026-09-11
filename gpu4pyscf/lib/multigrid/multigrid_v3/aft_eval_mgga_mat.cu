@@ -334,10 +334,11 @@ int orth_aft_mgga_mat(double *out, cuDoubleComplex *vrhoG, cuDoubleComplex *vtau
 #ifdef USE_SYCL
     sycl::range<1> threads(THREADS);
     sycl::range<1> grids(ntile_batch*npair);
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class orth_mgga_mat_kernel_mgv3_sycl>
         (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             orth_mgga_mat_kernel(
-                out, vrhoG, vtauG, *envs, bas_ij_idx, G_bases, L_bases,
+                out, vrhoG, vtauG, dev_envs, bas_ij_idx, G_bases, L_bases,
                 mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
         }).wait();
 #else

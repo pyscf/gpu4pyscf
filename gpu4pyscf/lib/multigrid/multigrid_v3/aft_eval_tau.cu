@@ -274,10 +274,11 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
 #ifdef USE_SYCL
     sycl::range<1> threads(THREADS);
     sycl::range<1> grids(ntiles*nbatches_shl_pair);
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class orth_ft_tau_dm_kernel_mgv3_sycl>
         (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             orth_ft_tau_dm_kernel(
-                densityR, densityI, tauR, tauI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
+                densityR, densityI, tauR, tauI, dm, dev_envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
                 mesh_cum, nimgs_cum, ntiles, factor);
         }).wait();
 #else

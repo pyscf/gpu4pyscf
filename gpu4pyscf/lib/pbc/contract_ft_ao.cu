@@ -157,6 +157,18 @@ while (1) {
             img_counts[t_id] = img1 - img0;
         }
         __syncthreads();
+#ifdef USE_SYCL
+        // See ft_ao.cu for why a sub-group shuffle restricted to a lane
+        // subset (thread_id < sp_threads) is UB in SYCL when sp_threads
+        // doesn't match the HW sub-group width -- scan serially instead.
+        if (thread_id == 0) {
+            int count = img_counts[0];
+            for (int w = 1; w < sp_threads; ++w) {
+                count = max(count, img_counts[w]);
+            }
+            img_max = count;
+        }
+#else
         if (thread_id < sp_threads) {
             int count = img_counts[thread_id];
             for (int offset = sp_threads/2; offset > 0; offset /= 2) {
@@ -166,6 +178,7 @@ while (1) {
                 img_max = count;
             }
         }
+#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -432,6 +445,18 @@ while (1) {
             img_counts[t_id] = img1 - img0;
         }
         __syncthreads();
+#ifdef USE_SYCL
+        // See ft_ao.cu for why a sub-group shuffle restricted to a lane
+        // subset (thread_id < sp_threads) is UB in SYCL when sp_threads
+        // doesn't match the HW sub-group width -- scan serially instead.
+        if (thread_id == 0) {
+            int count = img_counts[0];
+            for (int w = 1; w < sp_threads; ++w) {
+                count = max(count, img_counts[w]);
+            }
+            img_max = count;
+        }
+#else
         if (thread_id < sp_threads) {
             int count = img_counts[thread_id];
             for (int offset = sp_threads/2; offset > 0; offset /= 2) {
@@ -441,6 +466,7 @@ while (1) {
                 img_max = count;
             }
         }
+#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];

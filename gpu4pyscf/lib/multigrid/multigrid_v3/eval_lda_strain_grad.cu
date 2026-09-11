@@ -402,7 +402,7 @@ extern "C" {
         sycl_get_queue()->parallel_for<class CONCAT(eval_lda_grad_kernel_mgv3_sycl_, CONCAT(li, _##lj))> \
         (sycl::nd_range<2>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { \
             eval_lda_grad_kernel<li,lj,slice_i,slice_j>( \
-                grad, strain, dm, vxc, *envs, bas_ij_idx, grid_frac_ranges, \
+                grad, strain, dm, vxc, dev_envs, bas_ij_idx, grid_frac_ranges, \
                 da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
                 factor, negligible); \
         }).wait(); \
@@ -432,6 +432,7 @@ int evaluate_lda_grad(double *grad, double *strain, double *dm,
 #ifdef USE_SYCL
     sycl::range<2> threads(16, 16);
     sycl::range<2> grids(1, npairs);
+    auto dev_envs = *envs;
 #else
     dim3 threads(16, 16);
 #endif

@@ -192,6 +192,25 @@ else:
 
 
     # -----------------------------------------------------------------
+    # ndarray.reshape(shape) -- CuPy/NumPy accept a bare ndarray as the
+    # shape arg (unpacked element-wise, e.g. `.reshape(cell.mesh)`), but
+    # dpnp's dpctl.tensor.reshape wraps a non-list/tuple shape into a
+    # 1-tuple instead of unpacking it, so `d` in its `operator.index(d)`
+    # loop ends up being the whole array -> TypeError. Normalise here.
+    # -----------------------------------------------------------------
+    if not getattr(dpnp.ndarray.reshape, "__gpu4pyscf_patched__", False):
+        _original_ndarray_reshape = dpnp.ndarray.reshape
+
+        def _ndarray_reshape_method(self, *shape, _orig=_original_ndarray_reshape, **kwargs):
+            if len(shape) == 1 and isinstance(shape[0], np.ndarray):
+                shape = tuple(int(d) for d in shape[0].tolist())
+            return _orig(self, *shape, **kwargs)
+
+        _ndarray_reshape_method.__gpu4pyscf_patched__ = True
+        dpnp.ndarray.reshape = _ndarray_reshape_method
+
+
+    # -----------------------------------------------------------------
     # Initial population of cupy_fake from dpnp (narrow, explicit list)
     # -----------------------------------------------------------------
     for _attr in (
@@ -553,6 +572,38 @@ else:
         _numpy_dot_with_dpnp.__gpu4pyscf_patched__ = True
         np.dot = _numpy_dot_with_dpnp
 
+    # numpy.diag -- same NEP 18 gap as einsum/dot above. cupy.ndarray
+    # implements __array_function__, so on CUDA `numpy.diag(<device array>)`
+    # dispatches to cupy.diag and stays on the device. dpnp.ndarray implements
+    # __array__ instead, which refuses implicit host conversion, so the same
+    # call raises "Implicit conversion to a NumPy array is not allowed" under
+    # SYCL. Dispatching to dpnp.diag keeps the result on the device, matching
+    # the CUDA path (a host round-trip would also work but costs ~22us).
+    #
+    # REVISIT: this patches numpy globally to work around unmodified pyscf
+    # call sites. Known sites reached from gpu4pyscf (pyscf 2.14.0), all
+    # `fock = numpy.diag(mo_energy)`-shaped, none of which gpu4pyscf overrides:
+    #   pyscf/mp/mp2.py:770    _ChemistsERIs._common_init_ (canonical/converged
+    #                          fast path) -- hit via gpu4pyscf/mp/mp2.py
+    #                          _make_eris:123 and gpu4pyscf/mp/dfmp2_old.py
+    #                          DFMP2.ao2mo:146; covers test_mp2.py's test_mp2,
+    #                          test_mp2_frozen, test_mp2_with_df, test_to_cpu
+    #   pyscf/mp/ump2.py:530-531, pyscf/mp/gmp2.py:264   same, U/G variants
+    #   pyscf/mp/mp2.py:136-137, ump2.py:140-143, gmp2.py:79-80   non-canonical
+    #                          `fock[:nocc,:nocc] - numpy.diag(mo_e_o)`
+    #   pyscf/cc/rccsd.py:394,423, pyscf/cc/ccsd_lambda.py:437
+    # If these are ever fixed upstream (or gpu4pyscf grows its own overrides),
+    # this patch can go.
+    if not getattr(np.diag, "__gpu4pyscf_patched__", False):
+        _original_numpy_diag = np.diag
+
+        def _numpy_diag_with_dpnp(v, k=0, _orig=_original_numpy_diag):
+            if isinstance(v, dpnp.ndarray):
+                return dpnp.diag(v, k=k)
+            return _orig(v, k=k)
+
+        _numpy_diag_with_dpnp.__gpu4pyscf_patched__ = True
+        np.diag = _numpy_diag_with_dpnp
 
     # =================================================================
     # tril_indices -- accept numpy.int64 etc.

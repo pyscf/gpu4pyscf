@@ -25,6 +25,27 @@ extern "C" void onemkl_trsm(double* a, double* b,
   e.wait();
 }
 
+extern "C" void onemkl_strsm(float* a, float* b,
+                             int m, int n, int lda, int ldb,
+                             int lower, int trans, int unit_diagonal) {
+  auto queue = *sycl_get_queue();
+
+  oneapi::mkl::uplo uplo = lower ? oneapi::mkl::uplo::L : oneapi::mkl::uplo::U;
+  oneapi::mkl::transpose transA = trans ? oneapi::mkl::transpose::T : oneapi::mkl::transpose::N;
+  oneapi::mkl::diag diag = unit_diagonal ? oneapi::mkl::diag::U : oneapi::mkl::diag::N;
+  float alpha = 1.0f;
+
+  // in-place
+  auto e = oneapi::mkl::blas::column_major::trsm(queue,
+                                                 oneapi::mkl::side::left,
+                                                 uplo,
+                                                 transA,
+                                                 diag,
+                                                 m, n, alpha,
+                                                 a, lda, b, ldb);
+  e.wait();
+}
+
 extern "C" void onemkl_dsygvd_scratchpad_size(int itype,
                                               int n,
                                               int lda,

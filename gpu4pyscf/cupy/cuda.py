@@ -1347,6 +1347,13 @@ def get_device_name():
     libgpu.sycl_get_device_name(buf, ctypes.c_int(len(buf)))
     return buf.value.decode('utf-8', errors='replace')
 
+def get_device_id() -> int:
+    """Current SYCL device id (maps to CUDA cudaGetDevice).
+
+    Queries the registered SYCL queue's device.
+    """
+    return int(libgpu.sycl_get_device_id())
+
 
 # =====================================================================
 # Device -- singleton per id, backed by the shared _device_cache on _state.

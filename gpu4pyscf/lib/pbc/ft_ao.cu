@@ -350,6 +350,23 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
             img_counts[warp_id] = img1 - img0;
         }
         __syncthreads();
+#ifdef USE_SYCL
+        // A sub-group shuffle reduction restricted to thread_id < WARPS is UB in
+        // SYCL: sub-group collectives require every lane of the *hardware*
+        // sub-group to participate uniformly, but this HW's sub-group width
+        // (16 on Intel Data Center GPU Max) doesn't match WARPS (8), so only
+        // part of the sub-group would call shift_group_left. CUDA's masked
+        // __shfl_down_sync tolerates this (warp is a fixed 32 lanes and the
+        // mask exactly matches the active lanes), so keep that path for CUDA
+        // and just scan img_counts[] serially here instead.
+        if (thread_id == 0) {
+            int count = img_counts[0];
+            for (int w = 1; w < WARPS; ++w) {
+                count = max(count, img_counts[w]);
+            }
+            img_max = count;
+        }
+#else
         if (thread_id < WARPS) {
             int count = img_counts[thread_id];
             unsigned mask = (1u << WARPS) - 1;
@@ -360,6 +377,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                 img_max = count;
             }
         }
+#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];

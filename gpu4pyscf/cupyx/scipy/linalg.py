@@ -35,6 +35,19 @@ libonemkl.onemkl_trsm.argtypes = [
 ]
 libonemkl.onemkl_trsm.restype = None
 
+libonemkl.onemkl_strsm.argtypes = [
+    ctypes.c_void_p,  # A
+    ctypes.c_void_p,  # B
+    ctypes.c_int,     # m
+    ctypes.c_int,     # n
+    ctypes.c_int,     # lda
+    ctypes.c_int,     # ldb
+    ctypes.c_int,     # lower
+    ctypes.c_int,     # trans
+    ctypes.c_int      # unit_diagonal
+]
+libonemkl.onemkl_strsm.restype = None
+
 ###########################################################################################################
 
 def solve_triangular(a, b, trans=0, lower=False, unit_diagonal=False,
@@ -104,12 +117,17 @@ def solve_triangular(a, b, trans=0, lower=False, unit_diagonal=False,
 
     m, n = (b.size, 1) if b.ndim == 1 else b.shape
 
-    libonemkl.onemkl_trsm(ctypes.cast(a.data.ptr, ctypes.c_void_p),
-                          ctypes.cast(b.data.ptr, ctypes.c_void_p),
-                          ctypes.c_int(m), ctypes.c_int(n),
-                          ctypes.c_int(m), ctypes.c_int(m),
-                          ctypes.c_int(lower), ctypes.c_int(trans_flag),
-                          ctypes.c_int(unit_diagonal))
+    if dtype.char == 'f':
+        trsm_func = libonemkl.onemkl_strsm
+    else:
+        trsm_func = libonemkl.onemkl_trsm
+
+    trsm_func(ctypes.cast(a.data.ptr, ctypes.c_void_p),
+              ctypes.cast(b.data.ptr, ctypes.c_void_p),
+              ctypes.c_int(m), ctypes.c_int(n),
+              ctypes.c_int(m), ctypes.c_int(m),
+              ctypes.c_int(lower), ctypes.c_int(trans_flag),
+              ctypes.c_int(unit_diagonal))
     return b
 
 ###########################################################################################################

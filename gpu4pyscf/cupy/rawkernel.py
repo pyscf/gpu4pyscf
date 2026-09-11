@@ -140,6 +140,47 @@ using std::cos;
 #define rsqrt(x)   (sycl::rsqrt((double)(x)))
 #define rsqrtf(x)  (sycl::rsqrt((float)(x)))
 #define __fdividef(a, b) ((float)(a) / (float)(b))
+
+// CUDA built-in vector types used by the embedded kernels. Plain structs
+// with the same layout/member names as the CUDA originals -- no alignment
+// annotations, since these kernels only ever access them element-wise.
+struct double2 { double x, y; };
+struct float2  { float x, y; };
+struct int2    { int x, y; };
+static inline double2 make_double2(double x, double y) { return double2{x, y}; }
+static inline float2  make_float2(float x, float y)   { return float2{x, y}; }
+static inline int2    make_int2(int x, int y)         { return int2{x, y}; }
+
+// CUDA atomicAdd -> sycl::atomic_ref (relaxed, device scope) compound add.
+template <typename T>
+static inline T atomicAdd(T *addr, T val) {
+    sycl::atomic_ref<T, sycl::memory_order::relaxed, sycl::memory_scope::device> ref(*addr);
+    return ref.fetch_add(val);
+}
+
+// CUDA warp-shuffle-down -> SYCL sub-group shuffle-down. The mask argument
+// is accepted for source compatibility and ignored (matches full-warp use
+// in every embedded kernel; sub-group size is fixed by the compiled device).
+template <typename T>
+static inline T __shfl_down_sync(unsigned mask, T val, unsigned delta) {
+    (void)mask;
+    return sycl::shift_group_left(g4p_compat::_it().get_sub_group(), val, delta);
+}
+template <typename T>
+static inline T __shfl_up_sync(unsigned mask, T val, unsigned delta) {
+    (void)mask;
+    return sycl::shift_group_right(g4p_compat::_it().get_sub_group(), val, delta);
+}
+template <typename T>
+static inline T __shfl_xor_sync(unsigned mask, T val, int lane_mask) {
+    (void)mask;
+    return sycl::permute_group_by_xor(g4p_compat::_it().get_sub_group(), val, lane_mask);
+}
+template <typename T>
+static inline T __shfl_sync(unsigned mask, T val, int src_lane) {
+    (void)mask;
+    return sycl::select_from_group(g4p_compat::_it().get_sub_group(), val, src_lane);
+}
 '''
 
 # Source lines matched here are stripped before compiling: CUDA-only headers

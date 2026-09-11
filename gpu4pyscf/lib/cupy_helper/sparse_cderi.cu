@@ -104,8 +104,9 @@ int unpack_block(CDERI_BLOCK *block, int p1, int p2, int nao, double *buf){
 #ifdef USE_SYCL
     sycl::range<2> threads(THREADS, THREADS);
     sycl::range<2> blocks(blocky, blockx);
+    CDERI_BLOCK dev_block = *block;
     sycl_get_queue()->parallel_for<class _unpack_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      _unpack(*block, nao, p1, buf);
+      _unpack(dev_block, nao, p1, buf);
     });
 #else //USE_SYCL
     dim3 threads(THREADS, THREADS);

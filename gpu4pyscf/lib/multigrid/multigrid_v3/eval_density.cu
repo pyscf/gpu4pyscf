@@ -331,10 +331,11 @@ extern "C" {
     case (li * LMAX1 + lj): { \
         sycl::range<1> sycl_threads(THREADS); \
         sycl::range<1> sycl_grids(block_grid); \
+        auto dev_envs = *envs; \
         sycl_get_queue()->parallel_for<class CONCAT(eval_density_kernel_mgv3_sycl_##li##_##lj##_##slice_i##_##slice_j##_##non_orth##_, __LINE__)> \
             (sycl::nd_range<1>(sycl_grids * sycl_threads, sycl_threads), [=](auto item) [[intel::kernel_args_restrict]] { \
                 eval_density_kernel<li,lj,slice_i,slice_j,non_orth>( \
-                    density, dm, *envs, supmol_img_coords, factor, \
+                    density, dm, dev_envs, supmol_img_coords, factor, \
                     shl_pair_offsets, dressed_bas_ij_idx, \
                     grid_tile_index, n_contributing_tiles, tiles_per_block, \
                     a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \

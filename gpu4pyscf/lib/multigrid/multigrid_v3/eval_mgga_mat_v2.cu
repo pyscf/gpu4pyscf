@@ -340,7 +340,7 @@ extern "C" {
         sycl_get_queue()->parallel_for<class CONCAT(eval_mgga_mat_kernel_v2_mgv3_sycl_, CONCAT(li, _##lj))> \
         (sycl::nd_range<2>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] { \
             eval_mgga_mat_kernel_v2<li,lj,slice_i,slice_j>( \
-                out, vxc, tau, *envs, bas_ij_idx, grid_frac_ranges, \
+                out, vxc, tau, dev_envs, bas_ij_idx, grid_frac_ranges, \
                 da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
                 negligible); \
         }).wait(); \
@@ -369,6 +369,7 @@ int evaluate_mgga_mat_v2(double *out, double *vxc, double *tau, PBCIntEnvVars *e
 #ifdef USE_SYCL
     sycl::range<2> threads(16, 16);
     sycl::range<2> grids(1, npairs);
+    auto dev_envs = *envs;
 #else
     dim3 threads(16, 16);
 #endif

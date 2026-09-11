@@ -256,10 +256,11 @@ int orth_contract_aopair_dm(double *outR, double *outI,
 #ifdef USE_SYCL
     sycl::range<1> threads(THREADS);
     sycl::range<1> grids(ntiles*nbatches_shl_pair);
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class orth_aopair_dm_kernel_mgv3_sycl>
         (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             orth_aopair_dm_kernel(
-                outR, outI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
+                outR, outI, dm, dev_envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
                 mesh_cum, nimgs_cum, ntiles, factor);
         }).wait();
 #else

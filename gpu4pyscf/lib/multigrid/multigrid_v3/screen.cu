@@ -531,10 +531,11 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
 #ifdef USE_SYCL
     sycl::range<1> threads(THREADS);
     sycl::range<1> grids(batches);
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class grid_ranges_kernel_mgv3_sycl>
         (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             grid_ranges_kernel(
-                grid_frac_ranges, pair_ke, Ecut_by_shell, *envs, bas_ij_idx,
+                grid_frac_ranges, pair_ke, Ecut_by_shell, dev_envs, bas_ij_idx,
                 li_inc, lj_inc, npairs, log_threshold, undressed_threshold, ke_max);
         }).wait();
 #else
@@ -592,10 +593,11 @@ int bvk_ovlp_mask_estimation(int8_t *ovlp_mask, PBCIntEnvVars *envs,
 #ifdef USE_SYCL
     sycl::range<2> threads(16, 16);
     sycl::range<2> grids((bvk_nbas + 15) / 16, (nbas + 15) / 16);
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class ovlp_mask_estimation_kernel_mgv3_sycl>
         (sycl::nd_range<2>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             ovlp_mask_estimation_kernel(
-                ovlp_mask, *envs, img_coords, nimgs, log_cutoff);
+                ovlp_mask, dev_envs, img_coords, nimgs, log_cutoff);
         }).wait();
 #else
     dim3 threads(16, 16);
@@ -619,10 +621,11 @@ int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
 #ifdef USE_SYCL
     sycl::range<1> threads(THREADS);
     sycl::range<1> grids(blocks);
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class supmol_non_trivial_pairs_kernel_mgv3_sycl>
         (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             supmol_non_trivial_pairs_kernel(
-                supmol_bas_ij, bas_ij_idx, *envs, npairs, log_cutoff, is_mgga, head);
+                supmol_bas_ij, bas_ij_idx, dev_envs, npairs, log_cutoff, is_mgga, head);
         }).wait();
 #else
     supmol_non_trivial_pairs_kernel<<<blocks, THREADS>>>(
@@ -644,10 +647,11 @@ int estimate_aft_Ecut(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
 #ifdef USE_SYCL
     sycl::range<1> threads(THREADS);
     sycl::range<1> grids(blocks);
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class estimate_aft_Ecut_kernel_mgv3_sycl>
         (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             estimate_aft_Ecut_kernel(
-                Ecut, bas_ij_idx, *envs, img_coords, nimgs, npairs, log_cutoff,
+                Ecut, bas_ij_idx, dev_envs, img_coords, nimgs, npairs, log_cutoff,
                 Ecut_max, is_mgga);
         }).wait();
 #else
