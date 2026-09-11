@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <cuda_runtime.h>
+
 __constant__ int c_nf[] = {
     1,
     3,

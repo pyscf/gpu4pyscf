@@ -28,9 +28,24 @@
 #include "gvhf-rys/build_rys_gxyz.cuh"
 #include "pbc/create_tasks.cu"
 
+#ifdef USE_SYCL
+// NOTE: this device_global and PBC_make_gxyz_offset() below are deliberately
+// named differently from their libgvhf_rys counterparts. Both libraries are
+// loaded into the SAME process (verified via /proc/self/maps), neither lists
+// the other in DT_NEEDED, and the symbols are GLOBAL DEFAULT visibility. When
+// both exported `s_pbc_gxyz_offset` / `PBC_make_gxyz_offset`, the dynamic linker
+// bound every caller in the process to whichever library happened to load
+// first -- so one library's device_global was written by the other library's
+// host memcpy, leaving its own copy uninitialised. Reading it yields garbage
+// int8_t offsets that flow into load_dm() as an arbitrary pointer
+// displacement. Keep these names library-unique.
+SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_pbc_gxyz_offset;
+#endif
+
 #define GOUT_WIDTH1     81
 
 // gout_pattern = ((li == 0) << 3) | ((lj == 0) << 2) | ((lk == 0) << 1) | (ll == 0);
+template <int OFFSET>
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
@@ -38,16 +53,53 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                   float *q_cond_ij, float *q_cond_kl,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                  float dm_penalty, int64_t *pool, int *head,
-                  int gout_pattern, int reserved_shm_size)
+                  float dm_penalty,
+                  int64_t *pool, int *head_base, const GXYZOffset *p_gxyz_offsets,
+                  int gout_pattern, int reserved_shm_size
+                  #ifdef USE_SYCL
+                  , sycl::nd_item<2> &item, std::byte *shm_mem
+                  #endif
+                  )
 {
     // sq is short for shl_quartet
+    #ifdef USE_SYCL
+    int sq_id = item.get_local_id(1);
+    int nsq_per_block = item.get_local_range(1);
+    int gout_id = item.get_local_id(0);
+    int gout_stride = item.get_local_range(0);
+    int thread_id = item.get_local_id(1) + item.get_local_range(1) * item.get_local_id(0);
+
+    int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
+    int64_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+
+    double *shared_memory = reinterpret_cast<double *>(shm_mem);
+
+    auto thread_block = item.get_group();
+    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    auto gxyz_offsets = s_pbc_gxyz_offset.get() + OFFSET;
+    #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
+
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+
     extern __shared__ double shared_memory[];
     __shared__ int ntasks, pair_ij, pair_kl0;
     __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
@@ -56,6 +108,12 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+
+    // c_gxyz_offset is a 256-entry __constant__; the launcher copies the
+    // chunk for this OFFSET into it before each launch, so no offset here.
+    const GXYZOffset *gxyz_offsets = p_gxyz_offsets;
+    #endif
+    int *head = head_base + OFFSET/256;
 
     int li = bounds.li;
     int lj = bounds.lj;
@@ -252,7 +310,7 @@ while (1) {
                     if (task_id >= ntasks) {
                         continue;
                     }
-                    GXYZOffset goff = c_gxyz_offset[gout_id];
+                    GXYZOffset goff = gxyz_offsets[gout_id];
                     int *addr_i = idx_i + goff.ioff*3;
                     int *addr_j = idx_j + goff.joff*3;
                     int *addr_k = idx_k + goff.koff*3;
@@ -281,7 +339,7 @@ while (1) {
         __syncthreads();
 
         if (task_id < ntasks) {
-            GXYZOffset goff = c_gxyz_offset[gout_id];
+            GXYZOffset goff = gxyz_offsets[gout_id];
             int ioff = goff.ioff;
             int joff = goff.joff;
             int koff = goff.koff;
@@ -329,7 +387,9 @@ while (1) {
 
 // Requires room for 256*3 entries: the tile count prod((nf+2)/3) reaches 625
 // at (4,4,4,4), and the launcher copies it out in chunks of 256.
-void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
+// NOTE: kept as PBC_make_gxyz_offset (not renamed to RYS_make_gxyz_offset to
+// match upstream) -- see the symbol-collision comment above this function.
+GXYZOffset *PBC_make_gxyz_offset(GXYZOffset *goff, BoundsInfo &bounds)
 {
 /*
     nfi = (li + 1) * (li + 2) // 2
@@ -353,19 +413,29 @@ void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
     for (int j = 0; j < nfj; j += 3) {
     for (int k = 0; k < nfk; k += 3) {
     for (int l = 0; l < nfl; l += 3) {
-        gxyz_offset[nf].ioff = i;
-        gxyz_offset[nf].joff = j;
-        gxyz_offset[nf].koff = k;
-        gxyz_offset[nf].loff = l;
+        goff[nf].ioff = i;
+        goff[nf].joff = j;
+        goff[nf].koff = k;
+        goff[nf].loff = l;
         ++nf;
     } } } }
     // n+m must be clamped too: nf need not divide 256, so the last round
     // would otherwise write past entry 255.
     for (int n = nf; n < 256; n += nf) {
         for (int m = 0; m < nf && n+m < 256; ++m) {
-            gxyz_offset[n+m] = gxyz_offset[m];
+            goff[n+m] = goff[m];
         }
     }
+    #ifdef USE_SYCL
+    sycl_get_queue()->memcpy(s_pbc_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset)).wait();
+    return nullptr;
+    #else
+    // c_gxyz_offset holds only 256 entries; the launchers copy each 256-tile
+    // chunk (goff+OFFSET) into it right before the corresponding launch.
+    GXYZOffset *p_gxyz_offset;
+    cudaGetSymbolAddress((void**)&p_gxyz_offset, c_gxyz_offset);
+    return p_gxyz_offset;
+    #endif
 }
 
 void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
@@ -496,8 +566,8 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl,
                            diffuse_exps, dm_penalty, pool, head, workers)) {
-        GXYZOffset gxyz_offset[256*3];
-        RYS_make_gxyz_offset(gxyz_offset, bounds);
+        GXYZOffset gxyz_offset[625];
+        GXYZOffset* p_gxyz_offset = PBC_make_gxyz_offset(gxyz_offset, bounds);
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
@@ -505,15 +575,34 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                             ( ll == 0));
 
         auto launch = [&](auto offset, int tile_chunk) {
-            checkCudaErrors(
-                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
-                                   tile_chunk*sizeof(GXYZOffset),
-                                   0, cudaMemcpyHostToDevice));
+            constexpr int OFFSET = decltype(offset)::value;
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
+            int reserved_shm_size = scheme[3];
+
+            #ifdef USE_SYCL
+            sycl::range<2> blocks(1, workers);
+            sycl::range<2> threads(scheme[1], scheme[0]);
+            auto dev_envs = *envs;
+            sycl_get_queue()->submit([&](sycl::handler &cgh) {
+              sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh);
+              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                rys_k_kernel<OFFSET>(dev_envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
+                                     supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                                     q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                                     dm_penalty, pool, head, p_gxyz_offset,
+                                     gout_pattern, reserved_shm_size,
+                                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              });
+            });
+            #else
+            checkCudaErrors(
+                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+OFFSET,
+                                   tile_chunk*sizeof(GXYZOffset),
+                                   0, cudaMemcpyHostToDevice));
             if (buflen > 48000) {
-                cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaFuncSetAttribute(rys_k_kernel<OFFSET>, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
                 cudaError_t err = cudaGetLastError();
                 if (err != cudaSuccess) {
                     fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
@@ -522,19 +611,20 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 }
             }
             dim3 threads(scheme[0], scheme[1]);
-            int reserved_shm_size = scheme[3];
-            rys_k_kernel<<<workers, threads, buflen>>>(
+            rys_k_kernel<OFFSET><<<workers, threads, buflen>>>(
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                dm_penalty, pool, head + offset/256,
+                dm_penalty, pool, head, p_gxyz_offset,
                 gout_pattern, reserved_shm_size);
+            #endif
         };
 
-        launch(0, 256);
-        if (n_tiles > 256) launch(256, min(256, n_tiles-256));
-        if (n_tiles > 512) launch(512, min(256, n_tiles-512));
+        launch(std::integral_constant<int,   0>{}, 256);
+        if (n_tiles > 256) launch(std::integral_constant<int, 256>{}, min(256, n_tiles-256));
+        if (n_tiles > 512) launch(std::integral_constant<int, 512>{}, min(256, n_tiles-512));
     }
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         int device_id = -1;

@@ -43,15 +43,31 @@ __global__
 void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                               PBCIntEnvVars envs, int nGv, int shm_size,
                               int *bas_ij_idx, int *bas_ij_img_idx,
-                              int *shl_pair_offsets, int permutation_symmetry)
+                              int *shl_pair_offsets, int permutation_symmetry
+                              #ifdef USE_SYCL
+                              , sycl::nd_item<2> &item, char *shm_mem
+                              #endif
+                              )
 {
     constexpr int nGv_per_block = NGV_PER_BLOCK;
     constexpr int threads = NGV_PER_BLOCK * NSP_PER_BLOCK;
+    #ifdef USE_SYCL
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int thread_id = item.get_local_id(1) + item.get_local_id(0) * item.get_local_range(1);
+    double *shared_memory = reinterpret_cast<double *>(shm_mem);
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    #else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int Gv_id_in_block = threadIdx.x;
-
     int thread_id = threadIdx.x + threadIdx.y * blockDim.x;
+    extern __shared__ double shared_memory[];
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    #endif
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
@@ -73,8 +89,8 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
         gout_stride *= 2;
     }
     int nsp_per_block = NSP_PER_BLOCK / gout_stride;
-    int gout_id = threadIdx.y % gout_stride;
-    int sp_id = threadIdx.y / gout_stride;
+    int gout_id = threadIdx_y % gout_stride;
+    int sp_id = threadIdx_y / gout_stride;
     int Gv_gout_id = Gv_id_in_block + nGv_per_block * gout_id;
     int nGv_gout = nGv_per_block * gout_stride;
     int lij = li + lj + 1;
@@ -100,7 +116,6 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
     }
     double kk = kx * kx + ky * ky + kz * kz;
 
-    extern __shared__ double shared_memory[];
     double *gxR = shared_memory + g_size * nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len*1;
     double *gyR = gxR + gx_len*2;
@@ -108,8 +123,8 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
     double *rjri = shared_memory + gx_len * 6 + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         __syncthreads();
@@ -362,15 +377,33 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
                               double *dm, double *vG, double *Gv,
                               PBCIntEnvVars envs, int nGv, int shm_size,
                               int *bas_ij_idx, int *bas_ij_img_idx,
-                              int *shl_pair_offsets, int permutation_symmetry)
+                              int *shl_pair_offsets, int permutation_symmetry     
+                              #ifdef USE_SYCL
+                              , sycl::nd_item<2> &item, char *shm_mem
+                              #endif
+                              )
 {
     constexpr int nGv_per_block = NGV_PER_BLOCK;
     constexpr int threads = NGV_PER_BLOCK * NSP_PER_BLOCK;
+
+    #ifdef USE_SYCL
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int thread_id = item.get_local_id(1) + item.get_local_id(0) * item.get_local_range(1);
+    double *shared_memory = reinterpret_cast<double *>(shm_mem);
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    #else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int Gv_id_in_block = threadIdx.x;
-
     int thread_id = threadIdx.x + threadIdx.y * blockDim.x;
+    extern __shared__ double shared_memory[];
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    #endif
+
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
@@ -392,8 +425,8 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
         gout_stride *= 2;
     }
     int nsp_per_block = NSP_PER_BLOCK / gout_stride;
-    int gout_id = threadIdx.y % gout_stride;
-    int sp_id = threadIdx.y / gout_stride;
+    int gout_id = threadIdx_y % gout_stride;
+    int sp_id = threadIdx_y / gout_stride;
     int Gv_gout_id = Gv_id_in_block + nGv_per_block * gout_id;
     int nGv_gout = nGv_per_block * gout_stride;
     int lij = li + lj + 1;
@@ -419,7 +452,6 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
     }
     double kk = kx * kx + ky * ky + kz * kz;
 
-    extern __shared__ double shared_memory[];
     double *gxR = shared_memory + g_size * nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len*1;
     double *gyR = gxR + gx_len*2;
@@ -427,8 +459,8 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
     double *rjri = shared_memory + gx_len * 6 + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     double sigma_xx = 0;
     double sigma_xy = 0;
@@ -743,9 +775,23 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int permutation_symmetry)
 {
+    int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
+
+    #ifdef USE_SYCL
+    sycl::range<2> threads(NSP_PER_BLOCK, NGV_PER_BLOCK);
+    sycl::range<2> blocks(Gv_batches, nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class ft_aopair_ejk_ip1_sycl1>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        ft_aopair_ejk_ip1_kernel(out, dm, vG, GvT, dev_envs, ngrids, shm_size,
+                                 bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry,
+                                 item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
     cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
-    int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
             out, dm, vG, GvT, *envs, ngrids, shm_size,
@@ -755,6 +801,7 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
         fprintf(stderr, "CUDA Error in ft_aopair_ej_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -763,9 +810,23 @@ int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars 
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int permutation_symmetry)
 {
+    int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
+
+    #ifdef USE_SYCL
+    sycl::range<2> threads(NSP_PER_BLOCK, NGV_PER_BLOCK);
+    sycl::range<2> blocks(Gv_batches, nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class ft_aopair_ejk_ip1_sycl2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        ft_aopair_ejk_ip1_kernel(out, dm_vG, NULL, GvT, dev_envs, ngrids, shm_size,
+                                 bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry,
+                                 item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
     cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
-    int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
             out, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
@@ -775,6 +836,7 @@ int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars 
         fprintf(stderr, "CUDA Error in ft_aopair_ek_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -785,8 +847,21 @@ int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
                          int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
     int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(NSP_PER_BLOCK, NGV_PER_BLOCK);
+    sycl::range<2> blocks(Gv_batches, nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class ft_aopair_strain_deriv_sycl1>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        ft_aopair_strain_deriv_kernel(out, sigma, dm, vG, GvT, dev_envs, ngrids, shm_size,
+                                      bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry,
+                                      item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
+    dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_strain_deriv_kernel<<<blocks, threads, shm_size>>>(
             out, sigma, dm, vG, GvT, *envs, ngrids, shm_size,
@@ -796,6 +871,7 @@ int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
         fprintf(stderr, "CUDA Error in ft_aopair_ej_strain_deriv: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -805,9 +881,23 @@ int PBC_ft_aopair_ek_strain_deriv(double *out, double *sigma,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int permutation_symmetry)
 {
+    int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
+
+    #ifdef USE_SYCL
+    sycl::range<2> threads(NSP_PER_BLOCK, NGV_PER_BLOCK);
+    sycl::range<2> blocks(Gv_batches, nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class ft_aopair_strain_deriv_sycl2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        ft_aopair_strain_deriv_kernel(out, sigma, dm_vG, NULL, GvT, dev_envs, ngrids, shm_size,
+                                      bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry,
+                                      item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
     cudaFuncSetAttribute(ft_aopair_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
-    int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_strain_deriv_kernel<<<blocks, threads, shm_size>>>(
             out, sigma, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
@@ -817,6 +907,7 @@ int PBC_ft_aopair_ek_strain_deriv(double *out, double *sigma,
         fprintf(stderr, "CUDA Error in ft_aopair_ek_strain_deriv: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

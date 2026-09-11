@@ -17,11 +17,19 @@
 __device__
 void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, double aij, double ur)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     const double kaij = k / (2*aij);
     const double fac = kaij * kaij * aij;
     double r = 0.0;
-    if (threadIdx.x < NGAUSS){
-        r = r128[threadIdx.x];
+    if (threadIdx_x < NGAUSS){
+        r = r128[threadIdx_x];
     }
     double tmp = r - kaij;
     tmp = fac - aij*tmp*tmp;
@@ -38,7 +46,7 @@ void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, doubl
         _ine(bval, LIJ, k*r);
     }
 
-    for (int i = threadIdx.x; i < LIJ1*LIJ1; i+=blockDim.x){
+    for (int i = threadIdx_x; i < LIJ1*LIJ1; i+=blockDim_x){
         rad_all[i] = 0.0;
     }
     __syncthreads();
@@ -93,6 +101,14 @@ double type1_ang_nuc_l(const int i, const int j, const int k, double *unitr){
 __device__
 void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, const double fac)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -107,7 +123,7 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
 
     // loop over i+j+k<=LIJ
     // TODO: find a closed form?
-    for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
+    for (int n = threadIdx_x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim_x){
         const int i = n/(LIJ+1)/(LIJ+1);
         const int j = n/(LIJ+1)%(LIJ+1);
         const int k = n%(LIJ+1);
@@ -127,7 +143,7 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
         //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
     }
 
-    for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
+    for (int n = threadIdx_x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim_x){
         const int i = n/(LIJ+1)/(LIJ+1);
         const int j = n/(LIJ+1)%(LIJ+1);
         const int k = n%(LIJ+1);
@@ -150,6 +166,14 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
 template <int LIJ> __device__
 void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -164,7 +188,7 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac
 
     // loop over i+j+k<=LIJ
     // TODO: find a closed form?
-    for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
+    for (int n = threadIdx_x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim_x){
         const int i = n/(LIJ+1)/(LIJ+1);
         const int j = n/(LIJ+1)%(LIJ+1);
         const int k = n%(LIJ+1);
@@ -184,7 +208,7 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac
         //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
     }
 
-    for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
+    for (int n = threadIdx_x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim_x){
         const int i = n/(LIJ+1)/(LIJ+1);
         const int j = n/(LIJ+1)%(LIJ+1);
         const int k = n%(LIJ+1);
@@ -211,7 +235,21 @@ void type1_cart(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
+    constexpr int LIJ1 = LI+LJ+1;
+
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    auto thread_block = item.get_group();
+    const int task_id = thread_block.get_group_id(0);
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    double (&rad_ang)[LIJ1*LIJ1*LIJ1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ1*LIJ1*LIJ1]>(thread_block);
+#else // USE_SYCL
     const int task_id = blockIdx.x;
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    __shared__ double rad_ang[LIJ1*LIJ1*LIJ1];
+#endif // USE_SYCL
     if (task_id >= ntasks){
         return;
     }
@@ -247,8 +285,6 @@ void type1_cart(double *gctr,
         ur += rad_part(kbas, ecpbas, env);
     }
 
-    constexpr int LIJ1 = LI+LJ+1;
-    __shared__ double rad_ang[LIJ1*LIJ1*LIJ1];
     set_shared_memory(rad_ang, LIJ1*LIJ1*LIJ1);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
@@ -261,7 +297,11 @@ void type1_cart(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai[ip] + aj[jp];
 
+            #ifdef USE_SYCL
+            double (&rad_all)[LIJ1*LIJ1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ1*LIJ1]>(thread_block);
+            #else
             __shared__ double rad_all[LIJ1*LIJ1];
+            #endif
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
             __syncthreads();
 
@@ -280,7 +320,7 @@ void type1_cart(double *gctr,
     double fj[3*nfj];
     cache_fac<LJ>(fj, rcb);
 
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int mi = ij%nfi;
         const int mj = ij/nfi;
 
@@ -331,9 +371,22 @@ void type1_cart(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env)
+                const int *atm, const int *bas, const double *env
+#ifdef USE_SYCL
+                , sycl::nd_item<1> &item, double* smem
+#endif
+                )
 {
+#ifdef USE_SYCL
+    const int task_id = item.get_group(0);
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+#else
     const int task_id = blockIdx.x;
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    extern __shared__ double smem[];
+#endif
     if (task_id >= ntasks){
         return;
     }
@@ -341,8 +394,6 @@ void type1_cart(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-
-    extern __shared__ double smem[];
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
@@ -403,7 +454,7 @@ void type1_cart(double *gctr,
     }
     const int nfi = (LI+1) * (LI+2) / 2;
     const int nfj = (LJ+1) * (LJ+2) / 2;
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         double fi[3*NF_MAX];
         cache_fac(fi, LI, rca);
         double fj[3*NF_MAX];
@@ -447,7 +498,7 @@ void type1_cart(double *gctr,
 
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij%nfi;
         const int j = ij/nfi;
         double tmp = reg_gctr[ij/THREADS];
@@ -458,4 +509,3 @@ void type1_cart(double *gctr,
     }
     return;
 }
-

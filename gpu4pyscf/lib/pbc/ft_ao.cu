@@ -1,5 +1,5 @@
 /*
- * Copyright 2024-2026 The PySCF Developers. All Rights Reserved.
+ * Copyright 2024 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,9 +29,11 @@
 #define WARP_SIZE       32
 #endif
 #define WARPS           8
-#define THREADS         256
-#define NG_PER_BLOCK    WARP_SIZE
 #define FT_AO_THREADS   (WARP_SIZE*4)
+// One shell per block (nsh_per_block == 1): every thread in the block then
+// sees the same shell's iprim, so the primitive loop's __syncthreads() trip
+// count is uniform without needing a per-block max-iprim workaround.
+#define NG_PER_BLOCK    FT_AO_THREADS
 #define GOUT_WIDTH      30
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
@@ -43,22 +45,42 @@
 __global__ static
 void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 {
+    int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+
+    int sh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int Gv_block_id = item.get_group(1);
+    int sh_id_in_block = item.get_local_id(0);
+    int Gv_id_in_block = item.get_local_id(1);
+
+    double (&g)[(AUXL+1)*FT_AO_THREADS * 6] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[(AUXL+1)*FT_AO_THREADS * 6]>(item.get_group());
+    #else
     int sh_block_id = gridDim.y - blockIdx.y - 1;
     int Gv_block_id = blockIdx.x;
-    int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
     int sh_id_in_block = threadIdx.y;
     int Gv_id_in_block = threadIdx.x;
+
+    __shared__ double g[(AUXL+1)*FT_AO_THREADS * 6];
+    #endif
+
     int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
-    if (sh_id >= envs.nbas) {
-        return;
-    }
+    // A work-item whose shell index falls outside envs.nbas cannot return
+    // here: every __syncthreads() below is a real SYCL group_barrier, which
+    // -- unlike CUDA's warp-retirement semantics -- requires every work-item
+    // in the group to reach it. Clamp to a valid shell instead so out-of-
+    // range lanes take the identical control-flow path (and therefore the
+    // same barrier count) as their neighbours; the final write-out below is
+    // masked so the clamped, discarded computation never reaches memory.
+    int valid = sh_id < envs.nbas;
+    int sh_id_clamped = valid ? sh_id : envs.nbas - 1;
 
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
-    int li = bas[sh_id*BAS_SLOTS+ANG_OF];
+    int li = bas[sh_id_clamped*BAS_SLOTS+ANG_OF];
     int nfi = c_nf[li];
-    int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
+    int iprim = bas[sh_id_clamped*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
     double kx = 0;
     double ky = 0;
@@ -71,14 +93,13 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double kk = kx * kx + ky * ky + kz * kz;
 
     int gx_len = (AUXL+1) * FT_AO_THREADS;
-    __shared__ double g[(AUXL+1)*FT_AO_THREADS * 6];
     double *gxR = g + (AUXL+1) * NG_PER_BLOCK * sh_id_in_block + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
     double *gyI = gxR + gx_len*3;
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
-    int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
 
     constexpr int aux_nf = (AUXL+1)*(AUXL+2)/2;
     double goutR[aux_nf];
@@ -95,9 +116,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double s0zR, s1zR, s2zR;
     double s0zI, s1zI, s2zI;
 
-    int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
-    double *expi = env + bas[sh_id*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[sh_id*BAS_SLOTS+PTR_COEFF];
+    int ia = bas[sh_id_clamped*BAS_SLOTS+ATOM_OF];
+    double *expi = env + bas[sh_id_clamped*BAS_SLOTS+PTR_EXP];
+    double *ci = env + bas[sh_id_clamped*BAS_SLOTS+PTR_COEFF];
     double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
     for (int ip = 0; ip < iprim; ++ip) {
         __syncthreads();
@@ -187,9 +208,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
         }
     }
 
-    if (Gv_id < nGv) {
+    if (valid && Gv_id < nGv) {
         size_t stride = (size_t)nGv * OF_COMPLEX;
-        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
+        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id_clamped] * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
         for (int n = 0; n < aux_nf; ++n) {
             if (n >= nfi) break;
@@ -203,36 +224,61 @@ __global__ static
 void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pair_offsets,
                       uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                       int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
-                      double *Gv, int nGv, int *ao_loc, int compressing, int to_sph,
-                      int *head, int nbatches_shl_pair)
+                      double *Gv, int nGv, int *ao_loc, int compressing, int to_sph
+                      #ifdef USE_SYCL
+                      , sycl::nd_item<2> &item, char *shm_mem
+                      #endif
+                      )
 {
-    constexpr int nGv_per_block = WARP_SIZE;
-    int thread_id = threadIdx.x;
-    int Gv_id_in_block = thread_id % nGv_per_block;
-    int warp_id = thread_id / nGv_per_block;
-    __shared__ int Gv_block_id, sp_block_id;
-    double *c2s_pool = pool + blockIdx.x * POOL_SIZE;
-while (1) {
-    if (thread_id == 0) {
-        int batch_id = atomicAdd(head, 1);
-        Gv_block_id = batch_id / nbatches_shl_pair;
-        sp_block_id = batch_id - Gv_block_id * nbatches_shl_pair;
-    }
-    __syncthreads();
-    if (Gv_block_id * nGv_per_block >= nGv) {
-        return;
-    }
+    #ifdef USE_SYCL
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int Gv_block_id = item.get_group(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int warp_id = item.get_local_id(0);
+    int blockDim_y = item.get_local_range(0);
 
-    int ncells = envs.bvk_ncells;
-    int bvk_nbas = envs.nbas * ncells;
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double *img_coords = envs.img_coords;
+    auto thread_block = item.get_group();
+    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nao = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &img_max = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int (&img_counts)[WARPS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[WARPS]>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
+    #else
+    int sp_block_id = gridDim.x - blockIdx.x - 1;
+    int Gv_block_id = blockIdx.y;
+    int Gv_id_in_block = threadIdx.x;
+    int warp_id = threadIdx.y;
+    int blockDim_y = blockDim.y;
+
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int li, lj;
     __shared__ int iprim, jprim;
     __shared__ int nao;
     __shared__ int gout_stride, nsp_per_block;
+    __shared__ int img_max;
+    __shared__ int img_counts[WARPS];
+
+    extern __shared__ double shared_memory[];
+    #endif
+
+    // ft_aopair_kernel's grid-points-per-block is independent of ft_ao_bdiv_kernel's
+    // NG_PER_BLOCK (bumped to FT_AO_THREADS for that kernel's divergence fix); upstream
+    // hardcodes WARP_SIZE here and sizes shm_size/grid dims on the host to match.
+    constexpr int nGv_per_block = WARP_SIZE;
+    int thread_id = Gv_id_in_block + nGv_per_block * warp_id;
+    int ncells = envs.bvk_ncells;
+    int bvk_nbas = envs.nbas * ncells;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *img_coords = envs.img_coords;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -247,7 +293,7 @@ while (1) {
         // cannot handle spherical integrals
         nao = ao_loc[envs.nbas];
         gout_stride = gout_stride_lookup[li*LMAX1+lj];
-        nsp_per_block = WARPS / gout_stride;
+        nsp_per_block = blockDim_y / gout_stride;
     }
     __syncthreads();
     int nGsp_per_block = nGv_per_block * nsp_per_block;
@@ -260,7 +306,6 @@ while (1) {
     int stride_j = li + 1;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nGsp_per_block;
-    extern __shared__ double shared_memory[];
     double *gxR = shared_memory + nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
@@ -277,6 +322,7 @@ while (1) {
     if (thread_id < nfj * 3) {
         idx_j[thread_id] = lex_xyz_address(lj, thread_id) * stride_j * nGsp_per_block;
     }
+    double *c2s_pool = pool + get_smid() * POOL_SIZE;
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
     double kx = 0;
@@ -300,12 +346,27 @@ while (1) {
         int jsh = bas_ij % bvk_nbas;
         int img0 = img_offsets[pair_ij];
         int img1 = img_offsets[pair_ij+1];
-        __shared__ int img_max;
-        __shared__ int img_counts[WARPS];
         if (Gv_id_in_block == 0) {
             img_counts[warp_id] = img1 - img0;
         }
         __syncthreads();
+#ifdef USE_SYCL
+        // A sub-group shuffle reduction restricted to thread_id < WARPS is UB in
+        // SYCL: sub-group collectives require every lane of the *hardware*
+        // sub-group to participate uniformly, but this HW's sub-group width
+        // (16 on Intel Data Center GPU Max) doesn't match WARPS (8), so only
+        // part of the sub-group would call shift_group_left. CUDA's masked
+        // __shfl_down_sync tolerates this (warp is a fixed 32 lanes and the
+        // mask exactly matches the active lanes), so keep that path for CUDA
+        // and just scan img_counts[] serially here instead.
+        if (thread_id == 0) {
+            int count = img_counts[0];
+            for (int w = 1; w < WARPS; ++w) {
+                count = max(count, img_counts[w]);
+            }
+            img_max = count;
+        }
+#else
         if (thread_id < WARPS) {
             int count = img_counts[thread_id];
             unsigned mask = (1u << WARPS) - 1;
@@ -316,6 +377,7 @@ while (1) {
                 img_max = count;
             }
         }
+#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -435,7 +497,7 @@ while (1) {
                     }
                 }
                 __syncthreads();
-                if (pair_idx < shl_pair1 && img < img1 && Gv_id < nGv) {
+                if (pair_idx < shl_pair1 && img < img1) {
                     float div_nfi = c_div_nf[li];
 #pragma unroll
                     for (int n = 0; n < GOUT_WIDTH; ++n) {
@@ -1149,15 +1211,23 @@ while (1) {
         }
     }
 }
-}
 
 extern "C" {
 int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int nbas)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
-    dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
+
+    #ifdef USE_SYCL
+    sycl::range<2> threads(nsh_per_block, NG_PER_BLOCK);
+    sycl::range<2> blocks(nbatches_shls, nbatches_grids);
+    auto dev_envs = *envs;
+    sycl_get_queue()->parallel_for<class ft_ao_bdiv_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      ft_ao_bdiv_kernel(out, dev_envs, ngrids, grids);
+    });
+    #else
+    dim3 threads(NG_PER_BLOCK, nsh_per_block);
     dim3 blocks(nbatches_grids, nbatches_shls);
     ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
     cudaError_t err = cudaGetLastError();
@@ -1165,29 +1235,51 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int
         fprintf(stderr, "CUDA Error in ft_ao_bdiv_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
+// `head` is the persistent-worker task counter upstream's kernel consumes via
+// atomicAdd. Both branches below map the grid statically instead, so the
+// pointer is unused -- but it stays in the signature because the ctypes
+// caller in pbc/df/ft_ao.py is upstream code and still passes it; dropping it
+// shifts every later argument by one and aborts the process.
 int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool, int *head,
                     int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
                     uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                     int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
                     double *grids, int ngrids, int *ao_loc, int compressing, int to_sph)
 {
+    (void)head;
+    constexpr int nGv_per_block = WARP_SIZE;
+    int Gv_batches = (ngrids + nGv_per_block - 1) / nGv_per_block;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(WARPS, nGv_per_block);
+    sycl::range<2> blocks(Gv_batches, nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class ft_aopair_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        ft_aopair_kernel(out, dev_envs, pool, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
+                         gout_stride_lookup, ao_pair_loc, ao_pair_offset, grids, ngrids,
+                         ao_loc, compressing, to_sph,
+                         item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
-    ft_aopair_kernel<<<workers, THREADS, shm_size>>>(
+    dim3 threads(nGv_per_block, WARPS);
+    dim3 blocks(nbatches_shl_pair, Gv_batches);
+    ft_aopair_kernel<<<blocks, threads, shm_size>>>(
         out, *envs, pool, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, grids, ngrids,
-        ao_loc, compressing, to_sph, head, nbatches_shl_pair);
+        ao_loc, compressing, to_sph);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

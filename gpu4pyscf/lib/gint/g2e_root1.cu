@@ -19,8 +19,7 @@ static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    KERNEL_SETUP();
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -71,7 +70,7 @@ static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProd
         }
         gout0 += fac;
     } }
-    
+
     int jstride = eri.stride_j;
     int kstride = eri.stride_k;
     int lstride = eri.stride_l;
@@ -89,8 +88,7 @@ static void GINTfill_int2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    KERNEL_SETUP();
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -204,8 +202,7 @@ static void GINTfill_int2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    KERNEL_SETUP();
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }

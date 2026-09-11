@@ -21,9 +21,23 @@ void type2_cart_ipipv(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env)
+                const int *atm, const int *bas, const double *env
+#ifdef USE_SYCL
+                , sycl::nd_item<1> &item, double* smem
+#endif
+                      )
 {
+    constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
+    constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
+
+#ifdef USE_SYCL
+    const int task_id = item.get_group(0);
+    double (&buf1)[nfi2_max*nfj_max] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi2_max*nfj_max]>(item.get_group());
+#else // USE_SYCL
     const int task_id = blockIdx.x;
+    __shared__ double buf1[nfi2_max*nfj_max];
+    extern __shared__ double smem[];
+#endif // USE_SYCL
     if (task_id >= ntasks){
         return;
     }
@@ -37,17 +51,13 @@ void type2_cart_ipipv(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += ioff*nao + joff + 9*ecp_id*nao*nao;
 
-    constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
-    constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    __shared__ double buf1[nfi2_max*nfj_max];
-    type2_cart_kernel<2,0>(
+    type2_cart_kernel<2,0>(smem,
         buf1, LI+2, LJ, LC,
         ish, jsh, ksh,
         ecpbas, ecploc,
         atm, bas, env);
 
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    extern __shared__ double smem[];
     double *buf = smem;
     set_shared_memory(buf, 3*nfi1_max*nfj_max);
     _li_down(buf, buf1, LI+1, LJ);
@@ -55,7 +65,7 @@ void type2_cart_ipipv(double *gctr,
     _li_down_and_write(gctr, buf, LI, LJ, nao);
     __syncthreads();
 
-    type2_cart_kernel<1,0>(
+    type2_cart_kernel<1,0>(smem,
         buf1, LI, LJ, LC,
         ish, jsh, ksh,
         ecpbas, ecploc,
@@ -73,7 +83,7 @@ void type2_cart_ipipv(double *gctr,
         _li_up_and_write(gctr, buf, LI, LJ, nao);
         __syncthreads();
         if (LI > 1){
-            type2_cart_kernel<0,0>(
+            type2_cart_kernel<0,0>(smem,
                 buf1, LI-2, LJ, LC,
                 ish, jsh, ksh,
                 ecpbas, ecploc,
@@ -93,9 +103,23 @@ void type2_cart_ipvip(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env)
+                const int *atm, const int *bas, const double *env
+#ifdef USE_SYCL
+                , sycl::nd_item<1> &item, double* smem
+#endif
+                      )
 {
+    constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+
+#ifdef USE_SYCL
+    const int task_id = item.get_group(0);
+    double (&buf1)[nfi1_max*nfj1_max] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi1_max*nfj1_max]>(item.get_group());
+#else // USE_SYCL
     const int task_id = blockIdx.x;
+    __shared__ double buf1[nfi1_max*nfj1_max];
+    extern __shared__ double smem[];
+#endif // USE_SYCL
     if (task_id >= ntasks){
         return;
     }
@@ -109,17 +133,13 @@ void type2_cart_ipvip(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += ioff*nao + joff + 9*ecp_id*nao*nao;
 
-    constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    __shared__ double buf1[nfi1_max*nfj1_max];
-    type2_cart_kernel<1,1>(
+    type2_cart_kernel<1,1>(smem,
         buf1, LI+1, LJ+1, LC,
         ish, jsh, ksh,
         ecpbas, ecploc,
         atm, bas, env);
 
     constexpr int nfi_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    extern __shared__ double smem[];
     double *buf = smem;
     set_shared_memory(buf, 3*nfi_max*nfj1_max);
     _li_down(buf, buf1, LI, LJ+1);
@@ -127,7 +147,7 @@ void type2_cart_ipvip(double *gctr,
     _lj_down_and_write(gctr, buf, LI, LJ, nao);
     __syncthreads();
     if (LI > 0){
-        type2_cart_kernel<0,1>(
+        type2_cart_kernel<0,1>(smem,
             buf1, LI-1, LJ+1, LC,
             ish, jsh, ksh,
             ecpbas, ecploc,
@@ -140,7 +160,7 @@ void type2_cart_ipvip(double *gctr,
     }
 
     if (LJ > 0){
-        type2_cart_kernel<1,0>(
+        type2_cart_kernel<1,0>(smem,
             buf1, LI+1, LJ-1, LC,
             ish, jsh, ksh,
             ecpbas, ecploc,
@@ -151,7 +171,7 @@ void type2_cart_ipvip(double *gctr,
         _lj_up_and_write(gctr, buf, LI, LJ, nao);
         __syncthreads();
         if (LI > 0){
-            type2_cart_kernel<0,0>(
+            type2_cart_kernel<0,0>(smem,
                 buf1, LI-1, LJ-1, LC,
                 ish, jsh, ksh,
                 ecpbas, ecploc,

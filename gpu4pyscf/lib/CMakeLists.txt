@@ -13,20 +13,125 @@
 # limitations under the License.
 
 cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
-project (gpu4pyscf C CXX CUDA Fortran)
+# OFF by default so that a plain `python setup.py build` produces the CUDA
+# backend, as upstream does. An ON default sent the CUDA CI down the SYCL
+# path, where it failed looking for MKL. setup.py passes -DUSE_SYCL=ON when
+# GPU4PYSCF_BACKEND=sycl is set.
+option(USE_SYCL "Using SYCL backend" OFF)
+
+if (USE_SYCL)
+  project (gpu4pyscf C CXX Fortran)
+else()
+  project (gpu4pyscf C CXX CUDA Fortran)
+endif()
 
 set(CMAKE_C_STANDARD "99")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if (USE_SYCL)
+  set(DPCTL_CMAKE_MODULES_PATH "${PROJECT_SOURCE_DIR}/cmake")
+  list(APPEND CMAKE_MODULE_PATH "${DPCTL_CMAKE_MODULES_PATH}")
+
+  add_compile_definitions(USE_SYCL=1)
+
+  # Production builds AOT-compile device code for Intel PVC (spir64_gen +
+  # -device pvc). That cannot run anywhere without a PVC, so CPU-only CI
+  # (GitHub-hosted runners driving the OpenCL CPU device) passes
+  # -DGPU4PYSCF_SYCL_AOT=OFF to get a generic JIT (spir64) build instead.
+  # Default ON keeps production PVC builds byte-identical.
+  option(GPU4PYSCF_SYCL_AOT "AOT-compile SYCL device code for Intel PVC" ON)
+
+  # Honor a user-supplied CMAKE_BUILD_TYPE (e.g. passed through
+  # CMAKE_CONFIGURE_ARGS="-DCMAKE_BUILD_TYPE=RelWithDebInfo"). When nothing is
+  # supplied, default to Release.
+  #
+  # With AOT (-fsycl-targets=spir64_gen) a -g injected by RelWithDebInfo/Debug
+  # into CMAKE_CXX_FLAGS_<CFG> is forwarded into the device path and reaches
+  # `ocloc -options "-g"`, which compiles device code in debug mode (disables
+  # optimization). To keep the device backend optimized while still giving host
+  # frames file:line for gdb-oneapi, we downgrade the C++ -g to
+  # -gline-tables-only below. Host-side full -g is re-added further down for the
+  # host-only (C/Fortran) translation units, which never carry SYCL device code.
+  if (NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+  endif()
+  message(STATUS "SYCL build: CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+
+  # Downgrade any -g the selected build type injects into the C++ per-config
+  # flags to host-only line tables. This keeps ocloc device compilation
+  # optimized (no -options "-g") while preserving host file:line info. C and
+  # Fortran host TUs keep full -g via the generator expressions below.
+  foreach(_cfg RELWITHDEBINFO DEBUG)
+    if (CMAKE_CXX_FLAGS_${_cfg})
+      string(REPLACE "-g" "-gline-tables-only"
+             CMAKE_CXX_FLAGS_${_cfg} "${CMAKE_CXX_FLAGS_${_cfg}}")
+    endif()
+  endforeach()
+
+  add_compile_options(
+    -fsycl
+    -Wno-ignored-reference-qualifiers
+    -Wno-register
+    -fsycl-device-code-split=per_kernel
+    -fp-model=precise
+    -fno-system-debug
+    -fsycl-default-sub-group-size=32
+  )
+  if (GPU4PYSCF_SYCL_AOT)
+    add_compile_options(
+      -fsycl-targets=spir64_gen
+      "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
+    )
+  endif()
+
+  # Host-side debug info WITHOUT propagating -g to the SYCL device backend.
+  # Restrict -g to C and Fortran translation units (pure host code). SYCL
+  # device-bearing C++ TUs are intentionally left without -g so `ocloc` does
+  # not receive -options "-g" and the device build stays optimized.
+  add_compile_options(
+    "$<$<COMPILE_LANGUAGE:C>:-g>"
+    "$<$<COMPILE_LANGUAGE:Fortran>:-g>"
+  )
+
+  add_link_options(
+    -fsycl
+    -flink-huge-device-code
+    -fsycl-max-parallel-link-jobs=4
+  )
+  if (GPU4PYSCF_SYCL_AOT)
+    add_link_options(
+      -ftarget-register-alloc-mode=pvc:auto
+      -fsycl-targets=spir64_gen
+      "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
+    )
+    # ExchCXX validates this against a GPU-only allowlist; an empty value
+    # disables its AOT pass entirely (generic spir64 JIT), which is what the
+    # CPU-only CI needs.
+    set(GPU4PYSCF_EXCHCXX_SYCL_TARGET intel_gpu_pvc)
+  else()
+    set(GPU4PYSCF_EXCHCXX_SYCL_TARGET "")
+  endif()
+
+  # This needs to be built first than anything else
+  add_subdirectory(gsycl)
+  # Global fallback so subdirectories that haven't yet gained
+  # target_link_libraries(... sycl_compat) still find
+  # <cuda_runtime.h> and <cuda.h> via gsycl/ shims.
+  # Remove once all subdirectory CMakeLists.txt are updated.
+  include_directories(${PROJECT_SOURCE_DIR}/gsycl)      
+endif()
+
 # For better performance on A100, the option
 # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
-if(DEFINED CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
-else()
-  set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real;90-real")
+if (NOT USE_SYCL)
+  if(DEFINED CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
+  else()
+    set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real;90-real")
+  endif()
+  message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 endif()
-message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
@@ -104,21 +209,77 @@ set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LA
 
 option(ENABLE_FP32_MULTIGRID "Enable experimental FP32 multigrid-v2 collocation kernels" OFF)
 
-option(BUILD_CUTLASS "Using cutlass" ON)
-if(BUILD_CUTLASS)
-  include(ExternalProject)
-  ExternalProject_Add(cutlass
-    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
-    GIT_TAG        v3.4.0
-    CONFIGURE_COMMAND ""  # No configure step
-    BUILD_COMMAND ""      # No build step
-    INSTALL_COMMAND ""    # No install step
-    TEST_COMMAND ""       # No test step
-  )
+if(USE_SYCL)
+  add_subdirectory(onemkl_helper)
 
-  # ExternalProject_Add automatically populates this variable
-  ExternalProject_Get_Property(cutlass SOURCE_DIR)
-  set(cutlass_SOURCE_DIR ${SOURCE_DIR})
+  option(BUILD_CUTLASS "Using cutlass-SYCL" OFF)
+
+  if(BUILD_CUTLASS)
+    include(ExternalProject)
+
+    # Detect if the compiler is IntelLLVM
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+      message(STATUS "IntelLLVM compiler detected: configuring CUTLASS for SYCL on Intel GPUs")
+
+      # Set environment variables specific to IntelLLVM
+      set(CUTLASS_ENV_VARS
+        "SYCL_PROGRAM_COMPILE_OPTIONS=-ze-opt-large-register-file"
+        "IGC_VISAOptions=-perfmodel"
+        "IGC_VectorAliasBBThreshold=10000"
+        "IGC_ExtraOCLOptions=-cl-intel-256-GRF-per-thread"
+      )
+
+      # CMake flags specific to IntelLLVM + SYCL
+      set(CUTLASS_CMAKE_ARGS
+        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DCUTLASS_ENABLE_SYCL=ON
+        -DDPCPP_SYCL_TARGET=intel_gpu_pvc
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        -DCUTLASS_ENABLE_EXAMPLES=OFF
+        -DCUTLASS_ENABLE_BENCHMARKS=OFF
+        -DCUTLASS_ENABLE_TESTS=OFF
+        -DCMAKE_CXX_FLAGS=-ftemplate-backtrace-limit=0\ -fdiagnostics-color=always
+      )
+    else()
+      message(WARNING "CUTLASS SYCL setup is only fully supported with IntelLLVM compiler (icx/icpx). Skipping custom flags.")
+      set(CUTLASS_ENV_VARS "")
+      set(CUTLASS_CMAKE_ARGS "")
+    endif(CMAKE_CXX_COMPILER_ID)
+
+    # Define the external CUTLASS SYCL project
+    ExternalProject_Add(cutlass
+      GIT_REPOSITORY https://github.com/codeplaysoftware/cutlass-sycl.git
+      GIT_TAG        sycl-develop
+      PREFIX         ${CMAKE_BINARY_DIR}/_deps/cutlass
+      CMAKE_ARGS     ${CUTLASS_CMAKE_ARGS}
+      CONFIGURE_ENVIRONMENT ${CUTLASS_ENV_VARS}
+      BUILD_ENVIRONMENT     ${CUTLASS_ENV_VARS}
+      INSTALL_ENVIRONMENT   ${CUTLASS_ENV_VARS}
+      TEST_ENVIRONMENT      ${CUTLASS_ENV_VARS}
+    )
+
+    # Expose the source dir of CUTLASS
+    ExternalProject_Get_Property(cutlass SOURCE_DIR)
+    set(cutlass_SOURCE_DIR ${SOURCE_DIR})
+  endif(BUILD_CUTLASS)
+else()
+  option(BUILD_CUTLASS "Using cutlass" ON)
+  if(BUILD_CUTLASS)
+    include(ExternalProject)
+    ExternalProject_Add(cutlass
+      GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
+      GIT_TAG        v3.4.0
+      CONFIGURE_COMMAND ""  # No configure step
+      BUILD_COMMAND ""      # No build step
+      INSTALL_COMMAND ""    # No install step
+      TEST_COMMAND ""       # No test step
+    )
+
+    # ExternalProject_Add automatically populates this variable
+    ExternalProject_Get_Property(cutlass SOURCE_DIR)
+    set(cutlass_SOURCE_DIR ${SOURCE_DIR})
+  endif()
 endif()
 
 add_subdirectory(gint)
@@ -141,19 +302,71 @@ add_subdirectory(ecp)
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   include(ExternalProject)
-  ExternalProject_Add(libxc
-    GIT_REPOSITORY https://github.com/wxj6000/libxc.git
-    GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
-    PATCH_COMMAND git apply --reject ${PROJECT_SOURCE_DIR}/libxc_prune.patch || true
-    PREFIX ${PROJECT_BINARY_DIR}/deps
-    INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-    CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-            -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
-            -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-            -DCMAKE_INSTALL_LIBDIR:PATH=lib
-            -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-            -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
-    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
-  )
-endif()
+
+  if(USE_SYCL)
+    set(_exchcxx_lib "${PROJECT_SOURCE_DIR}/deps/lib/libexchcxx.so")
+    set(_exchcxx_inc "${PROJECT_SOURCE_DIR}/deps/include")
+
+    # Always define the IMPORTED target — both branches need it
+    file(MAKE_DIRECTORY "${_exchcxx_inc}")   # must exist at configure time
+    file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/deps/lib")
+
+    add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
+    set_target_properties(ExchCXX::ExchCXX PROPERTIES
+      IMPORTED_LOCATION             "${_exchcxx_lib}"
+      INTERFACE_INCLUDE_DIRECTORIES "${_exchcxx_inc}"
+      INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
+    )
+
+    # Conditionally build or skip ExchCXX
+    if(NOT EXISTS "${_exchcxx_lib}")
+      message(STATUS "ExchCXX: not found -- building from source (~35 min)")
+      ExternalProject_Add(ExchCXX
+        GIT_REPOSITORY    https://github.com/abagusetty/ExchCXX.git
+        GIT_TAG           d7ed4af53ce0499da62d38e54e100713ee565e8f
+        UPDATE_DISCONNECTED ON
+        PREFIX            ${PROJECT_BINARY_DIR}/deps
+        INSTALL_DIR       ${PROJECT_SOURCE_DIR}/deps
+        CMAKE_ARGS
+        -DCMAKE_BUILD_TYPE=Release
+        -DBUILD_SHARED_LIBS=ON
+        # ExternalProject does not inherit the parent's compiler choice; without
+        # this the inner configure falls back to /usr/bin/c++ (no -fsycl).
+        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DEXCHCXX_ENABLE_SYCL=ON
+        -DEXCHCXX_SYCL_TARGET=${GPU4PYSCF_EXCHCXX_SYCL_TARGET}
+        -DEXCHCXX_ENABLE_TESTS=OFF
+        -DEXCHCXX_ENABLE_LIBXC=OFF
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+        -DCMAKE_INSTALL_LIBDIR:PATH=lib
+        -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
+        -DCMAKE_CXX_CREATE_SHARED_LIBRARY=${CXX_LINK_TEMPLATE}
+        BUILD_BYPRODUCTS "${_exchcxx_lib}"
+      )
+    else()
+      message(STATUS "ExchCXX: found ${_exchcxx_lib} -- skipping rebuild")
+      add_custom_target(ExchCXX)    # no-op target, satisfies add_dependencies()
+    endif()
+
+    # Wire IMPORTED target to whichever ExchCXX target was created above
+    add_dependencies(ExchCXX::ExchCXX ExchCXX)
+  else (USE_SYCL)
+    ExternalProject_Add(libxc
+      GIT_REPOSITORY https://github.com/wxj6000/libxc.git
+      GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
+      PATCH_COMMAND git apply --reject ${PROJECT_SOURCE_DIR}/libxc_prune.patch || true
+      PREFIX ${PROJECT_BINARY_DIR}/deps
+      INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
+      CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+      -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
+      -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+      -DCMAKE_INSTALL_LIBDIR:PATH=lib
+      -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
+      -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
+      CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
+    )
+  endif(USE_SYCL)
+endif(BUILD_LIBXC)
