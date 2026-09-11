@@ -1039,16 +1039,16 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     return 0;
 }
 
-int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
-                        double *sigma, double *dm, int n_dm, int nao,
-                        RysIntEnvVars *envs, int *scheme, int *shls_slice,
-                        int npairs_ij, int npairs_kl,
-                        int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                        int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
-                        float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
-                        float *diffuse_exps, float *dm_cond, float cutoff,
-                        int64_t *pool, double *dd_pool, int nbas_cell0,
-                        int *bas, double omega)
+int PBC_jk_derivatives(double *ejk, double j_factor, double k_factor,
+                       double *sigma, double *dm, int n_dm, int nao,
+                       RysIntEnvVars *envs, int *scheme, int *shls_slice,
+                       int npairs_ij, int npairs_kl,
+                       int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                       int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
+                       float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                       float *diffuse_exps, float *dm_cond, float cutoff,
+                       int64_t *pool, double *dd_pool, int nbas_cell0,
+                       int *bas, double omega)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];

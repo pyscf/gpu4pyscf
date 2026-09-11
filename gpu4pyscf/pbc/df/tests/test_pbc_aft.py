@@ -232,6 +232,23 @@ class KnownValues(unittest.TestCase):
         finally:
             aft_jk.get_avail_mem = bak
 
+    def test_vk_kpts_vs_fft(self):
+        cell = pyscf.M(
+            atom = '''
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.55, .5, .1], [.35, .6, .2], [.15, .1, .8]], [1, [.3, 1]]],
+        )
+        kpts = cell.make_kpts([3,2,1])
+        dm_kpts = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        mydf = aft.AFTDF(cell, kpts=kpts)
+        vk = aft_jk.get_k_kpts(mydf, dm_kpts, hermi=1, kpts=kpts)
+        ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm_kpts, hermi=1, with_j=False, kpts=kpts)[1]
+        assert abs(vk - ref).max().get() < 1e-8
+
     def test_ej_ip1_gamma_point(self):
         cell = pgto.M(
             atom = '''

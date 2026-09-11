@@ -484,7 +484,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
     if not ft_opt.permutation_symmetry:
         ej *= .5
     ej = ej.get()
-    ej /= nkpts**2
+    ej *= 2. / nkpts**2
     return ej
 
 def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
@@ -589,8 +589,8 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                 idx = np.empty_like(ki_idx)
                 idx[kj_idx] = ki_idx
                 tmp = contract('snjk,nlkg->snljg', dms, pqG_conj)
-                tmp = contract('snljg,snli->nijg', tmp, dms[:,idx])
-                dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
+                tmp = contract('snljg,snli->njig', tmp, dms[:,idx])
+                dm_vG = contract('Lk,kjig->Ljig', expLk, tmp)
                 # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_deriv kernel
                 # only processes the lower triangular parts (p>=q in pLqG). By using the
                 # other transformation for nijG
@@ -599,7 +599,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                 # TODO: the two types of transformation likely produce the same
                 # output. Removing the following transformation if this is true.
                 if ft_opt.permutation_symmetry:
-                    dm_vG += contract('Lk,kijg->Lijg', expLk[:,idx].conj(), tmp)
+                    dm_vG += contract('Lk,kjig->Lijg', expLk[:,idx].conj(), tmp)
             if swap_2e:
                 dm_vG *= wcoulG[p0:p1] * 2
             else:
@@ -624,10 +624,8 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
-    ek *= .5
     ek = ek.get()
-    if not is_gamma_point:
-        ek /= nkpts**2
+    ek *= 1. / nkpts**2
     log.timer_debug1('get_ek_ip1', *cpu0)
     return ek
 

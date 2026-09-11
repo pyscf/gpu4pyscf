@@ -167,7 +167,6 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
             ejk += with_rsjk._get_ejk_lr_ip1(
                 dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
                 lr_factor=lr_factor, sr_factor=sr_factor)
-        ejk *= 2
         if ej is not None:
             ejk += ej
 
@@ -232,6 +231,5 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
         if omega != 0 and lr_factor != 0:
             with with_df.range_coulomb(omega) as with_df:
                 ejk -= with_df.get_k_e1(dm, kpts, exxdiv) * lr_factor
-        ejk *= 2
 
     return ejk

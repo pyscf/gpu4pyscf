@@ -26,6 +26,27 @@ from gpu4pyscf.pbc.scf import rsjk
 from gpu4pyscf.pbc.tools.pbc import probe_charge_sr_coulomb
 from gpu4pyscf.pbc.df import aft, aft_jk
 
+def _check_gradient(grad, cell, eval_energy, disp=1e-4, tol=1e-7):
+    atom_coords = cell.atom_coords()
+    for ia, axis in [(0, 0), (0, 1), (1, 2)]:
+        coords = atom_coords.copy()
+        coords[ia, axis] += disp
+        cell1 = cell.set_geom_(coords, unit='Bohr', inplace=False)
+        e1 = eval_energy(cell1)
+
+        coords[ia, axis] -= 2 * disp
+        cell2 = cell.set_geom_(coords, unit='Bohr', inplace=False)
+        e2 = eval_energy(cell2)
+        assert abs((e1-e2)/(2*disp) - grad[ia,axis]) < tol
+
+def _check_strain(sigma, cell, eval_energy, disp=1e-4, tol=1e-7):
+    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    for (i, j) in [(0, 0), (0, 1), (2, 0)]:
+        cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
+        e1 = eval_energy(cell1)
+        e2 = eval_energy(cell2)
+        assert abs(sigma[i,j] - (e1-e2)/2/disp) < tol
+
 def test_sr_vk_hermi1_gamma_point_vs_cpu():
     cell = pyscf.M(
         atom = '''
@@ -512,6 +533,7 @@ def test_ejk_ip1_per_atom_gamma_point():
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[0,:,p0:p1])
+    ref *= 2
     assert abs(ejk - ref).max() < 1e-6
 
     if Version(pyscf.__version__) > Version('2.11'):
@@ -526,6 +548,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
+        ref *= 2
         assert abs(ejk - ref).max() < 1e-6
     else:
         ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpt, exxdiv=None)
@@ -539,6 +562,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
+        ref *= 2
         assert abs(ejk - ref).max() < 1e-6
 
 def test_ejk_ip1_per_atom_kpts():
@@ -559,6 +583,14 @@ def test_ejk_ip1_per_atom_kpts():
     ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
+    nkpts = len(kpts)
+    def eval_ejk(cell):
+        with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build()
+        vj = rsjk.get_j(cell, dm, 1, kpts, vhfopt=with_rsjk)
+        vk = rsjk.get_k(cell, dm, 1, kpts, vhfopt=with_rsjk)
+        return cp.einsum('kpq,kqp->', vj-vk*.5, dm).real.get() / (2*nkpts)
+    _check_gradient(ejk, cell, eval_ejk)
+
     vj, vk = fft_cpu.FFTDF(cell, kpts=kpts).get_jk_e1(dm, kpts=kpts, exxdiv=None)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
@@ -567,6 +599,7 @@ def test_ejk_ip1_per_atom_kpts():
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
     ref /= len(kpts)
+    ref *= 2
     assert abs(ejk - ref).max() < 1e-7
 
     def rsjk_deriv(dm, omega, exxdiv, lr_factor, sr_factor):
@@ -835,20 +868,43 @@ def test_ejk_strain_deriv_kpts():
 
     # exxdiv=None, omega == 0, lr == sr == 1
     with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
-    sigma = with_rsjk._get_ejk_sr_strain_deriv(dm_kpts, kpts=kpts)
-    sigma += with_rsjk._get_ejk_lr_strain_deriv(dm_kpts, kpts=kpts)
+    grad, sigma = with_rsjk._get_ejk_sr_derivatives(dm_kpts, kpts=kpts)
+    grad1, sigma1 = with_rsjk._get_ejk_lr_derivatives(dm_kpts, kpts=kpts)
+    grad += grad1
+    sigma += sigma1
     mydf = aft.AFTDF(cell)
     ref = aft_jk.get_ej_strain_deriv(mydf, dm_kpts, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm_kpts, kpts=kpts) * .5
     assert abs(ref - sigma).max() < 1e-6
 
+    def eval_ejk(cell1):
+        kpts1 = cell1.make_kpts(kmesh)
+        nkpts = len(kpts1)
+        vj, vk = fft.FFTDF(cell1, kpts=kpts1).get_jk(dm_kpts, hermi=1, kpts=kpts1)
+        return cp.einsum('kij,kji->', vj-vk*.5, dm_kpts).real * .5 / nkpts
+    _check_gradient(grad, cell, eval_ejk)
+    _check_strain(sigma, cell, eval_ejk)
+
     # exxdiv='ewald', omega == 0, lr == sr == 1
     dm1 = cp.array([dm_kpts, dm_kpts])
-    sigma = with_rsjk._get_ejk_sr_strain_deriv(dm1, kpts=kpts, exxdiv='ewald')
-    sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm1, kpts=kpts, exxdiv='ewald')
+    grad, sigma = with_rsjk._get_ejk_sr_derivatives(dm1, kpts=kpts, exxdiv='ewald')
+    grad1, sigma1 = with_rsjk._get_ejk_lr_derivatives(dm1, kpts=kpts, exxdiv='ewald')
+    grad += grad1
+    sigma += sigma1
     ref = aft_jk.get_ej_strain_deriv(mydf, dm1, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm1, kpts=kpts, exxdiv='ewald')
     assert abs(ref - sigma).max() < 3e-6
+
+    def eval_ejk(cell1):
+        kpts1 = cell1.make_kpts(kmesh)
+        nkpts = len(kpts1)
+        mydf = aft.AFTDF(cell1)
+        vj, vk = fft.FFTDF(cell1, kpts=kpts1).get_jk(dm1, hermi=1, kpts=kpts1, exxdiv='ewald')
+        vj = vj[0] + vj[1]
+        return cp.einsum('skij,skji->', vj-vk, dm1).real * .5 / nkpts
+
+    _check_gradient(grad, cell, eval_ejk)
+    _check_strain(sigma, cell, eval_ejk, tol=1e-6)
 
     def rsjk_sigma(dm, omega, exxdiv, lr_factor, sr_factor, kpts=None):
         with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build(kpts=kpts)
@@ -868,6 +924,33 @@ def test_ejk_strain_deriv_kpts():
     ref = aft_jk.get_ej_strain_deriv(mydf, dm)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm, omega=-omega, exxdiv=exxdiv) * .5 * sr_factor
     assert abs(ref - sigma).max() < 1e-6
+
+    # exxdiv='ewald', omega != 0, lr != 0, sr == 0
+    omega = 0.2
+    exxdiv = 'ewald'
+    lr_factor = 0
+    sr_factor = 0.8
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build()
+    grad, sigma = with_rsjk._get_ejk_sr_derivatives(
+        dm, omega=omega, j_factor=0, lr_factor=0, sr_factor=sr_factor, exxdiv=exxdiv)
+    grad1, sigma1 = with_rsjk._get_ejk_lr_derivatives(
+        dm, omega=omega, j_factor=0, lr_factor=0, sr_factor=sr_factor, exxdiv=exxdiv)
+    grad += grad1
+    sigma += sigma1
+    mydf = aft.AFTDF(cell)
+    grad_ref = aft_jk.get_ek_ip1(mydf, dm, omega=-omega, exxdiv=exxdiv) * -.5 * sr_factor
+    sigma_ref = aft_jk.get_ek_strain_deriv(mydf, dm, omega=-omega, exxdiv=exxdiv) * -.5 * sr_factor
+    assert abs(grad_ref - grad).max() < 1e-6
+    assert abs(sigma_ref - sigma).max() < 1e-6
+
+    def eval_ejk(cell1):
+        mydf = aft.AFTDF(cell1)
+        vk = aft_jk.get_k_kpts(mydf, dm, exxdiv=exxdiv)
+        vk -= aft_jk.get_k_kpts(mydf, dm, omega=omega, exxdiv=exxdiv)
+        return cp.einsum('ij,ji->', vk, dm).real * -.25 * sr_factor
+
+    _check_gradient(grad, cell, eval_ejk)
+    _check_strain(sigma, cell, eval_ejk, tol=1e-6)
 
     # exxdiv='ewald', omega != 0, lr != 0, sr == 0
     omega = 0.5
