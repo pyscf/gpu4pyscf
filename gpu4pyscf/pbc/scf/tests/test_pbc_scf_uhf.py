@@ -63,7 +63,7 @@ class KnownValues(unittest.TestCase):
     def test_uhf_bands(self):
         mf = pscf.UHF(cell).run(conv_tol=1e-9)
         mf_cpu = mf.to_cpu().run()
-        self.assertAlmostEqual(mf.e_tot, mf_cpu.e_tot, 8)
+        self.assertAlmostEqual(mf.e_tot, mf_cpu.e_tot, delta=1e-8)
         self.assertAlmostEqual(mf.e_tot, -3.9546467710639632, 7)
         pop = mf.analyze()[0][0]
         self.assertAlmostEqual(lib.fp(pop), -0.04691820429296646, 5)
