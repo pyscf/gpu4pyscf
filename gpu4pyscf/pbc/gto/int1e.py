@@ -47,6 +47,8 @@ __all__ = [
     'int1e_r4_origi_ip2',
     'ovlp_strain_deriv',
     'kin_strain_deriv',
+    'ovlp_derivatives',
+    'kin_derivatives',
 ]
 
 libpbc.PBCint1e_ovlp.restype = ctypes.c_int
@@ -97,15 +99,21 @@ def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
     return opt.intor('PBCint1e_r4_origi_ip2', 3, (0, 5), kpts, sort_output)
 
-def ovlp_strain_deriv(cell, dm, kpts=None):
+def ovlp_derivatives(cell, dm, kpts=None):
     assert isinstance(cell, Cell)
     opt = _check_opt(cell, 1, kpts)
-    return opt.get_ovlp_strain_deriv(dm, kpts)
+    return opt.get_ovlp_derivatives(dm, kpts)
 
-def kin_strain_deriv(cell, dm, kpts=None):
+def kin_derivatives(cell, dm, kpts=None):
     assert isinstance(cell, Cell)
     opt = _check_opt(cell, 1, kpts, scale_precision=1e-1)
-    return opt.get_kin_strain_deriv(dm, kpts)
+    return opt.get_kin_derivatives(dm, kpts)
+
+def ovlp_strain_deriv(cell, dm, kpts=None):
+    return ovlp_derivatives(cell, dm, kpts)[1]
+
+def kin_strain_deriv(cell, dm, kpts=None):
+    return kin_derivatives(cell, dm, kpts)[1]
 
 def _check_opt(cell, hermi, kpts, bvk_kmesh=None, scale_precision=1):
     if isinstance(cell, Mole):
@@ -287,7 +295,7 @@ class _Int1eOpt:
                 out = out[0]
         return out
 
-    def strain_deriv_intor(self, dm, kern, deriv, kpts=None):
+    def _derivatives_intor(self, dm, kern, deriv, kpts=None):
         cell = self.cell
         dm = cell.apply_C_mat_CT(dm)
         if kpts is None:
@@ -316,9 +324,11 @@ class _Int1eOpt:
         gout_stride_lookup, shm_size = _gout_stride_lookup_table(cell, deriv)
         nbatches_shl_pair = len(self.shl_pair_offsets) - 1
 
+        grad = cp.zeros((cell.natm, 3))
         sigma = cp.zeros((3, 3))
         drv = getattr(libpbc, kern)
         err = drv(
+            ctypes.cast(grad.data.ptr, ctypes.c_void_p),
             ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.byref(self.int1e_envs),
@@ -329,23 +339,23 @@ class _Int1eOpt:
             ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
-        sigma = sigma.get()
+        grad *= 2 / nkpts
         sigma *= 2 / nkpts
-        return sigma
+        return grad.get(), sigma.get()
 
-    def get_ovlp_strain_deriv(self, dm, kpts=None):
+    def get_ovlp_derivatives(self, dm, kpts=None):
         '''Computes the strain derivatives for the product of density matrix and
         overlap matrix. In the case of k-points calculations, the derivatives
         are averaged over k-mesh.
         '''
-        return self.strain_deriv_intor(dm, 'PBCovlp_strain_deriv', (1, 0), kpts)
+        return self._derivatives_intor(dm, 'PBCovlp_derivatives', (1, 0), kpts)
 
-    def get_kin_strain_deriv(self, dm, kpts=None):
+    def get_kin_derivatives(self, dm, kpts=None):
         '''Computes the strain derivatives for the product of density matrix and
         kinetic matrix. In the case of k-points calculations, the derivatives
         are averaged over k-mesh.
         '''
-        return self.strain_deriv_intor(dm, 'PBCkin_strain_deriv', (3, 0), kpts)
+        return self._derivatives_intor(dm, 'PBCkin_derivatives', (3, 0), kpts)
 
 class CrossInt1e(_Int1eOpt):
     def __init__(self, cell1, cell2, bvk_kmesh=None):
