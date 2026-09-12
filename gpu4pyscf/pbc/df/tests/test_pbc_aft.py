@@ -279,7 +279,8 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xpq,qp->x', vj[:,p0:p1], dm[:,p0:p1])
-        assert abs(ej - ref).max() < 1e-9
+        ref *= 2
+        assert abs(ej - ref).max() < 1e-8
 
         disp = 1e-3
         atom_coords = cell.atom_coords()
@@ -294,7 +295,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp) - ej[i,x]*2) < 1e-5
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]) < 1e-5
 
     def test_ej_ip1_kpts(self):
         cell = pgto.M(
@@ -324,7 +325,8 @@ class KnownValues(unittest.TestCase):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
         ref /= len(kpts)
-        assert abs(ej - ref).max() < 1e-9
+        ref *= 2
+        assert abs(ej - ref).max() < 1e-8
 
         nkpts = len(kpts)
         disp = 1e-3
@@ -340,7 +342,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp) - ej[i,x]/nkpts*2) < 2e-6
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]/nkpts) < 2e-6
 
     def test_ek_ip1_gamma_point(self):
         cell = pgto.M(
@@ -376,6 +378,7 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
+        ref *= 2
         assert abs(ek - ref).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -383,6 +386,7 @@ class KnownValues(unittest.TestCase):
             for i in range(cell.natm):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
+            ref *= 2
             assert abs(ek_ewald - ref).max() < 3e-8
 
     @unittest.skipIf(num_devices > 1, '')
@@ -419,6 +423,7 @@ class KnownValues(unittest.TestCase):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
         ref /= len(kpts)
+        ref *= 2
         assert abs(ek - ref).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -427,6 +432,7 @@ class KnownValues(unittest.TestCase):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
             ref /= len(kpts)
+            ref *= 2
             assert abs(ek_ewald - ref).max() < 1e-8
 
     def test_ej_strain_deriv_gamma_point(self):

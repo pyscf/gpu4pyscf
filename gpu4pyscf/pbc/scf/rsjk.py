@@ -1195,7 +1195,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(int(ft_opt.permutation_symmetry)))
                 if err != 0:
-                    raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
+                    raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
                     Gpq[:,diffuse_i,diffuse_j] = 0.
                     rhoG = contract('kji,kijg->g', dm_sf, Gpq)
@@ -1217,15 +1217,25 @@ class PBCJKMatrixOpt:
                         ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
-                        raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
+                        raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 Gpq = None
             if not ft_opt.permutation_symmetry:
                 ej *= .5
                 sigma *= .5
             ej *= 2 * j_factor / nkpts**2
             sigma *= 2 * j_factor / nkpts**2
-            log.timer_debug1('get_ej_strain_deriv', *t0)
+            log.timer_debug1('get_ej_deriv', *t0)
             return ej, sigma
+
+        def weighted_coulG_derivatives(Gvk, range_omega, remove_G0):
+            wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, range_omega)
+            if (remove_G0 and exxdiv == 'ewald' and
+                (cell.dimension == 3 or
+                 (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+                exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, range_omega)
+                wcoulG_0[0] += exx_0
+                wcoulG_1[:,:,0] += cp.asarray(exx_1)
+            return wcoulG_0, wcoulG_1
 
         def get_k():
             cpu0 = cpu1 = log.init_timer()
@@ -1248,20 +1258,12 @@ class PBCJKMatrixOpt:
                 kpt = kpts[kp]
                 Gvk = Gv + cp.asarray(kpt)
                 remove_G0 = is_zero(kpt)
-                wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, 0)
-                if remove_G0 and exxdiv == 'ewald':
-                    fr_ewald_0, fr_ewald_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, 0.)
-                    wcoulG_0[0] += fr_ewald_0
-                    wcoulG_1[:,:,0] += cp.asarray(fr_ewald_1)
+                wcoulG_0, wcoulG_1 = weighted_coulG_derivatives(Gvk, 0, remove_G0)
                 if lr_factor == sr_factor:
                     wcoulG_0 *= lr_factor
                     wcoulG_1 *= lr_factor
                 else:
-                    wcoulG_LR_0, wcoulG_LR_1 = get_wcoulG(cell, Gvk, omega)
-                    if remove_G0 and exxdiv == 'ewald':
-                        lr_ewald_0, lr_ewald_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, omega)
-                        wcoulG_LR_0[0] += lr_ewald_0
-                        wcoulG_LR_1[:,:,0] += cp.asarray(lr_ewald_1)
+                    wcoulG_LR_0, wcoulG_LR_1 = weighted_coulG_derivatives(Gvk, omega, remove_G0)
                     wcoulG_0 -= wcoulG_LR_0
                     wcoulG_0 *= sr_factor
                     wcoulG_0 += wcoulG_LR_0 * lr_factor
@@ -1323,7 +1325,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
-                        raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
+                        raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
                     if exclude_dd_block and len(bas_ij_wo_dd) > 0:
                         Gpq[:,diffuse_i,diffuse_j] = 0.
@@ -1363,7 +1365,7 @@ class PBCJKMatrixOpt:
                             ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.c_int(int(ft_opt.permutation_symmetry)))
                         if err != 0:
-                            raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
+                            raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                     Gpq = Gpq_conj = dm_k = tmp = dm_vG = None
                 cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
             # First *2 due to i>=j symmetry in kernel;
@@ -1372,7 +1374,7 @@ class PBCJKMatrixOpt:
             sigma1 *= 2*2*.25 / nkpts**2
             sigma *= .5 / nkpts**2
             sigma += sigma1
-            log.timer_debug1('get_ek_strain_deriv', *cpu0)
+            log.timer_debug1('get_ek_deriv', *cpu0)
             return ek, sigma
 
         ej = ek = 0
