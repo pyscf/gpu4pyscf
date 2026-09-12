@@ -30,8 +30,11 @@
 #endif
 #define WARPS           8
 #define THREADS         256
-#define NG_PER_BLOCK    WARP_SIZE
 #define FT_AO_THREADS   (WARP_SIZE*4)
+// One shell per block (nsh_per_block == 1): every thread in the block then
+// sees the same shell's iprim, so the primitive loop's __syncthreads() trip
+// count is uniform without needing a per-block max-iprim workaround.
+#define NG_PER_BLOCK    FT_AO_THREADS
 #define GOUT_WIDTH      30
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
@@ -49,16 +52,15 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     int sh_id_in_block = threadIdx.y;
     int Gv_id_in_block = threadIdx.x;
     int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
-    if (sh_id >= envs.nbas) {
-        return;
-    }
+    int valid = sh_id < envs.nbas;
+    int sh_id_clamped = valid ? sh_id : envs.nbas - 1;
 
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
-    int li = bas[sh_id*BAS_SLOTS+ANG_OF];
+    int li = bas[sh_id_clamped*BAS_SLOTS+ANG_OF];
     int nfi = c_nf[li];
-    int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
+    int iprim = bas[sh_id_clamped*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
     double kx = 0;
     double ky = 0;
@@ -95,9 +97,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double s0zR, s1zR, s2zR;
     double s0zI, s1zI, s2zI;
 
-    int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
-    double *expi = env + bas[sh_id*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[sh_id*BAS_SLOTS+PTR_COEFF];
+    int ia = bas[sh_id_clamped*BAS_SLOTS+ATOM_OF];
+    double *expi = env + bas[sh_id_clamped*BAS_SLOTS+PTR_EXP];
+    double *ci = env + bas[sh_id_clamped*BAS_SLOTS+PTR_COEFF];
     double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
     for (int ip = 0; ip < iprim; ++ip) {
         __syncthreads();
@@ -187,9 +189,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
         }
     }
 
-    if (Gv_id < nGv) {
+    if (valid && Gv_id < nGv) {
         size_t stride = (size_t)nGv * OF_COMPLEX;
-        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
+        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id_clamped] * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
         for (int n = 0; n < aux_nf; ++n) {
             if (n >= nfi) break;
