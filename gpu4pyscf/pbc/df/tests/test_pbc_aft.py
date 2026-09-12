@@ -267,7 +267,10 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(2, nao, nao) - .5
         dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
         mydf = aft.AFTDF(cell)
-        ej = aft_jk.get_ej_ip1(mydf, dm)
+        grad_sigma = aft_jk.get_ej_derivatives(mydf, dm)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        ej = grad_sigma[:-3]
         assert abs(ej.sum(axis=0)).max() < 1e-9
 
         cell.precision = 1e-10
@@ -313,7 +316,10 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([3,2,1])
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
-        ej = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+        grad_sigma = aft_jk.get_ej_derivatives(mydf, dm, kpts=kpts)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        ej = grad_sigma[:-3]
         assert abs(ej.sum(axis=0)).max() < 1e-8
 
         cell.precision = 1e-10
@@ -362,7 +368,10 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(2, nao, nao) * .5
         dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
         myaft = aft.AFTDF(cell)
-        ek = aft_jk.get_ek_ip1(myaft, dm)
+        grad_sigma = aft_jk.get_ek_derivatives(myaft, dm)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        ek = grad_sigma[:-3]
         assert abs(ek.sum(axis=0)).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -406,7 +415,10 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([3,2,1])
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         myaft = aft.AFTDF(cell)
-        ek = aft_jk.get_ek_ip1(myaft, dm, kpts=kpts)
+        grad_sigma = aft_jk.get_ek_derivatives(myaft, dm, kpts=kpts)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        ek = grad_sigma[:-3]
         assert abs(ek.sum(axis=0)).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -450,7 +462,10 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) * .5
         dm = dm.dot(dm.T)
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ej_strain_deriv(mydf, dm)
+        grad_sigma = aft_jk.get_ej_derivatives(mydf, dm)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        sigma = grad_sigma[-3:]
 
         xc = 'lda,'
         mf_grad = cell.RKS(xc=xc).to_gpu().Gradients()
@@ -473,7 +488,10 @@ class KnownValues(unittest.TestCase):
         nkpts = len(kpts)
         dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ej_strain_deriv(mydf, dm, kpts)
+        grad_sigma = aft_jk.get_ej_derivatives(mydf, dm, kpts)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        sigma = grad_sigma[-3:]
 
         xc = 'lda,'
         mf_grad = cell.KRKS(xc=xc, kpts=kpts).to_gpu().Gradients()
@@ -506,7 +524,10 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) * .5
         dm = cp.array(dm.dot(dm.T))
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ek_strain_deriv(mydf, dm)
+        grad_sigma = aft_jk.get_ek_derivatives(mydf, dm)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        sigma = grad_sigma[-3:]
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
             cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
@@ -533,7 +554,10 @@ class KnownValues(unittest.TestCase):
         nkpts = len(kpts)
         dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ek_strain_deriv(mydf, dm, kpts, exxdiv='ewald')
+        grad_sigma = aft_jk.get_ek_derivatives(mydf, dm, kpts, exxdiv='ewald')
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        sigma = grad_sigma[-3:]
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
             cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)

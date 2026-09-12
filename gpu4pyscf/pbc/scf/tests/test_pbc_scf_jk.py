@@ -868,10 +868,11 @@ def test_ejk_strain_deriv_kpts():
 
     # exxdiv=None, omega == 0, lr == sr == 1
     with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
-    grad, sigma = with_rsjk._get_ejk_sr_derivatives(dm_kpts, kpts=kpts)
-    grad1, sigma1 = with_rsjk._get_ejk_lr_derivatives(dm_kpts, kpts=kpts)
-    grad += grad1
-    sigma += sigma1
+    grad_sigma = with_rsjk._get_ejk_sr_derivatives(dm_kpts, kpts=kpts)
+    assert grad_sigma.shape == (cell.natm+3, 3)
+    grad_sigma += with_rsjk._get_ejk_lr_derivatives(dm_kpts, kpts=kpts)
+    assert grad_sigma.shape == (cell.natm+3, 3)
+    grad, sigma = grad_sigma[:-3], grad_sigma[-3:]
     mydf = aft.AFTDF(cell)
     ref = aft_jk.get_ej_strain_deriv(mydf, dm_kpts, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm_kpts, kpts=kpts) * .5
@@ -885,12 +886,19 @@ def test_ejk_strain_deriv_kpts():
     _check_gradient(grad, cell, eval_ejk)
     _check_strain(sigma, cell, eval_ejk)
 
+    for get_derivatives in (with_rsjk._get_ejk_sr_derivatives,
+                            with_rsjk._get_ejk_lr_derivatives):
+        zero = get_derivatives(dm_kpts, kpts=kpts,
+                               j_factor=0, lr_factor=0, sr_factor=0)
+        assert zero.shape == (cell.natm+3, 3)
+        assert np.count_nonzero(zero) == 0
+
     # exxdiv='ewald', omega == 0, lr == sr == 1
     dm1 = cp.array([dm_kpts, dm_kpts])
-    grad, sigma = with_rsjk._get_ejk_sr_derivatives(dm1, kpts=kpts, exxdiv='ewald')
-    grad1, sigma1 = with_rsjk._get_ejk_lr_derivatives(dm1, kpts=kpts, exxdiv='ewald')
-    grad += grad1
-    sigma += sigma1
+    grad_sigma = with_rsjk._get_ejk_sr_derivatives(dm1, kpts=kpts, exxdiv='ewald')
+    grad_sigma += with_rsjk._get_ejk_lr_derivatives(dm1, kpts=kpts, exxdiv='ewald')
+    assert grad_sigma.shape == (cell.natm+3, 3)
+    grad, sigma = grad_sigma[:-3], grad_sigma[-3:]
     ref = aft_jk.get_ej_strain_deriv(mydf, dm1, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm1, kpts=kpts, exxdiv='ewald')
     assert abs(ref - sigma).max() < 3e-6
@@ -931,12 +939,12 @@ def test_ejk_strain_deriv_kpts():
     lr_factor = 0
     sr_factor = 0.8
     with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build()
-    grad, sigma = with_rsjk._get_ejk_sr_derivatives(
+    grad_sigma = with_rsjk._get_ejk_sr_derivatives(
         dm, omega=omega, j_factor=0, lr_factor=0, sr_factor=sr_factor, exxdiv=exxdiv)
-    grad1, sigma1 = with_rsjk._get_ejk_lr_derivatives(
+    grad_sigma += with_rsjk._get_ejk_lr_derivatives(
         dm, omega=omega, j_factor=0, lr_factor=0, sr_factor=sr_factor, exxdiv=exxdiv)
-    grad += grad1
-    sigma += sigma1
+    assert grad_sigma.shape == (cell.natm+3, 3)
+    grad, sigma = grad_sigma[:-3], grad_sigma[-3:]
     mydf = aft.AFTDF(cell)
     grad_ref = aft_jk.get_ek_ip1(mydf, dm, omega=-omega, exxdiv=exxdiv) * -.5 * sr_factor
     sigma_ref = aft_jk.get_ek_strain_deriv(mydf, dm, omega=-omega, exxdiv=exxdiv) * -.5 * sr_factor

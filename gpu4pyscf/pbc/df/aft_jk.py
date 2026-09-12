@@ -402,15 +402,20 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
 
 def get_ej_ip1(mydf, dm, kpts=None):
     '''Return nuclear gradients for the Coulomb energy.'''
-    return get_ej_derivatives(mydf, dm, kpts)[0]
+    return get_ej_derivatives(mydf, dm, kpts)[:-3]
 
-def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
+def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     '''Return strain derivatives for the Coulomb energy.'''
-    return get_ej_derivatives(mydf, dm, kpts, omega, get_wcoulG_deriv)[1]
+    return get_ej_derivatives(mydf, dm, kpts, omega)[-3:]
 
-def get_ej_derivatives(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
-    '''Return nuclear gradients and strain derivatives of the Coulomb energy.'''
-    from gpu4pyscf.pbc.grad.rks_stress import _get_weighted_coulG_strain_derivatives
+def get_ej_derivatives(mydf, dm, kpts=None, omega=None):
+    '''Return nuclear gradients and strain derivatives of the Coulomb energy.
+
+    The output has shape (cell.natm+3, 3), with atomic derivatives in the
+    first cell.natm rows and strain derivatives in the last three rows.
+    '''
+    from gpu4pyscf.pbc.grad.rks_stress import (
+        _get_weighted_coulG_strain_derivatives as get_wcoulG)
     log = logger.new_logger(mydf)
     cell = mydf.cell
     if kpts is None:
@@ -452,9 +457,7 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
-    if get_wcoulG_deriv is None:
-        get_wcoulG_deriv = _get_weighted_coulG_strain_derivatives
-    wcoulG_0, wcoulG_1 = get_wcoulG_deriv(cell, Gv, omega=omega)
+    wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gv, omega=omega)
 
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
@@ -465,8 +468,7 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ej_deriv
-    ej = cp.zeros((cell.natm, 3))
-    sigma = cp.zeros((3, 3))
+    ej_sigma = cp.zeros([cell.natm+3, 3])
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
@@ -474,15 +476,15 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
         Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         rhoG = contract('kji,kijg->g', dms, Gpq)
-        sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
+        ej_sigma[-3:] += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
 
         vG = rhoG.conj()
         vG *= wcoulG_0[p0:p1]
         GvT = cp.asarray(Gv[p0:p1].T.ravel())
         Gpq = None
         err = kern(
-            ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ej_sigma[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(ej_sigma[-3:].data.ptr, ctypes.c_void_p),
             ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
             ctypes.cast(vG.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -497,27 +499,29 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
     if not ft_opt.permutation_symmetry:
-        ej *= .5
-        sigma *= .5
-    ej *= 2. / nkpts**2
-    sigma *= 2 / nkpts**2
-    return ej.get(), sigma.get()
+        ej_sigma *= .5
+    ej_sigma *= 2. / nkpts**2
+    return ej_sigma.get()
 
 def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                omega=None, lr_factor=1, sr_factor=1):
     '''Return nuclear gradients of the exact-exchange energy.'''
     return get_ek_derivatives(mydf, dm, kpts, exxdiv, omega,
-                              lr_factor=lr_factor, sr_factor=sr_factor)[0]
+                              lr_factor=lr_factor, sr_factor=sr_factor)[:-3]
 
 def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
-                        get_wcoulG_deriv=None, *, lr_factor=1, sr_factor=1):
-    return get_ek_derivatives(mydf, dm, kpts, exxdiv, omega, get_wcoulG_deriv,
-                              lr_factor=lr_factor, sr_factor=sr_factor)[1]
+                        lr_factor=1, sr_factor=1):
+    return get_ek_derivatives(mydf, dm, kpts, exxdiv, omega, lr_factor, sr_factor)[-3:]
 
-def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None, omega=None,
-                       get_wcoulG_deriv=None, *, lr_factor=1, sr_factor=1):
-    '''Return nuclear gradients and strain derivatives of the exact-exchange energy.'''
-    from gpu4pyscf.pbc.grad.rks_stress import _get_weighted_coulG_strain_derivatives
+def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
+                       omega=None, lr_factor=1, sr_factor=1):
+    '''Return nuclear gradients and strain derivatives of the exact-exchange energy.
+
+    The output has shape (cell.natm+3, 3), with atomic derivatives in the
+    first cell.natm rows and strain derivatives in the last three rows.
+    '''
+    from gpu4pyscf.pbc.grad.rks_stress import (
+        _get_weighted_coulG_strain_derivatives as get_wcoulG)
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
     cell = mydf.cell
@@ -558,9 +562,6 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None, omega=None,
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(blksize, ngrids, 16384)
 
-    if get_wcoulG_deriv is None:
-        get_wcoulG_deriv = _get_weighted_coulG_strain_derivatives
-
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
@@ -570,7 +571,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None, omega=None,
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     def weighted_coulG_derivatives(Gvk, range_omega, remove_G0):
-        wcoulG_0, wcoulG_1 = get_wcoulG_deriv(cell, Gvk, omega=range_omega)
+        wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, omega=range_omega)
         if (remove_G0 and exxdiv == 'ewald' and
             (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
@@ -580,9 +581,8 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None, omega=None,
         return wcoulG_0, wcoulG_1
 
     kern = libpbc.PBC_ft_aopair_ek_deriv
-    ek = cp.zeros((cell.natm, 3))
+    ek_sigma = cp.zeros([cell.natm+3, 3])
     sigma = cp.zeros((3, 3))
-    sigma1 = cp.zeros((3, 3))
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
         Gvk = Gv + kpt
@@ -674,8 +674,8 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None, omega=None,
 
             GvT = cp.asarray(Gvk[p0:p1].T.ravel())
             err = kern(
-                ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-                ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ek_sigma[:-3].data.ptr, ctypes.c_void_p),
+                ctypes.cast(ek_sigma[-3:].data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),
@@ -693,12 +693,11 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None, omega=None,
 
     assert ft_opt.permutation_symmetry
     # The exchange contraction includes both AO-pair permutations.
-    ek *= 1. / nkpts**2
+    ek_sigma *= 1. / nkpts**2
     sigma *= .5 / nkpts**2
-    sigma1 *= 1. / nkpts**2
-    sigma += sigma1
+    ek_sigma[-3:] += sigma
     log.timer_debug1('get_ek_derivatives', *cpu0)
-    return ek.get(), sigma.get()
+    return ek_sigma.get()
 
 def _generate_shl_pairs(ft_opt):
     img_idx = ft_opt.img_idx

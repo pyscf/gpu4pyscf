@@ -99,21 +99,21 @@ def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
     return opt.intor('PBCint1e_r4_origi_ip2', 3, (0, 5), kpts, sort_output)
 
-def ovlp_derivatives(cell, dm, kpts=None):
+def ovlp_derivatives(cell, dm, kpts=None, kmesh=None):
     assert isinstance(cell, Cell)
-    opt = _check_opt(cell, 1, kpts)
+    opt = _check_opt(cell, 1, kpts, kmesh)
     return opt.get_ovlp_derivatives(dm, kpts)
 
-def kin_derivatives(cell, dm, kpts=None):
+def kin_derivatives(cell, dm, kpts=None, kmesh=None):
     assert isinstance(cell, Cell)
-    opt = _check_opt(cell, 1, kpts, scale_precision=1e-1)
+    opt = _check_opt(cell, 1, kpts, kmesh, scale_precision=1e-1)
     return opt.get_kin_derivatives(dm, kpts)
 
 def ovlp_strain_deriv(cell, dm, kpts=None):
-    return ovlp_derivatives(cell, dm, kpts)[1]
+    return ovlp_derivatives(cell, dm, kpts)[-3:]
 
 def kin_strain_deriv(cell, dm, kpts=None):
-    return kin_derivatives(cell, dm, kpts)[1]
+    return kin_derivatives(cell, dm, kpts)[-3:]
 
 def _check_opt(cell, hermi, kpts, bvk_kmesh=None, scale_precision=1):
     if isinstance(cell, Mole):
@@ -324,12 +324,11 @@ class _Int1eOpt:
         gout_stride_lookup, shm_size = _gout_stride_lookup_table(cell, deriv)
         nbatches_shl_pair = len(self.shl_pair_offsets) - 1
 
-        grad = cp.zeros((cell.natm, 3))
-        sigma = cp.zeros((3, 3))
+        grad_sigma = cp.zeros([cell.natm+3, 3])
         drv = getattr(libpbc, kern)
         err = drv(
-            ctypes.cast(grad.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grad_sigma[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(grad_sigma[-3:].data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.byref(self.int1e_envs),
             ctypes.c_int(shm_size),
@@ -339,9 +338,8 @@ class _Int1eOpt:
             ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
-        grad *= 2 / nkpts
-        sigma *= 2 / nkpts
-        return grad.get(), sigma.get()
+        grad_sigma *= 2 / nkpts
+        return grad_sigma.get()
 
     def get_ovlp_derivatives(self, dm, kpts=None):
         '''Computes the strain derivatives for the product of density matrix and

@@ -56,7 +56,6 @@ __all__ = [
 ]
 
 libpbc.PBC_build_k.restype = ctypes.c_int
-libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
 libpbc.PBC_jk_derivatives.restype = ctypes.c_int
 
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
@@ -884,7 +883,7 @@ class PBCJKMatrixOpt:
         j_factor - k_factor / 2, where k_factor = sr_factor
         '''
         return self._get_ejk_sr_derivatives(
-            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[0]
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[:-3]
 
     def _get_ejk_lr_ip1(self, dm, kpts=None, omega=None, exxdiv=None,
                         j_factor=1, lr_factor=1, sr_factor=1):
@@ -893,18 +892,21 @@ class PBCJKMatrixOpt:
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
         '''
         return self._get_ejk_lr_derivatives(
-            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[0]
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[:-3]
 
     def _get_ejk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None, omega=None,
                         j_factor=1, lr_factor=1, sr_factor=1):
         return self._get_ejk_sr_derivatives(
-            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[1]
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[-3:]
 
     def _get_ejk_sr_derivatives(self, dm, kpts=None, exxdiv=None, omega=None,
                                 j_factor=1, lr_factor=1, sr_factor=1):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor - k_factor / 2.
+
+        Returns an array of shape (cell.natm+3, 3), with atomic derivatives
+        in the first cell.natm rows and strain derivatives in the last three.
         '''
         log = logger.new_logger(self)
         cell = self.cell
@@ -990,8 +992,7 @@ class PBCJKMatrixOpt:
                               for k, v in self.bas_pair_cache.items()}
             _sup_bas_idx = cp.asarray(sup_bas_idx)
             _Ts_ji_lookup = cp.asarray(Ts_ji_lookup)
-            ejk = cp.zeros((cell.natm, 3))
-            sigma = cp.zeros((3, 3))
+            ejk_sigma = cp.zeros([cell.natm+3, 3])
 
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int64)
@@ -1016,9 +1017,9 @@ class PBCJKMatrixOpt:
                 scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 err = kern(
-                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ejk_sigma[:-3].data.ptr, ctypes.c_void_p),
                     ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
-                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ejk_sigma[-3:].data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
                     ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
@@ -1049,22 +1050,19 @@ class PBCJKMatrixOpt:
                     t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
-            return ejk, sigma, kern_counts, timing_collection
+            return ejk_sigma, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
         dms = None
 
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', sum(x[2] for x in results))
-            _TimingCollector.summary(log.debug1, (x[3] for x in results))
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
-        ejk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
-        sigma = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
-        sigma = sigma.get()
-        ejk = ejk.get()
-        ejk *= 2. / nkpts**2
-        sigma *= 2. / nkpts**2
-        return ejk, sigma
+        ejk_sigma = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+        ejk_sigma = ejk_sigma.get()
+        ejk_sigma *= 2. / nkpts**2
+        return ejk_sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, omega=None, exxdiv=None,
                         j_factor=1, lr_factor=1, sr_factor=1):
@@ -1073,13 +1071,16 @@ class PBCJKMatrixOpt:
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
         '''
         return self._get_ejk_lr_derivatives(
-            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[1]
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[-3:]
 
     def _get_ejk_lr_derivatives(self, dm, kpts=None, exxdiv=None, omega=None,
                                 j_factor=1, lr_factor=1, sr_factor=1):
         '''Compute the derivatives of the long-range part of the
         aggregated J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
+
+        Returns an array of shape (cell.natm+3, 3), with atomic derivatives
+        in the first cell.natm rows and strain derivatives in the last three.
         '''
         from gpu4pyscf.pbc.grad.rks_stress import (
             _get_weighted_coulG_strain_derivatives as get_wcoulG)
@@ -1169,20 +1170,19 @@ class PBCJKMatrixOpt:
 
             aft_envs = ft_opt.aft_envs
             kern = libpbc.PBC_ft_aopair_ej_deriv
-            ej = cp.zeros((cell.natm, 3))
-            sigma = cp.zeros((3, 3))
+            ej_sigma = cp.zeros([cell.natm+3, 3])
             for p0, p1 in lib.prange(0, ngrids, blksize):
                 nGv = p1 - p0
                 Gpq = ft_kern(Gv[p0:p1])
                 Gpq = Gpq.transpose(0,2,3,1)
                 rhoG = contract('kji,kijg->g', dm_sf, Gpq)
-                sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
+                ej_sigma[-3:] += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
                 vG = rhoG.conj()
                 vG *= wcoulG_0[p0:p1]
                 GvT = cp.asarray(Gv[p0:p1].T.ravel())
                 err = kern(
-                    ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ej_sigma[:-3].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ej_sigma[-3:].data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
                     ctypes.cast(vG.data.ptr, ctypes.c_void_p),
                     ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -1199,12 +1199,12 @@ class PBCJKMatrixOpt:
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
                     Gpq[:,diffuse_i,diffuse_j] = 0.
                     rhoG = contract('kji,kijg->g', dm_sf, Gpq)
-                    sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_SR_1[:,:,p0:p1], rhoG.conj(), rhoG).real
+                    ej_sigma[-3:] += .25*cp.einsum('xyg,g,g->xy', wcoulG_SR_1[:,:,p0:p1], rhoG.conj(), rhoG).real
                     vG = rhoG.conj()
                     vG *= wcoulG_SR_0[p0:p1]
                     err = kern(
-                        ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ej_sigma[:-3].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ej_sigma[-3:].data.ptr, ctypes.c_void_p),
                         ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
                         ctypes.cast(vG.data.ptr, ctypes.c_void_p),
                         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -1220,12 +1220,10 @@ class PBCJKMatrixOpt:
                         raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 Gpq = None
             if not ft_opt.permutation_symmetry:
-                ej *= .5
-                sigma *= .5
-            ej *= 2 * j_factor / nkpts**2
-            sigma *= 2 * j_factor / nkpts**2
+                ej_sigma *= .5
+            ej_sigma *= 2 * j_factor / nkpts**2
             log.timer_debug1('get_ej_deriv', *t0)
-            return ej, sigma
+            return ej_sigma
 
         def weighted_coulG_derivatives(Gvk, range_omega, remove_G0):
             wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, range_omega)
@@ -1251,9 +1249,8 @@ class PBCJKMatrixOpt:
 
             aft_envs = ft_opt.aft_envs
             kern = libpbc.PBC_ft_aopair_ek_deriv
-            ek = cp.zeros((cell.natm, 3))
+            ek_sigma = cp.zeros([cell.natm+3, 3])
             sigma = cp.zeros((3, 3))
-            sigma1 = cp.zeros((3, 3))
             for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
                 kpt = kpts[kp]
                 Gvk = Gv + cp.asarray(kpt)
@@ -1312,8 +1309,8 @@ class PBCJKMatrixOpt:
                     dm_vG = cp.asarray(dm_vG, order='C')
                     GvT = cp.asarray(Gvk[p0:p1].T.ravel())
                     err = kern(
-                        ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ek_sigma[:-3].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ek_sigma[-3:].data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                         ctypes.byref(aft_envs),
@@ -1352,8 +1349,8 @@ class PBCJKMatrixOpt:
                             dm_vG *= wcoulG_SR_0[p0:p1]
                         dm_vG = cp.asarray(dm_vG, order='C')
                         err = kern(
-                            ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-                            ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
+                            ctypes.cast(ek_sigma[:-3].data.ptr, ctypes.c_void_p),
+                            ctypes.cast(ek_sigma[-3:].data.ptr, ctypes.c_void_p),
                             ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                             ctypes.byref(aft_envs),
@@ -1370,20 +1367,18 @@ class PBCJKMatrixOpt:
                 cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
             # First *2 due to i>=j symmetry in kernel;
             # second *2 due to (d/dX ij|kl) + (ij|d/dX kl)
-            ek *= 2*2*.25 / nkpts**2
-            sigma1 *= 2*2*.25 / nkpts**2
+            ek_sigma *= 2*2*.25 / nkpts**2
             sigma *= .5 / nkpts**2
-            sigma += sigma1
+            ek_sigma[-3:] += sigma
             log.timer_debug1('get_ek_deriv', *cpu0)
-            return ek, sigma
+            return ek_sigma
 
-        ej = ek = 0
-        sigma_j = sigma_k = 0
+        ejk_sigma = cp.zeros([cell.natm+3, 3])
         if j_factor != 0:
-            ej, sigma_j = get_j()
+            ejk_sigma += get_j()
         if lr_factor != 0 or sr_factor != 0:
-            ek, sigma_k = get_k()
-        return (ej - ek).get(), (sigma_j - sigma_k).get()
+            ejk_sigma -= get_k()
+        return ejk_sigma.get()
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''

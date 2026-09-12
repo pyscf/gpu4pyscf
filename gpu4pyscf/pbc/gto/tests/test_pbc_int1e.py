@@ -243,7 +243,9 @@ def test_ovlp_derivatives():
     ovlp01 = np.einsum('xyiLj,Lk->xykij', ovlp01, expLk, optimize=True)
     ref = ovlp01 + ovlp10
     ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
-    grad, sigma = int1e.ovlp_derivatives(cell, dm, kpts)
+    grad_sigma = int1e.ovlp_derivatives(cell, dm, kpts)
+    grad = grad_sigma[:-3]
+    sigma = grad_sigma[-3:]
     assert abs(sigma - ref).max() < 1e-12
 
     mat = -cp.array(cell.pbc_intor('int1e_ipovlp', hermi=0, kpts=kpts))
@@ -293,7 +295,9 @@ def test_kin_derivatives():
     kin01 = np.einsum('xyiLj,Lk->xykij', kin01, expLk, optimize=True)
     ref = kin01 + kin10
     ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
-    grad, sigma = int1e.kin_derivatives(cell, dm, kpts)
+    grad_sigma = int1e.kin_derivatives(cell, dm, kpts)
+    grad = grad_sigma[:-3]
+    sigma = grad_sigma[-3:]
     assert abs(sigma - ref).max() < 1e-11
 
     mat = -cp.array(cell.pbc_intor('int1e_ipkin', hermi=0, kpts=kpts))
