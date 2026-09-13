@@ -44,7 +44,9 @@ H GTH-PBE-q1 GTH-PBE
 1
   0.20000000    2    -4.17890044     0.72446331
 0
-                 ''', verbose=6, output='/dev/null', a=a, unit='Bohr')
+                 ''',
+                 precision=1e-9,
+                 verbose=6, output='/dev/null', a=a, unit='Bohr')
 
 def tearDownModule():
     global cell
@@ -370,20 +372,22 @@ class KnownValues(unittest.TestCase):
         _check_vs_finite_diff(dat, mf_scanner)
 
         ref = dat
-        dat = mf0.run().Gradients().get_stress()
+        dat = mf0.reset(cell).run().Gradients().get_stress()
         assert abs(dat - ref).max() < 1e-8
 
     def test_gga_vs_finite_difference(self):
         xc = 'pbe'
         kmesh = [3, 1, 1]
         mf0 = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
-        mf = mf0.multigrid_numint().run()
+        mf = mf0.multigrid_numint()
         mf._numint.allow_mesh_reduction = False
+        mf.run()
         mf_grad = mf.Gradients()
         ref = mf_grad.get_stress()
 
         mf = mf0.multigrid_numint()
         mf._numint.allow_mesh_reduction = True
+        mf.run()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         assert abs(dat - ref).max() < 1e-6
@@ -392,7 +396,7 @@ class KnownValues(unittest.TestCase):
         _check_vs_finite_diff(dat, mf_scanner)
 
         ref = dat
-        dat = mf0.run().Gradients().get_stress()
+        dat = mf0.reset(cell).run().Gradients().get_stress()
         assert abs(dat - ref).max() < 1e-8
 
     def test_mgga_vs_finite_difference(self):
@@ -408,7 +412,7 @@ class KnownValues(unittest.TestCase):
         _check_vs_finite_diff(dat, mf_scanner)
 
         ref = dat
-        dat = mf0.run().Gradients().get_stress()
+        dat = mf0.reset(cell).run().Gradients().get_stress()
         assert abs(dat - ref).max() < 1e-8
 
     @unittest.skipIf(num_devices > 1, '')

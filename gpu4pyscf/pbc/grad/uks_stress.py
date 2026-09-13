@@ -56,7 +56,9 @@ def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
             mf.xc, dm[:,None], spin=1, with_j=True, with_nuc=with_nuc)
         j_factor = 0
     elif isinstance(ni, NumInt):
-        with_j = False
+        with_j = not (with_rsjk or isinstance(mf.with_df, GDF))
+        if with_j:
+            j_factor = 0
         sigma = get_vxc(mf_grad, cell, dm, with_j, with_nuc)
     else:
         raise NotImplementedError(f'UKS stress tensor for {mf.xc}')

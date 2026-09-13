@@ -31,7 +31,9 @@ H GTH-PBE-q1 GTH-PBE
 1
   0.20000000    2    -4.17890044     0.72446331
 0
-                 ''', verbose=6, output='/dev/null', a=a, unit='Bohr')
+                 ''',
+                 precision=1e-9,
+                 verbose=6, output='/dev/null', a=a, unit='Bohr')
 
 def tearDownModule():
     global cell

@@ -485,12 +485,13 @@ class KnownValues(unittest.TestCase):
         ]
         kpts = cell.make_kpts([2,1,1])
         mf0 = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu()
-        mf = mf0.density_fit(auxbasis=auxbasis).multigrid_numint()
-        mf.run()
-        self.assertAlmostEqual(mf.e_tot, -0.44948541440929657, 8)
+        mf = mf0.density_fit(auxbasis=auxbasis).multigrid_numint().run()
+        mf1 = mf0.multigrid_numint().run()
+        self.assertAlmostEqual(mf.e_tot, mf1.e_tot, 4)
+        self.assertAlmostEqual(mf.e_tot, -0.4196032331000882, 8)
 
         mf = mf0.density_fit(auxbasis=auxbasis).run()
-        self.assertAlmostEqual(mf.e_tot, -0.44966206867831404, 8)
+        self.assertAlmostEqual(mf.e_tot, -0.4197798873685143, 8)
 
     def test_hse06_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])

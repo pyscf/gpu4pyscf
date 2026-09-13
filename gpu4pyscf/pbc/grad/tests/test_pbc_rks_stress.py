@@ -261,14 +261,14 @@ class KnownValues(unittest.TestCase):
 
     def test_lda_vs_finite_difference(self):
         mf0 = cell.RKS(xc='svwn').to_gpu()
-        mf = mf0.multigrid_numint.run()
+        mf = mf0.multigrid_numint().run()
         mf_grad = rks.Gradients(mf)
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
         _check_vs_finite_diff(dat, mf_scanner)
 
         ref = dat
-        dat = mf0.run().Gradients().get_stress()
+        dat = mf0.reset(cell).run().Gradients().get_stress()
         assert abs(dat - ref).max() < 1e-8
 
     def test_gga_vs_finite_difference(self):
@@ -280,7 +280,7 @@ class KnownValues(unittest.TestCase):
         _check_vs_finite_diff(dat, mf_scanner)
 
         ref = dat
-        dat = mf0.run().Gradients().get_stress()
+        dat = mf0.reset(cell).run().Gradients().get_stress()
         assert abs(dat - ref).max() < 1e-8
 
     def test_mgga_vs_finite_difference(self):
@@ -292,7 +292,7 @@ class KnownValues(unittest.TestCase):
         _check_vs_finite_diff(dat, mf_scanner)
 
         ref = dat
-        dat = mf0.run().Gradients().get_stress()
+        dat = mf0.reset(cell).run().Gradients().get_stress()
         assert abs(dat - ref).max() < 1e-8
 
     def test_pbe0_vs_finite_difference(self):

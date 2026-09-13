@@ -31,21 +31,22 @@ H GTH-PBE-q1 GTH-PBE
 1
   0.20000000    2    -4.17890044     0.72446331
 0
-                 ''', verbose=6, output='/dev/null', a=a, unit='Bohr')
+                 ''',
+                 precision=1e-9,
+                 verbose=6, output='/dev/null', a=a, unit='Bohr')
 
 def tearDownModule():
     global cell
     del cell
 
-def _check_vs_finite_diff(dat, mf_scanner):
+def _check_vs_finite_diff(dat, mf_scanner, disp=1e-3, tol=1e-7):
     cell = mf_scanner.cell
     vol = cell.vol
-    disp = 1e-3
     for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
         e1 = mf_scanner(cell1)
         e2 = mf_scanner(cell2)
-        assert abs(dat[i,j] - (e1-e2)/2/disp/vol) < 1e-7
+        assert abs(dat[i,j] - (e1-e2)/2/disp/vol) < tol
 
 class KnownValues(unittest.TestCase):
     def test_kuhf_vs_finite_difference(self):
@@ -65,7 +66,7 @@ class KnownValues(unittest.TestCase):
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = cell.UHF().as_scanner()
-        _check_vs_finite_diff(dat, mf_scanner)
+        _check_vs_finite_diff(dat, mf_scanner, disp=.5e-3)
 
     def test_gdf_uhf_vs_finite_difference(self):
         mf = cell.UHF().to_gpu().density_fit().run()

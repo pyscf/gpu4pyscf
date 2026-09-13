@@ -40,7 +40,9 @@ H GTH-PBE-q1 GTH-PBE
 1
   0.20000000    2    -4.17890044     0.72446331
 0
-                 ''', verbose=6, output='/dev/null', a=a, unit='Bohr')
+                 ''',
+                 precision=1e-9,
+                 verbose=6, output='/dev/null', a=a, unit='Bohr')
 
 def tearDownModule():
     global cell
@@ -150,14 +152,14 @@ class KnownValues(unittest.TestCase):
     def test_lda_vs_finite_difference(self):
         xc = 'svwn'
         mf0 = cell.UKS(xc=xc).to_gpu()
-        mf = mf0.multigrid_numint.run()
+        mf = mf0.multigrid_numint().run()
         mf_grad = uks.Gradients(mf)
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
         _check_vs_finite_diff(dat, mf_scanner)
 
         ref = dat
-        dat = mf0.run().Gradients().get_stress()
+        dat = mf0.reset(cell).run().Gradients().get_stress()
         assert abs(dat - ref).max() < 1e-8
 
     def test_gga_vs_finite_difference(self):
