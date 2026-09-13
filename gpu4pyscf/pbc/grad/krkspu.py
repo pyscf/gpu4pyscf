@@ -20,10 +20,11 @@ Analytical derivatives for DFT+U with kpoints sampling
 import numpy as np
 import cupy as cp
 from pyscf.pbc import gto
-from gpu4pyscf.pbc.grad import krks as krks_grad
-from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
-from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract
+from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
+from gpu4pyscf.pbc.grad import krks as krks_grad
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+from gpu4pyscf.pbc.gto import int1e
 
 def generate_first_order_local_orbitals(cell, minao_ref='MINAO', kpts=None):
     kpts = kpts.reshape(-1, 3)
@@ -134,7 +135,94 @@ def _hubbard_U_deriv1(mf, dm=None, kpts=None):
                     - cp.einsum('xij,ji->x', P1, P0).real * 2)
     return dE_U.get()
 
+def ovlp_strain_deriv(cell, kpts):
+    '''Strain derivatives for overlap matrix
+    '''
+    disp = 1e-5
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    s = []
+    for x in range(3):
+        for y in range(3):
+            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+            s1 = int1e.int1e_ovlp(cell1, kpts1)
+            s2 = int1e.int1e_ovlp(cell2, kpts2)
+            s.append((s1 - s2) / (2*disp))
+    return cp.array(s)
+
+def _strain_deriv_local_orbitals(cell, minao_ref='MINAO', kpts=None):
+    if isinstance(minao_ref, str):
+        pcell = reference_mol(cell, minao_ref)
+    else:
+        pcell = minao_ref
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    nkpts = len(kpts)
+
+    nao = cell.nao
+    naop = pcell.nao
+    if is_zero(kpts):
+        C1_minao = cp.empty((3, 3, nkpts, nao, naop))
+    else:
+        C1_minao = cp.empty((3, 3, nkpts, nao, naop), dtype=np.complex128)
+    disp = 1e-5
+    for x in range(3):
+        for y in range(3):
+            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+            pcell1, pcell2 = _finite_diff_cells(pcell, x, y, disp)
+            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+            C1 = _make_minao_lo(cell1, pcell1, kpts=kpts1)
+            C2 = _make_minao_lo(cell2, pcell2, kpts=kpts2)
+            C1_minao[x,y] = (C1 - C2) / (2*disp)
+    return C1_minao
+
+def _hubbard_U_strain_deriv1(mf, dm=None, kpts=None):
+    assert mf.alpha is None
+    assert mf.C_ao_lo is None
+    assert mf.minao_ref is not None
+    if dm is None:
+        dm = mf.make_rdm1()
+    cell = mf.cell
+    if kpts is None:
+        kpts = mf.kpts.reshape(-1, 3)
+    nkpts = len(kpts)
+
+    # Construct orthogonal minao local orbitals.
+    pcell = reference_mol(cell, mf.minao_ref)
+    C_ao_lo = _make_minao_lo(cell, pcell, kpts=kpts)
+    U_idx, U_val = _set_U(cell, pcell, mf.U_idx, mf.U_val)[:2]
+    U_idx_stack = np.hstack(U_idx)
+    C0 = [C_k[:,U_idx_stack] for C_k in C_ao_lo]
+    C1_ao_lo = _strain_deriv_local_orbitals(cell, pcell, kpts)
+    C1 = [C_k[:,:,:,U_idx_stack] for C_k in C1_ao_lo.transpose(2,0,1,3,4)]
+
+    ovlp0 = int1e.int1e_ovlp(cell, kpts)
+    ovlp1 = cp.asarray(ovlp_strain_deriv(cell, kpts))
+    nao = ovlp0.shape[-1]
+    ovlp1 = ovlp1.reshape(3,3,nkpts,nao,nao).transpose(2,0,1,3,4)
+    C_inv = [C_k.conj().T.dot(S_k) for C_k, S_k in zip(C0, ovlp0)]
+    dm_deriv0 = [C_k.dot(dm_k).dot(C_k.conj().T) for C_k, dm_k in zip(C_inv, dm)]
+
+    sigma = cp.zeros((3, 3))
+    weight = 1. / nkpts
+    for k in range(nkpts):
+        SC1 = contract('pq,xyqi->xypi', ovlp0[k], C1[k])
+        SC1 += contract('xypq,qi->xypi', ovlp1[k], C0[k])
+        dm_deriv1 = contract('pj,xyjq->xypq', C_inv[k].dot(dm[k]), SC1)
+        i0 = i1 = 0
+        for idx, val in zip(U_idx, U_val):
+            i0, i1 = i1, i1 + len(idx)
+            P0 = dm_deriv0[k][i0:i1,i0:i1]
+            P1 = dm_deriv1[:,:,i0:i1,i0:i1]
+            sigma += weight * (val * 0.5) * (
+                cp.einsum('xyii->xy', P1).real * 2 # *2 for P1+P1.T
+                - cp.einsum('xyij,ji->xy', P1, P0).real * 2)
+    return sigma.get()
+
 class Gradients(krks_grad.Gradients):
     def energy_ee(self, dm, kpts):
-        dE_U = _hubbard_U_deriv1(self.base, dm, kpts)
-        return krks_grad.energy_ee(self, dm, kpts) + dE_U
+        grad = _hubbard_U_deriv1(self.base, dm, kpts)
+        sigma = _hubbard_U_strain_deriv1(self.base, dm, kpts)
+        dE = np.vstack([grad, sigma])
+        return krks_grad.energy_ee(self, dm, kpts) + dE

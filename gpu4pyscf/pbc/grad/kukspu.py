@@ -22,7 +22,8 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.grad import kuks as kuks_grad
-from gpu4pyscf.pbc.grad.krkspu import generate_first_order_local_orbitals
+from gpu4pyscf.pbc.grad.krkspu import (
+    generate_first_order_local_orbitals, _strain_deriv_local_orbitals)
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract
 
@@ -76,7 +77,56 @@ def _hubbard_U_deriv1(mf, dm=None, kpts=None):
                         - cp.einsum('xij,ji->x', P1, P0).real * 4)
     return dE_U.get()
 
+def _hubbard_U_strain_deriv1(mf, dm=None, kpts=None):
+    assert mf.alpha is None
+    assert mf.C_ao_lo is None
+    assert mf.minao_ref is not None
+    if dm is None:
+        dm = mf.make_rdm1()
+    cell = mf.cell
+    if kpts is None:
+        kpts = mf.kpts.reshape(-1, 3)
+    nkpts = len(kpts)
+
+    # Construct orthogonal minao local orbitals.
+    pcell = reference_mol(cell, mf.minao_ref)
+    C_ao_lo = _make_minao_lo(cell, pcell, kpts=kpts)
+    U_idx, U_val = _set_U(cell, pcell, mf.U_idx, mf.U_val)[:2]
+    U_idx_stack = np.hstack(U_idx)
+    C0 = [C_k[:,U_idx_stack] for C_k in C_ao_lo]
+    C1_ao_lo = _strain_deriv_local_orbitals(cell, pcell, kpts)
+    C1 = [C_k[:,:,:,U_idx_stack] for C_k in C1_ao_lo.transpose(2,0,1,3,4)]
+
+    ovlp0 = int1e.int1e_ovlp(cell, kpts)
+    ovlp1 = cp.asarray(ovlp_strain_deriv(cell, kpts))
+    nao = ovlp0.shape[-1]
+    ovlp1 = ovlp1.reshape(3,3,nkpts,nao,nao).transpose(2,0,1,3,4)
+    C_inv = [C_k.conj().T.dot(S_k) for C_k, S_k in zip(C0, ovlp0)]
+    dm_deriv0 = [
+        [C_k.dot(dm_k).dot(C_k.conj().T) for C_k, dm_k in zip(C_inv, dm_s)]
+        for dm_s in dm
+    ]
+
+    sigma = cp.zeros((3, 3))
+    weight = 1. / nkpts
+    for k in range(nkpts):
+        SC1 = contract('pq,xyqi->xypi', ovlp0[k], C1[k])
+        SC1 += contract('xypq,qi->xypi', ovlp1[k], C0[k])
+        for s in range(2):
+            dm_deriv1 = contract('pj,xyjq->xypq', C_inv[k].dot(dm[s,k]), SC1)
+            i0 = i1 = 0
+            for idx, val in zip(U_idx, U_val):
+                i0, i1 = i1, i1 + len(idx)
+                P0 = dm_deriv0[s][k][i0:i1,i0:i1]
+                P1 = dm_deriv1[:,:,i0:i1,i0:i1]
+                sigma += weight * (val * 0.5) * (
+                    cp.einsum('xyii->xy', P1).real * 2
+                    - cp.einsum('xyij,ji->xy', P1, P0).real * 4)
+    return sigma.get()
+
 class Gradients(kuks_grad.Gradients):
     def energy_ee(self, dm, kpts):
-        dE_U = _hubbard_U_deriv1(self.base, dm, kpts)
-        return kuks_grad.energy_ee(self, dm, kpts) + dE_U
+        grad = _hubbard_U_deriv1(self.base, dm, kpts)
+        sigma = _hubbard_U_strain_deriv1(self.base, dm, kpts)
+        dE = np.vstack([grad, sigma])
+        return kuks_grad.energy_ee(self, dm, kpts) + dE

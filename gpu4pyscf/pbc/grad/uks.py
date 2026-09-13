@@ -13,7 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from gpu4pyscf.pbc.grad import uhf
+import numpy as np
+from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
+from gpu4pyscf.pbc.df.df import GDF
+from gpu4pyscf.pbc.grad import rhf, uhf, rks
 
 __all__ = ['Gradients']
 
@@ -21,6 +24,51 @@ class Gradients(uhf.Gradients):
     grids = None
     grid_response = False
 
-    def get_stress(self):
-        from gpu4pyscf.pbc.grad import uks_stress
-        return uks_stress.kernel(self)
+    _keys = {'grid_response', 'grids'}
+
+    reset = rks.Gradients.reset
+
+    def energy_ee(self, dm):
+        '''
+        The contribution of electron-electron interactions per cell to the
+        nuclear gradients.
+        '''
+        mf = self.base
+        with_df = mf.with_df
+        ni = mf._numint
+        j_in_xc = not isinstance(with_df, GDF)
+        j_factor = 1
+        if j_in_xc:
+            j_factor = 0
+        xc = getattr(mf, 'xc', 'HF')
+        if xc.upper() == 'HF':
+            omega, k_lr, k_sr = 0, 1, 1
+        else:
+            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+
+        # TODO: handle all-electron+GGA and pseudo+GGA differently
+        # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
+        de = 0
+        spin = 0 if dm.ndim == 2 else 1
+        if isinstance(ni, multigrid.MultiGridNumIntBase):
+            de = ni.energy_derivatives(
+                xc, dm, spin=spin, with_j=j_in_xc, with_nuc=True)
+        elif xc.upper() != 'HF':
+            from gpu4pyscf.pbc.grad.kuks import get_vxc, get_vxc_full_response
+            if self.grid_response:
+                assert isinstance(mf.grids, BeckeGrids), "Only Becke grid requires grid response"
+                fn = get_vxc_full_response
+            else:
+                fn = get_vxc
+            cell = self.cell
+            de = np.empty([cell.natm+3, 3])
+            de[:-3] = fn(ni, cell, mf.grids, xc, dm[None], np.zeros((1, 3)))
+            if isinstance(grids, BeckeGrids):
+                de[-3:] = np.nan
+            else:
+                de[-3:] = ni.energy_strain_gradient(
+                    xc, dm, spin=spin, with_j=False, with_nuc=True)
+
+        if j_factor != 0 or k_sr != 0 or k_lr != 0:
+            de += rhf._get_ejk_derivatives(mf, dm, None, j_factor, omega, k_lr, k_sr)
+        return de

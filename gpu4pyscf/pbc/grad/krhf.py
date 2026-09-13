@@ -21,84 +21,28 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.grad import krhf as krhf_cpu
-from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
+from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
+from gpu4pyscf.lib.cupy_helper import contract, asarray, batched_vec_norm2
 from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
-from gpu4pyscf.pbc.dft import UniformGrids
-from gpu4pyscf.pbc.df import ft_ao
+from gpu4pyscf.pbc.dft.numint import eval_ao_kpts, _GTOvalOpt
+from gpu4pyscf.pbc.dft import UniformGrids, BeckeGrids
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
+from gpu4pyscf.pbc.df import ft_ao, GDF
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
-from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-from gpu4pyscf.pbc.tools.pbc import get_coulG
-from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
-from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, jk_energy_per_atom
+from gpu4pyscf.pbc import tools as pbctools
+from gpu4pyscf.pbc.grad.rks_stress import (
+    _eval_ao_strain_derivatives, _get_vpplocG_strain_derivatives,
+    _get_coulG_strain_derivatives, ALIGNED)
+from gpu4pyscf.pbc.grad.pp import (
+    vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
+from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, _get_ejk_derivatives
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
-from gpu4pyscf.pbc.dft import multigrid
 
 __all__ = ['Gradients']
-
-def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
-    '''
-    Electronic part of KRHF/KRKS gradients
-    Args:
-        mf_grad : pbc.grad.krhf.Gradients or pbc.grad.krks.Gradients object
-    '''
-    mf = mf_grad.base
-    cell = mf_grad.cell
-    natm = cell.natm
-    kpts = mf.kpts
-    nkpts = len(kpts)
-    if mo_energy is None: mo_energy = mf.mo_energy
-    if mo_occ is None:    mo_occ = mf.mo_occ
-    if mo_coeff is None:  mo_coeff = mf.mo_coeff
-
-    if getattr(mf, 'disp', None):
-        raise NotImplementedError('dispersion correction')
-
-    if getattr(mf, 'with_x2c', None):
-        raise NotImplementedError('X2C gradients')
-
-    log = logger.new_logger(mf_grad)
-    t0 = log.init_timer()
-    log.debug('Computing Gradients of NR-HF Coulomb repulsion')
-    s1 = mf_grad.get_ovlp(cell, kpts)
-    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    # derivatives of the two-electron contribution
-    e2_grad = mf_grad.energy_ee(dm0, kpts)
-    t1 = log.timer_debug1('gradients of 2e part', *t0)
-
-    ni = mf._numint
-    if isinstance(ni, multigrid.MultiGridNumIntBase):
-        # Vne or pploc contribution is evaluated in energy_ee
-        dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        dh1e = -contract_h1e_dm(cell, dh1e_kin, dm0, hermi=1)
-    else:
-        hcore_deriv = mf_grad.hcore_generator(cell, kpts)
-        dh1e = cp.empty([natm, 3])
-        for ia in range(natm):
-            h1ao = hcore_deriv(ia)
-            dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
-        dh1e = dh1e.get()
-
-    if cell._pseudo:
-        dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0, kpts = kpts)
-        dh1e += dh1e_pp_nonlocal
-
-    log.timer_debug1('gradients of 1e part', *t1)
-
-    # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
-    dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
-    ds = contract_h1e_dm(cell, s1, dme0, hermi=1)
-    de = (dh1e - ds) / nkpts + e2_grad
-    de += cp.asnumpy(mf_grad.extra_force())
-
-    if log.verbose > logger.DEBUG:
-        log.debug('gradients of electronic part')
-        mf_grad._write(cell, de, range(natm))
-    return de
 
 def get_hcore(cell, kpts):
     '''
@@ -114,7 +58,7 @@ def get_hcore(cell, kpts):
         vlocG = get_vlocG(cell)
         vpplocG = -cp.einsum('ij,ij->j', SI, vlocG)
         vpplocG[0] = cp.sum(get_alphas(cell))
-        vpplocR = tools.ifft(vpplocG, cell.mesh).real
+        vpplocR = pbctools.ifft(vpplocG, cell.mesh).real
         ni = pbc_numint.KNumInt()
         grids = UniformGrids(cell)
         # block_loop(sort_grids=True) would reorder the grids. Sorting vpplocR
@@ -133,9 +77,9 @@ def get_hcore(cell, kpts):
         mesh = cell.mesh
         rhoG = _get_ZSI(cell, mesh)
         Gv = cell.get_Gv(mesh)
-        coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
+        coulG = pbctools.get_coulG(cell, mesh=mesh, Gv=Gv)
         vneG = rhoG * coulG
-        vneR = tools.ifft(vneG, mesh).real
+        vneR = pbctools.ifft(vneG, mesh).real
         ni = pbc_numint.KNumInt()
         grids = UniformGrids(cell)
         # block_loop(sort_grids=True) would reorder the grids. Sorting vneR
@@ -176,7 +120,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         vlocG = cp.asarray(get_vlocG(cell))
     else:
         Z = cell.atom_charges()
-        coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
+        coulG = pbctools.get_coulG(cell, mesh=mesh, Gv=Gv)
     ni = pbc_numint.KNumInt()
     grids = UniformGrids(cell)
 
@@ -186,7 +130,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
             vloc_g = cp.einsum('ga,g,g->ag', Gv, 1j * SI[atm_id], vlocG[atm_id])
         else:
             vloc_g = cp.einsum('ga,g,g->ag', Gv, Z[atm_id]*1j * SI[atm_id], coulG)
-        vloc_R = tools.ifft(vloc_g, mesh).real
+        vloc_R = pbctools.ifft(vloc_g, mesh).real
         vloc_R = vloc_R[:,grids.argsort()]
         vloc_g = None
         deriv = 0
@@ -206,22 +150,95 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         return hcore
     return hcore_deriv
 
+def get_nuc_strain_deriv(mf_grad, cell, dm, kpts):
+    '''Strain derivatives for nuclear attraction or pp-local with k-points sampling
+    '''
+    from gpu4pyscf.lib.cupy_helper import sandwich_dot
+    assert cell.low_dim_ft_type != 'inf_vacuum'
+    assert cell.dimension != 1
+    assert kpts.ndim == 2
+    assert dm.ndim == 3
+    if not cell.cart:
+        c2s = asarray(cell.cart2sph_coeff())
+        dm = sandwich_dot(dm, c2s.T)
+        # Ensure all AOs are evaluated in the Cartesian GTOs as ao_ks strain
+        # derivatives currently supports Cartesian format only
+        cell = cell.copy()
+        cell.cart = True
+    nkpts, nao = dm.shape[:2]
+    assert nkpts == len(kpts)
+
+    grids = UniformGrids(cell)
+    grids_idx = grids.argsort(tile=8)
+    grids_coords = grids.coords[grids_idx]
+    ngrids = len(grids_coords)
+    mesh = grids.mesh
+
+    def partial_dot(bra, ket):
+        '''conj(ig),ig->g'''
+        rho = cp.einsum('ig,ig->g', bra.real, ket.real)
+        rho += cp.einsum('ig,ig->g', bra.imag, ket.imag)
+        return rho
+
+    eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=1)
+    max_memory = 4e9
+    blksize = int((max_memory/16/(nkpts*10*nao))/ ALIGNED) * ALIGNED
+
+    rho0 = cp.zeros(ngrids)
+    rho1 = cp.zeros((3,3, ngrids))
+
+    for p0, p1 in lib.prange(0, ngrids, blksize):
+        coords = cp.asarray(grids_coords[p0:p1].T, order='C').T
+        ao_ks = eval_ao_kpts(cell, coords, kpts, deriv=1, opt=eval_gto_opt)
+        ao_ks_strain = _eval_ao_strain_derivatives(
+            cell, coords, kpts, deriv=0, opt=eval_gto_opt)
+        coordsT = coords.T
+        for k, dm in enumerate(dm):
+            ao = ao_ks[k].transpose(0,2,1)
+            ao_strain = ao_ks_strain[k]
+            ao1 = ao_strain[:,:,0]
+            # Adding the response of the grids
+            ao1 += contract('xig,yg->xyig', ao[1:4], coordsT)
+            c0 = dm.T.dot(ao[0])
+            rho0[p0:p1] += partial_dot(ao[0], c0).real
+            rho1[:,:,p0:p1] += contract('xyig,ig->xyg', ao1, c0.conj()).real
+
+    rho0 *= 1./nkpts
+    # *2 for rho1 because the derivatives were applied to the bra only
+    rho1 *= 2./nkpts
+
+    rho0_fft_order = cp.empty_like(rho0)
+    rho1_fft_order = cp.empty_like(rho1)
+    rho0_fft_order[grids_idx] = rho0
+    rho1_fft_order[:,:,grids_idx] = rho1
+    rho0, rho1 = rho0_fft_order, rho1_fft_order
+    rhoG = pbctools.fft(rho0, mesh)
+
+    if cell._pseudo:
+        vpplocG_0, vpplocG_1 = _get_vpplocG_strain_derivatives(cell, mesh)
+        vpplocR = pbctools.ifft(vpplocG_0, mesh).real
+        Ene = contract('xyg,g->xy', rho1, vpplocR).real.get()
+        Ene += contract('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
+    else:
+        Gv = cell.get_Gv(mesh)
+        coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
+        # SI corresponds to Fourier components of the fractional atomic
+        # positions within the cell. It does not respond to the strain
+        # transformation
+        ZG = _get_ZSI(cell, mesh)
+        vR = pbctools.ifft(ZG * coulG_0, mesh).real
+        Ene = contract('xyg,g->xy', rho1, vR).real.get()
+        Ene += contract('xyg,g->xy', coulG_1, rhoG.conj()*ZG).real.get() * (1./ngrids)
+    return Ene
+
 class GradientsBase(pbchf_grad.GradientsBase):
     '''
     Basic nuclear gradient functions for non-relativistic methods
     '''
-    def __init__(self, method):
-        self.cell = method.cell
-        molgrad.GradientsBase.__init__(self, method)
 
     @property
     def kpts(self):
         return self.base.kpts
-
-    def get_ovlp(self, cell=None, kpts=None):
-        if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
-        return -int1e.int1e_ipovlp(cell, kpts)
 
     def get_veff(self, dm=None, kpts=None):
         '''
@@ -254,22 +271,25 @@ class Gradients(GradientsBase):
         nuclear gradients.
         '''
         mf = self.base
-        ni = mf._numint
+        with_df = mf.with_df
         # When J is evaluated using mf.j_engine or mf.rsjk, it is identical to
         # the J from MultiGridNumInt. The contribution from J matrix can be
         # efficiently evaluated using the MultiGridNumInt integrator.
-        j_in_xc = ni is not None and isinstance(ni, multigrid.MultiGridNumIntBase)
-        if j_in_xc:
-            j_factor = 0
+        j_in_xc = not isinstance(with_df, GDF)
+        omega = 0
+        j_factor = k_sr = k_lr = 1
+
+        # TODO: handle all-electron+GGA and pseudo+GGA differently
+        # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
+        de = 0
+        ni = mf._numint
+        if isinstance(ni, multigrid.MultiGridNumIntBase):
             de = ni.energy_nuclear_gradient(
                 'HF', dm, kpts=kpts, spin=0, with_j=j_in_xc, with_nuc=True)
-        else:
-            j_factor = 1
-            de = 0
+            if j_in_xc:
+                j_factor = 0
 
-        de += jk_energy_per_atom(
-            mf, dm, kpts, j_factor=j_factor, lr_factor=1, sr_factor=1,
-            exxdiv=mf.exxdiv)
+        de += _get_ejk_derivatives(mf, dm, kpts, j_factor, omega, k_lr, k_sr)
         return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
@@ -288,10 +308,77 @@ class Gradients(GradientsBase):
             dm1e[k] = (c*e_occ).dot(c.conj().T)
         return dm1e
 
-    grad_elec = grad_elec
+    def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
+        '''
+        Electronic part of KRHF/KRKS gradients
+        Args:
+            mf_grad : pbc.grad.krhf.Gradients or pbc.grad.krks.Gradients object
+        '''
+        mf = mf_grad.base
+        cell = mf_grad.cell
+        natm = cell.natm
+        kpts = mf.kpts
+        nkpts = len(kpts)
+        if mo_energy is None: mo_energy = mf.mo_energy
+        if mo_occ is None:    mo_occ = mf.mo_occ
+        if mo_coeff is None:  mo_coeff = mf.mo_coeff
+
+        if getattr(mf, 'disp', None):
+            raise NotImplementedError('dispersion correction')
+
+        if getattr(mf, 'with_x2c', None):
+            raise NotImplementedError('X2C gradients')
+
+        log = logger.new_logger(mf_grad)
+        t0 = log.init_timer()
+        log.debug('Computing Gradients of NR-HF Coulomb repulsion')
+        dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+        # derivatives of the two-electron contribution
+        grad_sigma = mf_grad.energy_ee(dm0, kpts)
+        t1 = log.timer_debug1('gradients of 2e part', *t0)
+
+        if dm0.ndim == 4: # KUHF
+            dm0 = dm0[0] + dm0[1]
+
+        ni = mf._numint
+        if ni is None and np.prod(cell.mesh) < 1000**3:
+            # In the pseudo and all-electron mixed case, MultiGridNumInt is
+            # still more efficient if Ecut is not too high.
+            ni = multigrid_v3.MultiGridNumInt(cell)
+
+        ni = mf._numint
+        if isinstance(ni, multigrid.MultiGridNumIntBase):
+            # Vne or pploc contribution is evaluated in energy_ee
+            grad_sigma += int1e.kin_derivatives(cell, dm0, kpts) / nkpts
+        else:
+            hcore_deriv = mf_grad.hcore_generator(cell, kpts)
+            dh1e = cp.empty([natm, 3])
+            for ia in range(natm):
+                h1ao = hcore_deriv(ia)
+                dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
+            grad_sigma[:-3] += dh1e.get()
+            if isinstance(mf.grids, BeckeGrids):
+                grad_sigma[-3:] = np.nan
+            else:
+                # TODO: sigma += self.with_df.pp_loc_energy_derivatives()[1]
+                grad_sigma[-3:] += get_nuc_strain_deriv(mf_grad, cell, dm0, kpts)
+
+        if cell._pseudo:
+            grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0, kpts=kpts)
+            grad_sigma[-3:] += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0)
+
+        log.timer_debug1('gradients of 1e part', *t1)
+
+        dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
+        grad_sigma -= int1e.ovlp_derivatives(cell, dme0, kpts) / nkpts
+        grad_sigma[-3:] /= cell.vol
+
+        if log.verbose > logger.DEBUG:
+            log.debug('gradients of electronic part')
+            mf_grad._write(cell, grad_sigma[:-3], range(cell.natm))
+            log.debug('Asymmetric strain tensor')
+            log.debug('%s', grad_sigma[-3:])
+        return grad_sigma
+
     as_scanner = molgrad.as_scanner
     _finalize = krhf_cpu.Gradients._finalize
-
-    def get_stress(self):
-        from gpu4pyscf.pbc.grad import krhf_stress
-        return krhf_stress.kernel(self)
