@@ -186,7 +186,8 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a,
+                     unit='Bohr', precision=1e-9)
         kmesh = [3, 1, 1]
         kpts = cell.make_kpts(kmesh)
         nao = cell.nao

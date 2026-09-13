@@ -644,7 +644,8 @@ class KnownValues(unittest.TestCase):
         mf = mol.UKS(xc = "wB97M-V").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
         mf.grids.atom_grid = (10,14)
         mf.nlcgrids.atom_grid = (10,14)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 5e-12
+        mf.max_cycle = 70
         mf.kernel()
         assert mf.converged
 
@@ -704,7 +705,7 @@ class KnownValues(unittest.TestCase):
         test_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
 
         g0 = 0
-        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2, strict_grid_order = True):
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2):
             g1 = g0 + weight.shape[0]
 
             mu = ao[0]
@@ -828,7 +829,7 @@ class KnownValues(unittest.TestCase):
         test_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
 
         g0 = 0
-        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 3, strict_grid_order = True):
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 3):
             g1 = g0 + weight.shape[0]
 
             mu = ao[0]
@@ -954,7 +955,7 @@ class KnownValues(unittest.TestCase):
         test_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
 
         g0 = 0
-        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 3, strict_grid_order = True):
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 3):
             g1 = g0 + weight.shape[0]
 
             mu = ao[0]

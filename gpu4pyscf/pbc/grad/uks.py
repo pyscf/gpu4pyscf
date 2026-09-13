@@ -19,6 +19,7 @@ __all__ = ['Gradients']
 
 class Gradients(uhf.Gradients):
     grids = None
+    grid_response = False
 
     def get_stress(self):
         from gpu4pyscf.pbc.grad import uks_stress

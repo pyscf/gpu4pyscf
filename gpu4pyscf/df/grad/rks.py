@@ -58,14 +58,28 @@ def energy_ee(ks_grad, mol=None, dm=None, verbose=None):
         if ks_grad.grid_response:
             exc1 += enlc1_grid
 
-    exc1 += ks_grad.jk_energy_per_atom(
-        dm, j_factor=1, k_factor=hyb, hermi=1, verbose=log)
-
     if ni.libxc.is_hybrid_xc(mf.xc) and omega != 0:  # For range separated Coulomb operator
-        beta = alpha - hyb
-        ek_lr = ks_grad.jk_energy_per_atom(
-            dm, j_factor=0, k_factor=beta, hermi=1, omega=omega, verbose=log)
-        exc1 += ek_lr
+        range_separated_mode = getattr(mf, 'range_separated_mode', 'mix_outside_kernel')
+        if range_separated_mode == 'mix_outside_kernel':
+            exc1 += ks_grad.jk_energy_per_atom(
+                dm, j_factor=1, k_factor=hyb, hermi=1, verbose=log)
+
+            beta = alpha - hyb
+            ek_lr = ks_grad.jk_energy_per_atom(
+                dm, j_factor=0, k_factor=beta, hermi=1, omega=omega, verbose=log)
+            exc1 += ek_lr
+        elif range_separated_mode == 'mix_inside_kernel':
+            exc1 += ks_grad.jk_energy_per_atom(
+                dm, j_factor=1, k_factor=0, hermi=1, verbose=log)
+
+            exc1 += ks_grad.jk_energy_per_atom(
+                dm, j_factor=0, k_factor=1, hermi=1, omega=omega, lr_factor=alpha, sr_factor=hyb, verbose=log)
+        else:
+            raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
+    else:
+        exc1 += ks_grad.jk_energy_per_atom(
+            dm, j_factor=1, k_factor=hyb, hermi=1, verbose=log)
+
     return exc1
 
 class Gradients(rks_grad.Gradients):

@@ -60,12 +60,17 @@ class Gradients(rhf.GradientsBase):
 
         if j_in_xc:
             assert isinstance(ni, multigrid.MultiGridNumIntBase)
+            assert not getattr(self, 'grid_response', False)
             de += ni.energy_nuclear_gradient(
                 xc, dm, spin=1, with_j=j_in_xc, with_nuc=True)
             j_factor = 0
         elif xc.upper() != 'HF':
-            from gpu4pyscf.pbc.grad.kuks import get_vxc
-            de += get_vxc(ni, mf.cell, mf.grids, xc, dm[:,None], np.zeros((1, 3))) * 2
+            from gpu4pyscf.pbc.grad.kuks import get_vxc, get_vxc_full_response
+            if self.grid_response:
+                assert isinstance(mf.grids, BeckeGrids), "Only Becke grid requires grid response"
+                de += get_vxc_full_response(ni, mf.cell, mf.grids, xc, dm[:,None], np.zeros((1, 3)))
+            else:
+                de += get_vxc(ni, mf.cell, mf.grids, xc, dm[:,None], np.zeros((1, 3)))
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:
             de += jk_energy_per_atom(
@@ -88,9 +93,6 @@ class Gradients(rhf.GradientsBase):
             mo_coeff = mf.mo_coeff
         if mo_occ is None:
             mo_occ = mf.mo_occ
-
-        if isinstance(mf, KohnShamDFT) and isinstance(mf.grids, BeckeGrids):
-            raise NotImplementedError('gradients for BeckeGrids not supported')
 
         if getattr(mf, 'with_x2c', None):
             raise NotImplementedError('X2C gradients')

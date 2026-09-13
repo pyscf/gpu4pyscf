@@ -31,7 +31,7 @@ from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, contract, tag_array, sandwich_dot, eigh, asarray)
+    return_cupy_array, contract, tag_array, sandwich_dot, eigh, asarray, get_avail_mem)
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -399,20 +399,25 @@ class KSCF(pbchf.SCF):
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
+
+        allowed_fft_mesh_size = get_avail_mem() / 8 / 10 # 8 for 8 bytes per fp64, 10 is arbitrary (A 80 GB gpu will allow 1000^3 mesh)
+
         if isinstance(self._numint, multigrid.MultiGridNumIntBase):
             ni = self._numint
-        elif np.prod(cell.mesh) < 1000**3:
+        elif np.prod(cell.mesh) < allowed_fft_mesh_size:
             # In the pseudo and all-electron mixed case, MultiGridNumInt is
             # still more efficient if Ecut is not too high.
             ni = multigrid_v3.MultiGridNumInt(cell)
         else:
             ni = self.with_df
+
         if cell.pseudo:
             hcore = ni.get_pp(kpts)
         else:
             hcore = ni.get_nuc(kpts)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
+
         bvk_kmesh = None
         if kpts_in_bvkcell:
             bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
