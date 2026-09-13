@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import unittest
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 import numpy as np
 import cupy as cp
 import pyscf
@@ -23,8 +24,8 @@ from pyscf.pbc.tools import pbc
 from pyscf.pbc.df import FFTDF
 from pyscf.pbc.dft.numint import NumInt
 from pyscf.pbc.dft.gen_grid import UniformGrids
-from gpu4pyscf.pbc.grad import rks_stress, rks
-from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.grad import rks, rks_stress
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 import pytest
@@ -122,8 +123,9 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
         xc = 'lda,'
-        mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
-        dat = rks_stress.get_vxc(mf_grad, cell, dm)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=0, with_j=False, with_nuc=False)[-3:]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -144,8 +146,9 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
         xc = 'pbe,'
-        mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
-        dat = rks_stress.get_vxc(mf_grad, cell, dm)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=0, with_j=False, with_nuc=False)[-3:]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -166,8 +169,9 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
         xc = 'm06,'
-        mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
-        dat = rks_stress.get_vxc(mf_grad, cell, dm)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=0, with_j=False, with_nuc=False)[-3:]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -187,8 +191,9 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
         xc = 'lda,'
-        mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
-        dat = rks_stress.get_vxc(mf_grad, cell, dm, with_j=True)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=0, with_j=True, with_nuc=False)[-3:]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -214,8 +219,9 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
         xc = 'lda,'
-        mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
-        dat = rks_stress.get_vxc(mf_grad, cell, dm, with_nuc=True)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=0, with_nuc=True, with_j=False)[-3:]
         kpt = np.zeros(3)
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
@@ -231,7 +237,7 @@ class KnownValues(unittest.TestCase):
             assert abs(dat[i,j] - de/2e-5) < 1e-8
 
     def test_get_pp(self):
-        from gpu4pyscf.pbc.grad.rks_stress import _get_pp_nonloc_strain_derivatives
+        from gpu4pyscf.pbc.grad.pp import _get_pp_nonloc_strain_derivatives
         a = np.eye(3) * 5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
@@ -242,8 +248,9 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
         xc = 'lda,'
-        mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
-        dat = rks_stress.get_vxc(mf_grad, cell, dm, with_nuc=True)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=0, with_nuc=True, with_j=False)[-3:]
         dat += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, cp.array(dm))
         ni = NumInt()
         kpt = np.zeros(3)

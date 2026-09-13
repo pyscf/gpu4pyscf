@@ -23,8 +23,8 @@ from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf.pbc.grad import rks_stress
-from gpu4pyscf.pbc.grad import krks_stress
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 from gpu4pyscf.lib.multi_gpu import num_devices
 from packaging import version
 
@@ -467,10 +467,10 @@ class KnownValues(unittest.TestCase):
         assert grad_sigma.shape == (cell.natm+3, 3)
         sigma = grad_sigma[-3:]
 
-        xc = 'lda,'
-        mf_grad = cell.RKS(xc=xc).to_gpu().Gradients()
-        ref = rks_stress.get_vxc(mf_grad, cell, dm, with_j=True, with_nuc=False)
-        ref -= rks_stress.get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=False)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        ref = ni.energy_derivatives(
+            'HF', dm, with_j=True, with_nuc=False)[-3:]
         assert abs(ref - sigma).max() < 1e-8
 
     def test_ej_strain_deriv_kpts(self):
@@ -493,14 +493,14 @@ class KnownValues(unittest.TestCase):
         assert grad_sigma.shape == (cell.natm+3, 3)
         sigma = grad_sigma[-3:]
 
-        xc = 'lda,'
-        mf_grad = cell.KRKS(xc=xc, kpts=kpts).to_gpu().Gradients()
-        ref = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=True, with_nuc=False)
-        ref -= krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=False, with_nuc=False)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        ref = ni.energy_derivatives(
+            'HF', dm, kpts=kpts, with_j=True, with_nuc=False)[-3:]
         assert abs(ref - sigma).max() < 1e-8
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             mydf = aft.AFTDF(cell1, kpts=cell1.make_kpts(kmesh))
             vj = aft_jk.get_j_kpts(mydf, dm, hermi=1, kpts=mydf.kpts)
             e1 = .5 * cp.einsum('kij,kji->', vj, dm).real / nkpts
@@ -530,7 +530,7 @@ class KnownValues(unittest.TestCase):
         sigma = grad_sigma[-3:]
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             mydf = aft.AFTDF(cell1)
             vk = aft_jk.get_jk(mydf, dm, hermi=1, with_j=False, exxdiv=None)[1]
             e1 = .5 * cp.einsum('ij,ji->', vk, dm).real
@@ -560,7 +560,7 @@ class KnownValues(unittest.TestCase):
         sigma = grad_sigma[-3:]
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             mydf = aft.AFTDF(cell1, kpts=cell1.make_kpts(kmesh))
             vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv='ewald')
             e1 = .5 * cp.einsum('kij,kji->', vk, dm).real / nkpts

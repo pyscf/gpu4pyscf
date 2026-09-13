@@ -188,11 +188,8 @@ def _gga_grad_sum_(ao, wv, out=None):
 def _tau_grad_dot_(ao, wv):
     return rks_grad._tau_grad_dot_(ao.transpose(0,2,1), wv)
 
-class Gradients(krhf_grad.Gradients):
-    grids = None
-    grid_response = False
 
-    _keys = {'grid_response', 'grids'}
+class Gradients(krhf_grad.Gradients):
 
     def reset(self, cell=None):
         if self.grids is not None:
@@ -210,49 +207,37 @@ class Gradients(krhf_grad.Gradients):
         log = logger.new_logger(self)
         t0 = log.init_timer()
 
-        if self.grid_response:
-            raise NotImplementedError
-
-        if isinstance(mf.grids, BeckeGrids):
-            raise NotImplementedError('gradients for BeckeGrids not supported')
-
         ni = mf._numint
-        j_in_xc = not isinstance(with_df, GDF)
-        j_factor = 1
-        if j_in_xc:
-            j_factor = 0
         xc = getattr(mf, 'xc', 'HF')
         if xc.upper() == 'HF':
             omega, k_lr, k_sr = 0, 1, 1
         else:
             omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+        j_factor = 1
 
         # TODO: handle all-electron+GGA and pseudo+GGA differently
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
-        de = 0
+        de = np.zeros([self.cell.natm+3, 3])
         if isinstance(ni, multigrid.MultiGridNumIntBase):
             de = ni.energy_derivatives(
-                xc, dm, kpts=kpts, spin=0, with_j=j_in_xc, with_nuc=True)
+                xc, dm, kpts=kpts, spin=0, with_j=True, with_nuc=True)
+            j_factor = 0
         else:
-            if self.grids is not None:
-                grids = self.grids
-            else:
-                grids = mf.grids
+            grids = self.grids or mf.grids
             if grids.coords is None:
                 grids.build()
             cell = self.cell
-            if ks_grad.grid_response:
+            if self.grid_response:
                 assert isinstance(grids, BeckeGrids), "Only Becke grid requires grid response"
                 fn = get_vxc_full_response
             else:
                 fn = get_vxc
-            de = np.empty([cell.natm+3, 3])
             de[:-3] = fn(ni, cell, grids, xc, dm, kpts)
             if isinstance(grids, BeckeGrids):
                 de[-3:] = np.nan
             else:
                 de[-3:] = ni.energy_strain_gradient(
-                    xc, dm, kpts=kpts, spin=0, with_j=False, with_nuc=True)
+                    xc, dm, kpts=kpts, spin=0, with_j=False, with_nuc=False)
         t0 = log.timer_debug1('vxc', *t0)
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:

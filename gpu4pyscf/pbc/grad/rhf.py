@@ -86,7 +86,6 @@ class GradientsBase(mol_rhf.GradientsBase):
         raise NotImplementedError
 
     def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None):
-        from gpu4pyscf.pbc.grad.rks_stress import ewald
         log = logger.new_logger(self)
         t0 = log.init_timer()
         if mo_energy is None:
@@ -100,7 +99,7 @@ class GradientsBase(mol_rhf.GradientsBase):
 
         de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
         self.de = de[:-3] + self.grad_nuc()
-        self.stress = de[-3:] + ewald(self.cell)
+        self.stress = (de[-3:] + ewald(self.cell)) / self.cell.vol
         log.timer('SCF gradients', *t0)
         self._finalize()
         return self.de
@@ -118,6 +117,10 @@ class GradientsBase(mol_rhf.GradientsBase):
 
 
 class Gradients(GradientsBase):
+    grids = None
+    grid_response = False
+
+    _keys = {'grid_response', 'grids'}
 
     make_rdm1e = mol_rhf.Gradients.make_rdm1e
 
@@ -145,9 +148,10 @@ class Gradients(GradientsBase):
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
         de = 0
         ni = mf._numint
+        spin = 0 if dm.ndim == 2 else 1
         if isinstance(ni, multigrid.MultiGridNumIntBase):
             de = ni.energy_derivatives(
-                'HF', dm, spin=0, with_j=j_in_xc, with_nuc=True)
+                'HF', dm, spin=spin, with_j=j_in_xc, with_nuc=True)
             if j_in_xc:
                 j_factor = 0
 
@@ -171,15 +175,10 @@ class Gradients(GradientsBase):
         grad_sigma = self.energy_ee(dm0)
         t1 = log.timer_debug1('gradients of 2e part', *t0)
 
-        ni = mf._numint
-        if ni is None and np.prod(cell.mesh) < 1000**3:
-            # In the pseudo and all-electron mixed case, MultiGridNumInt is
-            # still more efficient if Ecut is not too high.
-            ni = multigrid_v3.MultiGridNumInt(cell)
-
         if dm0.ndim == 3: # UHF
             dm0 = dm0[0] + dm0[1]
 
+        ni = mf._numint
         if isinstance(ni, multigrid.MultiGridNumIntBase):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0)
@@ -191,11 +190,14 @@ class Gradients(GradientsBase):
                 h1ao = hcore_deriv(ia)
                 dh1e[ia] = cp.einsum('xij,ji->x', h1ao[0], dm0).real
             grad_sigma[:-3] += dh1e.get()
-            if isinstance(mf.grids, BeckeGrids):
+            if isinstance(self.grids or mf.grids), BeckeGrids):
                 grad_sigma[-3:] = np.nan
             else:
-                # TODO: sigma += self.with_df.pp_loc_energy_derivatives()[1]
-                grad_sigma[-3:] += get_nuc_strain_deriv(self, cell, dm0)
+                # hcore_generator includes kinetic gradients, but not kinetic strain.
+                grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0)[-3:]
+                ni = multigrid_v3.MultiGridNumInt(cell)
+                grad_sigma[-3:] += ni.energy_strain_gradient(
+                    'HF', dm, spin=0, with_j=False, with_nuc=True)
 
         if cell._pseudo:
             grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0)
@@ -204,7 +206,6 @@ class Gradients(GradientsBase):
 
         dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ)
         grad_sigma -= int1e.ovlp_derivatives(cell, dme0)
-        grad_sigma[-3:] /= cell.vol
         return grad_sigma
 
 def contract_h1e_dm(cell, h1e, dm, hermi=0):
@@ -366,7 +367,7 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
                 ejk_sigma -= with_df.get_ek_derivatives(dm, kpts, exxdiv) * sr_factor
         if omega != 0 and lr_factor != 0:
             with with_df.range_coulomb(omega) as with_df:
-                ejk_sigma -= with_df.get_k_e1(dm, kpts, exxdiv) * lr_factor
+                ejk_sigma -= with_df.get_ek_derivatives(dm, kpts, exxdiv) * lr_factor
 
     return ejk_sigma
 

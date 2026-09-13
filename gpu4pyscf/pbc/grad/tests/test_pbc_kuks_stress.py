@@ -22,14 +22,16 @@ from pyscf.pbc.df import FFTDF
 from pyscf.pbc.dft.numint import KNumInt
 from pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.dft import kukspu
-from gpu4pyscf.pbc.grad import kuks_stress, kuks
-from gpu4pyscf.pbc.grad.kuks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.grad import kukspu as kukspu_grad
+from gpu4pyscf.pbc.grad import kuks
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 from gpu4pyscf.lib.multi_gpu import num_devices
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 import pytest
+
 
 def setUpModule():
     global cell
@@ -75,13 +77,9 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('sLpq,Lk->skpq', dm, phase.conj())
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'lda,'
-        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=kpts).to_gpu())
-        dat1 = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
-
         ni = MultiGridNumInt(cell)
         ni.allow_mesh_reduction = False
         dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=1, with_j=False, with_nuc=False)
-        assert abs(dat1 - dat2).max() < 1e-6
 
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
@@ -90,7 +88,6 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat1[i,j] - (exc1 - exc2)/2e-4) < 1e-7
             assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
         ni = MultiGridNumInt(cell)
@@ -117,13 +114,9 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('sLpq,Lk->skpq', dm, phase.conj())
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'pbe,'
-        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=kpts).to_gpu())
-        dat1 = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
-
         ni = MultiGridNumInt(cell)
         ni.allow_mesh_reduction = False
         dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=1, with_j=False, with_nuc=False)
-        assert abs(dat1 - dat2).max() < 1e-6
 
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
@@ -132,7 +125,6 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat1[i,j] - (exc1 - exc2)/2e-4) < 1e-7
             assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
     def test_get_vxc_mgga(self):
@@ -149,13 +141,9 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('sLpq,Lk->skpq', dm, phase.conj())
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'm06,'
-        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=kpts).to_gpu())
-        dat1 = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts)
-
         ni = MultiGridNumInt(cell)
         ni.allow_mesh_reduction = False
         dat2 = ni.energy_strain_gradient(xc, dm, kpts, spin=1, with_j=False, with_nuc=False)
-        assert abs(dat1 - dat2).max() < 1e-6
 
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
@@ -164,7 +152,6 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat1[i,j] - (exc1 - exc2)/2e-4) < 1e-7
             assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
     def test_get_j(self):
@@ -182,8 +169,9 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'lda,'
         kpts = cell.make_kpts(kmesh)
-        mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=kpts).to_gpu())
-        dat = kuks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=True)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=1, kpts=kpts, with_j=True, with_nuc=False)[-3:]
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -211,12 +199,12 @@ class KnownValues(unittest.TestCase):
         mf = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().run()
         mf_grad = mf.Gradients()
         dat1 = mf_grad.get_stress()
+        _check_vs_finite_diff(dat1, mf.as_scanner())
 
         mf = mf.multigrid_numint()
         mf._numint.allow_mesh_reduction = False
         mf_grad = mf.Gradients()
         dat2 = mf_grad.get_stress()
-        assert abs(dat1 - dat2).max() < 1e-6
 
         mf_scanner = mf.as_scanner()
         _check_vs_finite_diff(dat2, mf_scanner)
@@ -306,7 +294,7 @@ class KnownValues(unittest.TestCase):
         U_val = [5]
         mf = kukspu.KUKSpU(cell, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao)
         mf.__dict__.update(cell.KUKS(kpts=kpts).to_gpu().run(max_cycle=1).__dict__)
-        sigma = kuks_stress._hubbard_U_deriv1(mf)
+        sigma = kukspu_grad._hubbard_U_strain_deriv1(mf)
 
         for (i, j) in [(1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)

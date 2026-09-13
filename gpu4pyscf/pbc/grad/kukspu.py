@@ -23,7 +23,8 @@ from pyscf import lib
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.grad import kuks as kuks_grad
 from gpu4pyscf.pbc.grad.krkspu import (
-    generate_first_order_local_orbitals, _strain_deriv_local_orbitals)
+    generate_first_order_local_orbitals, _strain_deriv_local_orbitals,
+    ovlp_strain_deriv)
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract
 
@@ -129,4 +130,4 @@ class Gradients(kuks_grad.Gradients):
         grad = _hubbard_U_deriv1(self.base, dm, kpts)
         sigma = _hubbard_U_strain_deriv1(self.base, dm, kpts)
         dE = np.vstack([grad, sigma])
-        return kuks_grad.energy_ee(self, dm, kpts) + dE
+        return kuks_grad.Gradients.energy_ee(self, dm, kpts) + dE

@@ -32,6 +32,10 @@ __all__ = ['Gradients']
 
 class Gradients(krhf_grad.GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
+    grids = None
+    grid_response = False
+
+    _keys = {'grid_response', 'grids'}
 
     hcore_generator = krhf_grad.hcore_generator
 

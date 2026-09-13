@@ -19,11 +19,15 @@ __all__ = ['Gradients']
 
 
 class Gradients(rhf.GradientsBase):
+    grids = None
+    grid_response = False
+
+    _keys = {'grid_response', 'grids'}
+
+    energy_ee = rhf.Gradients.energy_ee
+    grad_elec = rhf.Gradients.grad_elec
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         dm1e = rhf.Gradients.make_rdm1e(self, mo_energy[0], mo_coeff[0], mo_occ[0])
         dm1e += rhf.Gradients.make_rdm1e(self, mo_energy[1], mo_coeff[1], mo_occ[1])
         return dm1e
-
-    energy_ee = rhf.Gradients.energy_ee
-    grad_elec = rhf.Gradients.grad_elec

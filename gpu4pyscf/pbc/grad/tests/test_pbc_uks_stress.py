@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import unittest
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 import numpy as np
 from pyscf.gto import ATOM_OF, intor_cross
 from pyscf.pbc import dft, gto, grad
@@ -21,12 +22,13 @@ from pyscf.pbc.tools import pbc
 from pyscf.pbc.df import FFTDF
 from pyscf.pbc.dft.numint import NumInt
 from pyscf.pbc.dft.gen_grid import UniformGrids
-from gpu4pyscf.pbc.grad import uks_stress, uks
-from gpu4pyscf.pbc.grad.uks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.grad import uks
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.lib.multi_gpu import num_devices
 import pytest
+
 
 def setUpModule():
     global cell
@@ -69,8 +71,9 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(2, nao, nao) - (.5+.2j)
         dm = np.einsum('spi,sqi->spq', dm, dm.conj())
         xc = 'lda,'
-        mf_grad = uks.Gradients(cell.UKS(xc=xc).to_gpu())
-        dat = uks_stress.get_vxc(mf_grad, cell, dm)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=1, with_j=False, with_nuc=False)[-3:]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -91,8 +94,9 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('spi,sqi->spq', dm, dm.conj())
         dm *= .5
         xc = 'pbe,'
-        mf_grad = uks.Gradients(cell.UKS(xc=xc).to_gpu())
-        dat = uks_stress.get_vxc(mf_grad, cell, dm)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=1, with_j=False, with_nuc=False)[-3:]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -112,8 +116,9 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(2, nao, nao) - (.5+.2j)
         dm = np.einsum('spi,sqi->spq', dm, dm.conj())
         xc = 'm06,'
-        mf_grad = uks.Gradients(cell.UKS(xc=xc).to_gpu())
-        dat = uks_stress.get_vxc(mf_grad, cell, dm)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=1, with_j=False, with_nuc=False)[-3:]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -134,8 +139,9 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('spi,sqi->spq', dm, dm.conj())
         dm *= .5
         xc = 'lda,'
-        mf_grad = uks.Gradients(cell.UKS(xc=xc).to_gpu())
-        dat = uks_stress.get_vxc(mf_grad, cell, dm, with_j=True)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        dat = ni.energy_derivatives(xc, dm, spin=1, with_j=True, with_nuc=False)[-3:]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)

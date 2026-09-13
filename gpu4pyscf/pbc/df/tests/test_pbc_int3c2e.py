@@ -422,7 +422,7 @@ C    D
 
 def test_int2c2e_strain_deriv_vs_finite_difference():
     from gpu4pyscf.pbc.df import int2c2e
-    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1

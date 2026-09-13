@@ -40,7 +40,7 @@ def _check_gradient(grad, cell, eval_energy, disp=1e-4, tol=1e-7):
         assert abs((e1-e2)/(2*disp) - grad[ia,axis]) < tol
 
 def _check_strain(sigma, cell, eval_energy, disp=1e-4, tol=1e-7):
-    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     for (i, j) in [(0, 0), (0, 1), (2, 0)]:
         cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
         e1 = eval_energy(cell1)
@@ -846,7 +846,7 @@ def test_ejk_strain_deriv_gamma_point():
     assert abs(ref - sigma).max() < 2e-5
 
 def test_ejk_strain_deriv_kpts():
-    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     cell = pyscf.M(
         atom = '''
         C   1.      1.    0.

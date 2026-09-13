@@ -20,6 +20,7 @@ Analytical derivatives for DFT+U with kpoints sampling
 import numpy as np
 import cupy as cp
 from pyscf.pbc import gto
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib.cupy_helper import asarray, contract
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.grad import krks as krks_grad
@@ -225,4 +226,4 @@ class Gradients(krks_grad.Gradients):
         grad = _hubbard_U_deriv1(self.base, dm, kpts)
         sigma = _hubbard_U_strain_deriv1(self.base, dm, kpts)
         dE = np.vstack([grad, sigma])
-        return krks_grad.energy_ee(self, dm, kpts) + dE
+        return krks_grad.Gradients.energy_ee(self, dm, kpts) + dE

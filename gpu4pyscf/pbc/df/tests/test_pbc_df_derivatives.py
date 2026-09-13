@@ -22,7 +22,7 @@ from gpu4pyscf.pbc.df import int3c2e
 from gpu4pyscf.pbc.df.grad import rhf, uhf, krhf, kuhf
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 from gpu4pyscf.pbc.df import rsdf_builder
-from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.tools.pbc import madelung
 
 def create_cell_auxcell():

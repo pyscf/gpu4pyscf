@@ -193,13 +193,13 @@ def get_nuc_strain_deriv(mf_grad, cell, dm, kpts):
         ao_ks_strain = _eval_ao_strain_derivatives(
             cell, coords, kpts, deriv=0, opt=eval_gto_opt)
         coordsT = coords.T
-        for k, dm in enumerate(dm):
+        for k, dm_k in enumerate(dm):
             ao = ao_ks[k].transpose(0,2,1)
             ao_strain = ao_ks_strain[k]
             ao1 = ao_strain[:,:,0]
             # Adding the response of the grids
             ao1 += contract('xig,yg->xyig', ao[1:4], coordsT)
-            c0 = dm.T.dot(ao[0])
+            c0 = dm_k.T.dot(ao[0])
             rho0[p0:p1] += partial_dot(ao[0], c0).real
             rho1[:,:,p0:p1] += contract('xyig,ig->xyg', ao1, c0.conj()).real
 
@@ -262,6 +262,10 @@ class GradientsBase(pbchf_grad.GradientsBase):
 
 class Gradients(GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
+    grids = None
+    grid_response = False
+
+    _keys = {'grid_response', 'grids'}
 
     hcore_generator = hcore_generator
 
@@ -283,9 +287,10 @@ class Gradients(GradientsBase):
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
         de = 0
         ni = mf._numint
+        spin = 0 if dm.ndim == 3 else 1
         if isinstance(ni, multigrid.MultiGridNumIntBase):
-            de = ni.energy_nuclear_gradient(
-                'HF', dm, kpts=kpts, spin=0, with_j=j_in_xc, with_nuc=True)
+            de = ni.energy_derivatives(
+                'HF', dm, kpts=kpts, spin=spin, with_j=j_in_xc, with_nuc=True)
             if j_in_xc:
                 j_factor = 0
 
@@ -341,43 +346,40 @@ class Gradients(GradientsBase):
             dm0 = dm0[0] + dm0[1]
 
         ni = mf._numint
-        if ni is None and np.prod(cell.mesh) < 1000**3:
-            # In the pseudo and all-electron mixed case, MultiGridNumInt is
-            # still more efficient if Ecut is not too high.
-            ni = multigrid_v3.MultiGridNumInt(cell)
-
-        ni = mf._numint
         if isinstance(ni, multigrid.MultiGridNumIntBase):
             # Vne or pploc contribution is evaluated in energy_ee
-            grad_sigma += int1e.kin_derivatives(cell, dm0, kpts) / nkpts
+            grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
         else:
             hcore_deriv = mf_grad.hcore_generator(cell, kpts)
             dh1e = cp.empty([natm, 3])
             for ia in range(natm):
                 h1ao = hcore_deriv(ia)
                 dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
-            grad_sigma[:-3] += dh1e.get()
-            if isinstance(mf.grids, BeckeGrids):
+            grad_sigma[:-3] += dh1e.get() / nkpts
+            if isinstance(mf_grad.grids or mf.grids, BeckeGrids):
                 grad_sigma[-3:] = np.nan
             else:
-                # TODO: sigma += self.with_df.pp_loc_energy_derivatives()[1]
-                grad_sigma[-3:] += get_nuc_strain_deriv(mf_grad, cell, dm0, kpts)
+                # hcore_generator includes kinetic gradients, but not kinetic strain.
+                grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0, kpts)[-3:]
+                ni = multigrid_v3.MultiGridNumInt(cell)
+                grad_sigma[-3:] += ni.energy_strain_gradient(
+                    'HF', dm, kpts, spin=0, with_j=False, with_nuc=True)
 
         if cell._pseudo:
-            grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0, kpts=kpts)
-            grad_sigma[-3:] += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0)
+            grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0, kpts=kpts) / nkpts
+            grad_sigma[-3:] += _get_pp_nonloc_strain_derivatives(
+                cell, cell.mesh, dm0, kpts=kpts)
 
         log.timer_debug1('gradients of 1e part', *t1)
 
         dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
-        grad_sigma -= int1e.ovlp_derivatives(cell, dme0, kpts) / nkpts
-        grad_sigma[-3:] /= cell.vol
+        grad_sigma -= int1e.ovlp_derivatives(cell, dme0, kpts)
 
         if log.verbose > logger.DEBUG:
             log.debug('gradients of electronic part')
             mf_grad._write(cell, grad_sigma[:-3], range(cell.natm))
-            log.debug('Asymmetric strain tensor')
-            log.debug('%s', grad_sigma[-3:])
+            log.debug('Asymmetric strain tensor of electronic part')
+            log.debug('%s', grad_sigma[-3:]/cell.vol)
         return grad_sigma
 
     as_scanner = molgrad.as_scanner
