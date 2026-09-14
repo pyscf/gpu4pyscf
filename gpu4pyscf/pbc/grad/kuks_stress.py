@@ -18,9 +18,10 @@ import cupy as cp
 import pyscf
 from pyscf import lib
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.pbc.tools import pbc as pbctools
+from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.dft.numint import KNumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
@@ -30,7 +31,6 @@ from gpu4pyscf.pbc.grad import kuks as kuks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.pbc.grad.rks_stress import (
     strain_tensor_dispalcement,
     _finite_diff_cells,
@@ -50,35 +50,39 @@ def get_veff(mf_grad, cell, dm, kpts, with_j=False, with_nuc=False):
     with_rsjk = mf.rsjk
     ni = mf._numint
     is_hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+    omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
 
     if isinstance(mf.grids, BeckeGrids):
         raise NotImplementedError('gradients for BeckeGrids not supported')
 
-    j_factor = 1 if with_j else 0
-    if is_hybrid and with_rsjk is not None:
-        with_j = False
-
+    j_factor = 1
     # TODO: with_nuc should be disabled for all-electron calculations
     if isinstance(ni, multigrid.MultiGridNumIntBase):
-        sigma = ni.energy_strain_gradient(mf.xc, dm, kpts, spin=1,
-                                          with_j=with_j, with_nuc=with_nuc)
+        sigma = ni.energy_strain_gradient(
+            mf.xc, dm, kpts, spin=1, with_j=True, with_nuc=with_nuc)
+        j_factor = 0
     elif isinstance(ni, KNumInt):
+        with_j = not (with_rsjk or isinstance(mf.with_df, GDF))
+        if with_j:
+            j_factor = 0
         sigma = get_vxc(mf_grad, cell, dm, kpts, with_j, with_nuc)
     else:
         raise NotImplementedError(f'KUKS stress tensor for {mf.xc}')
 
-    if is_hybrid:
+    if is_hybrid or j_factor != 0:
         if with_rsjk is not None:
             assert isinstance(with_rsjk, PBCJKMatrixOpt)
             if with_rsjk.supmol is None:
                 with_rsjk.build()
-            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
             sigma += with_rsjk._get_ejk_sr_strain_deriv(
                 dm, kpts, exxdiv=mf.exxdiv, omega=omega,
                 j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
             sigma += with_rsjk._get_ejk_lr_strain_deriv(
                 dm, kpts, exxdiv=mf.exxdiv, omega=omega,
                 j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+        elif isinstance(mf.with_df, GDF):
+            from gpu4pyscf.pbc.grad.krks_stress import _gdf_strain_deriv
+            sigma += _gdf_strain_deriv(mf, dm, kpts, j_factor, omega, k_lr, k_sr)
         else:
             raise NotImplementedError(f'KUKS stress tensor for {mf.xc}')
     return sigma
@@ -114,6 +118,10 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
     elif xctype == 'MGGA':
         deriv = 1
         nvar = 5
+    elif xctype == 'HF':
+        assert not with_j
+        assert not with_nuc
+        return np.zeros((3, 3))
     else:
         raise NotImplementedError
 
@@ -254,8 +262,6 @@ def kernel(mf_grad):
     '''
     assert isinstance(mf_grad, kuks_grad.Gradients)
     mf = mf_grad.base
-    with_df = mf.with_df
-    assert isinstance(with_df, FFTDF)
 
     log = logger.new_logger(mf_grad)
     t0 = (logger.process_clock(), logger.perf_counter())
@@ -270,11 +276,14 @@ def kernel(mf_grad):
     kpts = mf.kpts
     sigma -= int1e.ovlp_strain_deriv(cell, dme0, kpts)
     sigma += int1e.kin_strain_deriv(cell, dm0_sf, kpts)
+
+    assert cell._pseudo, 'All electron calculations not supported'
+
     if cell._pseudo:
         sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0_sf, kpts)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
-    sigma += get_veff(mf_grad, cell, dm0, kpts=kpts, with_j=True, with_nuc=True)
+    sigma += get_veff(mf_grad, cell, dm0, kpts=kpts, with_nuc=True)
     t0 = log.timer_debug1('Vxc and Coulomb derivatives', *t0)
 
     if hasattr(mf, 'U_idx'):

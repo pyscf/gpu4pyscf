@@ -23,11 +23,11 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import rhf as rhf_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-from gpu4pyscf.pbc.df import aft, aft_jk
+from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.pbc.dft import multigrid_v3
+from gpu4pyscf.pbc.df import aft, aft_jk, GDF
 from gpu4pyscf.pbc.grad.rks_stress import (
-    _get_pp_nonloc_strain_derivatives, ewald)
-
-ALIGNED = 256
+    _get_pp_nonloc_strain_derivatives, _gdf_strain_deriv, ewald)
 
 def kernel(mf_grad):
     '''Compute the energy derivatives for strain tensor (e_ij)
@@ -59,9 +59,22 @@ def kernel(mf_grad):
     dm0 = mf.make_rdm1()
     dme0 = mf_grad.make_rdm1e()
     sigma = ewald(cell)
+
     sigma -= int1e.ovlp_strain_deriv(cell, dme0)
     sigma += int1e.kin_strain_deriv(cell, dm0)
-    sigma += get_nuc(mf_grad, cell, dm0)
+
+    ni = mf._numint
+    if ni is None and np.prod(cell.mesh) < 1000**3:
+        # In the pseudo and all-electron mixed case, MultiGridNumInt is
+        # still more efficient if Ecut is not too high.
+        ni = multigrid_v3.MultiGridNumInt(cell)
+
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
+        sigma += ni.energy_strain_gradient(
+            'HF', dm0, spin=0, with_j=False, with_nuc=True)
+    else:
+        # TODO: sigma += self.with_df.pp_loc_energy_derivatives()[1]
+        sigma += get_nuc(mf_grad, cell, dm0)
     if cell._pseudo:
         sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0)
     t0 = log.timer_debug1('hcore derivatives', *t0)
@@ -89,12 +102,14 @@ def get_veff(mf_grad, cell, dm):
     elif isinstance(mf.with_df, aft.AFTDF):
         sigma = aft_jk.get_ej_strain_deriv(mf.with_df, dm)
         sigma -= aft_jk.get_ek_strain_deriv(mf.with_df, dm, exxdiv=mf.exxdiv) * .5
+    elif isinstance(mf.with_df, GDF):
+        sigma = _gdf_strain_deriv(mf, dm)
     else:
         raise NotImplementedError(f'Stress tensor for KHF for {mf.with_df}')
     return sigma
 
 def get_nuc(mf_grad, cell, dm):
-    '''Strain derivatives for Coulomb and Exc at gamma point
+    '''Strain derivatives for nuclear attraction or pp-local at gamma point
     '''
     from gpu4pyscf.pbc.grad import krhf_stress
     kpts = np.zeros((1, 3))

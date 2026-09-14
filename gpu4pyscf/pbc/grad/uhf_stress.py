@@ -20,6 +20,8 @@ Stress tensor
 import numpy as np
 import cupy as cp
 from gpu4pyscf.lib import logger
+from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.pbc.dft import multigrid_v3
 from gpu4pyscf.pbc.grad import uhf as uhf_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.grad.rhf_stress import (
@@ -60,7 +62,17 @@ def kernel(mf_grad):
     dme0_sf = dme0[0] + dme0[1]
     sigma -= int1e.ovlp_strain_deriv(cell, dme0_sf)
     sigma += int1e.kin_strain_deriv(cell, dm0_sf)
-    sigma += get_nuc(mf_grad, cell, dm0_sf)
+
+    ni = mf._numint
+    if ni is None and np.prod(cell.mesh) < 1000**3:
+        ni = multigrid_v3.MultiGridNumInt(cell)
+
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
+        sigma += ni.energy_strain_gradient(
+            'HF', dm0_sf, spin=0, with_j=False, with_nuc=True)
+    else:
+        # TODO: sigma += self.with_df.pp_loc_energy_derivatives()[1]
+        sigma += get_nuc(mf_grad, cell, dm0)
     if cell._pseudo:
         sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0_sf)
     t0 = log.timer_debug1('hcore derivatives', *t0)

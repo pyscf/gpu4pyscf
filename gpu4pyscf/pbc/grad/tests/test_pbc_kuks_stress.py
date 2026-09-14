@@ -31,6 +31,35 @@ from gpu4pyscf.lib.multi_gpu import num_devices
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 import pytest
 
+def setUpModule():
+    global cell
+    a = np.eye(3) * 4
+    np.random.seed(5)
+    a += np.random.rand(3, 3) - .5
+    cell = gto.M(atom='H 1 1 1; H 3 2.5 2.4',
+                 basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
+                 pseudo='''
+H GTH-PBE-q1 GTH-PBE
+1
+  0.20000000    2    -4.17890044     0.72446331
+0
+                 ''',
+                 precision=1e-9,
+                 verbose=6, output='/dev/null', a=a, unit='Bohr')
+
+def tearDownModule():
+    global cell
+    del cell
+
+def _check_vs_finite_diff(dat, mf_scanner, disp=1e-3, tol=1e-7):
+    cell = mf_scanner.cell
+    vol = cell.vol
+    for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+        cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
+        e1 = mf_scanner(cell1)
+        e2 = mf_scanner(cell2)
+        assert abs(dat[i,j] - (e1-e2)/2/disp/vol) < tol
+
 class KnownValues(unittest.TestCase):
     def test_get_vxc_lda(self):
         a = np.eye(3) * 5
@@ -167,34 +196,16 @@ class KnownValues(unittest.TestCase):
             assert abs(dat[i,j] - de/2e-5) < 1e-8
 
     def test_lda_vs_finite_difference(self):
-        a = np.eye(3) * 3
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
-                     a=a, unit='Bohr', verbose=0)
         xc = 'svwn'
         kmesh = [3, 1, 1]
         mf = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().run()
         mf_grad = kuks.Gradients(mf)
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat, mf_scanner)
 
     @unittest.skipIf(num_devices > 1, '')
     def test_gga_vs_finite_difference(self):
-        a = np.eye(3) * 3.5
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='B 1 1 1; C 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
-                     spin=1,
-                     pseudo='gth-pade', a=a, unit='Bohr', verbose=0)
         xc = 'pbe'
         kmesh = [3, 1, 1]
         mf = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().run()
@@ -208,24 +219,10 @@ class KnownValues(unittest.TestCase):
         assert abs(dat1 - dat2).max() < 1e-6
 
         mf_scanner = mf.as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            cell1.precision = 1e-10
-            cell2.precision = 1e-10
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat1[i,j] - (e1-e2)/2e-3/vol) < 1e-6
-            assert abs(dat2[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat2, mf_scanner)
 
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_vs_finite_difference(self):
-        a = np.eye(3) * 3.5
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
-                     a=a, unit='Bohr', verbose=0)
         xc = 'r2scan'
         kmesh = [3, 1, 1]
         mf = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
@@ -235,22 +232,9 @@ class KnownValues(unittest.TestCase):
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            cell1.precision = 1e-10
-            cell2.precision = 1e-10
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat, mf_scanner)
 
     def test_pbe0_vs_finite_difference(self):
-        a = np.eye(3) * 3.5
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [0, [.5, 1]]],
-                     a=a, unit='Bohr', verbose=0)
         xc = 'pbe0'
         kmesh = [3, 1, 1]
         mf = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
@@ -260,21 +244,10 @@ class KnownValues(unittest.TestCase):
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 3e-7
+        _check_vs_finite_diff(dat, mf_scanner)
 
     @pytest.mark.slow
     def test_hse_vs_finite_difference(self):
-        a = np.eye(3) * 5
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [0, [.5, 1]]],
-                     a=a, unit='Bohr', verbose=0)
         xc = 'hse06'
         kmesh = [3, 1, 1]
         mf = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
@@ -284,12 +257,37 @@ class KnownValues(unittest.TestCase):
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 2e-7
+        _check_vs_finite_diff(dat, mf_scanner, disp=2e-3, tol=5e-7)
+
+    def test_gdf_pbe0_vs_finite_difference(self):
+        xc = 'pbe0'
+        kmesh = [3, 1, 1]
+        mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
+        mf = mf.density_fit().multigrid_numint().run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
+        _check_vs_finite_diff(dat, mf_scanner)
+
+    def test_gdf_pbe_vs_finite_difference(self):
+        xc = 'pbe'
+        kmesh = [3, 1, 1]
+        mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
+        mf = mf.density_fit().run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
+        _check_vs_finite_diff(dat, mf_scanner)
+
+    def test_gdf_hse_vs_finite_difference(self):
+        xc = 'hse06'
+        kmesh = [3, 1, 1]
+        mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
+        mf = mf.density_fit().run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
+        _check_vs_finite_diff(dat, mf_scanner, disp=2e-3, tol=5e-7)
 
     def test_hubbard_U(self):
         cell = gto.M(

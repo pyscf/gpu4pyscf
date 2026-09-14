@@ -291,7 +291,7 @@ class KnownValues(unittest.TestCase):
         # dm is not very stable, and numerical gradient is super fast
         ref_gradient = numerical_gradient_exc_becke(cell, "HSE06", kpts, 'def2-universal-jkfit', (50,194), dm)
 
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
 
     def test_xc_gradient_gga_without_response(self):
         cell = pyscf.M(

@@ -20,25 +20,11 @@
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
+#include "ft_ao.cuh"
 
-// WARP_SIZE: compile-time constant used for shared-memory sizing.
-// `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
-// so we keep a literal here. Guarded so the build can override
-// it (e.g. -DWARP_SIZE=64) for future wider-wavefront targets.
-#ifndef WARP_SIZE
-#define WARP_SIZE       32
-#endif
-#define WARPS           8
 #define THREADS         256
-#define NG_PER_BLOCK    WARP_SIZE
-#define FT_AO_THREADS   (WARP_SIZE*4)
 #define GOUT_WIDTH      30
-// pi^1.5
-#define OVERLAP_FAC     5.56832799683170787
-#define OF_COMPLEX      2
 #define POOL_SIZE       65536
-#define AUXL            6
-#define AUXNF           ((AUXL+1)*(AUXL+2)/2)
 
 __global__ static
 void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
@@ -80,11 +66,10 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double *gzI = gxR + gx_len*5;
     int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
 
-    constexpr int aux_nf = (AUXL+1)*(AUXL+2)/2;
-    double goutR[aux_nf];
-    double goutI[aux_nf];
+    double goutR[AUXNF];
+    double goutI[AUXNF];
 #pragma unroll
-    for (int n = 0; n < aux_nf; ++n) {
+    for (int n = 0; n < AUXNF; ++n) {
         goutR[n] = 0.;
         goutI[n] = 0.;
     }
@@ -169,7 +154,7 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
         }
         __syncthreads();
 #pragma unroll
-        for (int n = 0; n < aux_nf; ++n) {
+        for (int n = 0; n < AUXNF; ++n) {
             if (n >= nfi) break;
             int addrx = idx[n*3+0] * NG_PER_BLOCK;
             int addry = idx[n*3+1] * NG_PER_BLOCK;
@@ -191,7 +176,7 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
         size_t stride = (size_t)nGv * OF_COMPLEX;
         double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
-        for (int n = 0; n < aux_nf; ++n) {
+        for (int n = 0; n < AUXNF; ++n) {
             if (n >= nfi) break;
             aft_tensor[n*stride  ] = goutR[n];
             aft_tensor[n*stride+1] = goutI[n];
@@ -1152,12 +1137,12 @@ while (1) {
 }
 
 extern "C" {
-int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int nbas)
+int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
     dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
-    int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
+    int nbatches_shls = (envs->nbas + nsh_per_block - 1) / nsh_per_block;
     dim3 blocks(nbatches_grids, nbatches_shls);
     ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
     cudaError_t err = cudaGetLastError();

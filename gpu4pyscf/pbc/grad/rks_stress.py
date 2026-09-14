@@ -52,17 +52,18 @@ from pyscf import gto
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.gto import pseudo
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import (
+    contract, asarray, sandwich_dot, batched_vec_norm2)
 from gpu4pyscf.pbc.tools import pbc as pbctools
-from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-from gpu4pyscf.pbc.df import FFTDF, ft_ao
+from gpu4pyscf.pbc.df import aft_jk, ft_ao, AFTDF, GDF
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
+from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.grad import rks as rks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.ft_ao import libpbc
-from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 
 ALIGNED = 256
 
@@ -99,7 +100,7 @@ def _get_coulG_strain_derivatives(cell, Gv, omega=None):
     '''derivatives of 4pi/G^2'''
     remove_G0 = is_zero(cp.asnumpy(Gv[0]))
     Gv = asarray(Gv)
-    G2 = cp.einsum('gx,gx->g', Gv, Gv)
+    G2 = batched_vec_norm2(Gv)
     if remove_G0:
         G2[0] = np.inf
     coulG_0 = 4 * np.pi / G2
@@ -182,41 +183,99 @@ def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
         out = out.view(np.complex128)[:,:,:,:,:,:,0]
     return out
 
-def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
+def get_veff(mf_grad, cell, dm, with_nuc=False):
     '''Strain derivatives for Coulomb and exchange energy with k-point samples
     '''
     mf = mf_grad.base
     with_rsjk = mf.rsjk
     ni = mf._numint
     is_hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+    omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
 
-    j_factor = 1 if with_j else 0
-    if is_hybrid and with_rsjk is not None:
-        with_j = False
-
+    j_factor = 1
     # TODO: with_nuc should be disabled for all-electron calculations
     if isinstance(ni, multigrid.MultiGridNumIntBase):
-        sigma = ni.energy_strain_gradient(mf.xc, dm[None], spin=0,
-                                          with_j=with_j, with_nuc=with_nuc)
+        sigma = ni.energy_strain_gradient(
+            mf.xc, dm[None], spin=0, with_j=True, with_nuc=with_nuc)
+        j_factor = 0
     elif isinstance(ni, NumInt):
+        with_j = not (with_rsjk or isinstance(mf.with_df, GDF))
+        if with_j:
+            j_factor = 0
         sigma = get_vxc(mf_grad, cell, dm, with_j, with_nuc)
     else:
         raise NotImplementedError(f'RKS stress tensor for {mf.xc}')
 
-    if is_hybrid:
+    if is_hybrid or j_factor != 0:
         if with_rsjk is not None:
             assert isinstance(with_rsjk, PBCJKMatrixOpt)
             if with_rsjk.supmol is None:
                 with_rsjk.build()
-            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
             sigma += with_rsjk._get_ejk_sr_strain_deriv(
                 dm, exxdiv=mf.exxdiv, omega=omega,
                 j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
             sigma += with_rsjk._get_ejk_lr_strain_deriv(
                 dm, exxdiv=mf.exxdiv, omega=omega,
                 j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+        elif isinstance(mf.with_df, GDF):
+            sigma += _gdf_strain_deriv(mf, dm, j_factor, omega, k_lr, k_sr)
         else:
             raise NotImplementedError(f'RKS stress tensor for {mf.xc}')
+    return sigma
+
+def _gdf_strain_deriv(mf, dm, j_factor=1, omega=0, lr_factor=1, sr_factor=1):
+    from pyscf.pbc.df.df import make_auxcell
+    from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
+    from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
+    from gpu4pyscf.pbc.df.rsdf_builder import _guess_omega
+    from gpu4pyscf.pbc.df.grad import rhf, uhf
+    hermi = 1
+    is_rhf = dm.ndim == 2
+
+    with_df = mf.with_df
+    cell = with_df.cell
+    auxcell = with_df.auxcell
+    if auxcell is None:
+        # For LDA, GGA or mGGA, J matrix is evaluated by the numint
+        # integrator along with the vxc matrix. with_df might be
+        # uninitialized.
+        auxcell = make_auxcell(cell, with_df.auxbasis, with_df.exp_to_discard)
+
+    def get_jk(j_factor, k_factor, omega, exxdiv):
+        if is_rhf:
+            fn = rhf._get_ejk_derivatives
+        else:
+            fn = uhf._get_ejk_derivatives
+        rsdf_omega = _guess_omega(cell)
+        opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega).build()
+        return fn(opt, dm, hermi, j_factor, k_factor, exxdiv, omega,
+                  linear_dep_threshold=with_df.linear_dep_threshold)[1]
+
+    def get_k_lr(k_factor, omega, exxdiv):
+        with AFTDF(cell).range_coulomb(omega) as mydf:
+            ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+            mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
+            sigma = aft_jk.get_ek_strain_deriv(mydf, dm, exxdiv=exxdiv)
+            if is_rhf:
+                sigma *= -.5 * k_factor
+            else:
+                sigma *= -k_factor
+            return sigma
+
+    sigma = 0
+    if omega == 0:
+        sigma = get_jk(j_factor, sr_factor, 0, mf.exxdiv)
+    elif lr_factor == 0:
+        if j_factor != 0:
+            sigma = get_jk(j_factor, 0, 0, None)
+        sigma += get_jk(0, sr_factor, omega, mf.exxdiv)
+    elif sr_factor == 0:
+        if j_factor != 0:
+            sigma = get_jk(j_factor, 0, 0, None)
+        sigma += get_k_lr(lr_factor, omega, mf.exxdiv)
+    else:
+        sigma = get_jk(j_factor, sr_factor, 0, mf.exxdiv)
+        sigma += get_k_lr(lr_factor-sr_factor, omega, mf.exxdiv)
     return sigma
 
 def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
@@ -250,6 +309,10 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
     elif xctype == 'MGGA':
         deriv = 1
         nvar = 5
+    elif xctype == 'HF':
+        assert not with_j
+        assert not with_nuc
+        return np.zeros((3, 3))
     else:
         raise NotImplementedError
 
@@ -565,9 +628,8 @@ def kernel(mf_grad):
     assert isinstance(mf_grad, rks_grad.Gradients)
     mf = mf_grad.base
     assert is_zero(mf.kpt)
-    with_df = mf.with_df
-    assert isinstance(with_df, FFTDF)
     if hasattr(mf, 'U_idx'):
+        # TODO: call krks_stress implementation
         raise NotImplementedError('Stress tensor for DFT+U')
 
     log = logger.new_logger(mf_grad)
@@ -580,12 +642,15 @@ def kernel(mf_grad):
     sigma = ewald(cell)
     sigma -= int1e.ovlp_strain_deriv(cell, dme0)
     sigma += int1e.kin_strain_deriv(cell, dm0)
+
+    assert cell._pseudo, 'All electron calculations not supported'
+
     if cell._pseudo:
         # pploc contribution is evaluated in get_veff
         sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
-    sigma += get_veff(mf_grad, cell, dm0, with_j=True, with_nuc=True)
+    sigma += get_veff(mf_grad, cell, dm0, with_nuc=True)
     t0 = log.timer_debug1('Vxc and Coulomb derivatives', *t0)
 
     sigma /= cell.vol

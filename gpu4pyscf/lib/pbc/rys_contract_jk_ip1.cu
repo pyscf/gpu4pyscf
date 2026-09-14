@@ -452,7 +452,7 @@ while (1) {
 }
 
 __global__ static
-void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+void rys_ejk_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         double *sigma, int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
                         int *bas_mask_idx, int *Ts_ij_lookup,
                         int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
@@ -505,7 +505,7 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     int i_1 =          nsq_per_block;
     int j_1 = stride_j*nsq_per_block;
     int k_1 = stride_k*nsq_per_block;
-    int l_1 = stride_l*nsq_per_block;
+    //int l_1 = stride_l*nsq_per_block;
 
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
@@ -592,12 +592,12 @@ while (1) {
         }
         cicj_cache[ij] = cicj * Kab;
     }
-    double v_ix = 0;
-    double v_iy = 0;
-    double v_iz = 0;
-    double v_jx = 0;
-    double v_jy = 0;
-    double v_jz = 0;
+    double grad_ix = 0;
+    double grad_iy = 0;
+    double grad_iz = 0;
+    double grad_jx = 0;
+    double grad_jy = 0;
+    double grad_jz = 0;
     double goutx, gouty, goutz;
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
@@ -640,12 +640,15 @@ while (1) {
             rlrk[2*nsq_per_block] = zlzk;
         }
 
+        double v_ix = 0;
+        double v_iy = 0;
+        double v_iz = 0;
+        double v_jx = 0;
+        double v_jy = 0;
+        double v_jz = 0;
         double v_kx = 0;
         double v_ky = 0;
         double v_kz = 0;
-        double v_lx = 0;
-        double v_ly = 0;
-        double v_lz = 0;
         size_t nao2 = nao * nao;
         double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
         double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
@@ -723,7 +726,7 @@ while (1) {
             double akl = ak + al;
             double al_akl = al / akl;
             double ak2 = ak * 2;
-            double al2 = al * 2;
+            //double al2 = al * 2;
             if (gout_id == 0) {
                 double xlxk = rlrk[0*nsq_per_block];
                 double ylyk = rlrk[1*nsq_per_block];
@@ -817,18 +820,6 @@ while (1) {
                         v_ix += goutx;
                         v_iy += gouty;
                         v_iz += goutz;
-                        double xi = ri[0];
-                        double yi = ri[1];
-                        double zi = ri[2];
-                        sigma_xx += goutx * xi;
-                        sigma_xy += goutx * yi;
-                        sigma_xz += goutx * zi;
-                        sigma_yx += gouty * xi;
-                        sigma_yy += gouty * yi;
-                        sigma_yz += gouty * zi;
-                        sigma_zx += goutz * xi;
-                        sigma_zy += goutz * yi;
-                        sigma_zz += goutz * zi;
                         double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; }
                         double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; }
                         double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; }
@@ -838,15 +829,6 @@ while (1) {
                         v_kx += goutx;
                         v_ky += gouty;
                         v_kz += goutz;
-                        sigma_xx += goutx * xk;
-                        sigma_xy += goutx * yk;
-                        sigma_xz += goutx * zk;
-                        sigma_yx += gouty * xk;
-                        sigma_yy += gouty * yk;
-                        sigma_yz += gouty * zk;
-                        sigma_zx += goutz * xk;
-                        sigma_zy += goutz * yk;
-                        sigma_zz += goutz * zk;
                         double fjx = aj2 * (gix - rjri[0] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
                         double fjy = aj2 * (giy - rjri[1] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
                         double fjz = aj2 * (giz - rjri[2] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
@@ -856,40 +838,46 @@ while (1) {
                         v_jx += goutx;
                         v_jy += gouty;
                         v_jz += goutz;
-                        double xj = rj[0];
-                        double yj = rj[1];
-                        double zj = rj[2];
-                        sigma_xx += goutx * xj;
-                        sigma_xy += goutx * yj;
-                        sigma_xz += goutx * zj;
-                        sigma_yx += gouty * xj;
-                        sigma_yy += gouty * yj;
-                        sigma_yz += gouty * zj;
-                        sigma_zx += goutz * xj;
-                        sigma_zy += goutz * yj;
-                        sigma_zz += goutz * zj;
-                        double flx = al2 * (gkx - rlrk[0*nsq_per_block] * Ix); if (lx > 0) { flx -= lx * gx[addrx-l_1]; }
-                        double fly = al2 * (gky - rlrk[1*nsq_per_block] * Iy); if (ly > 0) { fly -= ly * gx[addry-l_1]; }
-                        double flz = al2 * (gkz - rlrk[2*nsq_per_block] * Iz); if (lz > 0) { flz -= lz * gx[addrz-l_1]; }
-                        goutx = flx * prod_yz;
-                        gouty = fly * prod_xz;
-                        goutz = flz * prod_xy;
-                        v_lx += goutx;
-                        v_ly += gouty;
-                        v_lz += goutz;
-                        sigma_xx += goutx * xl;
-                        sigma_xy += goutx * yl;
-                        sigma_xz += goutx * zl;
-                        sigma_yx += gouty * xl;
-                        sigma_yy += gouty * yl;
-                        sigma_yz += gouty * zl;
-                        sigma_zx += goutz * xl;
-                        sigma_zy += goutz * yl;
-                        sigma_zz += goutz * zl;
+                        //double flx = al2 * (gkx - rlrk[0*nsq_per_block] * Ix); if (lx > 0) { flx -= lx * gx[addrx-l_1]; }
+                        //double fly = al2 * (gky - rlrk[1*nsq_per_block] * Iy); if (ly > 0) { fly -= ly * gx[addry-l_1]; }
+                        //double flz = al2 * (gkz - rlrk[2*nsq_per_block] * Iz); if (lz > 0) { flz -= lz * gx[addrz-l_1]; }
+                        //goutx = flx * prod_yz;
+                        //gouty = fly * prod_xz;
+                        //goutz = flz * prod_xy;
+                        //v_lx += goutx;
+                        //v_ly += gouty;
+                        //v_lz += goutz;
                     }
                 }
             }
         }
+        double xixl = ri[0] - xl;
+        double yiyl = ri[1] - yl;
+        double zizl = ri[2] - zl;
+        double xjxl = rj[0] - xl;
+        double yjyl = rj[1] - yl;
+        double zjzl = rj[2] - zl;
+        double xlxk = rlrk[0*nsq_per_block];
+        double ylyk = rlrk[1*nsq_per_block];
+        double zlzk = rlrk[2*nsq_per_block];
+        sigma_xx += v_ix * xixl + v_jx * xjxl - v_kx * xlxk;
+        sigma_xy += v_ix * yiyl + v_jx * yjyl - v_kx * ylyk;
+        sigma_xz += v_ix * zizl + v_jx * zjzl - v_kx * zlzk;
+        sigma_yx += v_iy * xixl + v_jy * xjxl - v_ky * xlxk;
+        sigma_yy += v_iy * yiyl + v_jy * yjyl - v_ky * ylyk;
+        sigma_yz += v_iy * zizl + v_jy * zjzl - v_ky * zlzk;
+        sigma_zx += v_iz * xixl + v_jz * xjxl - v_kz * xlxk;
+        sigma_zy += v_iz * yiyl + v_jz * yjyl - v_kz * ylyk;
+        sigma_zz += v_iz * zizl + v_jz * zjzl - v_kz * zlzk;
+        grad_ix += v_ix;
+        grad_iy += v_iy;
+        grad_iz += v_iz;
+        grad_jx += v_jx;
+        grad_jy += v_jy;
+        grad_jz += v_jz;
+        double v_lx = -v_ix - v_jx - v_kx;
+        double v_ly = -v_iy - v_jy - v_ky;
+        double v_lz = -v_iz - v_jz - v_kz;
         int ka = bas[ksh_cell0*BAS_SLOTS+ATOM_OF];
         int la = bas[lsh_cell0*BAS_SLOTS+ATOM_OF];
         int threads = nsq_per_block * gout_stride;
@@ -926,12 +914,12 @@ while (1) {
     int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
     double *reduce = shared_memory + thread_id;
     __syncthreads();
-    reduce[0*threads] = v_ix;
-    reduce[1*threads] = v_iy;
-    reduce[2*threads] = v_iz;
-    reduce[3*threads] = v_jx;
-    reduce[4*threads] = v_jy;
-    reduce[5*threads] = v_jz;
+    reduce[0*threads] = grad_ix;
+    reduce[1*threads] = grad_iy;
+    reduce[2*threads] = grad_iz;
+    reduce[3*threads] = grad_jx;
+    reduce[4*threads] = grad_jy;
+    reduce[5*threads] = grad_jz;
     for (int i = gout_stride/2; i > 0; i >>= 1) {
         __syncthreads();
         if (gout_id < i) {
@@ -1115,7 +1103,7 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
         int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
         if (buflen > 48000) {
-            cudaFuncSetAttribute(rys_ejk_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaFuncSetAttribute(rys_ejk_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
@@ -1123,7 +1111,7 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
                 return 1;
             }
         }
-        rys_ejk_strain_deriv_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_deriv_kernel<<<workers, threads, buflen>>>(
                 *envs, jk, bounds, sigma, pair_ij_mapping, pair_kl_mapping,
                 bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
@@ -1131,7 +1119,7 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in PBC_jk_strain_deriv, li,lj,lk,ll = %d,%d,%d,%d, error message = %s\n",
+        fprintf(stderr, "CUDA Error in PBC_jk_deriv, li,lj,lk,ll = %d,%d,%d,%d, error message = %s\n",
                 li,lj,lk,ll, cudaGetErrorString(err));
         return 1;
     }

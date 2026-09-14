@@ -29,6 +29,34 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 import pytest
 
+def setUpModule():
+    global cell
+    a = np.eye(3) * 4
+    np.random.seed(5)
+    a -= np.random.rand(3, 3)
+    cell = gto.M(atom='H 1 1 1; H 3 2.5 2.4',
+                 basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
+                 pseudo='''
+H GTH-PBE-q1 GTH-PBE
+1
+  0.20000000    2    -4.17890044     0.72446331
+0
+                 ''', verbose=6, output='/dev/null', a=a, unit='Bohr')
+
+def tearDownModule():
+    global cell
+    del cell
+
+def _check_vs_finite_diff(dat, mf_scanner):
+    cell = mf_scanner.cell
+    vol = cell.vol
+    disp = 1e-3
+    for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+        cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
+        e1 = mf_scanner(cell1)
+        e2 = mf_scanner(cell2)
+        assert abs(dat[i,j] - (e1-e2)/2/disp/vol) < 1e-6
+
 class KnownValues(unittest.TestCase):
     def test_coulG(self):
         a = np.eye(3) * 5
@@ -232,66 +260,42 @@ class KnownValues(unittest.TestCase):
             assert abs(dat[i,j] - de/2e-4) < 5e-7
 
     def test_lda_vs_finite_difference(self):
-        a = np.eye(3) * 3
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
-                     a=a, unit='Bohr', verbose=0)
-        mf = cell.RKS(xc='svwn').to_gpu().run()
+        mf0 = cell.RKS(xc='svwn').to_gpu()
+        mf = mf0.multigrid_numint().run()
         mf_grad = rks.Gradients(mf)
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat, mf_scanner)
+
+        ref = dat
+        dat = mf0.reset(cell).run().Gradients().get_stress()
+        assert abs(dat - ref).max() < 1e-8
 
     def test_gga_vs_finite_difference(self):
-        a = np.eye(3) * 3.5
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='C 1 1 1; C 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
-                     pseudo='gth-pade', a=a, unit='Bohr', verbose=0)
-        mf = cell.RKS(xc='pbe').to_gpu().multigrid_numint().run()
+        mf0 = cell.RKS(xc='pbe').to_gpu()
+        mf = mf0.multigrid_numint().run()
         mf_grad = rks.Gradients(mf)
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat, mf_scanner)
+
+        ref = dat
+        dat = mf0.reset(cell).run().Gradients().get_stress()
+        assert abs(dat - ref).max() < 1e-8
 
     def test_mgga_vs_finite_difference(self):
-        a = np.eye(3) * 3.5
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
-                     a=a, unit='Bohr', verbose=0)
-        mf = cell.RKS(xc='rscan').to_gpu().multigrid_numint().run()
+        mf0 = cell.RKS(xc='rscan').to_gpu()
+        mf = mf0.multigrid_numint().run()
         mf_grad = rks.Gradients(mf)
         dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat, mf_scanner)
+
+        ref = dat
+        dat = mf0.reset(cell).run().Gradients().get_stress()
+        assert abs(dat - ref).max() < 1e-8
 
     def test_pbe0_vs_finite_difference(self):
-        a = np.eye(3) * 3.5
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
-                     a=a, unit='Bohr', verbose=0)
         xc = 'pbe0'
         mf = cell.RKS(xc=xc).to_gpu()
         mf.j_engine = PBCJMatrixOpt(cell)
@@ -300,21 +304,35 @@ class KnownValues(unittest.TestCase):
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = cell.RKS(xc=xc).to_gpu().as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat, mf_scanner)
+
+    def test_gdf_pbe0_vs_finite_difference(self):
+        xc = 'pbe0'
+        mf = cell.RKS(xc=xc).to_gpu().density_fit()
+        mf = mf.multigrid_numint().run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
+        _check_vs_finite_diff(dat, mf_scanner)
+
+    def test_gdf_pbe_vs_finite_difference(self):
+        xc = 'pbe'
+        mf = cell.RKS(xc=xc).to_gpu().density_fit().run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
+        _check_vs_finite_diff(dat, mf_scanner)
+
+    def test_gdf_hse_vs_finite_difference(self):
+        xc = 'hse06'
+        mf = cell.RKS(xc=xc).to_gpu().density_fit().run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
+        _check_vs_finite_diff(dat, mf_scanner)
 
     @pytest.mark.slow
     def test_hse_vs_finite_difference(self):
-        a = np.eye(3) * 5
-        np.random.seed(5)
-        a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
-                     a=a, unit='Bohr', verbose=0)
         xc = 'hse06'
         mf = cell.RKS(xc=xc).to_gpu()
         mf.j_engine = PBCJMatrixOpt(cell)
@@ -323,18 +341,13 @@ class KnownValues(unittest.TestCase):
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = cell.RKS(xc=xc).to_gpu().as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 2e-7
+        _check_vs_finite_diff(dat, mf_scanner)
 
     def test_get_vpplocG_strain_derivatives(self):
         from gpu4pyscf.pbc.grad.rks_stress import _get_vpplocG_strain_derivatives
         np.random.seed(8)
         cell = pyscf.M(
-            atom='C 0 0 0;#C .2 .3 .7',
+            atom='C 0 0 0; C .2 .3 .7',
             basis=[[0, [0.4, 1]]],
             pseudo={'C': [[2, 2], 0.38, 4, [-8.8, 1.33, 0.85, 0.55]]},
             a=np.eye(3) * 2.5 + np.random.rand(3,3)*.5)
@@ -358,4 +371,4 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == "__main__":
     print("Full Tests for RKS Stress tensor")
-    #unittest.main()
+    unittest.main()

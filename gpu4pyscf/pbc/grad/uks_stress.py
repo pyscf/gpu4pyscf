@@ -18,16 +18,16 @@ import cupy as cp
 import pyscf
 from pyscf import lib
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.pbc.tools import pbc as pbctools
-from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-from gpu4pyscf.pbc.df import FFTDF
+from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.pbc.df.aft import _get_ZSI
+from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 from gpu4pyscf.pbc.grad import uks as uks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.pbc.grad.rks_stress import (
     strain_tensor_dispalcement,
     _finite_diff_cells,
@@ -47,32 +47,36 @@ def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
     with_rsjk = mf.rsjk
     ni = mf._numint
     is_hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+    omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
 
-    j_factor = 1 if with_j else 0
-    if is_hybrid and with_rsjk is not None:
-        with_j = False
-
+    j_factor = 1
     # TODO: with_nuc should be disabled for all-electron calculations
     if isinstance(ni, MultiGridNumInt):
-        sigma = ni.energy_strain_gradient(mf.xc, dm[:,None], spin=1,
-                                          with_j=with_j, with_nuc=with_nuc)
+        sigma = ni.energy_strain_gradient(
+            mf.xc, dm[:,None], spin=1, with_j=True, with_nuc=with_nuc)
+        j_factor = 0
     elif isinstance(ni, NumInt):
+        with_j = not (with_rsjk or isinstance(mf.with_df, GDF))
+        if with_j:
+            j_factor = 0
         sigma = get_vxc(mf_grad, cell, dm, with_j, with_nuc)
     else:
         raise NotImplementedError(f'UKS stress tensor for {mf.xc}')
 
-    if is_hybrid:
+    if is_hybrid or j_factor != 0:
         if with_rsjk is not None:
             assert isinstance(with_rsjk, PBCJKMatrixOpt)
             if with_rsjk.supmol is None:
                 with_rsjk.build()
-            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
             sigma += with_rsjk._get_ejk_sr_strain_deriv(
                 dm, exxdiv=mf.exxdiv, omega=omega,
                 j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
             sigma += with_rsjk._get_ejk_lr_strain_deriv(
                 dm, exxdiv=mf.exxdiv, omega=omega,
                 j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
+        elif isinstance(mf.with_df, GDF):
+            from gpu4pyscf.pbc.grad.rks_stress import _gdf_strain_deriv
+            sigma += _gdf_strain_deriv(mf, dm, j_factor, omega, k_lr, k_sr)
         else:
             raise NotImplementedError(f'UKS stress tensor for {mf.xc}')
     return sigma
@@ -108,6 +112,10 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
     elif xctype == 'MGGA':
         deriv = 1
         nvar = 5
+    elif xctype == 'HF':
+        assert not with_j
+        assert not with_nuc
+        return np.zeros((3, 3))
     else:
         raise NotImplementedError
 
@@ -263,8 +271,6 @@ def kernel(mf_grad):
     '''
     assert isinstance(mf_grad, uks_grad.Gradients)
     mf = mf_grad.base
-    with_df = mf.with_df
-    assert isinstance(with_df, FFTDF)
     if hasattr(mf, 'U_idx'):
         raise NotImplementedError('Stress tensor for DFT+U')
 
@@ -279,12 +285,15 @@ def kernel(mf_grad):
     sigma = ewald(cell)
     sigma -= int1e.ovlp_strain_deriv(cell, dme0)
     sigma += int1e.kin_strain_deriv(cell, dm0_sf)
+
+    assert cell._pseudo, 'All electron calculations not supported'
+
     if cell._pseudo:
         # pploc contribution is evaluated in get_veff
         sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0_sf)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
-    sigma += get_veff(mf_grad, cell, dm0, with_j=True, with_nuc=True)
+    sigma += get_veff(mf_grad, cell, dm0, with_nuc=True)
     t0 = log.timer_debug1('Vxc and Coulomb derivatives', *t0)
 
     sigma /= cell.vol

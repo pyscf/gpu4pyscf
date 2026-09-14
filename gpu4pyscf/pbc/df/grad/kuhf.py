@@ -13,43 +13,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+'''
+Functions for computing nuclear gradients and strain derivatives
+'''
+
 import math
 import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.gto import ATOM_OF
 from pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, unpack_tril, get_avail_mem, empty_aligned)
+    contract, asarray, ndarray, get_avail_mem, empty_aligned)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
+from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
 from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
-from gpu4pyscf.pbc.df.grad.krhf import (
-    _split_l_ctr_pattern, get_ao_pair_loc, int3c2e_scheme, factorize_dm,
-    _j_energy_per_atom)
-from gpu4pyscf.pbc.df.rsdf_builder import (
-    _weighted_coulG_kpts, LINEAR_DEP_THR)
+from gpu4pyscf.pbc.df.grad import uhf
+from gpu4pyscf.pbc.df.grad.krhf import _get_ej_derivatives
+from gpu4pyscf.pbc.df.grad.rhf import (
+    factorize_dm, get_ao_pair_loc, _split_l_ctr_pattern, _gen_metric_solver,
+    _get_shl_pair_batch_size)
+from gpu4pyscf.pbc.df.int3c2e import int3c2e_scheme
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.df.grad import rhf, uhf
 from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
-from gpu4pyscf.gto.mole import groupby
+from gpu4pyscf.pbc.grad.rks_stress import (
+    _get_weighted_coulG_strain_derivatives as get_wcoulG)
+from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.lib.kpts_helper import (
-    fft_matrix, kk_adapted_iter, conj_images_in_bvk_cell)
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 
 
-def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, omega=None, verbose=None,
-                        linear_dep_threshold=LINEAR_DEP_THR):
+def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
+                         exxdiv=None, omega=None, verbose=None,
+                         linear_dep_threshold=LINEAR_DEP_THR):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
     if kpts is None:
-        return uhf._jk_energy_per_atom(
+        return uhf._get_ejk_derivatives(
             int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, omega, verbose,
             linear_dep_threshold)
 
@@ -57,10 +62,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         j_factor = 0
 
     if k_factor == 0:
-        return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], kpts, hermi,
-                                  omega, verbose,
-                                  linear_dep_threshold) * j_factor
+        ej, sigma = _get_ej_derivatives(
+            int3c2e_opt, dm[0]+dm[1], kpts, hermi, omega, verbose,
+            linear_dep_threshold)
+        return ej * j_factor, sigma * j_factor
 
+    # Must be symmetric density matrices, otherwise, dm_tensor needs to be
+    # symmetrized since PBCsr_ejk_int3c2e_deriv only handles the tril pairs
     assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
@@ -68,16 +76,15 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
-    assert dm.ndim == 4
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
     # transform to the AO order in sorted_cell
+    assert dm.ndim == 4
     dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=2)
     if dm_factor_r is None:
         dm_factor_r = dm_factor_l.conj()
     else:
         dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=2)
     nkpts, nao, nocc = dm_factor_l.shape[1:]
-    naux = auxcell.nao
 
     pair_addresses, diag_idx = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=False)
@@ -122,6 +129,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     buf = cp.empty((bvk_ncells*batch_size, nao_pair))
     buf1 = cp.empty(((nao*bvk_ncells)**2*blksize), dtype=np.complex128)
     buf2 = cp.empty(((nao*bvk_ncells)**2*blksize), dtype=np.complex128)
+    # Compute the occ-occ block of j3c, should be identical to
+    #:j3c = int3c2e.sr_aux_e2(cell.cell, auxcell.cell, omega, kpts)
+    #:j3c_oo = cp.einsum('IJpqr,Ipi,Jqj->rIJij', j3c, dm_factor_r, dm_factor_l)
     j3c_oo = cp.empty((2, naux, nkpts, nkpts, nocc, nocc), dtype=np.complex128)
     for kbatch in range(aux_batches):
         compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
@@ -138,6 +148,16 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             j3c[pair_addresses] = compressed[:,k0:k1]
             j3c = j3c.reshape(nao, bvk_ncells, nao, dk, nkpts)
 
+            # Construct j3c_ij in crystal AOs
+            #:j3c_ij = cp.empty((nkpts, nkpts, nao, nao, dk), dtype=np.complex128)
+            #:j3c_I = contract('jLikK,LI->KIijk', j3c, expLk.conj())
+            #:j3c_J = contract('iLjkK,LJ->KJijk', j3c, expLk)
+            #:for ki in range(nkpts):
+            #:    for kj in range(nkpts):
+            #:        kk = ijk_conserv[ki,kj]
+            #:        j3c_ij[ki,kj] = j3c_I[kk,ki] + j3c_J[kk,kj]
+            # The indices (kk*nkpts+ki) and (kk*nkpts+kj) are precomputed and
+            # provided by order_KI and order_KJ
             j3c_ij = ndarray((nkpts*nkpts, nao*nao*dk), dtype=np.complex128, buffer=buf1)
             j3c_tmp = ndarray((nkpts,nkpts, nao,nao,dk), dtype=np.complex128, buffer=buf2)
             j3c_tmp = contract('jLikK,LI->KIijk', j3c, expLk_conj, out=j3c_tmp)
@@ -185,13 +205,25 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     else:
         assert cell.dimension == 3
         mesh = [1] * 3
-    coulG_LR = _weighted_coulG_kpts(cell, mesh, omega, int3c2e_opt.omega, uniq_kpts)
-    Gv = auxcell.get_Gv(mesh)
+    Gv, _, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
+    wcoulG_LR0 = cp.empty((nkpts_uniq, ngrids))
+    wcoulG_LR1 = cp.empty((nkpts_uniq, 3, 3, ngrids))
+    for k, kpt in enumerate(uniq_kpts):
+        Gk = Gv + kpt
+        wcoulG_LR0[k], wcoulG_LR1[k] = get_wcoulG(cell, Gk, int3c2e_opt.omega)
+        if omega != 0:
+            wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gk, omega)
+            wcoulG_LR0[k] -= wcoulG_0
+            wcoulG_LR1[k] -= wcoulG_1
+    # The removed G=0 short-range contribution only belongs to q=0.
+    wcoulG_SR_at_G0 = np.pi / int3c2e_opt.omega**2 * kws
+    wcoulG_LR0[0, 0] -= wcoulG_SR_at_G0
+    wcoulG_LR1[0, :, :, 0] += wcoulG_SR_at_G0 * cp.eye(3)
 
     def lr_3c2e(j3c_oo):
         mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gblksize = int(mem_avail//((nao*2+nocc)*nao*16*nkpts))//32*32
+        Gblksize = int(mem_avail*.8//((nao*2+nocc)*nao*16*nkpts))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
@@ -201,7 +233,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             auxG = ft_ao.ft_ao(auxcell, (Gv[p0:p1]+uniq_kpts[:,None]).reshape(-1,3)).T
             auxG = auxG.reshape(naux, nkpts_uniq, nGv)
             auxGw = auxG.conj()
-            auxGw *= coulG_LR[:,p0:p1]
+            auxGw *= wcoulG_LR0[:,p0:p1]
             contract('iKG,jKG->Kij', auxGw, auxG, beta=1, out=j2c)
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
@@ -220,22 +252,23 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
 
+    ################################
+    # (d/dX P|Q) contributions
     j2c = auxcell.apply_CT_mat_C(j2c)
-    j2c_ip1 = auxcell.pbc_intor('int2c2e_ip1', kpts=uniq_kpts)
-
     j_factor /= nkpts**2
     k_factor /= nkpts**2
     aux_coeff = cp.asarray(auxcell.ctr_coeff)
     dm_oo = j3c_oo
-    ejk = np.zeros((cell.natm, 3))
     buf = cp.empty((2, naux, nkpts, nocc, nocc), dtype=np.complex128)
     buf1 = cp.empty((2, naux, nkpts, nocc, nocc), dtype=np.complex128)
     dm_aux = cp.empty((nkpts_uniq, naux, naux), dtype=np.complex128)
+    # Contractions for kp and kp_conj are complex conjugated.
+    # A factor of 2 is applied due to this symmetry.
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
         j2c_k = j2c[j2c_idx]
         if kp == kp_conj:
             j2c_k = j2c_k.real
-        solve_j2c = rhf._gen_metric_solver(
+        solve_j2c = _gen_metric_solver(
             j2c_k, linear_dep_threshold, auxcell.dimension)
         metric = aux_coeff.dot(solve_j2c(aux_coeff.T))
         j3c_oo_k = j3c_oo[:,:,ki_idx,kj_idx]
@@ -260,18 +293,20 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             cp.multiply(auxvec[:,None], auxvec.conj(), out=dm_aux[j2c_idx])
             beta = j_factor
 
-        dm_aux_k = contract('urkij,uskji->rs', dm_oo_k, dm_oo_kconj,
-                            alpha=-k_factor, beta=beta, out=dm_aux[j2c_idx])
-        j2c_k = asarray(j2c_ip1[j2c_idx])
-        if kp == kp_conj:
-            ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux_k, hermi=0)
-        else:
-            ejk += 2 * contract_h1e_dm(auxcell, j2c_k, dm_aux_k, hermi=0)
-        metric = j3c_oo_k = dm_oo_k = dm_oo_kconj = dm_aux_k = j2c_k = None
-    ejk *= .5
-    j2c = j2c_ip1 = j3c_oo = None
+        contract('urkij,uskji->rs', dm_oo_k, dm_oo_kconj,
+                 alpha=-k_factor, beta=beta, out=dm_aux[j2c_idx])
+        # Contractions for kp and kp_conj are complex conjugated.
+        # A factor of 2 is applied due to this time-reversal symmetry.
+        if kp != kp_conj:
+            dm_aux[j2c_idx] *= 2
+        metric = j3c_oo_k = dm_oo_k = dm_oo_kconj = None
+    ejk, sigma = int2c2e_opt.energy_derivatives(
+        dm_aux, uniq_kpts, omega=-int3c2e_opt.omega)
+    ejk = cp.asarray(-ejk)
+    sigma = cp.asarray(-sigma)
+    j2c = j3c_oo = None
     aux_coeff = buf = buf1 = None
-    t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
+    t0 = log.timer_debug1('contract int2c2e_deriv', *t0)
 
     ################################
     # LR part response
@@ -285,15 +320,23 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
         mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gblksize = int(mem_avail//((nao*2+nocc)*nao*16*nkpts))//32*32
+        Gblksize = int(mem_avail*.8//((nao*2+nocc)*nao*16*nkpts))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
-        kern = libpbc.PBC_ft_aopair_ek_ip1
+        kern = libpbc.PBC_ft_aopair_ek_deriv
+        kern_auxG = libpbc.PBC_ft_ao_deriv
         ejk_lr = cp.zeros((cell.natm, 3))
-        partial_daux = cp.zeros((3, naux))
+        ejk_aux = cp.zeros((cell.natm, 3))
+        sigma_lr = cp.zeros((3, 3))
+        sigma_aux = cp.zeros((3, 3))
+        sigma_G = cp.zeros((3, 3))
+        aux_ft_envs = RysIntEnvVars.new(
+            auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
+            _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
+        null_ptr = lib.c_null_ptr()
         vG = cp.empty(ngrids, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
@@ -318,29 +361,37 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
                 # contracting all [0] order terms -> dm_auxG
                 dm_oo_k = dm_oo[:,:,kj_idx,ki_idx]
+                if kp != kp_conj:
+                    dm_oo_k *= 2
                 contract('srkji,skijG->rG', dm_oo_k, ijG, -k_factor, beta, out=dm_auxG)
 
                 # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
                 # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
-                contract('sr,sG->rG', dm_aux[j2c_idx], auxG[:,j2c_idx], -1, 1, out=dm_auxG)
-                dm_auxG *= coulG_LR[j2c_idx, p0:p1]
+                dm_auxG1 = contract('sr,sG->rG', dm_aux[j2c_idx], auxG[:,j2c_idx])
+                rhoG_metric = cp.einsum('rg,rg->g', dm_auxG, auxG[:,j2c_idx].conj()).real * 2
+                rhoG_metric -= cp.einsum('rg,rg->g', dm_auxG1, auxG[:,j2c_idx].conj()).real
+                sigma_G += .5 * cp.einsum(
+                    'g,xyg->xy', rhoG_metric, wcoulG_LR1[j2c_idx,:, :,p0:p1])
+                dm_auxG -= dm_auxG1
+                dm_auxG *= wcoulG_LR0[j2c_idx, p0:p1]
                 dm_auxG = dm_auxG.view(np.float64)
 
-                # contract to (r|G)^{[1]}
-                for i in range(3):
-                    ip_auxG = auxG[:,j2c_idx] * (-1j*Gk[j2c_idx,p0:p1,i])
-                    ip_auxG = ip_auxG.view(np.float64)
-                    if kp != kp_conj:
-                        partial_daux[i] += 2 * cp.einsum('ag,ag->a', ip_auxG, dm_auxG)
-                    else:
-                        partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG, dm_auxG)
-
-                pqG = None
+                # contract to (r|G)^{[1]} = einsum('ag,ag->a', (iG IFT(aux)), dm_auxG)
+                GkT = cp.asarray(Gk[j2c_idx,p0:p1].T.ravel())
+                err = kern_auxG(
+                    ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(sigma_aux.data.ptr, ctypes.c_void_p),
+                    null_ptr,
+                    ctypes.cast(dm_auxG.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(GkT.data.ptr, ctypes.c_void_p),
+                    ctypes.byref(aux_ft_envs), ctypes.c_int(nGv))
+                if err != 0:
+                    raise RuntimeError('ft_ao_deriv failed')
 
                 # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
                 auxG_conj = auxG[:,j2c_idx].conj()
-                auxG_conj *= coulG_LR[j2c_idx,p0:p1]
-                # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
+                auxG_conj *= wcoulG_LR0[j2c_idx,p0:p1]
+                # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
                 # dm_oo must be symmetric
                 dm_ooG = contract('srkji,rG->skijG', dm_oo_k, auxG_conj)
                 tmp = contract('skijG,skpi->skpjG', dm_ooG, dm_factor_r)
@@ -348,7 +399,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 LpqG = contract('Lk,kpqG->LqpG', expLk[:,kj_idx], dm_vG)
                 if ft_opt.permutation_symmetry:
                     #TODO: This transformation is likely identical to the
-                    # previous one. Scale LpqG a factor of two instead.
+                    # previous one. Scale LpqG by a factor of two instead.
                     LpqG += contract('Lk,kpqG->LpqG', expLk.conj(), dm_vG)
 
                 if j_factor != 0 and kp == 0:
@@ -357,14 +408,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                         vG *= 2
                     bvk_dm = contract('Lk,kpq->Lpq', expLk, dm_sorted)
                     LpqG += bvk_dm[:,:,:,None] * vG
-
-                if kp != kp_conj:
-                    LpqG *= 2
                 dm_vG = cp.asarray(LpqG, order='C')
 
                 GvT = cp.asarray((Gv[p0:p1]+kpts[kp]).T.ravel())
                 err = kern(
                     ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(sigma_lr.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                     ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                     ctypes.byref(aft_envs),
@@ -376,22 +425,16 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(ft_opt.permutation_symmetry))
                 if err != 0:
-                    raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+                    raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                 dm_oo_k = dm_ooG = tmp = dm_vG = LpqG = None
 
-        dims = aux_loc[1:] - aux_loc[:-1]
-        atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
-        partial_daux = partial_daux.T.get()
-        ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
-        ejk_lr = ejk_lr.get()
-        if len(ejk_aux) < cell.natm:
-            ejk_lr[np.unique(atm_id_for_aux)] += ejk_aux
-        else:
-            ejk_lr += ejk_aux
-        return ejk_lr
+        ejk_lr += ejk_aux
+        sigma_lr += sigma_aux + sigma_G
+        return ejk_lr, sigma_lr
 
-    ejk_lr = lr_3c2e_response()
+    ejk_lr, sigma_lr = lr_3c2e_response()
     ejk += ejk_lr
+    sigma += sigma_lr
     log.timer_debug1('LR coulomb', *t0)
     ft_opt = ft_kern = None
     dm_aux = None
@@ -413,7 +456,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
     nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
-    shl_pair_batch_size = rhf._get_shl_pair_batch_size(
+    shl_pair_batch_size = _get_shl_pair_batch_size(
         nksh_per_batch, bvk_ncells)
     bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
         int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
@@ -427,12 +470,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     order_KI = (ijk_conserv.T * nkpts + cp.arange(nkpts)[:,None]).ravel()
     ejk_sr = cp.zeros((cell.natm, 3))
     ejk_aux_sr = cp.zeros((cell.natm, 3))
+    sigma_sr = cp.zeros((3, 3))
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
     head = pool[-1:]
     task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libpbc.PBCsr_ejk_int3c2e_ip1
+    kern = libpbc.PBCsr_ejk_int3c2e_deriv
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size*bvk_ncells))
     buf1 = cp.empty((nkpts**2 * blksize*nao*nao), dtype=np.complex128)
@@ -444,17 +488,37 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
+            # The contraction with first order derivative integrals are
+            #:for ki in range(nkpts):
+            #:    for kj in range(nkpts):
+            #:        einsum('li,ijp,jk,qp,xklq->x', dm[ki], j3c[ki,kj], dm[kj],
+            #:               metric[kk_conserv[ki,kj]], j3c_ip1[kj,ki])
+            # dm_tensor stores the contraction 'li,ijp,jk,qp->lkq'.
             dm_tensor = ndarray((nkpts,nkpts,nao,nao,dk), dtype=np.complex128, buffer=buf2)
             tmp = ndarray((nkpts,nkpts,nocc,nao,dk), dtype=np.complex128, buffer=buf1)
-            contract('rIJij,Jqj->IJiqr', dm_oo[0,aux0:aux1], dm_factor_r[0], -k_factor, out=tmp)
+            contract('rIJij,Jqj->IJiqr', dm_oo[0,aux0:aux1],
+                     dm_factor_r[0], -k_factor, out=tmp)
             contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_l[0], out=dm_tensor)
-            contract('rIJij,Jqj->IJiqr', dm_oo[1,aux0:aux1], dm_factor_r[1], -k_factor, out=tmp)
-            contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_l[1], beta=1, out=dm_tensor)
+            contract('rIJij,Jqj->IJiqr', dm_oo[1,aux0:aux1],
+                     dm_factor_r[1], -k_factor, out=tmp)
+            contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_l[1],
+                     beta=1, out=dm_tensor)
+            # j3c_ip1 (xklq) is first evaluated in real space, then l and q
+            # are transformed to k-adpated indices. kpt for l is associated with
+            # the first index of dm_tensor.
+            # To match the kpt indexing of j3c_ip, dm_tensor's orbital k-indices
+            # JI needs to be transformed to abs-obs mixed k-indices KI.
+            #:dm_tensor_swap = cp.zeros_like(dm_tensor)
+            #:for ki in range(nkpts):
+            #:    for kj in range(nkpts):
+            #:        kk = ijk_conserv[kj,ki]
+            #:        dm_tensor_swap[kk,ki] = dm_tensor[ki,kj]
             dm_tensor_swap = ndarray((nkpts*nkpts,nao,nao,dk), dtype=np.complex128, buffer=buf1)
             dm_tensor_swap[order_KI] = dm_tensor.reshape(nkpts**2,nao,nao,dk)
             dm_tensor_swap = dm_tensor_swap.reshape(nkpts,nkpts,nao,nao,dk)
             if j_factor != 0:
                 dm_tensor_swap[0] += j_factor * auxvec[aux0:aux1] * dm_sorted[:,:,:,None]
+
             tmp = ndarray((nkpts,nao,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf2)
             tmp1 = ndarray((nao,bvk_ncells,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf1)
             dm_tensor = contract('KJpqr,LK->JpqLr', dm_tensor_swap, expLk_conj, out=tmp)
@@ -465,8 +529,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         err = kern(
             ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
             ctypes.cast(ejk_aux_sr.data.ptr, ctypes.c_void_p),
-            ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sigma_sr.data.ptr, ctypes.c_void_p),
             lib.c_null_ptr(),
+            ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
             ctypes.c_double(-int3c2e_opt.omega),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
@@ -489,10 +554,14 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
         if err != 0:
-            raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+            raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
     ejk_sr += ejk_aux_sr
-    ejk += ejk_sr.get() * 2
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
+    ejk += ejk_sr * 2
+    sigma += sigma_sr * 2
+    t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+
+    ejk = ejk.get()
+    sigma = sigma.get()
 
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
@@ -507,7 +576,26 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         # contract_h1e_dm
         ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
         weighted_coulG_at_G0 = madelung(cell, kpts, omega=-omega)
+        # The k_factor was previously scaled by 1/nkpts^2. The ewald term
+        # requires a factor of 1/nkpts. Rescale k_factor by nkpts
         # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
-        ejk_ewald *= k_factor*nkpts * weighted_coulG_at_G0
+        ewald_k_factor = k_factor * nkpts
+        ejk_ewald *= ewald_k_factor * weighted_coulG_at_G0
         ejk += ejk_ewald
-    return ejk
+
+        ek_G0 = float(cp.einsum('kij,kji->', s0, k_dm).real.get()) / nkpts
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
+        # *.5 for the factor 1/2 in Coulomb operator
+        fac = ewald_k_factor * .5
+        sigma -= fac * exx_1 * ek_G0
+        # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
+        sigma -= 2 * fac * exx_0 * int1e.ovlp_strain_deriv(cell.cell, k_dm, kpts)
+    return ejk, sigma
+
+def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
+                        exxdiv=None, omega=None, verbose=None,
+                        linear_dep_threshold=LINEAR_DEP_THR):
+    '''Compatibility wrapper returning only the atomic J/K derivatives.'''
+    return _get_ejk_derivatives(
+        int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega, verbose,
+        linear_dep_threshold)[0]

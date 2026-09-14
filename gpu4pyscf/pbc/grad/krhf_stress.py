@@ -24,11 +24,13 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.dft.numint import eval_ao_kpts, _GTOvalOpt
+from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.pbc.dft import multigrid_v3
+from gpu4pyscf.pbc.df import aft, aft_jk, GDF
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.pbc.grad.rks_stress import (
     _get_coulG_strain_derivatives,
@@ -73,7 +75,19 @@ def kernel(mf_grad):
     kpts = mf.kpts
     sigma -= int1e.ovlp_strain_deriv(cell, dme0, kpts)
     sigma += int1e.kin_strain_deriv(cell, dm0, kpts)
-    sigma += get_nuc(mf_grad, cell, dm0, kpts)
+
+    ni = mf._numint
+    if ni is None and np.prod(cell.mesh) < 1000**3:
+        # In the pseudo and all-electron mixed case, MultiGridNumInt is
+        # still more efficient if Ecut is not too high.
+        ni = multigrid_v3.MultiGridNumInt(cell)
+
+    if isinstance(ni, multigrid.MultiGridNumIntBase):
+        sigma += ni.energy_strain_gradient(
+            'HF', dm0, kpts, spin=0, with_j=False, with_nuc=True)
+    else:
+        # TODO: sigma += self.with_df.pp_loc_energy_derivatives()[1]
+        sigma += get_nuc(mf_grad, cell, dm0, kpts)
     if cell._pseudo:
         sigma += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0, kpts)
     t0 = log.timer_debug1('hcore derivatives', *t0)
@@ -101,12 +115,15 @@ def get_veff(mf_grad, cell, dm, kpts):
     elif isinstance(mf.with_df, aft.AFTDF):
         sigma = aft_jk.get_ej_strain_deriv(mf.with_df, dm, kpts)
         sigma -= aft_jk.get_ek_strain_deriv(mf.with_df, dm, kpts, exxdiv=mf.exxdiv) * .5
+    elif isinstance(mf.with_df, GDF):
+        from gpu4pyscf.pbc.grad.krks_stress import _gdf_strain_deriv
+        sigma = _gdf_strain_deriv(mf, dm, kpts)
     else:
         raise NotImplementedError(f'Stress tensor for KHF for {mf.with_df}')
     return sigma
 
 def get_nuc(mf_grad, cell, dm, kpts):
-    '''Strain derivatives for Coulomb and Exc with k-point samples
+    '''Strain derivatives for nuclear attraction or pp-local with k-points sampling
     '''
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension != 1
