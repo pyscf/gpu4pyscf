@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import numpy as np
-from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
+from gpu4pyscf.pbc.dft import multigrid_v3, BeckeGrids
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.grad import rhf
 
@@ -33,7 +33,6 @@ class Gradients(rhf.Gradients):
         nuclear gradients.
         '''
         mf = self.base
-        with_df = mf.with_df
         ni = mf._numint
         xc = getattr(mf, 'xc', 'HF')
         if xc.upper() == 'HF':
@@ -46,7 +45,7 @@ class Gradients(rhf.Gradients):
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
         de = np.zeros([self.cell.natm+3, 3])
         spin = 0 if dm.ndim == 2 else 1
-        if isinstance(ni, multigrid.MultiGridNumIntBase):
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
             # Match pbc/dft/rks.py: multigrid supplies J even when exchange uses GDF.
             de = ni.energy_derivatives(
                 xc, dm, spin=spin, with_j=True, with_nuc=True)
@@ -66,7 +65,7 @@ class Gradients(rhf.Gradients):
             if isinstance(grids, BeckeGrids):
                 de[-3:] = np.nan
             else:
-                de[-3:] = ni.energy_strain_gradient(
+                de[-3:] = multigrid_v3.MultiGridNumInt(cell).energy_strain_gradient(
                     xc, dm, spin=0, with_j=False, with_nuc=False)
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:

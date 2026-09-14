@@ -26,7 +26,7 @@ from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
+from gpu4pyscf.pbc.dft import multigrid_v3, BeckeGrids
 from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
 
 __all__ = ['Gradients']
@@ -219,7 +219,6 @@ class Gradients(kuhf_grad.Gradients):
 
     def energy_ee(self, dm, kpts):
         mf = self.base
-        with_df = mf.with_df
         log = logger.new_logger(self)
         t0 = log.init_timer()
 
@@ -234,7 +233,7 @@ class Gradients(kuhf_grad.Gradients):
         # TODO: handle all-electron+GGA and pseudo+GGA differently
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
         de = np.zeros([self.cell.natm+3, 3])
-        if isinstance(ni, multigrid.MultiGridNumIntBase):
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
             de = ni.energy_derivatives(
                 xc, dm, kpts=kpts, spin=1, with_j=True, with_nuc=True)
             j_factor = 0
@@ -255,7 +254,7 @@ class Gradients(kuhf_grad.Gradients):
             if isinstance(grids, BeckeGrids):
                 de[-3:] = np.nan
             else:
-                de[-3:] = ni.energy_strain_gradient(
+                de[-3:] = multigrid_v3.MultiGridNumInt(cell).energy_strain_gradient(
                     xc, dm, kpts=kpts, spin=1, with_j=False, with_nuc=False)
         t0 = log.timer_debug1('vxc', *t0)
 

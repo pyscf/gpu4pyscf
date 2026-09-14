@@ -38,8 +38,7 @@ from gpu4pyscf.pbc.df.grad.rhf import (
     _get_shl_pair_batch_size)
 from gpu4pyscf.pbc.df.int3c2e import int3c2e_scheme
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
-from gpu4pyscf.pbc.grad.rks_stress import (
+from gpu4pyscf.pbc.grad.krks_stress import (
     _get_weighted_coulG_strain_derivatives as get_wcoulG)
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e

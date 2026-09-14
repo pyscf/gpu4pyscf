@@ -2380,14 +2380,14 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
 
+        grad_sigma = cp.zeros([cell.natm+3, 3])
+        sigma = grad_sigma[-3:]
         if xctype == 'HF':
             if n_dm == 2:
                 # XC contribution = 0. Only needs to consider Coulomb energy
                 dm_sc = dm_sc[0] + dm_sc[1]
                 n_dm = 1
             rhoG, tauG = _eval_density(self, dm_sc)
-
-            sigma = cp.zeros((3, 3))
             vxc = cp.zeros(ngrids)
 
         elif n_dm == 1: # RHF
@@ -2424,7 +2424,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             t0 = log.timer_debug1("eval_xc_eff", *t0)
 
             # grid weight response
-            sigma = vec_dot(rho_sf, exc.ravel()) * weight * cp.eye(3)
+            sigma += vec_dot(rho_sf, exc.ravel()) * weight * cp.eye(3)
 
         if xctype == 'GGA' or xctype == 'MGGA':
             # The response of grids wrt the lattice vectors introduces an
@@ -2444,14 +2444,13 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
         density = exc = rho_sf = None
 
-        grad_sigma = 0
         coulomb_on_g_mesh = cp.zeros_like(rhoG)
         if with_nuc:
             if cell._pseudo:
                 coulomb_on_g_mesh = multigrid_v1.eval_vpplocG(cell, mesh, out=tauG).reshape(mesh)
-                grad_sigma = _pploc_derivatives(cell, rhoG, Gv_bases)
+                grad_sigma += _pploc_derivatives(cell, rhoG, Gv_bases)
             else:
-                grad_sigma = _ne_derivatives(cell, rhoG, Gv_bases)
+                grad_sigma += _ne_derivatives(cell, rhoG, Gv_bases)
                 ZSI = _get_ZSI(cell, mesh, out=tauG)
                 vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
                 coulomb_on_g_mesh = vneG.reshape(mesh)

@@ -1082,7 +1082,7 @@ class PBCJKMatrixOpt:
         Returns an array of shape (cell.natm+3, 3), with atomic derivatives
         in the first cell.natm rows and strain derivatives in the last three.
         '''
-        from gpu4pyscf.pbc.grad.rks_stress import (
+        from gpu4pyscf.pbc.grad.krks_stress import (
             _get_weighted_coulG_strain_derivatives as get_wcoulG)
         log = logger.new_logger(self)
         cell = self.cell

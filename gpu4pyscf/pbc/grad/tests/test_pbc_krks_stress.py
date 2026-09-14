@@ -25,7 +25,8 @@ from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.dft import krkspu
 from gpu4pyscf.pbc.grad import pp as pp_grad
 from gpu4pyscf.pbc.grad import krkspu as krkspu_grad
-from gpu4pyscf.pbc.grad import krks, rks_stress
+from gpu4pyscf.pbc.grad import krks
+from gpu4pyscf.pbc.grad.krks_stress import _eval_ao_strain_derivatives
 from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -76,7 +77,7 @@ class KnownValues(unittest.TestCase):
         kmesh = [3, 1, 1]
         kpts = cell.make_kpts(kmesh)
         coords = np.random.rand(10, 3)
-        ao_value = rks_stress._eval_ao_strain_derivatives(cell, coords, kpts)
+        ao_value = _eval_ao_strain_derivatives(cell, coords, kpts)
         ao_value = ao_value.get().transpose(0,1,2,3,5,4)
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
@@ -99,7 +100,7 @@ class KnownValues(unittest.TestCase):
         kmesh = [3, 1, 1]
         kpts = cell.make_kpts(kmesh)
         coords = np.random.rand(10, 3)
-        ao_value = rks_stress._eval_ao_strain_derivatives(cell, coords, kpts, deriv=1)
+        ao_value = _eval_ao_strain_derivatives(cell, coords, kpts, deriv=1)
         ao_value = ao_value.get().transpose(0,1,2,3,5,4)
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)

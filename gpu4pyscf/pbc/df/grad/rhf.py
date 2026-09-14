@@ -34,8 +34,7 @@ from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
-from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
-from gpu4pyscf.pbc.grad.rks_stress import (
+from gpu4pyscf.pbc.grad.krks_stress import (
     _get_weighted_coulG_strain_derivatives as get_wcoulG)
 from gpu4pyscf.pbc.tools.pbc import madelung
 from gpu4pyscf.__config__ import props as gpu_specs

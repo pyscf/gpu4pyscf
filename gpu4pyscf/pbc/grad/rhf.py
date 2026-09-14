@@ -25,9 +25,9 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 import gpu4pyscf.grad.rhf as mol_rhf
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
+from gpu4pyscf.pbc.dft import multigrid_v3
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-from gpu4pyscf.pbc.df.df import GDF
+from gpu4pyscf.pbc.df import aft_jk, AFTDF, GDF
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.dft import KohnShamDFT, BeckeGrids
 from gpu4pyscf.pbc.grad.pp import (
@@ -61,7 +61,7 @@ class GradientsBase(mol_rhf.GradientsBase):
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell
-            self.stress = None
+        self.stress = None
         self.base.reset(cell)
         return self
 
@@ -149,7 +149,7 @@ class Gradients(GradientsBase):
         de = 0
         ni = mf._numint
         spin = 0 if dm.ndim == 2 else 1
-        if isinstance(ni, multigrid.MultiGridNumIntBase):
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
             de = ni.energy_derivatives(
                 'HF', dm, spin=spin, with_j=j_in_xc, with_nuc=True)
             if j_in_xc:
@@ -161,7 +161,6 @@ class Gradients(GradientsBase):
     def grad_elec(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         mf = self.base
         cell = mf.cell
-        assert gamma_point(mf.kpt)
         if mo_energy is None: mo_energy = mf.mo_energy
         if mo_coeff is None: mo_coeff = mf.mo_coeff
         if mo_occ is None: mo_occ = mf.mo_occ
@@ -175,11 +174,14 @@ class Gradients(GradientsBase):
         grad_sigma = self.energy_ee(dm0)
         t1 = log.timer_debug1('gradients of 2e part', *t0)
 
-        if dm0.ndim == 3: # UHF
+        is_uhf = mf.istype('UHF')
+        assert gamma_point(mf.kpt)
+
+        if is_uhf:
             dm0 = dm0[0] + dm0[1]
 
         ni = mf._numint
-        if isinstance(ni, multigrid.MultiGridNumIntBase):
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0)
         else:
@@ -190,14 +192,14 @@ class Gradients(GradientsBase):
                 h1ao = hcore_deriv(ia)
                 dh1e[ia] = cp.einsum('xij,ji->x', h1ao[0], dm0).real
             grad_sigma[:-3] += dh1e.get()
-            if isinstance(self.grids or mf.grids), BeckeGrids):
+            if isinstance(self.grids or getattr(mf, 'grids', None), BeckeGrids):
                 grad_sigma[-3:] = np.nan
             else:
                 # hcore_generator includes kinetic gradients, but not kinetic strain.
                 grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0)[-3:]
                 ni = multigrid_v3.MultiGridNumInt(cell)
                 grad_sigma[-3:] += ni.energy_strain_gradient(
-                    'HF', dm, spin=0, with_j=False, with_nuc=True)
+                    'HF', dm0, spin=0, with_j=False, with_nuc=True)
 
         if cell._pseudo:
             grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0)
@@ -245,7 +247,6 @@ def contract_h1e_dm(cell, h1e, dm, hermi=0):
 def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr_factor=1):
     from pyscf.pbc.df.df import make_auxcell
     from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
-    from gpu4pyscf.pbc.df.aft import aft_jk, AFTDF
     from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
     from gpu4pyscf.pbc.df.rsdf_builder import _guess_omega
     from gpu4pyscf.pbc.df.grad import krhf, kuhf
@@ -278,14 +279,14 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
                   linear_dep_threshold=with_df.linear_dep_threshold)
 
     def get_k_lr(k_factor, omega, exxdiv):
-        with AFTDF(cell).range_coulomb(omega) as mydf:
-            ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-            mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
-            ek_sigma = aft_jk.get_ek_derivatives(mydf, dm, kpts, exxdiv=exxdiv)
-            if is_rhf:
-                k_factor *= .5
-            ek_sigma *= -k_factor
-            return ek_sigma
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+        mydf = AFTDF(cell)
+        mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
+        if is_rhf:
+            k_factor *= .5
+        ek_sigma = aft_jk.get_ek_derivatives(
+            mydf, dm, kpts, exxdiv=exxdiv, omega=omega, lr_factor=k_factor, sr_factor=0)
+        return ek_sigma
 
     grad_sigma = 0
     if omega == 0:
@@ -295,12 +296,12 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
         if j_factor != 0:
             grad_sigma += get_jk(j_factor, 0, 0, None)
     elif sr_factor == 0:
-        grad_sigma = get_k_lr(lr_factor, omega, mf.exxdiv)
+        grad_sigma = get_k_lr(-lr_factor, omega, mf.exxdiv)
         if j_factor != 0:
             grad_sigma += get_jk(j_factor, 0, 0, None)
     else:
         grad_sigma = get_jk(j_factor, sr_factor, 0, mf.exxdiv)
-        grad_sigma += get_k_lr(lr_factor-sr_factor, omega, mf.exxdiv)
+        grad_sigma -= get_k_lr(lr_factor-sr_factor, omega, mf.exxdiv)
     return grad_sigma
 
 def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr_factor=1):
@@ -312,6 +313,7 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
     from gpu4pyscf.pbc.df.grad.krhf import _get_ejk_derivatives
     assert omega >= 0
     with_df = mf.with_df
+    cell = mf.cell
     hermi = 1
     if kpts is None:
         is_rhf = dm.ndim == 2
@@ -323,7 +325,6 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
     if mf.rsjk is not None:
         if j_factor != 0 and not mf.j_engine and isinstance(with_df, GDF):
             j_factor = 0
-            cell = with_df.cell
             if kpts is None:
                 kmesh = None
             else:
@@ -337,17 +338,18 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
                 ejk_sigma = _get_ejk_derivatives(
                     int3c2e_opt, dm[0]+dm[1], kpts, hermi, k_factor=0)
 
-        with_rsjk = mf.rsjk
-        assert isinstance(with_rsjk, PBCJKMatrixOpt)
-        if with_rsjk.supmol is None:
-            with_rsjk.build()
-        ejk_sigma += with_rsjk._get_ejk_sr_derivatives(
-            dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
-            lr_factor=lr_factor, sr_factor=sr_factor)
-        if lr_factor != 0 or omega != with_rsjk.omega:
-            ejk_sigma += with_rsjk._get_ejk_lr_derivatives(
+        if lr_factor != 0 or sr_factor != 0:
+            with_rsjk = mf.rsjk
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if with_rsjk.supmol is None:
+                with_rsjk.build()
+            ejk_sigma += with_rsjk._get_ejk_sr_derivatives(
                 dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
                 lr_factor=lr_factor, sr_factor=sr_factor)
+            if lr_factor != 0 or omega != with_rsjk.omega:
+                ejk_sigma += with_rsjk._get_ejk_lr_derivatives(
+                    dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
+                    lr_factor=lr_factor, sr_factor=sr_factor)
 
     elif isinstance(with_df, GDF):
         return _gdf_ejk_derivatives(mf, dm, kpts, j_factor, omega, lr_factor, sr_factor)
@@ -355,19 +357,21 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
     else: # fft or aft
         if j_factor != 0:
             if is_rhf:
-                ejk_sigma = with_df.get_ej_derivatives(dm, kpts)
+                dm_sf = dm
             else:
-                ejk_sigma = with_df.get_ej_derivatives(dm[0]+dm[1], kpts)
+                dm_sf = dm[0] + dm[1]
+            if isinstance(with_df, AFTDF):
+                ejk_sigma = with_df.get_ej_derivatives(dm_sf, kpts)
+            else:
+                ejk_sigma = multigrid_v3.MultiGridNumInt(cell).energy_derivatives(
+                    'HF', dm_sf, kpts, spin=0, with_j=True, with_nuc=False)
             ejk_sigma *= j_factor
-        if is_rhf:
-            sr_factor *= .5
-            lr_factor *= .5
-        if sr_factor != 0:
-            with with_df.range_coulomb(-omega) as with_df:
-                ejk_sigma -= with_df.get_ek_derivatives(dm, kpts, exxdiv) * sr_factor
-        if omega != 0 and lr_factor != 0:
-            with with_df.range_coulomb(omega) as with_df:
-                ejk_sigma -= with_df.get_ek_derivatives(dm, kpts, exxdiv) * lr_factor
+        if lr_factor != 0 or sr_factor != 0:
+            if is_rhf:
+                sr_factor *= .5
+                lr_factor *= .5
+            ejk_sigma -= with_df.get_ek_derivatives(
+                dm, kpts, exxdiv, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
     return ejk_sigma
 
@@ -410,10 +414,3 @@ def ewald(cell):
             e2 = cell2.ewald()
             out[j,i] = out[i,j] = (e1 - e2) / (2*disp)
     return out
-
-def get_nuc_strain_deriv(mf_grad, cell, dm):
-    '''Strain derivatives for nuclear attraction or pp-local at gamma point
-    '''
-    from gpu4pyscf.pbc.grad.krhf import get_nuc_strain_deriv
-    kpts = np.zeros((1, 3))
-    return get_nuc_strain_deriv(mf_grad, cell, dm[None], kpts)

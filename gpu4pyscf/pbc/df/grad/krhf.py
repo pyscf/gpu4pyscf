@@ -35,8 +35,7 @@ from gpu4pyscf.pbc.df.grad import rhf
 from gpu4pyscf.pbc.df.grad.rhf import factorize_dm, get_ao_pair_loc, _split_l_ctr_pattern
 from gpu4pyscf.pbc.df.int3c2e import int3c2e_scheme
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
-from gpu4pyscf.pbc.grad.rks_stress import (
+from gpu4pyscf.pbc.grad.krks_stress import (
     _get_weighted_coulG_strain_derivatives as get_wcoulG)
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
@@ -562,8 +561,6 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
-    from gpu4pyscf.pbc.grad.rks_stress import (
-        _get_weighted_coulG_strain_derivatives as get_wcoulG)
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     log = logger.new_logger(cell, verbose)

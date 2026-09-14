@@ -28,15 +28,12 @@ from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft.numint import eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft import UniformGrids, BeckeGrids
-from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
+from gpu4pyscf.pbc.dft import multigrid_v3
 from gpu4pyscf.pbc.df import ft_ao, GDF
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc import tools as pbctools
-from gpu4pyscf.pbc.grad.rks_stress import (
-    _eval_ao_strain_derivatives, _get_vpplocG_strain_derivatives,
-    _get_coulG_strain_derivatives, ALIGNED)
 from gpu4pyscf.pbc.grad.pp import (
     vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, _get_ejk_derivatives
@@ -46,8 +43,8 @@ __all__ = ['Gradients']
 
 def get_hcore(cell, kpts):
     '''
-        Part of the nuclear gradients of core Hamiltonian
-        If pseudo potential is turned on, the local term is included, but the nonlocal term is not included.
+    Part of the nuclear gradients of core Hamiltonian
+    If pseudo potential is turned on, the local term is included, but the nonlocal term is not included.
     '''
     h1 = int1e.int1e_ipkin(cell, kpts)
     if cell._pseudo:
@@ -98,7 +95,7 @@ def get_hcore(cell, kpts):
 
 def hcore_generator(mf_grad, cell=None, kpts=None):
     '''
-        If pseudo potential is turned on, the local term is included, but the nonlocal term is not included.
+    If pseudo potential is turned on, the local term is included, but the nonlocal term is not included.
     '''
     if cell is None: cell = mf_grad.cell
     if kpts is None:
@@ -152,8 +149,13 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
 
 def get_nuc_strain_deriv(mf_grad, cell, dm, kpts):
     '''Strain derivatives for nuclear attraction or pp-local with k-points sampling
+
+    This function is deprecated.
     '''
     from gpu4pyscf.lib.cupy_helper import sandwich_dot
+    from gpu4pyscf.pbc.grad.krks_stress import (
+        _eval_ao_strain_derivatives, _get_vpplocG_strain_derivatives,
+        _get_coulG_strain_derivatives, ALIGNED)
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension != 1
     assert kpts.ndim == 2
@@ -288,7 +290,7 @@ class Gradients(GradientsBase):
         de = 0
         ni = mf._numint
         spin = 0 if dm.ndim == 3 else 1
-        if isinstance(ni, multigrid.MultiGridNumIntBase):
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
             de = ni.energy_derivatives(
                 'HF', dm, kpts=kpts, spin=spin, with_j=j_in_xc, with_nuc=True)
             if j_in_xc:
@@ -313,20 +315,23 @@ class Gradients(GradientsBase):
             dm1e[k] = (c*e_occ).dot(c.conj().T)
         return dm1e
 
-    def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
+    def grad_elec(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''
         Electronic part of KRHF/KRKS gradients
-        Args:
-            mf_grad : pbc.grad.krhf.Gradients or pbc.grad.krks.Gradients object
         '''
-        mf = mf_grad.base
-        cell = mf_grad.cell
-        natm = cell.natm
-        kpts = mf.kpts
-        nkpts = len(kpts)
+        mf = self.base
+        cell = self.cell
         if mo_energy is None: mo_energy = mf.mo_energy
         if mo_occ is None:    mo_occ = mf.mo_occ
         if mo_coeff is None:  mo_coeff = mf.mo_coeff
+
+        if mf.istype('KSCF'):
+            is_uhf = mf.istype('KUHF')
+            kpts = mf.kpts
+        else:
+            is_uhf = mf.istype('UHF')
+            kpts = mf.kpt
+        nkpts = len(kpts)
 
         if getattr(mf, 'disp', None):
             raise NotImplementedError('dispersion correction')
@@ -334,36 +339,36 @@ class Gradients(GradientsBase):
         if getattr(mf, 'with_x2c', None):
             raise NotImplementedError('X2C gradients')
 
-        log = logger.new_logger(mf_grad)
+        log = logger.new_logger(self)
         t0 = log.init_timer()
         log.debug('Computing Gradients of NR-HF Coulomb repulsion')
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
         # derivatives of the two-electron contribution
-        grad_sigma = mf_grad.energy_ee(dm0, kpts)
+        grad_sigma = self.energy_ee(dm0, kpts)
         t1 = log.timer_debug1('gradients of 2e part', *t0)
 
-        if dm0.ndim == 4: # KUHF
+        if is_uhf:
             dm0 = dm0[0] + dm0[1]
 
         ni = mf._numint
-        if isinstance(ni, multigrid.MultiGridNumIntBase):
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
         else:
-            hcore_deriv = mf_grad.hcore_generator(cell, kpts)
-            dh1e = cp.empty([natm, 3])
-            for ia in range(natm):
+            hcore_deriv = self.hcore_generator(cell, kpts)
+            dh1e = cp.empty([cell.natm, 3])
+            for ia in range(cell.natm):
                 h1ao = hcore_deriv(ia)
                 dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
             grad_sigma[:-3] += dh1e.get() / nkpts
-            if isinstance(mf_grad.grids or mf.grids, BeckeGrids):
+            if isinstance(self.grids or getattr(mf, 'grids', None), BeckeGrids):
                 grad_sigma[-3:] = np.nan
             else:
                 # hcore_generator includes kinetic gradients, but not kinetic strain.
                 grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0, kpts)[-3:]
                 ni = multigrid_v3.MultiGridNumInt(cell)
                 grad_sigma[-3:] += ni.energy_strain_gradient(
-                    'HF', dm, kpts, spin=0, with_j=False, with_nuc=True)
+                    'HF', dm0, kpts, spin=0, with_j=False, with_nuc=True)
 
         if cell._pseudo:
             grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0, kpts=kpts) / nkpts
@@ -372,12 +377,12 @@ class Gradients(GradientsBase):
 
         log.timer_debug1('gradients of 1e part', *t1)
 
-        dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
+        dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ)
         grad_sigma -= int1e.ovlp_derivatives(cell, dme0, kpts)
 
         if log.verbose > logger.DEBUG:
             log.debug('gradients of electronic part')
-            mf_grad._write(cell, grad_sigma[:-3], range(cell.natm))
+            self._write(cell, grad_sigma[:-3], range(cell.natm))
             log.debug('Asymmetric strain tensor of electronic part')
             log.debug('%s', grad_sigma[-3:]/cell.vol)
         return grad_sigma

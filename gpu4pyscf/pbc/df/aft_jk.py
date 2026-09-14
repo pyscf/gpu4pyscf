@@ -414,7 +414,7 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None):
     The output has shape (cell.natm+3, 3), with atomic derivatives in the
     first cell.natm rows and strain derivatives in the last three rows.
     '''
-    from gpu4pyscf.pbc.grad.rks_stress import (
+    from gpu4pyscf.pbc.grad.krks_stress import (
         _get_weighted_coulG_strain_derivatives as get_wcoulG)
     log = logger.new_logger(mydf)
     cell = mydf.cell
@@ -520,7 +520,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     The output has shape (cell.natm+3, 3), with atomic derivatives in the
     first cell.natm rows and strain derivatives in the last three rows.
     '''
-    from gpu4pyscf.pbc.grad.rks_stress import (
+    from gpu4pyscf.pbc.grad.krks_stress import (
         _get_weighted_coulG_strain_derivatives as get_wcoulG)
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
@@ -737,7 +737,7 @@ def _estimate_max_shm_size(cell, deriv_ij=None):
 
 def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
     from pyscf.pbc.tools.pbc import madelung
-    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     scaled_kpts = kpts.dot(cell.lattice_vectors().T)
     nkpts = len(kpts)
     ewald_G0_response = np.empty((3,3))
