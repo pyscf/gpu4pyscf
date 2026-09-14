@@ -25,7 +25,6 @@
 #include "utils.cuh"
 
 #define TILE            4
-#define WARP_SIZE       32
 #define THREADS         64
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
@@ -39,7 +38,7 @@ void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
                          int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
     constexpr int threads = THREADS;
-    constexpr int WARPS = THREADS / WARP_SIZE;
+    constexpr int WARPS = THREADS / MGRID_SUBGROUP_SIZE;
     int thread_id = threadIdx.x;
     int tile_id0 = blockIdx.x * tiles_per_block;
     __shared__ int a_upper, b_upper, c_upper;
@@ -77,8 +76,8 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
         c_upper = min(c_start + TILE, mesh_c) - c_start;
     }
 
-    int lane = thread_id % WARP_SIZE;
-    int warp = thread_id / WARP_SIZE;
+    int lane = thread_id % MGRID_SUBGROUP_SIZE;
+    int warp = thread_id / MGRID_SUBGROUP_SIZE;
     for (int n = thread_id; n < TILE*TILE*TILE*WARPS; n += threads) {
         density_value[n] = 0;
     }
@@ -256,8 +255,8 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                             }
                             val *= gaussian_xyz;
                         }
-                        for (int offset = WARP_SIZE/2; offset > 0; offset >>= 1) {
-                            val += __shfl_down_sync(0xffffffff, val, offset);
+                        for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
+                            val += __shfl_down_sync(__activemask(), val, offset, 32);
                         }
                         if (lane == 0) {
                             int abc_index = a_index * TILE*TILE + b_index*TILE + c_index;

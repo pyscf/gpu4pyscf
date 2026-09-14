@@ -1299,6 +1299,9 @@ def vec_dot(vec1, vec2):
     vec2 = cupy.asarray(vec2)
     assert vec1.dtype == vec2.dtype == cupy.float64
     assert vec1.shape == vec2.shape
+    if cupy.cuda.runtime.is_hip:
+        # The CUDA JIT reduction assumes 32-lane warps and a 32-bit mask.
+        return cupy.dot(vec1.ravel(), vec2.ravel())
     n = vec1.size
 
     fn_name = 'vec_dot_kernel_order'

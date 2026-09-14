@@ -384,7 +384,9 @@ class KSCF(pbchf.SCF):
         # By initializing self._numint, get_j and get_hcore will use the
         # MultiGridNumInt integrator to evaluate Coulomb integrals, skipping the
         # self.with_df code path.
-        if isinstance(self.with_df, df.FFTDF) and self._numint is None:
+        # Keep the default FFTDF route on HIP, as in get_hcore below.
+        if (isinstance(self.with_df, df.FFTDF) and self._numint is None
+                and not cp.cuda.runtime.is_hip):
             from gpu4pyscf.pbc.dft import multigrid_v3
             self._numint = multigrid_v3.MultiGridNumInt(self.cell)
 

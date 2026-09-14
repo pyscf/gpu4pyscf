@@ -2005,7 +2005,8 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
     return pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
-                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None):
+                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None,
+                strict_grid_order=True):
     '''
     Generator loops over grids block-by-block.
     Kwargs:
@@ -2015,6 +2016,8 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         blksize: if not given, it will be estimated with avail GPU memory.
         buf: dummy argument for compatibility with PySCF
         grid_range: loop [grid_start, grid_end] in grids only. Both values has to be multiple of MIN_BLK_SIZE.
+        strict_grid_order: retained for callers such as Skala; grid order is
+            now always preserved, including blocks with no active AOs.
     '''
     log = logger.new_logger(mol)
     if grids.coords is None:

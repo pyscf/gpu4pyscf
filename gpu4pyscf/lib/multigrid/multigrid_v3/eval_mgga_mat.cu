@@ -25,7 +25,6 @@
 #include "utils.cuh"
 
 #define TILE            4
-#define WARP_SIZE       32
 #define THREADS         64
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
