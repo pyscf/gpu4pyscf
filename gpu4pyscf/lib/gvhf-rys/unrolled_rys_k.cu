@@ -34,7 +34,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -211,7 +211,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -420,7 +420,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -673,7 +673,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -1032,7 +1032,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -1263,7 +1263,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -1622,7 +1622,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -2057,7 +2057,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -2297,7 +2297,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -2629,7 +2629,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -3139,7 +3139,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -3569,7 +3569,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -4524,7 +4524,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -4824,7 +4824,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -5319,7 +5319,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -6584,7 +6584,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -7740,7 +7740,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -8062,7 +8062,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -9157,7 +9157,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -9436,7 +9436,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -9865,7 +9865,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -10868,7 +10868,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -11492,7 +11492,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -11865,7 +11865,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
@@ -12816,7 +12816,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                        q_cond_ij, q_cond_kl, dm_penalty,
                        (int *)shared_memory, envs, bounds);
