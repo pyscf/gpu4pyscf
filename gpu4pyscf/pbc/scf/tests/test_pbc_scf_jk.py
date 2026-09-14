@@ -906,7 +906,6 @@ def test_ejk_strain_deriv_kpts():
     def eval_ejk(cell1):
         kpts1 = cell1.make_kpts(kmesh)
         nkpts = len(kpts1)
-        mydf = aft.AFTDF(cell1)
         vj, vk = fft.FFTDF(cell1, kpts=kpts1).get_jk(dm1, hermi=1, kpts=kpts1, exxdiv='ewald')
         vj = vj[0] + vj[1]
         return cp.einsum('skij,skji->', vj-vk, dm1).real * .5 / nkpts

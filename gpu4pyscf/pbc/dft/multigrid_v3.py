@@ -1382,7 +1382,6 @@ double cexp0, double cexp1, double cexp2, double cexp3)
             cp.int32(i1-i0), idx_gpu[i0:i1], charges_gpu, cp.float64(rloc),
             cp.int32(nexp)] + cexp[:4])
 
-    vol = cell.vol
     grad_sigma /= cell.vol
     return grad_sigma
 
