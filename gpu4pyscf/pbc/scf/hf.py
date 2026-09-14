@@ -31,7 +31,7 @@ from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.smearing import smearing
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.__config__ import pros as gpu_specs
+from gpu4pyscf.__config__ import props as gpu_specs
 
 # 8 for 8 bytes per fp64, 10 is arbitrary (A 80 GB gpu will allow 1000^3 mesh)
 ALLOWED_FFT_MESH_SIZE = gpu_specs['totalGlobalMem'] // 8 // 10

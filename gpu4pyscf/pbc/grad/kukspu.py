@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,117 +17,12 @@
 Analytical derivatives for DFT+U with kpoints sampling
 '''
 
-import numpy as np
-import cupy as cp
-from pyscf import lib
-from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.grad import kuks as kuks_grad
-from gpu4pyscf.pbc.grad.krkspu import (
-    generate_first_order_local_orbitals, _strain_deriv_local_orbitals,
-    ovlp_strain_deriv)
-from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.lib.cupy_helper import asarray, contract
+from gpu4pyscf.pbc.grad.krkspu import _hubbard_U_derivatives
 
-def _hubbard_U_deriv1(mf, dm=None, kpts=None):
-    assert mf.alpha is None
-    assert mf.C_ao_lo is None
-    assert mf.minao_ref is not None
-    if dm is None:
-        dm = mf.make_rdm1()
-    if kpts is None:
-        kpts = mf.kpts.reshape(-1, 3)
-    nkpts = len(kpts)
-    cell = mf.cell
-
-    # Construct orthogonal minao local orbitals.
-    pcell = reference_mol(cell, mf.minao_ref)
-    C_ao_lo = _make_minao_lo(cell, pcell, kpts=kpts)
-    U_idx, U_val = _set_U(cell, pcell, mf.U_idx, mf.U_val)[:2]
-    U_idx_stack = np.hstack(U_idx)
-    C0 = [C_k[:,U_idx_stack] for C_k in C_ao_lo]
-
-    ovlp0 = int1e.int1e_ovlp(cell, kpts)
-    ovlp1 = int1e.int1e_ipovlp(cell, kpts)
-    C_inv = [C_k.conj().T.dot(S_k) for C_k, S_k in zip(C0, ovlp0)]
-    dm_deriv0 = [
-        [C_k.dot(dm_k).dot(C_k.conj().T) for C_k, dm_k in zip(C_inv, dm_s)]
-        for dm_s in dm
-    ]
-    f_local_ao = generate_first_order_local_orbitals(cell, pcell, kpts)
-
-    ao_slices = cell.aoslice_by_atom()
-    natm = cell.natm
-    dE_U = cp.zeros((natm, 3))
-    weight = 1. / nkpts
-    for atm_id, (p0, p1) in enumerate(ao_slices[:,2:]):
-        C1 = f_local_ao(atm_id)
-        for k in range(nkpts):
-            C1_k = C1[k][:,:,U_idx_stack]
-            SC1 = contract('pq,xqi->xpi', ovlp0[k], C1_k)
-            SC1 -= contract('xqp,qi->xpi', ovlp1[k][:,p0:p1].conj(), C0[k][p0:p1])
-            SC1[:,p0:p1] -= contract('xpq,qi->xpi', ovlp1[k][:,p0:p1], C0[k])
-            for s in range(2):
-                dm_deriv1 = contract('pj,xjq->xpq', C_inv[k].dot(dm[s][k]), SC1)
-                i0 = i1 = 0
-                for idx, val in zip(U_idx, U_val):
-                    i0, i1 = i1, i1 + len(idx)
-                    P0 = dm_deriv0[s][k][i0:i1,i0:i1]
-                    P1 = dm_deriv1[:,i0:i1,i0:i1]
-                    dE_U[atm_id] += weight * (val * 0.5) * (
-                        cp.einsum('xii->x', P1).real * 2 # *2 for P1+P1.T
-                        - cp.einsum('xij,ji->x', P1, P0).real * 4)
-    return dE_U.get()
-
-def _hubbard_U_strain_deriv1(mf, dm=None, kpts=None):
-    assert mf.alpha is None
-    assert mf.C_ao_lo is None
-    assert mf.minao_ref is not None
-    if dm is None:
-        dm = mf.make_rdm1()
-    cell = mf.cell
-    if kpts is None:
-        kpts = mf.kpts.reshape(-1, 3)
-    nkpts = len(kpts)
-
-    # Construct orthogonal minao local orbitals.
-    pcell = reference_mol(cell, mf.minao_ref)
-    C_ao_lo = _make_minao_lo(cell, pcell, kpts=kpts)
-    U_idx, U_val = _set_U(cell, pcell, mf.U_idx, mf.U_val)[:2]
-    U_idx_stack = np.hstack(U_idx)
-    C0 = [C_k[:,U_idx_stack] for C_k in C_ao_lo]
-    C1_ao_lo = _strain_deriv_local_orbitals(cell, pcell, kpts)
-    C1 = [C_k[:,:,:,U_idx_stack] for C_k in C1_ao_lo.transpose(2,0,1,3,4)]
-
-    ovlp0 = int1e.int1e_ovlp(cell, kpts)
-    ovlp1 = cp.asarray(ovlp_strain_deriv(cell, kpts))
-    nao = ovlp0.shape[-1]
-    ovlp1 = ovlp1.reshape(3,3,nkpts,nao,nao).transpose(2,0,1,3,4)
-    C_inv = [C_k.conj().T.dot(S_k) for C_k, S_k in zip(C0, ovlp0)]
-    dm_deriv0 = [
-        [C_k.dot(dm_k).dot(C_k.conj().T) for C_k, dm_k in zip(C_inv, dm_s)]
-        for dm_s in dm
-    ]
-
-    sigma = cp.zeros((3, 3))
-    weight = 1. / nkpts
-    for k in range(nkpts):
-        SC1 = contract('pq,xyqi->xypi', ovlp0[k], C1[k])
-        SC1 += contract('xypq,qi->xypi', ovlp1[k], C0[k])
-        for s in range(2):
-            dm_deriv1 = contract('pj,xyjq->xypq', C_inv[k].dot(dm[s,k]), SC1)
-            i0 = i1 = 0
-            for idx, val in zip(U_idx, U_val):
-                i0, i1 = i1, i1 + len(idx)
-                P0 = dm_deriv0[s][k][i0:i1,i0:i1]
-                P1 = dm_deriv1[:,:,i0:i1,i0:i1]
-                sigma += weight * (val * 0.5) * (
-                    cp.einsum('xyii->xy', P1).real * 2
-                    - cp.einsum('xyij,ji->xy', P1, P0).real * 4)
-    return sigma.get()
 
 class Gradients(kuks_grad.Gradients):
     def energy_ee(self, dm, kpts):
-        grad = _hubbard_U_deriv1(self.base, dm, kpts)
-        sigma = _hubbard_U_strain_deriv1(self.base, dm, kpts)
-        dE = np.vstack([grad, sigma])
+        # The shared routine sums the spin-resolved Hubbard responses.
+        dE = _hubbard_U_derivatives(self.base, dm, kpts)
         return kuks_grad.Gradients.energy_ee(self, dm, kpts) + dE

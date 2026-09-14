@@ -478,7 +478,7 @@ class KnownValues(unittest.TestCase):
         U_val = [5]
         mf = krkspu.KRKSpU(cell, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao)
         mf.__dict__.update(cell.KRKS(kpts=kpts).to_gpu().run(max_cycle=1).__dict__)
-        sigma = krkspu_grad._hubbard_U_strain_deriv1(mf)
+        sigma = krkspu_grad._hubbard_U_derivatives(mf)[-3:]
 
         for (i, j) in [(1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
