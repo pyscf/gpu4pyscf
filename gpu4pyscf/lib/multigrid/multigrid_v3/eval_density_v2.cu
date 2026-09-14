@@ -23,7 +23,6 @@
 #include "utils.cuh"
 
 #define TILE            8
-#define WARP_SIZE       32
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
@@ -33,8 +32,8 @@ void eval_density_kernel(double *rho_c, double *dm, PBCIntEnvVars envs,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
-    constexpr int nsp_per_block = WARP_SIZE;
-    constexpr int threads = WARP_SIZE * TILE;
+    constexpr int nsp_per_block = MGRID_SUBGROUP_SIZE;
+    constexpr int threads = MGRID_SUBGROUP_SIZE * TILE;
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
     int tx = threadIdx.x;
@@ -226,7 +225,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
                     }
                     // Every lane participates, including inactive shell pairs.
                     for (int offset = nsp_per_block/2; offset > 0; offset >>= 1) {
-                        rho += __shfl_down_sync(0xffffffff, rho, offset);
+                        rho += __shfl_down_sync(__activemask(), rho, offset, 32);
                     }
                     if (tx == 0) {
                         rho_cache[b_index*c_stride+c_index - bc_offset] += rho;
@@ -276,7 +275,7 @@ int evaluate_density_v2(double *rho_c, double *placeholder, double *dm,
     int ntasks = nseg * atom_mesh[0];
     int c_stride = (6000 / atom_mesh[1] / TILE) * TILE;
     int shmsize = atom_mesh[1] * c_stride * sizeof(double);
-    dim3 threads(WARP_SIZE, TILE);
+    dim3 threads(MGRID_SUBGROUP_SIZE, TILE);
     double a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] + dxyz_dabc[1] * dxyz_dabc[4] + dxyz_dabc[2] * dxyz_dabc[5];
     double a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] + dxyz_dabc[1] * dxyz_dabc[7] + dxyz_dabc[2] * dxyz_dabc[8];
     double b_dot_c = dxyz_dabc[3] * dxyz_dabc[6] + dxyz_dabc[4] * dxyz_dabc[7] + dxyz_dabc[5] * dxyz_dabc[8];
