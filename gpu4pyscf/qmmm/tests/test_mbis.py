@@ -374,6 +374,86 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 1e-2
         assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-2
 
+    def test_mbis_ecp_I(self):
+        mol = pyscf.M(
+            atom = """
+                I -2.0 0.0 0.0
+                H 0 0 0
+                I  2.0 0.1 0.0
+            """,
+            basis = "def2-svp",
+            ecp = "def2-svp",
+            charge = -1,
+            verbose = 4,
+        )
+        mf = RKS(mol, xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99, 590)
+        mf.conv_tol = 1e-10
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+
+        grids = mf.grids
+
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles = mbis(mol, grids, dm)
+
+        ### Reference ORCA input
+        # ! PBE0 def2-svp TightSCF DEFGRID3 MBIS
+
+        # *XYZ -1 1
+        # I -2.0 0.0 0.0
+        # H 0 0 0
+        # I  2.0 0.1 0.0
+        # *
+
+        # %method
+        # MBIS_LARGEPRINT TRUE
+        # end
+        ref_energy = -596.13570631596986
+        ref_charges = np.array([ -0.538668,  0.078969, -0.540302 ])
+        ref_dipoles = np.array([
+            [ 0.046821,  0.004997,  -0.000000],
+            [ 0.000171, -0.003007,   0.000000],
+            [-0.046702,  0.002658,  -0.000000],
+        ])
+        ref_quadrupoles_orca_shape = np.array([
+            [-21.009513,-21.964324, -21.964249, -0.009349, -0.000000,  0.000000],
+            [ -0.912617, -0.835838,  -0.835839, -0.001925,  0.000000, -0.000000],
+            [-21.021372,-21.966649, -21.969880,  0.056766, -0.000000, -0.000000],
+        ])
+        ref_quadrupoles = np.zeros((mol.natm, 3, 3))
+        ref_quadrupoles[:, 0, 0] = ref_quadrupoles_orca_shape[:, 0]
+        ref_quadrupoles[:, 1, 1] = ref_quadrupoles_orca_shape[:, 1]
+        ref_quadrupoles[:, 2, 2] = ref_quadrupoles_orca_shape[:, 2]
+        ref_quadrupoles[:, 0, 1] = ref_quadrupoles[:, 1, 0] = ref_quadrupoles_orca_shape[:, 3]
+        ref_quadrupoles[:, 0, 2] = ref_quadrupoles[:, 2, 0] = ref_quadrupoles_orca_shape[:, 4]
+        ref_quadrupoles[:, 1, 2] = ref_quadrupoles[:, 2, 1] = ref_quadrupoles_orca_shape[:, 5]
+        ref_octupoles_orca_shape = np.array([
+            [-1.988769,  0.023054,  -0.000000, -0.012919,  0.000000,  0.240698,  0.000000,  0.242010, -0.000000,  0.007699],
+            [-0.000337, -0.014498,   0.000000,  0.001570, -0.000000,  0.000545, -0.000000,  0.000224,  0.000000, -0.004838],
+            [ 1.980318, -0.012595,  -0.000000,  0.110068, -0.000000, -0.233815,  0.000000, -0.239820, -0.000000, -0.004308],
+        ])
+        ref_octupoles = np.zeros((mol.natm, 3, 3, 3))
+        ref_octupoles[:, 0, 0, 0] = ref_octupoles_orca_shape[:, 0]
+        ref_octupoles[:, 1, 1, 1] = ref_octupoles_orca_shape[:, 1]
+        ref_octupoles[:, 2, 2, 2] = ref_octupoles_orca_shape[:, 2]
+        ref_octupoles[:, 0, 0, 1] = ref_octupoles[:, 0, 1, 0] = ref_octupoles[:, 1, 0, 0] = ref_octupoles_orca_shape[:, 3]
+        ref_octupoles[:, 0, 0, 2] = ref_octupoles[:, 0, 2, 0] = ref_octupoles[:, 2, 0, 0] = ref_octupoles_orca_shape[:, 4]
+        ref_octupoles[:, 0, 1, 1] = ref_octupoles[:, 1, 0, 1] = ref_octupoles[:, 1, 1, 0] = ref_octupoles_orca_shape[:, 5]
+        ref_octupoles[:, 0, 1, 2] = ref_octupoles[:, 0, 2, 1] = ref_octupoles[:, 1, 0, 2] = ref_octupoles[:, 1, 2, 0] = ref_octupoles[:, 2, 0, 1] = ref_octupoles[:, 2, 1, 0] = ref_octupoles_orca_shape[:, 6]
+        ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
+        ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
+        ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+
+        assert abs(test_energy - ref_energy) < 1e-4
+        assert np.max(np.abs(test_charges - ref_charges)) < 3e-3
+        assert np.max(np.abs(test_dipoles - ref_dipoles)) < 3e-4
+        assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 1e-2
+        assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-2
+
+
 if __name__ == "__main__":
     print("Full Tests for MBIS multipole")
     unittest.main()
