@@ -18,6 +18,7 @@ import numpy as np
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf.solvent.pcm import natm_without_ghost
+from pyscf.data.elements import charge as elements_proton
 
 MBIS_REMOVE_ZERO_RHO_GRID_THRESHOLD = 1e-10
 
@@ -95,7 +96,7 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
     if natm != mol.natm:
         raise NotImplementedError("Ghost atoms are not supported in MBIS yet")
     if len(mol._ecpbas) > 0:
-        raise NotImplementedError("ECP is not supported in MBIS yet")
+        log.warn("It is not recommended to use ECP for MBIS multipole calculation.")
     if mol.pseudo:
         raise NotImplementedError("GTH pseudopotential is not supported in MBIS yet")
 
@@ -104,8 +105,6 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
                  "If you see a shell with huge width on one atom, it is likely due to the diffused charge got fitted onto that random atom.")
 
     atom_coords = cp.asarray(mol.atom_coords())
-    atom_charges = cp.asarray(mol.atom_charges(), dtype = cp.int32)
-    assert cp.all(atom_charges > 0)
 
     if grids.coords is None:
         grids.build()
@@ -138,7 +137,7 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
     atom_shell_offsets = []
     n_shell_offset = 0
     for i_atom in range(mol.natm):
-        Z = int(atom_charges[i_atom])
+        Z = int(elements_proton(mol.atom_symbol(i_atom))) # ECP atom will get the original element index
         shell_population = _neutral_atom_shell_populations(Z)
         shell_populations.append(shell_population)
         shell_width = _initial_width(Z)
@@ -195,8 +194,8 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
 
     n_shell = shell_atom_indices.shape[0]
     for i_shell in range(n_shell):
-        log.info(f"MBIS shell {i_shell} from atom {shell_atom_indices[i_shell]} has "
-                 "population = {shell_populations[i_shell]} and width = {shell_widths[i_shell]}")
+        log.info(f"MBIS shell {i_shell} from atom {shell_atom_indices[i_shell]} {mol.elements[shell_atom_indices[i_shell]]} has "
+                 f"population = {shell_populations[i_shell]} and width = {shell_widths[i_shell]}")
 
     if not compute_multipoles:
         return shell_populations.get(), shell_widths.get(), shell_atom_indices
@@ -217,7 +216,8 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
 
     partitioned_w_rho = atom_partition * grid_w_rho[None, :]
     partitioned_nelec = cp.sum(partitioned_w_rho, axis = 1)
-    charges = atom_charges.astype(cp.float64) - partitioned_nelec
+    atom_charges = cp.asarray(mol.atom_charges(), dtype = cp.float64) # ECP atom will get the effective core charge
+    charges = atom_charges - partitioned_nelec
 
     log.info("MBIS Charge (a.u.)")
     for i_atom in range(mol.natm):
