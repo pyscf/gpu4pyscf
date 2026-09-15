@@ -35,6 +35,9 @@ from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
 from pyscf.pbc.lib.kpts_helper import gamma_point
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
 from gpu4pyscf.pbc.dft import multigrid_v3
+from gpu4pyscf.pbc.gto.pseudo import pp_int
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
+from gpu4pyscf.pbc.grad.pp import ppnl_derivatives
 import pytest
 
 disp = 1e-4
@@ -134,8 +137,12 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
     '''Nuclear gradients of the non-local part of the GTH pseudo potential,
     contracted with the density matrix.
     '''
+    from pyscf.gto import ATOM_OF
+    from pyscf.pbc.lib.kpts_helper import gamma_point
+    from gpu4pyscf.lib.cupy_helper import contract
     from gpu4pyscf.lib import logger
     from gpu4pyscf.gto.mole import groupby
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl_gpu, _sorted_fake_cell_vnl
     if kpts is None:
         kpts_lst = np.zeros((1, 3))
     else:
@@ -192,6 +199,85 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
     if grad_max_imag >= 1e-8:
         logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from pseudopotential non-local term gradient.")
     return grad.real
+
+def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+    if kpts is None:
+        assert dm_kpts.ndim == 2
+        dm_kpts = dm_kpts[None,:,:]
+        kpts = np.zeros((1, 3))
+    fakemol = gto.Mole()
+    fakemol._atm = np.zeros((1,gto.ATM_SLOTS), dtype=np.int32)
+    fakemol._bas = np.zeros((1,gto.BAS_SLOTS), dtype=np.int32)
+    ptr = gto.PTR_ENV_START
+    fakemol._env = np.zeros(ptr+10)
+    fakemol._bas[0,gto.NPRIM_OF ] = 1
+    fakemol._bas[0,gto.NCTR_OF  ] = 1
+    fakemol._bas[0,gto.PTR_EXP  ] = ptr+3
+    fakemol._bas[0,gto.PTR_COEFF] = ptr+4
+
+    ngrids = np.prod(mesh)
+    buf = np.empty((48,ngrids), dtype=np.complex128)
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    nkpts = len(kpts)
+
+    def eval_pp_nonloc(cell):
+        vol = cell.vol
+        b = cell.reciprocal_vectors(norm_to=1)
+        Gv = cell.get_Gv(mesh)
+        SI = get_SI(cell, mesh=mesh)
+        # buf for SPG_lmi upto l=0..3 and nl=3
+        vppnl = 0
+        for k, dm in enumerate(dm_kpts):
+            kpt = scaled_kpts[k].dot(b)
+            Gk = Gv + kpt
+            G_rad = lib.norm(Gk, axis=1)
+            aokG = ft_ao.ft_ao(cell, Gv, kpt=kpt) * (1/vol)**.5
+            for ia in range(cell.natm):
+                symb = cell.atom_symbol(ia)
+                if symb not in cell._pseudo:
+                    continue
+                pp = cell._pseudo[symb]
+                p1 = 0
+                for l, proj in enumerate(pp[5:]):
+                    rl, nl, hl = proj
+                    if nl > 0:
+                        fakemol._bas[0,gto.ANG_OF] = l
+                        fakemol._env[ptr+3] = .5*rl**2
+                        fakemol._env[ptr+4] = rl**(l+1.5)*np.pi**1.25
+                        pYlm_part = fakemol.eval_gto('GTOval', Gk)
+
+                        p0, p1 = p1, p1+nl*(l*2+1)
+                        # pYlm is real, SI[ia] is complex
+                        pYlm = np.ndarray((nl,l*2+1,ngrids), dtype=np.complex128, buffer=buf[p0:p1])
+                        for k in range(nl):
+                            qkl = pseudo.pp._qli(G_rad*rl, l, k)
+                            pYlm[k] = pYlm_part.T * qkl
+                if p1 > 0:
+                    SPG_lmi = asarray(buf[:p1])
+                    SPG_lmi *= SI[ia].conj()
+                    SPG_lm_aoGs = SPG_lmi.dot(aokG)
+                    rho = SPG_lm_aoGs.dot(dm).dot(SPG_lm_aoGs.conj().T).real.get()
+                    p1 = 0
+                    for l, proj in enumerate(pp[5:]):
+                        rl, nl, hl = proj
+                        if nl > 0:
+                            nf = l * 2 + 1
+                            p0, p1 = p1, p1+nl*nf
+                            hl = np.asarray(hl)
+                            rho_sub = rho[p0:p1,p0:p1].reshape(nl, nf, nl, nf)
+                            vppnl += np.einsum('ij,jmim->', hl, rho_sub)
+        return vppnl / (nkpts*vol)
+
+    disp = max(1e-5, (cell.precision*.1)**.5)
+    out = np.empty((3, 3))
+    for i in range(3):
+        for j in range(3):
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
+            e1 = eval_pp_nonloc(cell1)
+            e2 = eval_pp_nonloc(cell2)
+            out[i,j] = (e1 - e2) / (2*disp)
+    return out
 
 
 class TestCrossBasisIntegrals(unittest.TestCase):
@@ -373,43 +459,6 @@ class TestFiniteDifference(unittest.TestCase):
     def test_carbon_fd(self):
         self._fd_check(cell_c, atom_id=1, cart_id=0, places=5)
 
-    def _strain_fd_check(self, cell, scaled_kpts):
-        from pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
-        from gpu4pyscf.pbc.grad.pp import _get_pp_nonloc_strain_derivatives
-        from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
-
-        kpts = cell.get_abs_kpts(np.asarray(scaled_kpts))
-        rng = np.random.default_rng(19)
-        dm = rng.normal(size=(len(kpts), cell.nao, cell.nao))
-        if not gamma_point(kpts):
-            dm = dm + 1j * rng.normal(size=dm.shape)
-        dm = (dm + dm.transpose(0, 2, 1).conj()) / cell.nao
-        analytical = _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm, kpts)
-        reference = np.empty((3, 3))
-        # Keep fractional k-points and AO density fixed. The CPU real-space
-        # PP energy independently checks all nine strain components, including
-        # the image displacement and k-point averaging in the GPU derivative.
-        step = 1e-5
-        for x in range(3):
-            for y in range(3):
-                energies = []
-                for strained in _finite_diff_cells(cell, x, y, disp=step):
-                    vpp = get_pp_nl(strained, strained.get_abs_kpts(scaled_kpts))
-                    energies.append(np.einsum('kij,kji->', vpp, dm).real / len(kpts))
-                reference[x, y] = (energies[0] - energies[1]) / (2 * step)
-        np.testing.assert_allclose(analytical, reference, atol=2e-6, rtol=1e-5)
-
-    def test_ppnl_strain_gamma(self):
-        self._strain_fd_check(cell_c, [[0., 0., 0.]])
-
-    def test_ppnl_strain_kpts(self):
-        self._strain_fd_check(cell_si, [[.13, .07, -.11], [-.21, .16, .09]])
-
-    @pytest.mark.slow
-    def test_ppnl_strain_iron(self):
-        # Fe exercises higher angular momentum and r^2/r^4 projectors.
-        self._strain_fd_check(cell_fe, [[.13, .07, -.11]])
-
     def test_silicon_fd(self):
         self._fd_check(cell_si, atom_id=0, cart_id=2, places=5)
 
@@ -519,6 +568,69 @@ class TestFiniteDifference(unittest.TestCase):
                 numerical_gradient[i_atom, i_xyz] = (e_p - e_m) / (2 * dx)
 
         assert np.max(np.abs(numerical_gradient - analytical_gradient)) < 1e-8
+
+    def test_ppnl_derivatives(self):
+        from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+        cell = pyscf.M(
+            a = np.array([
+                [3.18693029, 0.0, 0.0],
+                [1.593466157846262, 2.759963819342879, 0.0],
+                [1.5934664345206309, 0.9199872811273334, 2.6021185638285855],
+            ]),
+            atom = """
+                Ga 0 -0 0
+                Ga 0.25 0.75 0.25
+                N 0.27 0.25 0.25
+                N 0.75 0.25 0.75
+            """,
+            unit = "Angstrom",
+            fractional = True,
+            basis=[[0, [1.2, .7, .2], [.5, .3, .8]],
+                   [1, [.8, 1]], [2, [.7, 1]]],
+            pseudo = {
+                "Ga": """
+                Ga GTH-PBE-q13 GTH-GGA-q13
+                    2    1   10    0
+                    0.49000018487159       0
+                    3
+                    0.41677483095310       3   10.48679119269639   -4.92176814704009    0.87070493953275
+                                                                    7.77018207637078   -2.24815160599927
+                                                                                        1.78441528219626
+                    0.56962661099353       2    1.77860037827899    0.19586036552562
+                                                                   -0.23168154587648
+                    0.23814730101676       1  -16.24818353736915
+                """,
+                "N": """
+                    N  GTH-PBE-q5 GTH-GGA-q5
+                        2    3    0    0
+                        0.28382600053810       2  -12.41517350030142    1.86813618209744
+                        1
+                        0.25541754972811       1   13.63124869974610
+                """},
+        )
+        nao = cell.nao
+        kmesh = [3,2,1]
+        kpts = cell.make_kpts(kmesh)
+        nkpts = len(kpts)
+        cp.random.seed(11)
+        dm = cp.random.rand(nkpts, nao, nao) * .2
+        expLk = fft_matrix(kmesh)
+        dm = cp.einsum('Lk,Lpq->kpq', expLk.conj(), dm)
+        dm = dm + dm.conj().transpose(0,2,1)
+        ref = vppnl_nuc_grad(cell, dm, kpts) / nkpts
+        dat = ppnl_derivatives(cell, dm, kpts)
+        assert abs(ref - dat[:-3]).max() < 1e-10
+
+        sigma = dat[-3:]
+
+        disp = 1e-4
+        for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
+            v = pp_int.get_pp_nl_gpu(cell1, cell1.make_kpts(kmesh))
+            e1 = cp.einsum('kpq,kqp->', dm, v).real / nkpts
+            v = pp_int.get_pp_nl_gpu(cell2, cell2.make_kpts(kmesh))
+            e2 = cp.einsum('kpq,kqp->', dm, v).real / nkpts
+            assert abs(sigma[i, j] - (e1-e2)/2/disp) < 2e-7
 
 
 if __name__ == '__main__':

@@ -29,9 +29,9 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
     '''Nuclear gradients of the non-local part of the GTH pseudo potential,
     contracted with the density matrix.
     '''
-    return vppnl_derivatives(cell, dm, kpts)[:-3]
+    return ppnl_derivatives(cell, dm, kpts)[:-3]
 
-def vppnl_derivatives(cell, dm, kpts=None):
+def ppnl_derivatives(cell, dm, kpts=None):
     '''Nonlocal GTH atomic and strain derivatives, averaged over k-points.
 
     Returns a real (natm+3, 3) array: nuclear gradients followed by dE/d(strain_xy)

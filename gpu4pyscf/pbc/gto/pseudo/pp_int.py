@@ -85,6 +85,7 @@ def get_pp_nl_gpu(cell, kpts=None):
 
     ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
 
+    is_gamma_point = gamma_point(kpts)
     dtype = np.float64 if is_gamma_point else np.complex128
     nao = cell.nao
     ppnl = cp.zeros((nkpts, nao, nao), dtype=dtype)
