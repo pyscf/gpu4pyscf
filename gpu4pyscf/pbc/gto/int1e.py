@@ -85,19 +85,19 @@ def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
 
 def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r2_origi', 1, (0, 2), kpts, sort_output)
+    return opt.intor('PBCint1e_r2_origi', 1, (2, 0), kpts, sort_output)
 
 def int1e_r4_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r4_origi', 1, (0, 4), kpts, sort_output)
+    return opt.intor('PBCint1e_r4_origi', 1, (4, 0), kpts, sort_output)
 
 def int1e_r2_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r2_origi_ip2', 3, (0, 3), kpts, sort_output)
+    return opt.intor('PBCint1e_r2_origi_ip2', 3, (2, 1), kpts, sort_output)
 
 def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r4_origi_ip2', 3, (0, 5), kpts, sort_output)
+    return opt.intor('PBCint1e_r4_origi_ip2', 3, (4, 1), kpts, sort_output)
 
 def ovlp_derivatives(cell, dm, kpts=None, kmesh=None):
     assert isinstance(cell, Cell)
@@ -429,8 +429,7 @@ class CrossInt1e(_Int1eOpt):
     def intor(self, kern, comp, deriv_ij, kpts=None, sort_output=True,
               out=None, buf=None, shls_slice=None):
         shls_slice = (0, self.cell1.nbas, self.cell1.nbas, self.cell.nbas)
-        out = super().intor(kern, comp, deriv_ij, kpts, False, out, buf,
-                             shls_slice)
+        out = super().intor(kern, comp, deriv_ij, kpts, False, out, buf, shls_slice)
         if sort_output:
             leading_shape = out.shape[:-2]
             n1, n2 = out.shape[-2:]

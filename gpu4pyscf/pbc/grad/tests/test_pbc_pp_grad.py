@@ -130,6 +130,69 @@ def _cpu_vppnl_nuc_grad(cell, dm, kpts=None):
 
     return grad.real
 
+def vppnl_nuc_grad(cell, dm, kpts=None):
+    '''Nuclear gradients of the non-local part of the GTH pseudo potential,
+    contracted with the density matrix.
+    '''
+    from gpu4pyscf.lib import logger
+    from gpu4pyscf.gto.mole import groupby
+    if kpts is None:
+        kpts_lst = np.zeros((1, 3))
+    else:
+        kpts_lst = np.reshape(kpts, (-1, 3))
+    nkpts = len(kpts_lst)
+
+    # pattern stores the unique [hl_dim, l] combinations
+    fakecell, hl_blocks, pattern, splits = _sorted_fake_cell_vnl(cell)
+
+    intors_d = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
+    ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
+    ppnl_half_ip2 = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
+    if len(ppnl_half_ip2[0]) > 0:
+        ppnl_half_ip2[0] *= -1
+
+    nao = cell.nao
+    dm = cp.asarray(dm).reshape(-1, nao, nao)
+    if gamma_point(kpts_lst):
+        dm = dm.real
+    dm_dmH = dm + dm.transpose(0, 2, 1).conj()
+
+    grad = np.zeros([cell.natm, 3], dtype=cp.complex128)
+    dppnl = cp.zeros((nao, 3), dtype=cp.complex128)
+
+    hl_offset = [0] * 3
+    for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
+        hl_dim, l = pattern[ii]
+        nd = 2 * l + 1
+        hl_block = cp.asarray(np.stack(hl_blocks[i0:i1]))
+        n_hl = len(hl_block)
+
+        ilp = cp.empty((hl_dim, nkpts, n_hl, nd, nao), dtype=cp.complex128)
+        dilp = cp.empty((hl_dim, nkpts, 3, n_hl, nd, nao), dtype=cp.complex128)
+        for i in range(hl_dim):
+            p0 = hl_offset[i]
+            p1 = p0 + n_hl * nd
+            ilp[i] = ppnl_half[i][:,p0:p1].reshape(nkpts, n_hl, nd, nao)
+            dilp[i] = ppnl_half_ip2[i][:,:,p0:p1].reshape(nkpts, 3, n_hl, nd, nao).conj()
+            hl_offset[i] = p1
+
+        tmp = contract('nij,jknlq->iknlq', hl_block, ilp)
+        ilp = contract('iknlq,kqp->iknlp', tmp, dm_dmH, out=ilp)
+
+        value = contract('ikdnlp,iknlp->nd', dilp, ilp)
+        np.add.at(grad, fakecell._bas[i0:i1, ATOM_OF], value.get())
+
+        dppnl += contract('ikdnlp,iknlp->pd', dilp, ilp)
+
+    ao_loc = cell.ao_loc
+    atm_labels = np.repeat(cell._bas[:,ATOM_OF], ao_loc[1:]-ao_loc[:-1])
+    grad -= groupby(atm_labels, dppnl.get(), 'sum')
+
+    grad_max_imag = np.max(np.abs(grad.imag))
+    if grad_max_imag >= 1e-8:
+        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from pseudopotential non-local term gradient.")
+    return grad.real
+
 
 class TestCrossBasisIntegrals(unittest.TestCase):
     """Test GPU _int_vnl_gpu against CPU _int_vnl for each element."""
@@ -309,6 +372,43 @@ class TestFiniteDifference(unittest.TestCase):
 
     def test_carbon_fd(self):
         self._fd_check(cell_c, atom_id=1, cart_id=0, places=5)
+
+    def _strain_fd_check(self, cell, scaled_kpts):
+        from pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
+        from gpu4pyscf.pbc.grad.pp import _get_pp_nonloc_strain_derivatives
+        from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+
+        kpts = cell.get_abs_kpts(np.asarray(scaled_kpts))
+        rng = np.random.default_rng(19)
+        dm = rng.normal(size=(len(kpts), cell.nao, cell.nao))
+        if not gamma_point(kpts):
+            dm = dm + 1j * rng.normal(size=dm.shape)
+        dm = (dm + dm.transpose(0, 2, 1).conj()) / cell.nao
+        analytical = _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm, kpts)
+        reference = np.empty((3, 3))
+        # Keep fractional k-points and AO density fixed. The CPU real-space
+        # PP energy independently checks all nine strain components, including
+        # the image displacement and k-point averaging in the GPU derivative.
+        step = 1e-5
+        for x in range(3):
+            for y in range(3):
+                energies = []
+                for strained in _finite_diff_cells(cell, x, y, disp=step):
+                    vpp = get_pp_nl(strained, strained.get_abs_kpts(scaled_kpts))
+                    energies.append(np.einsum('kij,kji->', vpp, dm).real / len(kpts))
+                reference[x, y] = (energies[0] - energies[1]) / (2 * step)
+        np.testing.assert_allclose(analytical, reference, atol=2e-6, rtol=1e-5)
+
+    def test_ppnl_strain_gamma(self):
+        self._strain_fd_check(cell_c, [[0., 0., 0.]])
+
+    def test_ppnl_strain_kpts(self):
+        self._strain_fd_check(cell_si, [[.13, .07, -.11], [-.21, .16, .09]])
+
+    @pytest.mark.slow
+    def test_ppnl_strain_iron(self):
+        # Fe exercises higher angular momentum and r^2/r^4 projectors.
+        self._strain_fd_check(cell_fe, [[.13, .07, -.11]])
 
     def test_silicon_fd(self):
         self._fd_check(cell_si, atom_id=0, cart_id=2, places=5)

@@ -34,8 +34,7 @@ from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc import tools as pbctools
-from gpu4pyscf.pbc.grad.pp import (
-    vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
+from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, _get_ejk_derivatives
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
 

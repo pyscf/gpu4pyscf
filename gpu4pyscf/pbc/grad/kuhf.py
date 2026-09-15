@@ -23,8 +23,7 @@ from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.grad.pp import (
-    vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
+from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.gto import int1e
 

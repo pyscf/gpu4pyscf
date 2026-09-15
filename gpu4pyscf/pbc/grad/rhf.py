@@ -30,8 +30,7 @@ from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df import aft_jk, AFTDF, GDF
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.dft import KohnShamDFT, BeckeGrids
-from gpu4pyscf.pbc.grad.pp import (
-    vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
+from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.gto.mole import groupby
 
 __all__ = ['Gradients']
