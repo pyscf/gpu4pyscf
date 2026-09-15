@@ -64,17 +64,15 @@ def test_buffer_budget():
             80*1024**3, 1488, 1110804, 24912, 384, 1, 1, 28, 2)
 
 
-def test_real_gamma_matches_complex():
+def test_real_gamma_matches_kpoint_path():
     for module, unrestricted in [(krhf, False), (kuhf, True)]:
         opt, dm, kpts = make_system([1, 1, 1], unrestricted)
-        complex_dm = tag_array(dm.astype(np.complex128),
-                               factor_l=dm.factor_l.astype(np.complex128),
-                               factor_r=None)
         for omega in [.3, 0.]:
             for j_factor in [0, 1]:
-                reference = module._get_ejk_derivatives(
-                    opt, complex_dm, kpts, hermi=1, omega=omega,
-                    j_factor=j_factor, exxdiv='ewald')
+                with mock.patch.object(module, 'is_zero', return_value=False):
+                    reference = module._get_ejk_derivatives(
+                        opt, dm, kpts, hermi=1, omega=omega,
+                        j_factor=j_factor, exxdiv='ewald')
                 result = module._get_ejk_derivatives(
                     opt, dm, kpts, hermi=1, omega=omega,
                     j_factor=j_factor, exxdiv='ewald')
