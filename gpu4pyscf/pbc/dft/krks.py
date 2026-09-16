@@ -126,13 +126,8 @@ def _get_jk(mf, cell, dm, hermi, kpts, kpts_band=None, with_j=True,
         if mf.rsjk.supmol is None:
             mf.rsjk.build(kpts)
         ddm = dm - dm_last if incremental_vk else dm
-        # _get_k_sr calls _lr_is_required to determine whether _get_k_lr will be
-        # executed and whether G=0 should be hanlded. Disable this feature by
-        # assigning a negligible value to lr_factor.
-        force_to_skip_sr_G0_treatment = 1e-100
         vk_sr = mf.rsjk._get_k_sr(ddm, hermi, kpts, kpts_band, mf.exxdiv,
-                                  omega, lr_factor=force_to_skip_sr_G0_treatment,
-                                  sr_factor=sr_factor)
+                                  omega, lr_factor, sr_factor)
         vk = mf.rsjk._get_k_lr(dm, hermi, kpts, kpts_band, mf.exxdiv,
                                omega, lr_factor, sr_factor)
         if incremental_vk:

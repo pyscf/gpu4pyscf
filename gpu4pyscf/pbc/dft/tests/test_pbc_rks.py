@@ -551,6 +551,15 @@ class KnownValues(unittest.TestCase):
         kmf.run()
         self.assertAlmostEqual(kmf.e_tot, -0.45774883471428585, 8)
 
+    def test_rsh_short_range_only(self):
+        omega = 0.25
+        xc = f'RSH({omega}, 0.0, 0.3) + 0.8*LDA'
+        mf = cell.KRKS(xc=xc).to_gpu().run()
+        ref = mf.e_tot
+        mf.rsjk = PBCJKMatrixOpt(cell, omega)
+        mf.run()
+        assert abs(mf.e_tot - ref) < 1e-9
+
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.rks")
     unittest.main()

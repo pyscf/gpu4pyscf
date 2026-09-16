@@ -89,10 +89,8 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
     if sr_factor != 0:
         vk = vhfopt._get_k_sr(dm, hermi, kpts, kpts_band, exxdiv, omega,
                               lr_factor, sr_factor, verbose=verbose)
-
-    if vhfopt._lr_is_required(omega, lr_factor):
-        vk += vhfopt._get_k_lr(dm, hermi, kpts, kpts_band, exxdiv, omega,
-                               lr_factor, sr_factor)
+    vk += vhfopt._get_k_lr(dm, hermi, kpts, kpts_band, exxdiv, omega,
+                           lr_factor, sr_factor)
     return vk
 
 def get_j(cell, dm, hermi=1, kpts=None, kpts_band=None, vhfopt=None):
@@ -224,14 +222,6 @@ class PBCJKMatrixOpt:
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
         return cutoff
 
-    def _lr_is_required(self, omega, lr_factor, j_factor=0):
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
-        requires_lr = (
-            self.omega != omega or
-            lr_factor != 0 or j_factor != 0 or
-            exclude_dd_block)
-        return requires_lr
-
     def _get_k_sr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
                   omega=None, lr_factor=0, sr_factor=1, verbose=None):
         '''
@@ -307,13 +297,6 @@ class PBCJKMatrixOpt:
         log.debug1('dm_penalty = %f', dm_penalty)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
-
-        # Note, the input lr_factor is used to determine whether _get_k_lr needs
-        # to be called. It should not be used for _check_rsh_factors
-        if omega is None:
-            omega = cell.cell.omega
-        omega = abs(omega)
-        requires_lr = self._lr_is_required(omega, lr_factor)
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -433,39 +416,7 @@ class PBCJKMatrixOpt:
         if hermi == 1:
             vk = transpose_sum(vk)
         vk = cell.apply_CT_mat_C(vk)
-
-        # When the vk_sr is evaluated in real space, the G=0 component is
-        # included in vk_sr. This G=0 contribution will be handled in the vk_lr.
-        # However, vk_lr may be skipped for certain RSH funcitonals like HSE06.
-        # In this particular case (self.omega == omega and lr_factor == 0),
-        # explicitly handle the G=0 term here.
-        if ((not requires_lr) and
-            (cell.dimension == 3 or
-             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-            assert len(member(np.zeros(3), kpts)) > 0
-            # difference associated to the G=0 term between the real space
-            # integrals and the AFT integrals
-            vk = vk.reshape(n_dm, nkpts, nao_orig, nao_orig)
-            dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
-            # Remove the G=0 contribution to match the output of FFTDF.get_jk().
-            wcoulG_SR_at_G0 = -np.pi / omega**2 / cell.vol
-            if exxdiv == 'ewald':
-                # probe_charge_sr_coulomb equals to -2*ewovrl.
-                # This term rapidly decays to 0 for large k-mesh. In the
-                # FFTDF.get_jk based implementation, this contribution is
-                # included in the short-range part.
-                wcoulG_SR_at_G0 += nkpts*pbctools.madelung(cell, kpts, omega=-omega)
-
-            s = int1e.int1e_ovlp(cell, kpts)
-            for i in range(n_dm):
-                for k in range(nkpts):
-                    vk[i,k] += s[k].dot(dms[i,k]).dot(s[k]) * wcoulG_SR_at_G0
-
-        if not is_gamma_point:
-            weight = 1. / nkpts
-            vk *= weight
-        if sr_factor is not None and sr_factor != 1:
-            vk *= sr_factor
+        vk *= sr_factor / nkpts
 
         if kpts_band is None:
             vk = vk.reshape(dm.shape)
@@ -497,6 +448,31 @@ class PBCJKMatrixOpt:
         n_dm, nkpts, nao, nocc = orbl.shape
         if orbr is None or nocc * 2 >= nao:
             orbl = None
+
+        # When the vk_sr is evaluated in real space, the G=0 component is
+        # included in vk_sr. When self.omega == omega, there is no need to
+        # process all AFT integrals. Handle the vk_sr G=0 term here.
+        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
+        requires_lr = self.omega != omega or lr_factor != 0 or exclude_dd_block
+        if not requires_lr:
+            if (cell.dimension == 3 or
+                (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum')):
+                # Remove the G=0 contribution to match the output of FFTDF.get_jk().
+                wcoulG_SR_at_G0 = -np.pi / omega**2 / cell.vol / nkpts
+                if exxdiv == 'ewald':
+                    # probe_charge_sr_coulomb equals to -2*ewovrl.
+                    # This term rapidly decays to 0 for large k-mesh. In the
+                    # FFTDF.get_jk based implementation, this contribution is
+                    # included in the short-range part.
+                    wcoulG_SR_at_G0 += pbctools.madelung(cell, kpts, omega=-omega)
+                wcoulG_SR_at_G0 *= sr_factor
+                s = int1e.int1e_ovlp(cell, kpts)
+                vk = contract('kpq,nkqr->nkpr', s, dms)
+                vk = contract('nkpr,krs->nkps', vk, s, wcoulG_SR_at_G0)
+                vk = vk.reshape(dm.shape)
+            else:
+                vk = cp.zeros_like(dm)
+            return vk
 
         vk = cp.zeros((n_dm,nkpts,nao,nao), dtype=np.complex128)
         if (exxdiv == 'ewald' and
@@ -553,7 +529,6 @@ class PBCJKMatrixOpt:
             update_vk = aft_jk._update_vk_dmf
         log.debug2('set update_vk to %s', update_vk)
 
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
         if exclude_dd_block:
             diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao1)
             unit += nao**2*bvk_ncells
@@ -976,11 +951,6 @@ class PBCJKMatrixOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
-        if omega is None:
-            omega = cell.cell.omega
-        omega = abs(omega)
-        requires_lr = self._lr_is_required(omega, lr_factor, j_factor)
-
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
@@ -1076,33 +1046,6 @@ class PBCJKMatrixOpt:
         ejk_sigma = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         ejk_sigma = ejk_sigma.get()
         ejk_sigma *= 2. / nkpts**2
-
-        # The G=0 term is treated differently between the real space ejk_sr code
-        # and the AFT integral code. This difference is encountered in the
-        # ejk_lr code.
-        # Explicitly handle this difference if ejk_lr code is not executed
-        if ((not requires_lr) and
-            (cell.dimension == 3 or
-             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-            dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
-            wcoulG_for_k = -np.pi / self.omega**2 / cell.vol
-            wcoulG_strain_deriv = -wcoulG_for_k * np.eye(3)
-            if exxdiv == 'ewald':
-                #vs wcoulG_for_k += nkpts*pbctools.madelung(cell, kpts, omega=-self.omega)
-                exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, -self.omega)
-                wcoulG_for_k += exx_0
-                wcoulG_strain_deriv += exx_1
-            s0 = int1e.int1e_ovlp(cell, kpts)
-            k_dm = contract('nkpq,kqr->nkpr', dms, s0)
-            k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
-            fac = sr_factor / nkpts
-            if n_dm == 1: #RHF
-                fac *= .5
-            ejk_sigma -= int1e.ovlp_derivatives(cell, k_dm, kpts) * (fac * wcoulG_for_k)
-
-            vk_G0 = cp.einsum('kpq,kqp->', k_dm, s0).real.get()
-            ejk_sigma[-3:] -= .5 * fac / nkpts * vk_G0 * wcoulG_strain_deriv
-
         return ejk_sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, omega=None, exxdiv=None,
@@ -1142,16 +1085,42 @@ class PBCJKMatrixOpt:
         n_dm, nkpts, nao = dms.shape[:3]
         assert nkpts == len(kpts)
 
-        dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
-        nao = dms.shape[-1]
-        dms = dms.reshape(n_dm,nkpts,nao,nao)
-
         if n_dm == 1: # RHF or KRHF
             # RHF energy is computed as J - 1/2 K
             lr_factor *= .5
             sr_factor *= .5
         elif n_dm > 2:
             raise NotImplementedError
+
+        # The G=0 term is treated differently between the real space ejk_sr code
+        # and the AFT integral code. When self.omega == omega, there is no need to
+        # process all AFT integrals. Handle the vk_sr G=0 term here.
+        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
+        requires_lr = self.omega != omega or lr_factor != 0 or j_factor != 0 or exclude_dd_block
+        if not requires_lr:
+            if (cell.dimension == 3 or
+                (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum')):
+                wcoulG_for_k = -np.pi / omega**2 / cell.vol
+                wcoulG_strain_deriv = -wcoulG_for_k * np.eye(3)
+                if exxdiv == 'ewald':
+                    #vs wcoulG_for_k += nkpts*pbctools.madelung(cell, kpts, omega=-omega)
+                    exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, -omega)
+                    wcoulG_for_k += exx_0
+                    wcoulG_strain_deriv += exx_1
+                s0 = int1e.int1e_ovlp(cell, kpts)
+                k_dm = contract('nkpq,kqr->nkpr', dms, s0)
+                k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
+                ejk_sigma = int1e.ovlp_derivatives(cell, k_dm, kpts)
+                ejk_sigma *= -sr_factor / nkpts * wcoulG_for_k
+                ek_G0 = cp.einsum('kpq,kqp->', k_dm, s0).real.get()
+                ejk_sigma[-3:] -= .5 * sr_factor / nkpts**2 * ek_G0 * wcoulG_strain_deriv
+            else:
+                ejk_sigma = np.zeros([cell.natm+3, 3])
+            return ejk_sigma
+
+        dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
+        nao = dms.shape[-1]
+        dms = dms.reshape(n_dm,nkpts,nao,nao)
 
         ft_opt = FTOpt(cell, kmesh)
         ft_opt.permutation_symmetry = bvk_ncells == nkpts
@@ -1171,7 +1140,6 @@ class PBCJKMatrixOpt:
         log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d',
                   len(bas_ij_idx), nbatches_shl_pair, shm_size)
 
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
         if exclude_dd_block:
             bas_ij_wo_dd, img_idx_wo_dd, shl_pair_offsets_wo_dd = \
                     _generate_shl_pairs(ft_opt, self.dd_bas_idx)
@@ -1433,14 +1401,9 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(self.cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
         ejk_sigma = self._get_ejk_sr_derivatives(
-            dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor, sr_factor=sr_factor)
-
-        requires_lr = self._lr_is_required(omega, lr_factor, j_factor)
-        logger.debug1(self.cell, '_get_ejk_derivatives requires_lr=%s', requires_lr)
-        if requires_lr:
-            ejk_sigma += self._get_ejk_lr_derivatives(
-                dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
-                lr_factor=lr_factor, sr_factor=sr_factor)
+            dm, kpts, exxdiv, omega, j_factor, sr_factor=sr_factor)
+        ejk_sigma += self._get_ejk_lr_derivatives(
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)
         return ejk_sigma
 
 

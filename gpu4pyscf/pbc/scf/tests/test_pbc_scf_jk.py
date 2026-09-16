@@ -66,7 +66,7 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     dm = dm.dot(dm.T)
     vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
     vhfopt.exclude_dd_block = False
-    vk = vhfopt.build()._get_k_sr(dm, hermi=1, exxdiv='ewald').get()
+    vk = rsjk.get_k(cell, dm, hermi=1, vhfopt=vhfopt, omega=-rsjk.OMEGA, exxdiv='ewald').get()
     s = cell.pbc_intor('int1e_ovlp', hermi=1)
     fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA)
     vk += np.einsum('ij,jk,kl->il', s, dm, s) * fac
@@ -98,7 +98,8 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
     vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
     vhfopt.exclude_dd_block = False
-    vk = vhfopt.build()._get_k_sr(dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, vhfopt=vhfopt,
+                    omega=-rsjk.OMEGA, exxdiv='ewald').get()
     s = np.array(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
     fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA, kmesh) / len(kpts)
     vk += np.einsum('Kij,Kjk,Kkl->Kil', s, dm, s) * fac
@@ -134,15 +135,23 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     dm = dm.dot(dm.T)
     vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
     vhfopt.exclude_dd_block = False
-    vk = vhfopt.build()._get_k_sr(dm, hermi=1).get()
+    vk = rsjk.get_k(cell, dm, hermi=1, vhfopt=vhfopt,
+                    omega=-rsjk.OMEGA, lr_factor=0, sr_factor=1).get()
+
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
+    vk1 = rsjk.get_k(cell, dm, hermi=1, vhfopt=vhfopt,
+                    omega=-rsjk.OMEGA, lr_factor=0, sr_factor=1).get()
+    assert abs(vk - vk1).max() < 1e-8
+
+    vhfopt = rsjk.PBCJKMatrixOpt(cell)
+    vk1 = rsjk.get_k(cell, dm, hermi=1, vhfopt=vhfopt,
+                    omega=-rsjk.OMEGA, lr_factor=0, sr_factor=1).get()
+    assert abs(vk - vk1).max() < 1e-8
 
     cell.precision = 1e-10
     cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, with_j=False)[1].get()
-    wcoulG_SR_at_G0 = np.pi / cell.omega**2 / cell.vol
-    s = cell.pbc_intor('int1e_ovlp')
-    ref += s.dot(dm).dot(s) * wcoulG_SR_at_G0
     assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi1_kpts_vs_fft():
@@ -164,7 +173,7 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     cell.omega = -rsjk.OMEGA
     vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
     vhfopt.exclude_dd_block = False
-    vk = vhfopt.build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, vhfopt=vhfopt, omega=-rsjk.OMEGA).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -179,7 +188,7 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm = dm + np.random.rand(nkpts, nao, nao)*.1j
     dm = dm + dm.conj().transpose(0,2,1)
-    vk = vhfopt._get_k_sr(dm, hermi=1, kpts=kpts).get()
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, vhfopt=vhfopt, omega=-rsjk.OMEGA).get()
 
     ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
@@ -202,15 +211,12 @@ def test_sr_vk_hermi0_gamma_point_vs_fft():
     dm = np.random.rand(nao, nao)*.2
     vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
     vhfopt.exclude_dd_block = False
-    vk = vhfopt.build()._get_k_sr(dm, hermi=0).get()
+    vk = rsjk.get_k(cell, dm, hermi=0, vhfopt=vhfopt, omega=-rsjk.OMEGA).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
-    wcoulG_SR_at_G0 = np.pi / cell.omega**2 / cell.vol
-    s = cell.pbc_intor('int1e_ovlp')
-    ref += s.dot(dm).dot(s) * wcoulG_SR_at_G0
     assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi0_kpts_vs_fft():
@@ -235,7 +241,7 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     dm[4:6] = dm[2:4].conj()
     vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
     vhfopt.exclude_dd_block = False
-    vk = vhfopt.build()._get_k_sr(dm, hermi=0, kpts=kpts, omega=-rsjk.OMEGA).get()
+    vk = rsjk.get_k(cell, dm, hermi=0, kpts=kpts, vhfopt=vhfopt, omega=-rsjk.OMEGA).get()
 
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
@@ -244,7 +250,8 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     # Test is_real == False
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm = dm + np.random.rand(nkpts, nao, nao)*.1j
-    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()
+    vk = rsjk.get_k(cell, dm, hermi=0, kpts=kpts, vhfopt=vhfopt, omega=-rsjk.OMEGA).get()
 
     ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
