@@ -1417,7 +1417,8 @@ def mbis(mol, grids, dm, initial_guess = "paper_guess", conv_tol = 1e-8, max_cyc
         Journal of Chemical Theory and Computation, 12(8), 3894-3912.
     """
     assert 0.0 <= damping and damping <= 1.0
-    # In the paper they describe a systematic way to generate guess, and in the associated repo https://github.com/theochem/denspart they use a different set of guess.
+    # In the paper they describe a systematic way to generate guess,
+    # and in the associated repo https://github.com/theochem/denspart they use a different set of guess.
     assert initial_guess in ["paper_guess", "repo_guess"]
 
     log = logger.new_logger(mol)

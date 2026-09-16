@@ -499,7 +499,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.atom_grid = (99, 590)
         mf.conv_tol = 1e-10
 
-        test_energy = mf.kernel()
+        mf.kernel()
         assert mf.converged
 
         dm = mf.make_rdm1()
