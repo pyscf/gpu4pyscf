@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,10 +20,12 @@ Analytical derivatives for DFT+U with kpoints sampling
 import numpy as np
 import cupy as cp
 from pyscf.pbc import gto
-from gpu4pyscf.pbc.grad import krks as krks_grad
-from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
-from gpu4pyscf.pbc.gto import int1e
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib.cupy_helper import asarray, contract
+from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
+from gpu4pyscf.pbc.grad import krks as krks_grad
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+from gpu4pyscf.pbc.gto import int1e
 
 def generate_first_order_local_orbitals(cell, minao_ref='MINAO', kpts=None):
     kpts = kpts.reshape(-1, 3)
@@ -88,7 +90,8 @@ def generate_first_order_local_orbitals(cell, minao_ref='MINAO', kpts=None):
         return C1
     return make_coeff
 
-def _hubbard_U_deriv1(mf, dm=None, kpts=None):
+def _hubbard_U_derivatives(mf, dm=None, kpts=None):
+    """Return Hubbard-U atomic and strain derivatives in (natm+3, 3) rows."""
     assert mf.alpha is None
     assert mf.C_ao_lo is None
     assert mf.minao_ref is not None
@@ -107,34 +110,110 @@ def _hubbard_U_deriv1(mf, dm=None, kpts=None):
     C0 = [C_k[:,U_idx_stack] for C_k in C_ao_lo]
 
     ovlp0 = int1e.int1e_ovlp(cell, kpts)
-    ovlp1 = int1e.int1e_ipovlp(cell, kpts)
     C_inv = [C_k.conj().T.dot(S_k) for C_k, S_k in zip(C0, ovlp0)]
-    dm_deriv0 = [C_k.dot(dm_k).dot(C_k.conj().T) for C_k, dm_k in zip(C_inv, dm)]
-    f_local_ao = generate_first_order_local_orbitals(cell, pcell, kpts)
+    # Both responses differentiate the same projected density. Build its
+    # zeroth-order factors once, including C_inv D for the first-order terms.
+    # Restricted densities include both spins; unrestricted densities keep
+    # them separate and have twice the quadratic occupation coefficient.
+    dm = cp.asarray(dm)
+    unrestricted = dm.ndim == 4
+    if not unrestricted:
+        assert dm.ndim == 3
+        dm = dm[None]
+    else:
+        assert dm.shape[0] == 2
+    occupation_factor = 2 if unrestricted else 1
+    C_dm = [[C_k.dot(dm_k) for C_k, dm_k in zip(C_inv, dm_s)] for dm_s in dm]
+    dm_deriv0 = [[D_k.dot(C_k.conj().T) for D_k, C_k in zip(D_s, C_inv)]
+                 for D_s in C_dm]
+    dE_U = cp.zeros((cell.natm+3, 3))
 
-    ao_slices = cell.aoslice_by_atom()
-    natm = cell.natm
-    dE_U = cp.zeros((natm, 3))
-    weight = 1. / nkpts
-    for atm_id, (p0, p1) in enumerate(ao_slices[:,2:]):
+    def contract_response(k, SC1):
+        # Flatten derivative components: three for an atom, nine for strain.
+        # This keeps the Hubbard trace contraction and its factors identical.
+        SC1 = SC1.reshape(-1, *SC1.shape[-2:])
+        response = cp.zeros(SC1.shape[0])
+        for spin, D_s in enumerate(C_dm):
+            dm_deriv1 = contract('pj,xjq->xpq', D_s[k], SC1)
+            i0 = i1 = 0
+            for idx, val in zip(U_idx, U_val):
+                i0, i1 = i1, i1 + len(idx)
+                P0 = dm_deriv0[spin][k][i0:i1,i0:i1]
+                P1 = dm_deriv1[:,i0:i1,i0:i1]
+                # The factor two accounts for P1 + P1.H; energy has a factor 1/2.
+                response += (val / nkpts) * (
+                    cp.einsum('xii->x', P1).real
+                    - occupation_factor * cp.einsum('xij,ji->x', P1, P0).real)
+        return response
+
+    ovlp1 = int1e.int1e_ipovlp(cell, kpts)
+    f_local_ao = generate_first_order_local_orbitals(cell, pcell, kpts)
+    for atm_id, (p0, p1) in enumerate(cell.aoslice_by_atom()[:,2:]):
         C1 = f_local_ao(atm_id)
         for k in range(nkpts):
             C1_k = C1[k][:,:,U_idx_stack]
             SC1 = contract('pq,xqi->xpi', ovlp0[k], C1_k)
             SC1 -= contract('xqp,qi->xpi', ovlp1[k][:,p0:p1].conj(), C0[k][p0:p1])
             SC1[:,p0:p1] -= contract('xpq,qi->xpi', ovlp1[k][:,p0:p1], C0[k])
-            dm_deriv1 = contract('pj,xjq->xpq', C_inv[k].dot(dm[k]), SC1)
-            i0 = i1 = 0
-            for idx, val in zip(U_idx, U_val):
-                i0, i1 = i1, i1 + len(idx)
-                P0 = dm_deriv0[k][i0:i1,i0:i1]
-                P1 = dm_deriv1[:,i0:i1,i0:i1]
-                dE_U[atm_id] += weight * (val * 0.5) * (
-                    cp.einsum('xii->x', P1).real * 2 # *2 for P1+P1.T
-                    - cp.einsum('xij,ji->x', P1, P0).real * 2)
+            dE_U[atm_id] += contract_response(k, SC1)
+    ovlp1 = f_local_ao = C1 = None
+
+    C1 = _strain_deriv_local_orbitals(cell, pcell, kpts)
+    ovlp1 = cp.asarray(ovlp_strain_deriv(cell, kpts))
+    nao = ovlp0.shape[-1]
+    ovlp1 = ovlp1.reshape(3,3,nkpts,nao,nao)
+    for k in range(nkpts):
+        C1_k = C1[:,:,k][:,:,:,U_idx_stack]
+        SC1 = contract('pq,xyqi->xypi', ovlp0[k], C1_k)
+        SC1 += contract('xypq,qi->xypi', ovlp1[:,:,k], C0[k])
+        dE_U[-3:] += contract_response(k, SC1).reshape(3, 3)
     return dE_U.get()
+
+
+def ovlp_strain_deriv(cell, kpts):
+    '''Strain derivatives for overlap matrix
+    '''
+    disp = 1e-5
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    s = []
+    for x in range(3):
+        for y in range(3):
+            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+            s1 = int1e.int1e_ovlp(cell1, kpts1)
+            s2 = int1e.int1e_ovlp(cell2, kpts2)
+            s.append((s1 - s2) / (2*disp))
+    return cp.array(s)
+
+def _strain_deriv_local_orbitals(cell, minao_ref='MINAO', kpts=None):
+    if isinstance(minao_ref, str):
+        pcell = reference_mol(cell, minao_ref)
+    else:
+        pcell = minao_ref
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    nkpts = len(kpts)
+
+    nao = cell.nao
+    naop = pcell.nao
+    if is_zero(kpts):
+        C1_minao = cp.empty((3, 3, nkpts, nao, naop))
+    else:
+        C1_minao = cp.empty((3, 3, nkpts, nao, naop), dtype=np.complex128)
+    disp = 1e-5
+    for x in range(3):
+        for y in range(3):
+            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+            pcell1, pcell2 = _finite_diff_cells(pcell, x, y, disp)
+            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+            C1 = _make_minao_lo(cell1, pcell1, kpts=kpts1)
+            C2 = _make_minao_lo(cell2, pcell2, kpts=kpts2)
+            C1_minao[x,y] = (C1 - C2) / (2*disp)
+    return C1_minao
 
 class Gradients(krks_grad.Gradients):
     def energy_ee(self, dm, kpts):
-        dE_U = _hubbard_U_deriv1(self.base, dm, kpts)
-        return krks_grad.energy_ee(self, dm, kpts) + dE_U
+        # Share local orbitals, overlap, and projected densities between responses.
+        dE = _hubbard_U_derivatives(self.base, dm, kpts)
+        return krks_grad.Gradients.energy_ee(self, dm, kpts) + dE

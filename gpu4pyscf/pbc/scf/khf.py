@@ -400,11 +400,9 @@ class KSCF(pbchf.SCF):
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
 
-        allowed_fft_mesh_size = get_avail_mem() / 8 / 10 # 8 for 8 bytes per fp64, 10 is arbitrary (A 80 GB gpu will allow 1000^3 mesh)
-
         if isinstance(self._numint, multigrid.MultiGridNumIntBase):
             ni = self._numint
-        elif np.prod(cell.mesh) < allowed_fft_mesh_size:
+        elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
             # In the pseudo and all-electron mixed case, MultiGridNumInt is
             # still more efficient if Ecut is not too high.
             ni = multigrid_v3.MultiGridNumInt(cell)

@@ -23,50 +23,12 @@ from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.grad import rks as rks_grad
+from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3, BeckeGrids
 from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
 
 __all__ = ['Gradients']
-
-def energy_ee(ks_grad, dm, kpts):
-    mf = ks_grad.base
-    cell = ks_grad.cell
-    log = logger.new_logger(ks_grad)
-    t0 = log.init_timer()
-
-    ni = mf._numint
-    omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
-    j_factor = 1
-
-    if isinstance(ni, multigrid.MultiGridNumIntBase):
-        assert not ks_grad.grid_response
-        # Note the j_in_xc treatment here slightly differs from KRHF. In KRHF,
-        # if GDF is enabled, J is evaluated with GDF CDERI. However, in KRKS,
-        # J is evaluated using MultiGridNumInt whenever applicable. See also
-        # the implementation in pbc.scf.krks
-        exc = ni.energy_nuclear_gradient(
-            mf.xc, dm, kpts=kpts, spin=0, with_j=True, with_nuc=True)
-        j_factor = 0
-    else:
-        if ks_grad.grids is not None:
-            grids = ks_grad.grids
-        else:
-            grids = mf.grids
-        if grids.coords is None:
-            grids.build()
-        if ks_grad.grid_response:
-            assert isinstance(grids, BeckeGrids), "Only Becke grid requires grid response"
-            exc = get_vxc_full_response(ni, cell, grids, mf.xc, dm, kpts)
-        else:
-            exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
-        t0 = log.timer('vxc', *t0)
-
-    if j_factor != 0 or k_sr != 0 or k_lr != 0:
-        exc += krhf_grad.jk_energy_per_atom(
-            mf, dm, kpts, j_factor, lr_factor=k_lr, sr_factor=k_sr, omega=omega,
-            exxdiv=mf.exxdiv)
-    return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     '''derivatives of the Exc per cell'''
@@ -226,13 +188,8 @@ def _gga_grad_sum_(ao, wv, out=None):
 def _tau_grad_dot_(ao, wv):
     return rks_grad._tau_grad_dot_(ao.transpose(0,2,1), wv)
 
-class Gradients(krhf_grad.Gradients):
-    _keys = {'grid_response', 'grids'}
 
-    def __init__(self, mf):
-        krhf_grad.Gradients.__init__(self, mf)
-        self.grids = None
-        self.grid_response = False
+class Gradients(krhf_grad.Gradients):
 
     def reset(self, cell=None):
         if self.grids is not None:
@@ -244,8 +201,48 @@ class Gradients(krhf_grad.Gradients):
         logger.info(self, 'grid_response = %s', self.grid_response)
         return self
 
-    energy_ee = energy_ee
+    def energy_ee(self, dm, kpts):
+        mf = self.base
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
 
-    def get_stress(self):
-        from gpu4pyscf.pbc.grad import krks_stress
-        return krks_stress.kernel(self)
+        ni = mf._numint
+        xc = getattr(mf, 'xc', 'HF')
+        if xc.upper() == 'HF':
+            omega, k_lr, k_sr = 0, 1, 1
+        else:
+            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+        j_factor = 1
+
+        # TODO: handle all-electron+GGA and pseudo+GGA differently
+        # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
+        de = np.zeros([self.cell.natm+3, 3])
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
+            de = ni.energy_derivatives(
+                xc, dm, kpts=kpts, spin=0, with_j=True, with_nuc=True)
+            j_factor = 0
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            raise NotImplementedError(f'derivatives for {ni}')
+        else:
+            grids = self.grids or mf.grids
+            if grids.coords is None:
+                grids.build()
+            cell = self.cell
+            if self.grid_response:
+                assert isinstance(grids, BeckeGrids), "Only Becke grid requires grid response"
+                fn = get_vxc_full_response
+            else:
+                fn = get_vxc
+            de[:-3] = fn(ni, cell, grids, xc, dm, kpts)
+            if isinstance(grids, BeckeGrids):
+                de[-3:] = np.nan
+            else:
+                de[-3:] = multigrid_v3.MultiGridNumInt(cell).energy_strain_gradient(
+                    xc, dm, kpts=kpts, spin=0, with_j=False, with_nuc=False)
+        t0 = log.timer_debug1('vxc', *t0)
+
+        if j_factor != 0 or k_sr != 0 or k_lr != 0:
+            de += krhf_grad._get_ejk_derivatives(
+                mf, dm, kpts, j_factor, omega, k_lr, k_sr)
+            t0 = log.timer_debug1('JK', *t0)
+        return de

@@ -317,6 +317,7 @@ class TestFiniteDifference(unittest.TestCase):
     def test_iron_fd(self):
         self._fd_check(cell_fe, atom_id=1, cart_id=0, places=4)
 
+    @pytest.mark.slow
     def test_pseudo_gradient_term_with_zero_nexp(self):
         from gpu4pyscf.pbc.dft.multigrid_v3 import _pploc_derivatives, _get_Gv_bases
         cell = pyscf.M(
@@ -388,7 +389,7 @@ class TestFiniteDifference(unittest.TestCase):
         ni.allow_mesh_reduction = False
         Gv_bases = _get_Gv_bases(ni.mesh, cell.reciprocal_vectors())
         rho_g = multigrid_v3._eval_rhoG(ni, dm0, 1, kpts).ravel()
-        analytical_gradient = _pploc_derivatives(cell, rho_g, Gv_bases)[0].get()
+        analytical_gradient = _pploc_derivatives(cell, rho_g, Gv_bases)[:-3].get()
 
         dx = 1e-4
         numerical_gradient = np.zeros([cell.natm, 3])

@@ -1097,7 +1097,8 @@ class KnownValues(unittest.TestCase):
         sigma_ref = cp.einsum('g,xyg->xy', rhoG.conj(), vlocG1).real / cell.vol
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-        grad, sigma = _pploc_derivatives(cell, rhoG, Gv_bases)
+        grad_sigma = _pploc_derivatives(cell, rhoG, Gv_bases)
+        grad, sigma = grad_sigma[:-3], grad_sigma[-3:]
         assert abs(grad_ref - grad).max().get() < 1e-12
         assert abs(sigma_ref - sigma).max().get() < 1e-12
 
@@ -1116,7 +1117,8 @@ class KnownValues(unittest.TestCase):
         grad_ref, sigma_ref = eval_nucG_SI_gradient(cell, mesh, rhoG)
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-        grad, sigma = _ne_derivatives(cell, rhoG, Gv_bases)
+        grad_sigma = _ne_derivatives(cell, rhoG, Gv_bases)
+        grad, sigma = grad_sigma[:-3], grad_sigma[-3:]
         assert abs(grad_ref - grad).max().get() < 1e-12
         assert abs(sigma_ref - sigma).max().get() < 1e-12
 

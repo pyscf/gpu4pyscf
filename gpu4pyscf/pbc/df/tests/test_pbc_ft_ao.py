@@ -235,7 +235,7 @@ class KnownValues(unittest.TestCase):
 
     def test_ft_ao_strain_deriv(self):
         from gpu4pyscf.gto.mole import SortedGTO
-        from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+        from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
         cell = pgto.M(
             verbose=5, output='/dev/null',
             atom='''N1   .19   .1      1.4

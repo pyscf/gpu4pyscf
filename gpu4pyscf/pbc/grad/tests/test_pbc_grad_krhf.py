@@ -59,6 +59,7 @@ class KnownValues(unittest.TestCase):
         3.37, 3.37, 0.00'''
         cell.basis = [[0, [3., 1]], [0, [.8, 1]], [1, [1., 1]]]
         cell.unit = 'bohr'
+        cell.verbose = 0
         cell.build()
         mf = cell.RHF().to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell)
@@ -104,6 +105,7 @@ class KnownValues(unittest.TestCase):
         3.37, 3.37, 0.00'''
         cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
         cell.unit = 'bohr'
+        cell.verbose = 0
         cell.build()
         mf = cell.RHF().to_gpu().density_fit()
         mf.conv_tol_grad = 1e-9
@@ -143,6 +145,7 @@ class KnownValues(unittest.TestCase):
         cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
         cell.pseudo = 'gth-pbe'
         cell.unit = 'bohr'
+        cell.verbose = 0
         cell.build()
         mf = cell.RHF().to_gpu().density_fit()
         mf.conv_tol_grad = 1e-9
@@ -206,6 +209,7 @@ class KnownValues(unittest.TestCase):
         3.370137329, 3.370137329, 0.000000000'''
         cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
         cell.unit = 'bohr'
+        cell.verbose = 0
         cell.build()
         kpts = cell.make_kpts([1,1,2])
         mf = cell.KRHF(kpts=kpts, exxdiv='ewald').to_gpu()
@@ -231,6 +235,7 @@ class KnownValues(unittest.TestCase):
         3.37, 3.37, 0.00'''
         cell.basis = [[0, [3., 1]], [0, [.8, 1]], [1, [.8, 1]]]
         cell.unit = 'bohr'
+        cell.verbose = 0
         cell.build()
         kpts = cell.make_kpts([1,1,3])
         mf = cell.KRHF(kpts=kpts).to_gpu().density_fit()
@@ -268,6 +273,7 @@ class KnownValues(unittest.TestCase):
         3.37, 3.37, 0.00'''
         cell.basis = [[0, [3., 1]], [0, [.8, 1]], [1, [.8, 1]]]
         cell.unit = 'bohr'
+        cell.verbose = 0
         cell.build()
         kpts = cell.make_kpts([1,1,3])
         mf = cell.KRHF(kpts=kpts).to_gpu().density_fit()
@@ -303,7 +309,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(3)
         cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',
                       a=np.eye(3)*2.4 + (np.random.rand(3,3)*.4 - .3),
-                      basis=[[0,[2.3, 1]], [1,[.4, 1]]])
+                      basis=[[0,[2.3, 1]], [1,[.4, 1]]], verbose=0)
         kpts = cell.make_kpts([1,1,3])
         hcore_generator_gpu = krhf_gpu.Gradients(cell.KRHF(kpts=kpts)).hcore_generator()
         dat = hcore_generator_gpu(1)
@@ -319,7 +325,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(3)
         cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',
                       a=np.eye(3)*2.4 + (np.random.rand(3,3)*.4 - .3),
-                      basis=[[0,[2.3, 1]], [1,[ .4, 1]]])
+                      basis=[[0,[2.3, 1]], [1,[ .4, 1]]], verbose=0)
         kpts = cell.make_kpts([1,1,3])
         mf = cell.KRHF(kpts=kpts, exxdiv='ewald').to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell)
