@@ -422,7 +422,7 @@ C    D
 
 def test_int2c2e_strain_deriv_vs_finite_difference():
     from gpu4pyscf.pbc.df import int2c2e
-    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
@@ -440,9 +440,9 @@ def test_int2c2e_strain_deriv_vs_finite_difference():
     dm = cp.random.rand(nao, nao)
     dm = dm + dm.T
     sorted_cell = SortedCell.from_cell(cell)
-    _, dat = int2c2e.int2c2e_energy_derivatives(
+    dat = int2c2e.int2c2e_energy_derivatives(
         cell, sorted_cell.apply_C_mat_CT(dm), omega=omega)
-    dat = cp.asnumpy(dat)
+    dat = cp.asnumpy(dat[-3:])
 
     disp = 1e-4
     for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:

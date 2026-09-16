@@ -16,7 +16,7 @@
 import unittest
 import numpy as np
 from pyscf.pbc import gto
-from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 
 def setUpModule():

@@ -1873,10 +1873,9 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
         with_nuc : Whether to include the electron-nuclear Coulomb interactions
     '''
     from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-    from gpu4pyscf.pbc.grad.rks_stress import (
-        _finite_diff_cells,
-        _get_weight_strain_derivatives)
-    from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.krks_stress import (
+        _get_weight_strain_derivatives, _contract_coulomb_and_nuc)
 
     cell = ni.cell
     if kpts is None:
@@ -1936,10 +1935,9 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
         with_nuc : Whether to include the electron-nuclear Coulomb interactions
     '''
     from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-    from gpu4pyscf.pbc.grad.rks_stress import (
-        _finite_diff_cells,
-        _get_weight_strain_derivatives)
-    from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.krks_stress import (
+        _get_weight_strain_derivatives, _contract_coulomb_and_nuc)
 
     cell = ni.cell
     if kpts is None:

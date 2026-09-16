@@ -56,8 +56,7 @@ __all__ = [
 ]
 
 libpbc.PBC_build_k.restype = ctypes.c_int
-libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
-libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
+libpbc.PBC_jk_derivatives.restype = ctypes.c_int
 
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 OMEGA = 0.4
@@ -91,7 +90,7 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
         vk = vhfopt._get_k_sr(dm, hermi, kpts, kpts_band, exxdiv, omega,
                               lr_factor, sr_factor, verbose=verbose)
 
-    if lr_factor != 0 or omega != vhfopt.omega:
+    if vhfopt._lr_is_required(omega, lr_factor):
         vk += vhfopt._get_k_lr(dm, hermi, kpts, kpts_band, exxdiv, omega,
                                lr_factor, sr_factor)
     return vk
@@ -225,8 +224,16 @@ class PBCJKMatrixOpt:
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
         return cutoff
 
+    def _lr_is_required(self, omega, lr_factor, j_factor=0):
+        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
+        requires_lr = (
+            self.omega != omega or
+            lr_factor != 0 or j_factor != 0 or
+            exclude_dd_block)
+        return requires_lr
+
     def _get_k_sr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
-                  omega=None, lr_factor=1, sr_factor=1, verbose=None):
+                  omega=None, lr_factor=0, sr_factor=1, verbose=None):
         '''
         Build kpts adapted K matrices
         Return a (*, nkpts, nao, nao) array.
@@ -301,8 +308,12 @@ class PBCJKMatrixOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        # Note, the input lr_factor is used to determine whether _get_k_lr needs
+        # to be called. It should not be used for _check_rsh_factors
+        if omega is None:
+            omega = cell.cell.omega
         omega = abs(omega)
+        requires_lr = self._lr_is_required(omega, lr_factor)
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -428,8 +439,7 @@ class PBCJKMatrixOpt:
         # However, vk_lr may be skipped for certain RSH funcitonals like HSE06.
         # In this particular case (self.omega == omega and lr_factor == 0),
         # explicitly handle the G=0 term here.
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
-        if ((self.omega == omega and lr_factor == 0 and not exclude_dd_block) and
+        if ((not requires_lr) and
             (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             assert len(member(np.zeros(3), kpts)) > 0
@@ -464,7 +474,7 @@ class PBCJKMatrixOpt:
         return vk
 
     def _get_k_lr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
-                  omega=None, lr_factor=1, sr_factor=1):
+                  omega=None, lr_factor=None, sr_factor=None):
         if kpts_band is not None:
             raise NotImplementedError
 
@@ -608,6 +618,7 @@ class PBCJKMatrixOpt:
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None,
                        kpts=None, lr_factor=1, sr_factor=1):
         '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''
+        raise DeprecationWarning
         cell = self.cell
         if mesh is None:
             mesh = self.mesh
@@ -878,458 +889,38 @@ class PBCJKMatrixOpt:
         return vj
 
     def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None, omega=None,
-                        j_factor=1, lr_factor=1, sr_factor=1, verbose=None):
+                        j_factor=1, lr_factor=0, sr_factor=1):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor - k_factor / 2, where k_factor = sr_factor
         '''
-        log = logger.new_logger(self, verbose)
-        cell = self.cell
-        assert cell.dimension == 3
-        nao = cell.nao
-        supmol = self.supmol
-
-        dm = asarray(dm)
-        nao_orig = dm.shape[-1]
-        dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
-        # Symmetrize density matrices because 8-fold symmetry is utilized when
-        # computing integrals. Fold the contribution of the upper triangular
-        # part of the density matrices into the lower triangular part.
-        dms = transpose_sum(dms)
-        dms *= .5
-
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
-        is_gamma_point = is_zero(kpts)
-        if is_gamma_point:
-            if is_single_kpt:
-                assert dms.dtype == np.float64
-            else:
-                dms = dms.real
-            nkpts = 1
-            ao_loc = asarray(cell.ao_loc)
-            dms = cp.asarray(dms, order='C')
-            dm_cond = condense('absmax', dms, ao_loc)
-            # Add the dimension for kpts
-            dms = dms[:,None,:,:]
-            nimgs = nimgs_uniq_pair = 1
-            Ts_ji_lookup = cp.zeros((nimgs, nimgs))
-            sup_bas_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32) % cell.nbas
-        else:
-            bvk_ncells = np.prod(kmesh)
-            nimgs = len(supmol.Ls)
-            # When the size of BvK cell is smaller than the supmol, it's more
-            # efficient to represent dms/vk in BvK cell
-            if bvk_ncells < 7*nimgs:
-                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, kmesh, kpts)
-                nimgs = bvk_ncells
-            else:
-                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_supermol(supmol, kpts)
-            nimgs_uniq_pair, nkpts = expLk.shape
-            dms = dms.reshape(-1, nkpts, nao, nao)
-            dms = contract('skpq,Lk->sLpq', dms, expLk)
-            # dm must be real if dm is obtained with KSCF.time_reversal_symmetry = True
-            if absmax(dms.imag) > cell.precision*5e2:
-                raise RuntimeError(
-                    'The density matrix in the BvK supercell is expected to be real for '
-                    'k-point calculations. However, non-negligible imaginary part is detected. '
-                    'This may be caused by time-reversal symmetry breaking.')
-            expLk = None
-            dms = dms.real
-            dms = cp.asarray(dms, order='C')
-            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
-        dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-        n_dm = len(dms)
-        assert n_dm <= 2
-        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
-        log_cutoff = math.log(cutoff)
-
-        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
-
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
-        omega = abs(omega)
-
-        uniq_l_ctr = cell.uniq_l_ctr
-        uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
-        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-        n_groups = np.count_nonzero(uniq_l <= LMAX)
-
-        tasks = ((i,j,k,l)
-                 for i in range(n_groups)
-                 for j in range(i+1)
-                 for k in range(i+1)
-                 for l in range(k+1))
-
-        def proc(dms, dm_cond):
-            device_id = cp.cuda.device.get_device_id()
-            stream = cp.cuda.stream.get_current_stream()
-            log = logger.new_logger(cell, verbose)
-            t0 = log.init_timer()
-            dms = cp.asarray(dms)
-            dm_cond = cp.asarray(dm_cond)
-
-            _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
-            bas_pair_cache = {k: [cp.asarray(x) for x in v]
-                              for k, v in self.bas_pair_cache.items()}
-            _sup_bas_idx = cp.asarray(sup_bas_idx)
-            _Ts_ji_lookup = cp.asarray(Ts_ji_lookup)
-            ejk = cp.zeros((cell.natm, 3))
-
-            workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int64)
-            dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
-
-            t1 = log.timer_debug1(f'ejk_sr initialization on Device {device_id}', *t0)
-            timing_collection = _TimingCollector(log.timer_debug1)
-            kern_counts = 0
-            kern = libpbc.PBC_per_atom_jk_ip1
-            rys_envs = self.rys_envs
-            omega = -self.omega
-
-            for task in tasks:
-                i, j, k, l = task
-                shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j][:3]
-                pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l][3:]
-                npairs_ij = pair_ij_mapping.size
-                npairs_kl = pair_kl_mapping.size
-                if npairs_ij == 0 or npairs_kl == 0:
-                    continue
-                scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
-                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                err = kern(
-                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                    ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
-                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
-                    (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
-                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
-                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(cell.nbas),
-                    supmol._bas.ctypes, ctypes.c_double(omega))
-                if err != 0:
-                    raise RuntimeError(f'PBC_build_jk_ip1 kernel for {llll} failed')
-                kern_counts += 1
-                if log.verbose >= logger.DEBUG1:
-                    ntasks = npairs_ij * npairs_kl
-                    msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1 = timing_collection.collect(llll, t1, msg)
-                if num_devices > 1:
-                    stream.synchronize()
-            return ejk, kern_counts, timing_collection
-
-        results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
-
-        if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', sum(x[1] for x in results))
-            _TimingCollector.summary(log.debug1, (x[2] for x in results))
-
-        ejk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
-        ejk = ejk.get()
-
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
-        if ((self.omega == omega and j_factor == 0 and lr_factor == 0 and
-             not exclude_dd_block) and
-            (cell.dimension == 3 or
-             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-            from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
-            # difference associated to the G=0 term between the real space
-            # integrals and the AFT integrals
-            dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
-            omega = self.omega
-            wcoulG_for_k = -np.pi / omega**2 / cell.vol
-            if exxdiv == 'ewald':
-                wcoulG_for_k += nkpts*pbctools.madelung(cell, kpts, omega=-omega)
-            s0 = int1e.int1e_ovlp(cell, kpts)
-            s1 = int1e.int1e_ipovlp(cell, kpts)
-            k_dm = contract('nkpq,kqr->nkpr', dms, s0)
-            k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
-            if n_dm == 1: # RHF
-                k_dm *= .5 * sr_factor * wcoulG_for_k
-            else:
-                k_dm *= sr_factor * wcoulG_for_k
-            ejk += contract_h1e_dm(cell.cell, s1, k_dm, hermi=1) * .5
-
-        if not is_gamma_point:
-            ejk *= 1. / nkpts**2
-        return ejk
+        return self._get_ejk_sr_derivatives(
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[:-3]
 
     def _get_ejk_lr_ip1(self, dm, kpts=None, omega=None, exxdiv=None,
-                        j_factor=1, lr_factor=1, sr_factor=1):
+                        j_factor=1, lr_factor=None, sr_factor=None):
         '''Compute the derivatives of the long-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
         '''
-        log = logger.new_logger(self)
-        cell = self.cell
-        assert cell.dimension == 3
-
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
-        omega = abs(omega)
-
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
-        log.debug('bvk_kmesh = %s', kmesh)
-        bvk_ncells = np.prod(kmesh)
-        is_gamma_point = is_zero(kpts)
-
-        dms = _format_dms(dm, kpts)
-        n_dm, nkpts, nao = dms.shape[:3]
-        assert nkpts == len(kpts)
-
-        dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
-        nao = dms.shape[-1]
-        dms = dms.reshape(n_dm,nkpts,nao,nao)
-
-        if n_dm == 1: # RHF or KRHF
-            # RHF energy is computed as J - 1/2 K
-            lr_factor *= .5
-            sr_factor *= .5
-        elif n_dm > 2:
-            raise NotImplementedError
-
-        ft_opt = FTOpt(cell, kmesh)
-        ft_opt.permutation_symmetry = bvk_ncells == nkpts
-        ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
-
-        if not is_gamma_point:
-            expLk = cp.exp(1j*cp.asarray(ft_opt.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-
-        mesh = self.mesh
-        Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
-        ngrids = len(Gv)
-
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
-        shm_size = aft_jk._estimate_max_shm_size(cell, (1,0))
-        log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d',
-                  len(bas_ij_idx), nbatches_shl_pair, shm_size)
-
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
-        if exclude_dd_block:
-            bas_ij_wo_dd, img_idx_wo_dd, shl_pair_offsets_wo_dd = \
-                    _generate_shl_pairs(ft_opt, self.dd_bas_idx)
-
-        def get_j_ip1():
-            t0 = log.init_timer()
-            if n_dm == 1:
-                dm_sf = dms[0]
-            else:
-                dm_sf = dms[0] + dms[1]
-            if is_gamma_point:
-                dms_bvkcell = cp.asarray(dm_sf.real, order='C')
-            else:
-                dms_bvkcell = contract('Lk,kpq->Lpq', expLk, dm_sf)
-                assert abs(dms_bvkcell.imag).max() < 1e-6
-                dms_bvkcell = cp.asarray(dms_bvkcell.real, order='C')
-
-            # memory buffer required by eval_ft
-            avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
-            blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
-            blksize = min(blksize, ngrids, 16384)
-            log.debug1('blksize=%d', blksize)
-
-            if exclude_dd_block:
-                diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao)
-
-            kpt_allow = np.zeros(3)
-            wcoulG = get_coulG(cell, kpt_allow, mesh=mesh, Gv=Gv, wrap_around=True, omega=0)
-            wcoulG *= kws
-            wcoulG_SR = get_coulG(cell, kpt_allow, mesh=mesh, Gv=Gv,
-                                  wrap_around=True, omega=-self.omega)
-            wcoulG_SR[0] += np.pi / self.omega**2
-            wcoulG_SR *= -kws
-            if not exclude_dd_block:
-                wcoulG += wcoulG_SR
-
-            aft_envs = ft_opt.aft_envs
-            kern = libpbc.PBC_ft_aopair_ej_deriv
-            ej = cp.zeros((cell.natm, 3))
-            sigma = cp.zeros((3, 3))
-            for p0, p1 in lib.prange(0, ngrids, blksize):
-                nGv = p1 - p0
-                Gpq = ft_kern(Gv[p0:p1])
-                Gpq = Gpq.transpose(0,2,3,1)
-                vG = contract('kji,kijg->g', dm_sf, Gpq).conj()
-                vG *= wcoulG[p0:p1]
-                GvT = cp.asarray(Gv[p0:p1].T.ravel())
-                err = kern(
-                    ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(vG.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                    ctypes.byref(aft_envs),
-                    ctypes.c_int(nbatches_shl_pair),
-                    ctypes.c_int(nGv),
-                    ctypes.c_int(shm_size),
-                    ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(int(ft_opt.permutation_symmetry)))
-                if err != 0:
-                    raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
-                if exclude_dd_block and len(bas_ij_wo_dd) > 0:
-                    Gpq[:,diffuse_i,diffuse_j] = 0.
-                    vG = contract('kji,kijg->g', dm_sf, Gpq).conj()
-                    vG *= wcoulG_SR[p0:p1]
-                    err = kern(
-                        ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vG.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                        ctypes.byref(aft_envs),
-                        ctypes.c_int(len(shl_pair_offsets_wo_dd) - 1),
-                        ctypes.c_int(nGv),
-                        ctypes.c_int(shm_size),
-                        ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
-                    if err != 0:
-                        raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
-                Gpq = None
-            if not ft_opt.permutation_symmetry:
-                ej *= .5
-            ej *= j_factor / nkpts**2
-            ej = ej.get()
-            log.timer_debug1('get_ej_ip1', *t0)
-            return ej
-
-        def get_k_ip1():
-            cpu0 = cpu1 = log.init_timer()
-            avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
-            blksize = int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16
-            if blksize == 0:
-                raise RuntimeError('Insufficient GPU memory')
-            blksize = min(blksize, ngrids, 16384)
-            log.debug1('blksize=%d', blksize)
-
-            if exclude_dd_block:
-                diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao)
-
-            aft_envs = ft_opt.aft_envs
-            kern = libpbc.PBC_ft_aopair_ek_deriv
-            ek = cp.zeros((cell.natm, 3))
-            sigma1 = cp.zeros((3, 3))
-            for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
-                kpt = kpts[kp]
-                wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
-                    cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
-                wcoulG_SR *= -1
-                if not exclude_dd_block:
-                    wcoulG += wcoulG_SR
-
-                swap_2e = kp != kp_conj
-                for p0, p1 in lib.prange(0, ngrids, blksize):
-                    nGv = p1 - p0
-                    Gpq = ft_kern(-Gv[p0:p1], -kpt, -kpts, kj_idx)
-                    pqG_conj = Gpq.transpose(0,2,3,1)
-                    if is_gamma_point:
-                        tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
-                        dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
-                        if ft_opt.permutation_symmetry:
-                            dm_vG *= 2
-                    else:
-                        idx = np.empty_like(ki_idx)
-                        idx[kj_idx] = ki_idx
-                        tmp = contract('snjk,nlkg->snljg', dms, pqG_conj)
-                        tmp = contract('snljg,snli->nijg', tmp, dms[:,idx])
-                        dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
-                        if ft_opt.permutation_symmetry:
-                            dm_vG += contract('Lk,kijg->Lijg', expLk[:,idx].conj(), tmp)
-                    if swap_2e:
-                        dm_vG *= wcoulG[p0:p1] * 2
-                    else:
-                        dm_vG *= wcoulG[p0:p1]
-                    dm_vG = cp.asarray(dm_vG, order='C')
-                    GvT = (Gv[p0:p1].T + cp.asarray(kpt[:,None])).ravel()
-                    err = kern(
-                        ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                        ctypes.byref(aft_envs),
-                        ctypes.c_int(nbatches_shl_pair),
-                        ctypes.c_int(nGv),
-                        ctypes.c_int(shm_size),
-                        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
-                    if err != 0:
-                        raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
-
-                    if exclude_dd_block and len(bas_ij_wo_dd) > 0:
-                        pqG_conj[:,diffuse_i,diffuse_j] = 0.
-                        if is_gamma_point:
-                            tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
-                            dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
-                            if ft_opt.permutation_symmetry:
-                                dm_vG *= 2
-                        else:
-                            tmp = contract('snjk,nlkg->snljg', dms, pqG_conj)
-                            tmp = contract('snljg,snli->nijg', tmp, dms[:,idx])
-                            dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
-                            if ft_opt.permutation_symmetry:
-                                dm_vG += contract('Lk,kijg->Lijg', expLk[:,idx].conj(), tmp)
-                        if swap_2e:
-                            dm_vG *= wcoulG_SR[p0:p1] * 2
-                        else:
-                            dm_vG *= wcoulG_SR[p0:p1]
-                        dm_vG = cp.asarray(dm_vG, order='C')
-                        err = kern(
-                            ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-                            ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
-                            ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
-                            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                            ctypes.byref(aft_envs),
-                            ctypes.c_int(len(shl_pair_offsets_wo_dd) - 1),
-                            ctypes.c_int(nGv),
-                            ctypes.c_int(shm_size),
-                            ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
-                            ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
-                            ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                            ctypes.c_int(int(ft_opt.permutation_symmetry)))
-                        if err != 0:
-                            raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
-                    Gpq = pqG_conj = tmp = dm_vG = None
-                cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
-            ek *= .5 / nkpts**2
-            ek = ek.get()
-            log.timer_debug1('get_ek_ip1', *cpu0)
-            return ek
-
-        ej = ek = 0
-        if j_factor != 0:
-            ej = get_j_ip1()
-        if lr_factor != 0 or sr_factor != 0:
-            ek = get_k_ip1()
-        return ej - ek
+        return self._get_ejk_lr_derivatives(
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[:-3]
 
     def _get_ejk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None, omega=None,
-                        j_factor=1, lr_factor=1, sr_factor=1, verbose=None):
+                                 j_factor=1, lr_factor=0, sr_factor=1):
+        return self._get_ejk_sr_derivatives(
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[-3:]
+
+    def _get_ejk_sr_derivatives(self, dm, kpts=None, exxdiv=None, omega=None,
+                                j_factor=1, lr_factor=0, sr_factor=1):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor - k_factor / 2.
+
+        Returns an array of shape (cell.natm+3, 3), with atomic derivatives
+        in the first cell.natm rows and strain derivatives in the last three.
         '''
-        log = logger.new_logger(self, verbose)
+        log = logger.new_logger(self)
         cell = self.cell
         assert cell.dimension == 3
         nao = cell.nao
@@ -1380,13 +971,15 @@ class PBCJKMatrixOpt:
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         n_dm = len(dms)
         assert n_dm <= 2
-        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
+        cutoff = self.estimate_cutoff_with_penalty(cell.precision*10)
         log_cutoff = math.log(cutoff)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        if omega is None:
+            omega = cell.cell.omega
         omega = abs(omega)
+        requires_lr = self._lr_is_required(omega, lr_factor, j_factor)
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -1403,7 +996,7 @@ class PBCJKMatrixOpt:
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
             stream = cp.cuda.stream.get_current_stream()
-            log = logger.new_logger(cell, verbose)
+            log = logger.new_logger(cell)
             t0 = log.init_timer()
             dms = cp.asarray(dms)
             dm_cond = cp.asarray(dm_cond)
@@ -1413,8 +1006,7 @@ class PBCJKMatrixOpt:
                               for k, v in self.bas_pair_cache.items()}
             _sup_bas_idx = cp.asarray(sup_bas_idx)
             _Ts_ji_lookup = cp.asarray(Ts_ji_lookup)
-            ejk = cp.zeros((cell.natm, 3))
-            sigma = cp.zeros((3, 3))
+            ejk_sigma = cp.zeros([cell.natm+3, 3])
 
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int64)
@@ -1423,7 +1015,7 @@ class PBCJKMatrixOpt:
             t1 = log.timer_debug1(f'ejk_sr_strain_deriv initialization on Device {device_id}', *t0)
             timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
-            kern = libpbc.PBC_jk_strain_deriv
+            kern = libpbc.PBC_jk_derivatives
             rys_envs = self.rys_envs
             omega = -self.omega
 
@@ -1439,9 +1031,9 @@ class PBCJKMatrixOpt:
                 scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 err = kern(
-                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ejk_sigma[:-3].data.ptr, ctypes.c_void_p),
                     ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
-                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ejk_sigma[-3:].data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
                     ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
@@ -1464,7 +1056,7 @@ class PBCJKMatrixOpt:
                     ctypes.c_int(cell.nbas),
                     supmol._bas.ctypes, ctypes.c_double(omega))
                 if err != 0:
-                    raise RuntimeError(f'PBC_jk_strain_deriv kernel for {llll} failed')
+                    raise RuntimeError(f'PBC_jk_derivatives kernel for {llll} failed')
                 kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
@@ -1472,61 +1064,66 @@ class PBCJKMatrixOpt:
                     t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
-            return ejk, sigma, kern_counts, timing_collection
+            return ejk_sigma, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
         dms = None
 
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', sum(x[2] for x in results))
-            _TimingCollector.summary(log.debug1, (x[3] for x in results))
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
-        sigma = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
-        sigma = sigma.get()
-        sigma *= 2 / nkpts**2
+        ejk_sigma = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+        ejk_sigma = ejk_sigma.get()
+        ejk_sigma *= 2. / nkpts**2
 
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
-        if ((self.omega == omega and j_factor == 0 and lr_factor == 0 and
-             not exclude_dd_block) and
+        # The G=0 term is treated differently between the real space ejk_sr code
+        # and the AFT integral code. This difference is encountered in the
+        # ejk_lr code.
+        # Explicitly handle this difference if ejk_lr code is not executed
+        if ((not requires_lr) and
             (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-            raise
-            from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
-            # difference associated to the G=0 term between the real space
-            # integrals and the AFT integrals
-            dm0 = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
-            omega = self.omega
-            wcoulG_for_k = -np.pi / omega**2 / cell.vol
+            dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
+            wcoulG_for_k = -np.pi / self.omega**2 / cell.vol
+            wcoulG_strain_deriv = -wcoulG_for_k * np.eye(3)
             if exxdiv == 'ewald':
-                exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, -omega)
+                #vs wcoulG_for_k += nkpts*pbctools.madelung(cell, kpts, omega=-self.omega)
+                exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, -self.omega)
                 wcoulG_for_k += exx_0
+                wcoulG_strain_deriv += exx_1
             s0 = int1e.int1e_ovlp(cell, kpts)
-            k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
-            k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
-            ek_G0 = .5 / nkpts**2 * cp.einsum('kij,kji->', s0, k_dm).real.get()
-            if n_dm == 1: # RHF
-                sr_factor *= .5
-            k_dm *= sr_factor * wcoulG_for_k / nkpts
-            ek_G0 *= sr_factor
+            k_dm = contract('nkpq,kqr->nkpr', dms, s0)
+            k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
+            fac = sr_factor / nkpts
+            if n_dm == 1: #RHF
+                fac *= .5
+            ejk_sigma -= int1e.ovlp_derivatives(cell, k_dm, kpts) * (fac * wcoulG_for_k)
 
-            # Response of the overlap integrals in Tr(S D S D)
-            int1e_opt = int1e._Int1eOpt(cell, 1)
-            # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
-            # scaled by 1/nkpts only instead of 1/nkpts**2 because
-            # get_ovlp_strain_deriv has already scaled the output by 1/nkpts
-            sigma += 2 / nkpts * int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
-            if exxdiv == 'ewald':
-                exx_1 *= ek_G0
-                sigma += exx_1
-        return sigma
+            vk_G0 = cp.einsum('kpq,kqp->', k_dm, s0).real.get()
+            ejk_sigma[-3:] -= .5 * fac / nkpts * vk_G0 * wcoulG_strain_deriv
+
+        return ejk_sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, omega=None, exxdiv=None,
-                        j_factor=1, lr_factor=1, sr_factor=1):
+                                 j_factor=1, lr_factor=None, sr_factor=None):
         '''Compute the strain derivatives of the long-range part of the
         aggregated J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
         '''
-        from gpu4pyscf.pbc.grad.rks_stress import (
+        return self._get_ejk_lr_derivatives(
+            dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[-3:]
+
+    def _get_ejk_lr_derivatives(self, dm, kpts=None, exxdiv=None, omega=None,
+                                j_factor=1, lr_factor=None, sr_factor=None):
+        '''Compute the derivatives of the long-range part of the
+        aggregated J/K contribution. The aggregated J/K contribution is given by
+        j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
+
+        Returns an array of shape (cell.natm+3, 3), with atomic derivatives
+        in the first cell.natm rows and strain derivatives in the last three.
+        '''
+        from gpu4pyscf.pbc.grad.krks_stress import (
             _get_weighted_coulG_strain_derivatives as get_wcoulG)
         log = logger.new_logger(self)
         cell = self.cell
@@ -1541,11 +1138,11 @@ class PBCJKMatrixOpt:
         bvk_ncells = np.prod(kmesh)
         is_gamma_point = is_zero(kpts)
 
-        dm0 = _format_dms(dm, kpts)
-        n_dm, nkpts, nao = dm0.shape[:3]
+        dms = _format_dms(dm, kpts)
+        n_dm, nkpts, nao = dms.shape[:3]
         assert nkpts == len(kpts)
 
-        dms = cell.apply_C_mat_CT(dm0.reshape(-1,nao,nao))
+        dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
         nao = dms.shape[-1]
         dms = dms.reshape(n_dm,nkpts,nao,nao)
 
@@ -1558,6 +1155,7 @@ class PBCJKMatrixOpt:
 
         ft_opt = FTOpt(cell, kmesh)
         ft_opt.permutation_symmetry = bvk_ncells == nkpts
+        assert ft_opt.permutation_symmetry
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
         if not is_gamma_point:
@@ -1578,7 +1176,7 @@ class PBCJKMatrixOpt:
             bas_ij_wo_dd, img_idx_wo_dd, shl_pair_offsets_wo_dd = \
                     _generate_shl_pairs(ft_opt, self.dd_bas_idx)
 
-        def get_j_sigma():
+        def get_j():
             t0 = log.init_timer()
             if n_dm == 1:
                 dm_sf = dms[0]
@@ -1613,20 +1211,19 @@ class PBCJKMatrixOpt:
 
             aft_envs = ft_opt.aft_envs
             kern = libpbc.PBC_ft_aopair_ej_deriv
-            ej = cp.zeros((cell.natm, 3))
-            sigma = cp.zeros((3, 3))
+            ej_sigma = cp.zeros([cell.natm+3, 3])
             for p0, p1 in lib.prange(0, ngrids, blksize):
                 nGv = p1 - p0
                 Gpq = ft_kern(Gv[p0:p1])
                 Gpq = Gpq.transpose(0,2,3,1)
                 rhoG = contract('kji,kijg->g', dm_sf, Gpq)
-                sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
+                ej_sigma[-3:] += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
                 vG = rhoG.conj()
                 vG *= wcoulG_0[p0:p1]
                 GvT = cp.asarray(Gv[p0:p1].T.ravel())
                 err = kern(
-                    ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ej_sigma[:-3].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ej_sigma[-3:].data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
                     ctypes.cast(vG.data.ptr, ctypes.c_void_p),
                     ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -1639,16 +1236,16 @@ class PBCJKMatrixOpt:
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(int(ft_opt.permutation_symmetry)))
                 if err != 0:
-                    raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
+                    raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
                     Gpq[:,diffuse_i,diffuse_j] = 0.
                     rhoG = contract('kji,kijg->g', dm_sf, Gpq)
-                    sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_SR_1[:,:,p0:p1], rhoG.conj(), rhoG).real
+                    ej_sigma[-3:] += .25*cp.einsum('xyg,g,g->xy', wcoulG_SR_1[:,:,p0:p1], rhoG.conj(), rhoG).real
                     vG = rhoG.conj()
                     vG *= wcoulG_SR_0[p0:p1]
                     err = kern(
-                        ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ej_sigma[:-3].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ej_sigma[-3:].data.ptr, ctypes.c_void_p),
                         ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
                         ctypes.cast(vG.data.ptr, ctypes.c_void_p),
                         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -1661,14 +1258,25 @@ class PBCJKMatrixOpt:
                         ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
-                        raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
+                        raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 Gpq = None
-            sigma *= 2 * j_factor / nkpts**2
-            sigma = sigma.get()
-            log.timer_debug1('get_ej_strain_deriv', *t0)
-            return sigma
+            if not ft_opt.permutation_symmetry:
+                ej_sigma *= .5
+            ej_sigma *= 2 * j_factor / nkpts**2
+            log.timer_debug1('get_ej_deriv', *t0)
+            return ej_sigma
 
-        def get_k_sigma():
+        def weighted_coulG_derivatives(Gvk, range_omega, remove_G0):
+            wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, range_omega)
+            if (remove_G0 and exxdiv == 'ewald' and
+                (cell.dimension == 3 or
+                 (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+                exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, range_omega)
+                wcoulG_0[0] += exx_0
+                wcoulG_1[:,:,0] += cp.asarray(exx_1)
+            return wcoulG_0, wcoulG_1
+
+        def get_k():
             cpu0 = cpu1 = log.init_timer()
             avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
             blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
@@ -1682,27 +1290,18 @@ class PBCJKMatrixOpt:
 
             aft_envs = ft_opt.aft_envs
             kern = libpbc.PBC_ft_aopair_ek_deriv
-            ek = cp.zeros((cell.natm, 3))
+            ek_sigma = cp.zeros([cell.natm+3, 3])
             sigma = cp.zeros((3, 3))
-            sigma1 = cp.zeros((3, 3))
             for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
                 kpt = kpts[kp]
                 Gvk = Gv + cp.asarray(kpt)
                 remove_G0 = is_zero(kpt)
-                wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, 0)
-                if remove_G0 and exxdiv == 'ewald':
-                    fr_ewald_0, fr_ewald_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, 0.)
-                    wcoulG_0[0] += fr_ewald_0
-                    wcoulG_1[:,:,0] += cp.asarray(fr_ewald_1)
+                wcoulG_0, wcoulG_1 = weighted_coulG_derivatives(Gvk, 0, remove_G0)
                 if lr_factor == sr_factor:
                     wcoulG_0 *= lr_factor
                     wcoulG_1 *= lr_factor
                 else:
-                    wcoulG_LR_0, wcoulG_LR_1 = get_wcoulG(cell, Gvk, omega)
-                    if remove_G0 and exxdiv == 'ewald':
-                        lr_ewald_0, lr_ewald_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, omega)
-                        wcoulG_LR_0[0] += lr_ewald_0
-                        wcoulG_LR_1[:,:,0] += cp.asarray(lr_ewald_1)
+                    wcoulG_LR_0, wcoulG_LR_1 = weighted_coulG_derivatives(Gvk, omega, remove_G0)
                     wcoulG_0 -= wcoulG_LR_0
                     wcoulG_0 *= sr_factor
                     wcoulG_0 += wcoulG_LR_0 * lr_factor
@@ -1730,13 +1329,17 @@ class PBCJKMatrixOpt:
                         tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                         dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
                         vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
+                        if ft_opt.permutation_symmetry:
+                            dm_vG *= 2
                     else:
                         idx = np.empty_like(ki_idx)
                         idx[kj_idx] = ki_idx
-                        dm_k = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
-                        dm_k = contract('snjlg,snli->njig', dm_k, dms[:,idx])
-                        dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
+                        dm_k = contract('snjk,nlkg->snljg', dms, Gpq_conj)
+                        dm_k = contract('snljg,snli->njig', dm_k, dms[:,idx])
                         vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
+                        dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
+                        if ft_opt.permutation_symmetry:
+                            dm_vG += contract('Lk,kpqg->Lqpg', expLk[:,idx].conj(), dm_k)
                     tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
                     if swap_2e:
                         sigma += tmp * 2
@@ -1747,8 +1350,8 @@ class PBCJKMatrixOpt:
                     dm_vG = cp.asarray(dm_vG, order='C')
                     GvT = cp.asarray(Gvk[p0:p1].T.ravel())
                     err = kern(
-                        ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ek_sigma[:-3].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(ek_sigma[-3:].data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                         ctypes.byref(aft_envs),
@@ -1760,7 +1363,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
-                        raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
+                        raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
                     if exclude_dd_block and len(bas_ij_wo_dd) > 0:
                         Gpq[:,diffuse_i,diffuse_j] = 0.
@@ -1769,13 +1372,15 @@ class PBCJKMatrixOpt:
                             tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                             dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
                             vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
+                            if ft_opt.permutation_symmetry:
+                                dm_vG *= 2
                         else:
-                            idx = np.empty_like(ki_idx)
-                            idx[kj_idx] = ki_idx
                             dm_k = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
                             dm_k = contract('snjlg,snli->njig', dm_k, dms[:,idx])
-                            dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
                             vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
+                            dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
+                            if ft_opt.permutation_symmetry:
+                                dm_vG += contract('Lk,kpqg->Lqpg', expLk[:,idx].conj(), dm_k)
                         tmp = cp.einsum('xyg,g->xy', wcoulG_SR_1[:,:,p0:p1], vkG)
                         if swap_2e:
                             sigma += tmp * 2
@@ -1785,8 +1390,8 @@ class PBCJKMatrixOpt:
                             dm_vG *= wcoulG_SR_0[p0:p1]
                         dm_vG = cp.asarray(dm_vG, order='C')
                         err = kern(
-                            ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-                            ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
+                            ctypes.cast(ek_sigma[:-3].data.ptr, ctypes.c_void_p),
+                            ctypes.cast(ek_sigma[-3:].data.ptr, ctypes.c_void_p),
                             ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                             ctypes.byref(aft_envs),
@@ -1798,25 +1403,46 @@ class PBCJKMatrixOpt:
                             ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.c_int(int(ft_opt.permutation_symmetry)))
                         if err != 0:
-                            raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
+                            raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                     Gpq = Gpq_conj = dm_k = tmp = dm_vG = None
                 cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
-            sigma *= 1. / nkpts**2
             # First *2 due to i>=j symmetry in kernel;
             # second *2 due to (d/dX ij|kl) + (ij|d/dX kl)
-            sigma1 *= 2 * 2 / nkpts**2
-            sigma += sigma1
-            sigma = sigma.get()
-            sigma *= .5 # *.5 for the factor 1/2 in Coulomb operator
-            log.timer_debug1('get_ek_strain_deriv', *cpu0)
-            return sigma
+            ek_sigma *= 2*2*.25 / nkpts**2
+            sigma *= .5 / nkpts**2
+            ek_sigma[-3:] += sigma
+            log.timer_debug1('get_ek_deriv', *cpu0)
+            return ek_sigma
 
-        ej = ek = 0
+        ejk_sigma = cp.zeros([cell.natm+3, 3])
         if j_factor != 0:
-            ej = get_j_sigma()
+            ejk_sigma += get_j()
         if lr_factor != 0 or sr_factor != 0:
-            ek = get_k_sigma()
-        return ej - ek
+            ejk_sigma -= get_k()
+        return ejk_sigma.get()
+
+    def _get_ejk_derivatives(self, dm, kpts=None, exxdiv=None, omega=None,
+                             j_factor=1, lr_factor=None, sr_factor=None):
+        '''
+        Computes the derivatives of the aggregated J/K contribution:
+        j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
+        '''
+        if self.supmol is None:
+            self.build()
+
+        omega, lr_factor, sr_factor = _check_rsh_factors(self.cell.cell, omega, lr_factor, sr_factor)
+        omega = abs(omega)
+        ejk_sigma = self._get_ejk_sr_derivatives(
+            dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor, sr_factor=sr_factor)
+
+        requires_lr = self._lr_is_required(omega, lr_factor, j_factor)
+        logger.debug1(self.cell, '_get_ejk_derivatives requires_lr=%s', requires_lr)
+        if requires_lr:
+            ejk_sigma += self._get_ejk_lr_derivatives(
+                dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
+                lr_factor=lr_factor, sr_factor=sr_factor)
+        return ejk_sigma
+
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''

@@ -1462,9 +1462,9 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 }
 
 static __global__
-void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
-                              int *shl_pair_offsets, int *bas_ij_idx,
-                              int *gout_stride_lookup)
+void ovlp_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVars envs,
+                             int *shl_pair_offsets, int *bas_ij_idx,
+                             int *gout_stride_lookup)
 {
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
@@ -1544,6 +1544,9 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
         int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
         int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
         for (int img = 0; img < envs.nimgs; img++) {
             double xi = env[ri+0];
             double yi = env[ri+1];
@@ -1551,6 +1554,7 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
             double xj = env[rj+0] + img_coords[img*3+0];
             double yj = env[rj+1] + img_coords[img*3+1];
             double zj = env[rj+2] + img_coords[img*3+2];
+            __syncthreads();
             if (gout_id == 0) {
                 double xjxi = xj - xi;
                 double yjyi = yj - yi;
@@ -1561,6 +1565,9 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 rjri[2*nsp_per_block] = zjzi;
                 rjri[3*nsp_per_block] = rr_ij;
             }
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
             int ijprim = iprim * jprim;
             for (int ijp = 0; ijp < ijprim; ++ijp) {
                 __syncthreads();
@@ -1609,40 +1616,52 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
                     double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; }
                     double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gy[addry-i_1]; }
                     double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gz[addrz-i_1]; }
-                    double v_ix = fix * prod_yz;
-                    double v_iy = fiy * prod_xz;
-                    double v_iz = fiz * prod_xy;
-                    double xjxi = rjri[0*nsp_per_block];
-                    double yjyi = rjri[1*nsp_per_block];
-                    double zjzi = rjri[2*nsp_per_block];
-                    sigma_xx -= v_ix * xjxi;
-                    sigma_xy -= v_ix * yjyi;
-                    sigma_xz -= v_ix * zjzi;
-                    sigma_yx -= v_iy * xjxi;
-                    sigma_yy -= v_iy * yjyi;
-                    sigma_yz -= v_iy * zjzi;
-                    sigma_zx -= v_iz * xjxi;
-                    sigma_zy -= v_iz * yjyi;
-                    sigma_zz -= v_iz * zjzi;
+                    v_ix += fix * prod_yz;
+                    v_iy += fiy * prod_xz;
+                    v_iz += fiz * prod_xy;
                 }
             }
+            double xjxi = rjri[0*nsp_per_block];
+            double yjyi = rjri[1*nsp_per_block];
+            double zjzi = rjri[2*nsp_per_block];
+            sigma_xx -= v_ix * xjxi;
+            sigma_xy -= v_ix * yjyi;
+            sigma_xz -= v_ix * zjzi;
+            sigma_yx -= v_iy * xjxi;
+            sigma_yy -= v_iy * yjyi;
+            sigma_yz -= v_iy * zjzi;
+            sigma_zx -= v_iz * xjxi;
+            sigma_zy -= v_iz * yjyi;
+            sigma_zz -= v_iz * zjzi;
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
         }
+        int ish_cell0 = ish;
+        int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
+        int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
+        atomicAdd(grad+ia*3+0, grad_ix);
+        atomicAdd(grad+ia*3+1, grad_iy);
+        atomicAdd(grad+ia*3+2, grad_iz);
+        atomicAdd(grad+ja*3+0, -grad_ix);
+        atomicAdd(grad+ja*3+1, -grad_iy);
+        atomicAdd(grad+ja*3+2, -grad_iz);
     }
-    atomicAdd(out+0, sigma_xx);
-    atomicAdd(out+1, sigma_xy);
-    atomicAdd(out+2, sigma_xz);
-    atomicAdd(out+3, sigma_yx);
-    atomicAdd(out+4, sigma_yy);
-    atomicAdd(out+5, sigma_yz);
-    atomicAdd(out+6, sigma_zx);
-    atomicAdd(out+7, sigma_zy);
-    atomicAdd(out+8, sigma_zz);
+    atomicAdd(sigma+0, sigma_xx);
+    atomicAdd(sigma+1, sigma_xy);
+    atomicAdd(sigma+2, sigma_xz);
+    atomicAdd(sigma+3, sigma_yx);
+    atomicAdd(sigma+4, sigma_yy);
+    atomicAdd(sigma+5, sigma_yz);
+    atomicAdd(sigma+6, sigma_zx);
+    atomicAdd(sigma+7, sigma_zy);
+    atomicAdd(sigma+8, sigma_zz);
 }
 
 static __global__
-void kin_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
-                             int *shl_pair_offsets, int *bas_ij_idx,
-                             int *gout_stride_lookup)
+void kin_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVars envs,
+                            int *shl_pair_offsets, int *bas_ij_idx,
+                            int *gout_stride_lookup)
 {
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
@@ -1722,6 +1741,9 @@ void kin_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
         int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
         int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
         for (int img = 0; img < envs.nimgs; img++) {
             double xi = env[ri+0];
             double yi = env[ri+1];
@@ -1729,6 +1751,7 @@ void kin_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
             double xj = env[rj+0] + img_coords[img*3+0];
             double yj = env[rj+1] + img_coords[img*3+1];
             double zj = env[rj+2] + img_coords[img*3+2];
+            __syncthreads();
             if (gout_id == 0) {
                 double xjxi = xj - xi;
                 double yjyi = yj - yi;
@@ -1739,6 +1762,9 @@ void kin_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 rjri[2*nsp_per_block] = zjzi;
                 rjri[3*nsp_per_block] = rr_ij;
             }
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
             int ijprim = iprim * jprim;
             for (int ijp = 0; ijp < ijprim; ++ijp) {
                 __syncthreads();
@@ -1808,44 +1834,46 @@ void kin_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
                         if (iz > 2) fz3 += iz*(iz-1)*(iz-2) * gz[addrz-i_1*3];
                     }
                     double dm_val = dm_ji[j*nao+i];
-                    double v_ix, v_iy, v_iz;
-                    v_ix  = fx3 * fy0 * fz0;
-                    v_ix += fx1 * fy2 * fz0;
-                    v_ix += fx1 * fy0 * fz2;
-                    v_iy  = fx2 * fy1 * fz0;
-                    v_iy += fx0 * fy3 * fz0;
-                    v_iy += fx0 * fy1 * fz2;
-                    v_iz  = fx2 * fy0 * fz1;
-                    v_iz += fx0 * fy2 * fz1;
-                    v_iz += fx0 * fy0 * fz3;
-                    v_ix *= dm_val;
-                    v_iy *= dm_val;
-                    v_iz *= dm_val;
-                    double xjxi = rjri[0*nsp_per_block];
-                    double yjyi = rjri[1*nsp_per_block];
-                    double zjzi = rjri[2*nsp_per_block];
-                    sigma_xx += v_ix * xjxi;
-                    sigma_xy += v_ix * yjyi;
-                    sigma_xz += v_ix * zjzi;
-                    sigma_yx += v_iy * xjxi;
-                    sigma_yy += v_iy * yjyi;
-                    sigma_yz += v_iy * zjzi;
-                    sigma_zx += v_iz * xjxi;
-                    sigma_zy += v_iz * yjyi;
-                    sigma_zz += v_iz * zjzi;
+                    v_ix -= (fx3 * fy0 * fz0 + fx1 * fy2 * fz0 + fx1 * fy0 * fz2) * dm_val;
+                    v_iy -= (fx2 * fy1 * fz0 + fx0 * fy3 * fz0 + fx0 * fy1 * fz2) * dm_val;
+                    v_iz -= (fx2 * fy0 * fz1 + fx0 * fy2 * fz1 + fx0 * fy0 * fz3) * dm_val;
                 }
             }
+            double xjxi = rjri[0*nsp_per_block];
+            double yjyi = rjri[1*nsp_per_block];
+            double zjzi = rjri[2*nsp_per_block];
+            sigma_xx -= v_ix * xjxi;
+            sigma_xy -= v_ix * yjyi;
+            sigma_xz -= v_ix * zjzi;
+            sigma_yx -= v_iy * xjxi;
+            sigma_yy -= v_iy * yjyi;
+            sigma_yz -= v_iy * zjzi;
+            sigma_zx -= v_iz * xjxi;
+            sigma_zy -= v_iz * yjyi;
+            sigma_zz -= v_iz * zjzi;
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
         }
+        int ish_cell0 = ish;
+        int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
+        int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
+        atomicAdd(grad+ia*3+0, grad_ix);
+        atomicAdd(grad+ia*3+1, grad_iy);
+        atomicAdd(grad+ia*3+2, grad_iz);
+        atomicAdd(grad+ja*3+0, -grad_ix);
+        atomicAdd(grad+ja*3+1, -grad_iy);
+        atomicAdd(grad+ja*3+2, -grad_iz);
     }
-    atomicAdd(out+0, sigma_xx);
-    atomicAdd(out+1, sigma_xy);
-    atomicAdd(out+2, sigma_xz);
-    atomicAdd(out+3, sigma_yx);
-    atomicAdd(out+4, sigma_yy);
-    atomicAdd(out+5, sigma_yz);
-    atomicAdd(out+6, sigma_zx);
-    atomicAdd(out+7, sigma_zy);
-    atomicAdd(out+8, sigma_zz);
+    atomicAdd(sigma+0, sigma_xx);
+    atomicAdd(sigma+1, sigma_xy);
+    atomicAdd(sigma+2, sigma_xz);
+    atomicAdd(sigma+3, sigma_yx);
+    atomicAdd(sigma+4, sigma_yy);
+    atomicAdd(sigma+5, sigma_yz);
+    atomicAdd(sigma+6, sigma_zx);
+    atomicAdd(sigma+7, sigma_zy);
+    atomicAdd(sigma+8, sigma_zz);
 }
 
 // An estimation of the upper bound of the overlap |<cell0|supcmol>| for
@@ -2060,31 +2088,31 @@ int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
     return 0;
 }
 
-int PBCovlp_strain_deriv(double *out, double *dm,
-                    PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
-                    int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
+int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
+                        PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
+                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
 {
-    cudaFuncSetAttribute(ovlp_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    ovlp_strain_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            out, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+    cudaFuncSetAttribute(ovlp_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    ovlp_derivatives_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in ovlp_strain_deriv kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in ovlp_derivatives kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
 
-int PBCkin_strain_deriv(double *out, double *dm,
-                        PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
-                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
+int PBCkin_derivatives(double *grad, double *sigma, double *dm,
+                       PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
+                       int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
 {
-    cudaFuncSetAttribute(kin_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    kin_strain_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            out, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+    cudaFuncSetAttribute(kin_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    kin_derivatives_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in kin_strain_deriv kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in kin_derivatives kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

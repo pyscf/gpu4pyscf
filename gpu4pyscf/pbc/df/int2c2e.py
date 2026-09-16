@@ -295,38 +295,10 @@ class Int2c2eOpt:
     def energy_ip1_per_atom(self, dm, kpts=None,
                             omega=None, lr_factor=None, sr_factor=None):
         '''Compute nuclear gradients of the 2c2e Coulomb energy'''
-        if self.bas_ij_cache is None:
-            self.build()
-        cell = self.cell
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
-        assert dm.shape[-1] == cell.nao
+        return self.energy_derivatives(dm, kpts, omega, lr_factor, sr_factor)[:-3]
 
-        nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, deriv=(1,0))
-        lmax = cell.uniq_l_ctr[:,0].max()
-        shm_size_max = shm_size[:lmax+1,:lmax+1].max()
-
-        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
-            self.bas_ij_cache, nsp_per_block)
-
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
-        rys_envs = self._rys_envs
-        out = cp.zeros((cell.natm, 3))
-        libpbc.e_int2c2e_ip1.restype = ctypes.c_int
-        err = libpbc.e_int2c2e_ip1(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-            ctypes.byref(rys_envs), ctypes.c_double(omega),
-            ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
-            ctypes.c_int(shm_size_max),
-            ctypes.c_int(nbatches_shl_pair),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
-        if err != 0:
-            raise RuntimeError('e_int2c2e_ip1 failed')
-        return out.get()
-
-    def energy_derivatives(self, dm, kpts=None, omega=None):
+    def energy_derivatives(self, dm, kpts=None,
+                           omega=None, lr_factor=None, sr_factor=None):
         '''Compute nuclear gradients and strain derivatives of the 2c2e energy for
         the short-range (SR) Coulomb interaction
         1/2 * erfc(omega * r12) / r12.
@@ -344,11 +316,7 @@ class Int2c2eOpt:
             expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
             dm = cp.asarray(contract('Lk,kpq->Lpq', expLk, dm).real, order='C')
 
-        if omega is None:
-            omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, None, None)
-        else:
-            assert omega < 0
-            lr_factor, sr_factor = 0, 1
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
         nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, deriv=(1,0))
         lmax = cell.uniq_l_ctr[:,0].max()
@@ -359,11 +327,10 @@ class Int2c2eOpt:
 
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         rys_envs = self._rys_envs
-        grad = cp.zeros((cell.natm, 3))
-        sigma = cp.zeros((3, 3))
+        grad_sigma = cp.zeros([cell.natm+3, 3])
         err = libpbc.int2c2e_deriv(
-            ctypes.cast(grad.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grad_sigma[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(grad_sigma[-3:].data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.byref(rys_envs), ctypes.c_double(omega),
             ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
@@ -374,4 +341,4 @@ class Int2c2eOpt:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError('int2c2e_deriv failed')
-        return grad, sigma
+        return grad_sigma

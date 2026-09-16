@@ -34,8 +34,7 @@ from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
-from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
-from gpu4pyscf.pbc.grad.rks_stress import (
+from gpu4pyscf.pbc.grad.krks_stress import (
     _get_weighted_coulG_strain_derivatives as get_wcoulG)
 from gpu4pyscf.pbc.tools.pbc import madelung
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -82,9 +81,9 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
-        ej, sigma = _get_ej_derivatives(
+        ej_sigma = _get_ej_derivatives(
             int3c2e_opt, dm, hermi, omega, verbose, linear_dep_threshold)
-        return ej * j_factor, sigma * j_factor
+        return ej_sigma * j_factor
 
     assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
@@ -232,9 +231,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
     # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
-    ejk, sigma = int2c2e_opt.energy_derivatives(dm_aux, omega=-int3c2e_opt.omega)
-    ejk = cp.asarray(-ejk)
-    sigma = cp.asarray(-sigma)
+    ejk_sigma = int2c2e_opt.energy_derivatives(dm_aux, omega=-int3c2e_opt.omega)
+    ejk_sigma = cp.asarray(-ejk_sigma)
     t0 = log.timer_debug1('contract int2c2e_deriv', *t0)
 
     ################################
@@ -254,10 +252,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
-        ejk_lr = cp.zeros((cell.natm, 3))
-        ejk_aux = cp.zeros((cell.natm, 3))
-        sigma = cp.zeros((3, 3))
-        sigma_aux = cp.zeros((3, 3))
+        ejk_sigma_lr = cp.zeros([cell.natm+3, 3])
+        ejk_sigma_aux = cp.zeros([cell.natm+3, 3])
         sigma_G = cp.zeros((3, 3))
 
         kern = libpbc.PBC_ft_aopair_ek_deriv
@@ -322,8 +318,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             #:    partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
             GvT = cp.asarray(Gv[p0:p1].T.ravel())
             err = kern_auxG(
-                ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p),
-                ctypes.cast(sigma_aux.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ejk_sigma_aux[:-3].data.ptr, ctypes.c_void_p),
+                ctypes.cast(ejk_sigma_aux[-3:].data.ptr, ctypes.c_void_p),
                 null_ptr,
                 ctypes.cast(dm_auxG.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -353,8 +349,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 beta = j_factor
             contract('jqG,pj->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
             err = kern(
-                ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
-                ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ejk_sigma_lr[:-3].data.ptr, ctypes.c_void_p),
+                ctypes.cast(ejk_sigma_lr[-3:].data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),
@@ -368,15 +364,12 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
-        ejk_lr *= 2 # due to i>=j symmetry in CUDA kernel
-        ejk_lr += ejk_aux
-        sigma *= 2 # due to i>=j symmetry in CUDA kernel
-        sigma += sigma_aux + sigma_G
-        return ejk_lr, sigma
+        ejk_sigma_lr *= 2 # due to i>=j symmetry in CUDA kernel
+        ejk_sigma_lr += ejk_sigma_aux
+        ejk_sigma_lr[-3:] += sigma_G
+        return ejk_sigma_lr
 
-    ejk_lr, sigma_lr = lr_3c2e_response()
-    ejk += ejk_lr
-    sigma += sigma_lr
+    ejk_sigma += lr_3c2e_response()
     log.timer_debug1('LR coulomb', *t0)
     ft_opt = eval_ft = None
     dm_aux = None
@@ -408,9 +401,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
     assert cell.natm == auxcell.natm
-    ejk_sr = cp.zeros((cell.natm, 3))
-    ejk_aux_sr = cp.zeros((cell.natm, 3))
-    sigma_sr = cp.zeros((3, 3))
+    ejk_sigma_sr = cp.zeros([cell.natm+3, 3])
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
     head = pool[-1:]
@@ -446,9 +437,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
                         out=compressed[:,k0:k1])
         err = kern(
-            ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ejk_aux_sr.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma_sr.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ejk_sigma_sr[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(ejk_sigma_sr[-3:].data.ptr, ctypes.c_void_p),
             lib.c_null_ptr(),
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
             ctypes.c_double(-int3c2e_opt.omega),
@@ -475,44 +465,28 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
     if hermi == 1:
-        ejk_sr *= 2.
-        ejk_aux_sr *= 2.
-        sigma_sr *= 2.
-    ejk += ejk_sr + ejk_aux_sr
-    sigma += sigma_sr
+        ejk_sigma_sr *= 2.
+    ejk_sigma += ejk_sigma_sr
     t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
 
-    ejk = ejk.get()
-    sigma = sigma.get()
+    ejk_sigma = ejk_sigma.get()
 
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
         s0 = int1e.int1e_ovlp(cell)
-        s1 = int1e.int1e_ipovlp(cell)
         k_dm = contract('pq,qr->pr', dm, s0)
         k_dm = contract('pr,rs->ps', k_dm, dm)
-        # The cell object reorders the AOs. s1 and k_dm are stored in the order
-        # of the original cell. It's necessary to pass the original cell to
-        # contract_h1e_dm
-        ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
         kpts = np.zeros((1, 3))
-        weighted_coulG_at_G0 = madelung(cell, kpts, omega=-omega)
-        # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
-        ejk_ewald *= .5 * k_factor * weighted_coulG_at_G0
-        ejk += ejk_ewald
-
-        # Strain response of the Ewald exchange correction.  There are two
-        # contributions: the cell dependence of the Madelung coefficient and
-        # the response of the two overlap factors in Tr(S D S D).
-        ek_G0 = float(cp.einsum('ij,ji->', s0, k_dm).real.get())
+        de_ewald = int1e.ovlp_derivatives(cell, k_dm)
         exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
+        de_ewald *= -.5 * k_factor * exx_0
+        ejk_sigma += de_ewald
+
+        ek_G0 = float(cp.einsum('ij,ji->', s0, k_dm).real.get())
         # *.5 for the factor 1/2 in Coulomb operator; second *.5 for J-K/2 in RHF
-        fac = k_factor * .5 * .5
-        sigma -= fac * exx_1 * ek_G0
-        # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
-        sigma -= 2 * fac * exx_0 * int1e.ovlp_strain_deriv(cell.cell, k_dm, kpts)
-    return ejk, sigma
+        ejk_sigma[-3:] -= k_factor * .5 * .5 * ek_G0 * exx_1
+    return ejk_sigma
 
 def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
                         linear_dep_threshold=LINEAR_DEP_THR):
@@ -622,9 +596,8 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     j2c = None
 
     dm_aux = auxvec[:,None] * auxvec
-    ej, sigma = int2c2e_opt.energy_derivatives(dm_aux, omega=-int3c2e_opt.omega)
-    ej = cp.asarray(-ej)
-    sigma = cp.asarray(-sigma)
+    ej_sigma = int2c2e_opt.energy_derivatives(dm_aux, omega=-int3c2e_opt.omega)
+    ej_sigma = cp.asarray(-ej_sigma)
     dm_aux = None
     t0 = log.timer_debug1('contract int2c2e_deriv', *t0)
 
@@ -653,14 +626,13 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
             #                          auxG.view(np.float64))
         vG = (rhoG - rho_auxG) * wcoulG_LR0
         GvT = cp.asarray(Gv.T.ravel())
-        ej_aux = cp.zeros((cell.natm, 3))
-        sigma_aux = cp.zeros((3, 3))
+        ej_sigma_aux = cp.zeros([cell.natm+3, 3])
         aux_ft_envs = RysIntEnvVars.new(
             auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
             _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
         err = libpbc.PBC_ft_ao_deriv(
-            ctypes.cast(ej_aux.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma_aux.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ej_sigma_aux[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(ej_sigma_aux[-3:].data.ptr, ctypes.c_void_p),
             ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
             ctypes.cast(vG.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -670,13 +642,12 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
             raise RuntimeError('ft_ao_deriv failed')
 
         vG_conj = rho_auxG.conj() * wcoulG_LR0
-        ej_lr = cp.zeros((cell.natm, 3))
-        sigma = cp.zeros((3, 3))
+        ej_sigma_lr = cp.zeros([cell.natm+3, 3])
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         err = libpbc.PBC_ft_aopair_ej_deriv(
-            ctypes.cast(ej_lr.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ej_sigma_lr[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(ej_sigma_lr[-3:].data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.cast(vG_conj.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -691,18 +662,14 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 
-        ej_lr *= 2 # due to i>=j symmetry in CUDA kernel
-        ej_lr += ej_aux
-        sigma *= 2 # due to i>=j symmetry in CUDA kernel
-        sigma += sigma_aux
-        sigma += .5 * cp.einsum('g,g,xyg->xy', rho_auxG,
+        ej_sigma_lr *= 2 # due to i>=j symmetry in CUDA kernel
+        ej_sigma_lr += ej_sigma_aux
+        ej_sigma_lr[-3:] += .5 * cp.einsum('g,g,xyg->xy', rho_auxG,
                                 (rhoG*2-rho_auxG).conj(), wcoulG_LR1).real
-        return ej_lr, sigma
+        return ej_sigma_lr
 
     if with_long_range:
-        ej_lr, sigma_lr = lr_3c2e_response()
-        ej += ej_lr
-        sigma += sigma_lr
+        ej_sigma += lr_3c2e_response()
         t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
         ft_opt = None
 
@@ -731,9 +698,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
     assert cell.natm == auxcell.natm
-    ej_sr = cp.zeros((cell.natm, 3))
-    ej_aux_sr = cp.zeros((cell.natm, 3))
-    sigma_sr = cp.zeros((3, 3))
+    ej_sigma_sr = cp.zeros([cell.natm+3, 3])
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
     head = pool[-1:]
@@ -741,9 +706,8 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libpbc.PBCsr_ejk_int3c2e_deriv
     err = kern(
-        ctypes.cast(ej_sr.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ej_aux_sr.data.ptr, ctypes.c_void_p),
-        ctypes.cast(sigma_sr.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ej_sigma_sr[:-3].data.ptr, ctypes.c_void_p),
+        ctypes.cast(ej_sigma_sr[-3:].data.ptr, ctypes.c_void_p),
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
         ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
         ctypes.c_double(-int3c2e_opt.omega),
@@ -769,11 +733,9 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         ctypes.c_float(log_cutoff))
     if err != 0:
         raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
-    ej_sr += ej_aux_sr
-    ej += ej_sr * 2
-    sigma += sigma_sr * 2
+    ej_sigma += ej_sigma_sr * 2
     t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
-    return ej.get(), sigma.get()
+    return ej_sigma.get()
 
 
 def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
@@ -782,11 +744,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     '''Compatibility wrapper returning only the atomic J/K derivatives.'''
     return _get_ejk_derivatives(
         int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, omega, verbose,
-        linear_dep_threshold)[0]
+        linear_dep_threshold)[:-3]
 
 
 def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
                        linear_dep_threshold=LINEAR_DEP_THR):
     '''Compatibility wrapper returning only the atomic Coulomb derivatives.'''
     return _get_ej_derivatives(
-        int3c2e_opt, dm, hermi, omega, verbose, linear_dep_threshold)[0]
+        int3c2e_opt, dm, hermi, omega, verbose, linear_dep_threshold)[:-3]
