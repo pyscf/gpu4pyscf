@@ -48,7 +48,8 @@ class KnownValues(unittest.TestCase):
         grids = Grids(mol)
         grids.atom_grid = (99,590)
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = mbis(mol, grids, dm)
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm)
 
         ### Reference ORCA input
         # ! HF DEF2-SVP TightSCF MBIS
@@ -109,12 +110,14 @@ class KnownValues(unittest.TestCase):
         ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
         ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
         ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+        ref_r3_moment = np.array([ 23.528681, 53.205098, 24.264910,  1.159630,  5.106663, 84.125575, ])
 
         assert abs(test_energy - ref_energy) < 3e-3
         assert np.max(np.abs(test_charges - ref_charges)) < 1e-4
         assert np.max(np.abs(test_dipoles - ref_dipoles)) < 1e-4
         assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 3e-4
         assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-4
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 2e-3
 
     def test_mbis_uhf(self):
         mol = pyscf.M(
@@ -143,7 +146,8 @@ class KnownValues(unittest.TestCase):
         grids = Grids(mol)
         grids.atom_grid = (99,590)
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = mbis(mol, grids, dm)
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm)
 
         ### Reference ORCA input
         # ! UHF DEF2-SVP TightSCF MBIS
@@ -208,12 +212,14 @@ class KnownValues(unittest.TestCase):
         ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
         ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
         ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+        ref_r3_moment = np.array([ 34.333544,  3.336940,  2.556058, 35.225552,  3.058440,  2.936329,  3.037714, ])
 
         assert abs(test_energy - ref_energy) < 2e-5
         assert np.max(np.abs(test_charges - ref_charges)) < 5e-5
         assert np.max(np.abs(test_dipoles - ref_dipoles)) < 5e-5
         assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 2e-4
         assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-4
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 1e-3
 
     def test_mbis_rks(self):
         mol = pyscf.M(
@@ -239,7 +245,7 @@ class KnownValues(unittest.TestCase):
 
         grids = mf.grids
 
-        test_shell_populations, test_shell_widths, test_shell_atom_indices = mbis(mol, grids, dm, compute_multipoles = False)
+        test_shell_populations, test_shell_widths, test_shell_atom_indices = mbis(mol, grids, dm, compute_properties = False)
 
         ### Reference ORCA input
         # ! PBE def2-svp TightSCF DEFGRID3 MBIS
@@ -294,7 +300,8 @@ class KnownValues(unittest.TestCase):
 
         grids = mf.grids
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = mbis(mol, grids, dm)
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm)
 
         ### Reference ORCA input
         # ! wB97M-V 6-31G TightSCF DEFGRID3 MBIS
@@ -367,12 +374,14 @@ class KnownValues(unittest.TestCase):
         ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
         ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
         ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+        ref_r3_moment = np.array([   2.949209, 36.547898,  2.777550,  2.778054, 28.564182,  3.424751,  3.425067, 25.124448,  1.288743, ])
 
         assert abs(test_energy - ref_energy) < 1e-4
         assert np.max(np.abs(test_charges - ref_charges)) < 3e-3
         assert np.max(np.abs(test_dipoles - ref_dipoles)) < 3e-4
         assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 1e-2
         assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-2
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 1e-1
 
     def test_mbis_ecp_I(self):
         mol = pyscf.M(
@@ -397,7 +406,8 @@ class KnownValues(unittest.TestCase):
 
         grids = mf.grids
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = mbis(mol, grids, dm)
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm)
 
         ### Reference ORCA input
         # ! PBE0 def2-svp TightSCF DEFGRID3 MBIS
@@ -446,12 +456,14 @@ class KnownValues(unittest.TestCase):
         ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
         ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
         ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+        ref_r3_moment = np.array([ 172.882242,  6.163151, 172.958552 ])
 
         assert abs(test_energy - ref_energy) < 1e-4
-        assert np.max(np.abs(test_charges - ref_charges)) < 3e-3
+        assert np.max(np.abs(test_charges - ref_charges)) < 3e-5
         assert np.max(np.abs(test_dipoles - ref_dipoles)) < 3e-4
-        assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 1e-2
-        assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-2
+        assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 1e-3
+        assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-3
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 1e-2
 
 
 if __name__ == "__main__":

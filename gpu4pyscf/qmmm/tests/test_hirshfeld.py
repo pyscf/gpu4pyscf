@@ -49,7 +49,8 @@ class KnownValues(unittest.TestCase):
         grids = Grids(mol)
         grids.atom_grid = (99,590)
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = hirshfeld(mol, grids, dm, xc = "HF", auxbasis = "def2-universal-jkfit")
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = hirshfeld(mol, grids, dm, xc = "HF", auxbasis = "def2-universal-jkfit")
 
         ### Reference Q-Chem input
         # $rem
@@ -101,7 +102,8 @@ class KnownValues(unittest.TestCase):
         grids.prune = None
         grids.radii_adjust = None
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = hirshfeld(mol, grids, dm, xc = "HF", auxbasis = "def2-universal-jkfit")
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = hirshfeld(mol, grids, dm, xc = "HF", auxbasis = "def2-universal-jkfit")
 
         ### Reference Q-Chem input
         # $rem
@@ -226,7 +228,8 @@ class KnownValues(unittest.TestCase):
             mf.conv_tol = 1e-10
             return mf
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = hirshfeld_kernel(mol, grids, dm, make_mf = _make_mf)
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = hirshfeld_kernel(mol, grids, dm, make_mf = _make_mf)
 
         ref_energy = -3172.1209095366
         ref_charges = np.array([  0.145544,  0.054114, -0.084534, -0.054412, -0.060709, ])
@@ -258,7 +261,8 @@ class KnownValues(unittest.TestCase):
         grids = Grids(mol)
         grids.atom_grid = (99,590)
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = hirshfeld(mol, grids, dm, xc = "wB97X", auxbasis = "def2-universal-jkfit")
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = hirshfeld(mol, grids, dm, xc = "wB97X", auxbasis = "def2-universal-jkfit")
 
         ### Reference ORCA input
         # !wB97X def2-SVP DEFGRID3 Hirshfeld

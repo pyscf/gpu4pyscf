@@ -75,7 +75,7 @@ def _mbis_density_on_grid(atom_grid_rij, shell_atom_indices, populations, widths
     prefactors = populations / (8.0 * np.pi * widths**3)
     return prefactors[:, None] * cp.exp(-shell_grid_rij / widths[:, None]) # Eq 7
 
-def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, compute_multipoles = True):
+def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, compute_properties = True):
     """
         Implementation follows:
         Verstraelen, T., Vandenbrande, S., Heidar-Zadeh, F., Vanduyfhuys, L., Van Speybroeck, V., Waroquier, M., & Ayers, P. W. (2016).
@@ -197,7 +197,7 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
         log.info(f"MBIS shell {i_shell} from atom {shell_atom_indices[i_shell]} {mol.elements[shell_atom_indices[i_shell]]} has "
                  f"population = {shell_populations[i_shell]} and width = {shell_widths[i_shell]}")
 
-    if not compute_multipoles:
+    if not compute_properties:
         return shell_populations.get(), shell_widths.get(), shell_atom_indices
 
     shell_rho = _mbis_density_on_grid(atom_grid_rij, shell_atom_indices, shell_populations, shell_widths)
@@ -212,29 +212,31 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
     atom_partition[:, rho0_nonzero_mask] = atom_rho[:, rho0_nonzero_mask] / rho0[rho0_nonzero_mask]
     del rho0, rho0_nonzero_mask, atom_rho
 
-    # MBIS Multipoles
-
     partitioned_w_rho = atom_partition * grid_w_rho[None, :]
+
+    atom_grid_vecrij = grid_coords[None, :, :] - atom_coords[:, None, :]
+
+    return properties_from_partition(mol, log, partitioned_w_rho, atom_grid_vecrij, "MBIS")
+
+def properties_from_partition(mol, log, partitioned_w_rho, atom_grid_vecrij, partition_name):
     partitioned_nelec = cp.sum(partitioned_w_rho, axis = 1)
     atom_charges = cp.asarray(mol.atom_charges(), dtype = cp.float64) # ECP atom will get the effective core charge
     charges = atom_charges - partitioned_nelec
 
-    log.info("MBIS Charge (a.u.)")
+    log.info(f"{partition_name} Charge (a.u.)")
     for i_atom in range(mol.natm):
         log.info(f"{mol.elements[i_atom]:2s}  {charges[i_atom]:13.8f}")
 
-    atom_grid_vecrij = grid_coords[None, :, :] - atom_coords[:, None, :]
-
     dipoles = -cp.einsum("Ag,Agx->Ax", partitioned_w_rho, atom_grid_vecrij)
 
-    log.info("MBIS Dipole x y z (a.u.)")
+    log.info(f"{partition_name} Dipole x y z (a.u.)")
     for i_atom in range(mol.natm):
         log.info(f"{mol.elements[i_atom]:2s}  {dipoles[i_atom, 0]:13.8f}  {dipoles[i_atom, 1]:13.8f}  {dipoles[i_atom, 2]:13.8f}")
 
     # ORCA did not remove trace, and we follow them
     quadrupoles = -cp.einsum("Ag,Agx,Agy->Axy", partitioned_w_rho, atom_grid_vecrij, atom_grid_vecrij)
 
-    log.info("MBIS Quadrupole xx yy zz xy xz yz (a.u.)")
+    log.info(f"{partition_name} Quadrupole xx yy zz xy xz yz (a.u.)")
     for i_atom in range(mol.natm):
         log.info(f"{mol.elements[i_atom]:2s}  {quadrupoles[i_atom, 0, 0]:13.8f}  {quadrupoles[i_atom, 1, 1]:13.8f}  {quadrupoles[i_atom, 2, 2]:13.8f}  "
                  f"{0.5 * (quadrupoles[i_atom, 0, 1] + quadrupoles[i_atom, 1, 0]):13.8f}  "
@@ -244,7 +246,7 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
     # ORCA did not remove trace, and we follow them
     octupoles = -cp.einsum("Ag,Agx,Agy,Agz->Axyz", partitioned_w_rho, atom_grid_vecrij, atom_grid_vecrij, atom_grid_vecrij)
 
-    log.info("MBIS Octupole xxx yyy zzz xxy xxz xyy xyz xzz yyz yzz (a.u.)")
+    log.info(f"{partition_name} Octupole xxx yyy zzz xxy xxz xyy xyz xzz yyz yzz (a.u.)")
     octupole_xyz_term = octupoles[i_atom, 0, 1, 2] + octupoles[i_atom, 0, 2, 1] + octupoles[i_atom, 1, 0, 2] \
                         + octupoles[i_atom, 1, 2, 0] + octupoles[i_atom, 2, 0, 1] + octupoles[i_atom, 2, 1, 0] # Just to make linter happy
     for i_atom in range(mol.natm):
@@ -258,4 +260,15 @@ def mbis(mol, grids, dm, conv_tol = 1e-8, max_cycle = 500, damping = 0.1, comput
                  f"{1.0/3.0 * (octupoles[i_atom, 1, 2, 2] + octupoles[i_atom, 2, 1, 2] + octupoles[i_atom, 2, 2, 1]):13.8f}  "
                  f"")
 
-    return charges.get(), dipoles.get(), quadrupoles.get(), octupoles.get()
+    atom_grid_rij = cp.linalg.norm(atom_grid_vecrij, axis=2)
+    del atom_grid_vecrij
+
+    r2_moment = cp.einsum("Ag,Ag->A", partitioned_w_rho, atom_grid_rij**2)
+    r3_moment = cp.einsum("Ag,Ag->A", partitioned_w_rho, atom_grid_rij**3)
+    r4_moment = cp.einsum("Ag,Ag->A", partitioned_w_rho, atom_grid_rij**4)
+
+    log.info(f"{partition_name} radial moments <r^2> <r^3> <r^4> (a.u.)")
+    for i_atom in range(mol.natm):
+        log.info(f"{mol.elements[i_atom]:2s}  {r2_moment[i_atom]:13.8f}  {r3_moment[i_atom]:13.8f}  {r4_moment[i_atom]:13.8f}")
+
+    return charges.get(), dipoles.get(), quadrupoles.get(), octupoles.get(), r2_moment.get(), r3_moment.get(), r4_moment.get()

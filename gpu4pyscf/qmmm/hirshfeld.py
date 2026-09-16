@@ -26,6 +26,7 @@ from gpu4pyscf.dft.gen_grid import Grids
 from gpu4pyscf.dft.uks import UKS
 from gpu4pyscf.scf.uhf import UHF as UHF_GPU
 from pyscf.scf.uhf import UHF as UHF_CPU
+from gpu4pyscf.qmmm.mbis import properties_from_partition
 
 HIRSHFELD_REMOVE_ZERO_RHO_GRID_THRESHOLD = 1e-10
 
@@ -265,53 +266,11 @@ def hirshfeld_kernel(mol, grids, dm, make_mf):
     atom_partition[:, sum_atomic_rho_nonzero_mask] = atomic_rho[:, sum_atomic_rho_nonzero_mask] / sum_atomic_rho[sum_atomic_rho_nonzero_mask]
     del sum_atomic_rho, sum_atomic_rho_nonzero_mask, atomic_rho
 
-    # Hirshfeld Multipoles
-
     partitioned_w_rho = atom_partition * grid_w_rho[None, :]
-    partitioned_nelec = cp.sum(partitioned_w_rho, axis = 1)
-    atom_charges = cp.asarray(mol.atom_charges(), dtype = cp.float64)
-    charges = atom_charges - partitioned_nelec
-
-    log.info("Hirshfeld Charge (a.u.)")
-    for i_atom in range(mol.natm):
-        log.info(f"{mol.elements[i_atom]:2s}  {charges[i_atom]:13.8f}")
 
     atom_grid_vecrij = grid_coords[None, :, :] - atom_coords[:, None, :]
 
-    dipoles = -cp.einsum("Ag,Agx->Ax", partitioned_w_rho, atom_grid_vecrij)
-
-    log.info("Hirshfeld Dipole x y z (a.u.)")
-    for i_atom in range(mol.natm):
-        log.info(f"{mol.elements[i_atom]:2s}  {dipoles[i_atom, 0]:13.8f}  {dipoles[i_atom, 1]:13.8f}  {dipoles[i_atom, 2]:13.8f}")
-
-    # ORCA did not remove trace, and we follow them
-    quadrupoles = -cp.einsum("Ag,Agx,Agy->Axy", partitioned_w_rho, atom_grid_vecrij, atom_grid_vecrij)
-
-    log.info("Hirshfeld Quadrupole xx yy zz xy xz yz (a.u.)")
-    for i_atom in range(mol.natm):
-        log.info(f"{mol.elements[i_atom]:2s}  {quadrupoles[i_atom, 0, 0]:13.8f}  {quadrupoles[i_atom, 1, 1]:13.8f}  {quadrupoles[i_atom, 2, 2]:13.8f}  "
-                 f"{0.5 * (quadrupoles[i_atom, 0, 1] + quadrupoles[i_atom, 1, 0]):13.8f}  "
-                 f"{0.5 * (quadrupoles[i_atom, 0, 2] + quadrupoles[i_atom, 2, 0]):13.8f}  "
-                 f"{0.5 * (quadrupoles[i_atom, 1, 2] + quadrupoles[i_atom, 2, 1]):13.8f}")
-
-    # ORCA did not remove trace, and we follow them
-    octupoles = -cp.einsum("Ag,Agx,Agy,Agz->Axyz", partitioned_w_rho, atom_grid_vecrij, atom_grid_vecrij, atom_grid_vecrij)
-
-    log.info("Hirshfeld Octupole xxx yyy zzz xxy xxz xyy xyz xzz yyz yzz (a.u.)")
-    octupole_xyz_term = octupoles[i_atom, 0, 1, 2] + octupoles[i_atom, 0, 2, 1] + octupoles[i_atom, 1, 0, 2] \
-                        + octupoles[i_atom, 1, 2, 0] + octupoles[i_atom, 2, 0, 1] + octupoles[i_atom, 2, 1, 0] # Just to make linter happy
-    for i_atom in range(mol.natm):
-        log.info(f"{mol.elements[i_atom]:2s}  {octupoles[i_atom, 0, 0, 0]:13.8f}  {octupoles[i_atom, 1, 1, 1]:13.8f}  {octupoles[i_atom, 2, 2, 2]:13.8f}  "
-                 f"{1.0/3.0 * (octupoles[i_atom, 0, 0, 1] + octupoles[i_atom, 0, 1, 0] + octupoles[i_atom, 1, 0, 0]):13.8f}  "
-                 f"{1.0/3.0 * (octupoles[i_atom, 0, 0, 2] + octupoles[i_atom, 0, 2, 0] + octupoles[i_atom, 2, 0, 0]):13.8f}  "
-                 f"{1.0/3.0 * (octupoles[i_atom, 0, 1, 1] + octupoles[i_atom, 1, 0, 1] + octupoles[i_atom, 1, 1, 0]):13.8f}  "
-                 f"{1.0/6.0 * octupole_xyz_term:13.8f}  "
-                 f"{1.0/3.0 * (octupoles[i_atom, 0, 2, 2] + octupoles[i_atom, 2, 0, 2] + octupoles[i_atom, 2, 2, 0]):13.8f}  "
-                 f"{1.0/3.0 * (octupoles[i_atom, 1, 1, 2] + octupoles[i_atom, 1, 2, 1] + octupoles[i_atom, 2, 1, 1]):13.8f}  "
-                 f"{1.0/3.0 * (octupoles[i_atom, 1, 2, 2] + octupoles[i_atom, 2, 1, 2] + octupoles[i_atom, 2, 2, 1]):13.8f}  "
-                 f"")
-
-    return charges.get(), dipoles.get(), quadrupoles.get(), octupoles.get()
+    return properties_from_partition(mol, log, partitioned_w_rho, atom_grid_vecrij, "Hirshfeld")
 
 def hirshfeld(mol, grids, dm, xc = "wB97X-V", xc_grid = (99,590), nlc_grid = (50,194), auxbasis = None,
               conv_tol = 1e-10, max_cycle = 100, nlc = None, disp = None):
