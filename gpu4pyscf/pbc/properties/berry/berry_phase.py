@@ -28,64 +28,84 @@ TWO_PI = 2. * np.pi
 
 
 def _wrap_phase(phase):
-    return cp.angle(cp.exp(1j * phase))
+    return (phase + np.pi) % TWO_PI - np.pi
 
 
-def unitary_part(overlaps, singular_tol=1e-10):
-    '''Return the unitary polar factor of a batch of overlap matrices.'''
+def _positive_tolerance(value, name):
+    if not np.isscalar(value) or not np.isfinite(value) or value <= 0:
+        raise ValueError(f'{name} must be finite and positive')
+
+
+def _validate_inputs(overlaps, strings):
     overlaps = cp.asarray(overlaps)
-    if overlaps.ndim < 2 or overlaps.shape[-1] != overlaps.shape[-2]:
+    strings = cp.asarray(strings)
+    if (overlaps.ndim != 3 or overlaps.shape[1] != overlaps.shape[2] or
+            overlaps.shape[0] == 0):
         raise ValueError(
-            f'overlaps must end in square matrix dimensions, got {overlaps.shape}')
-    if overlaps.shape[-1] == 0:
-        return overlaps.copy()
+            f'overlaps must have shape (nkpts, nband, nband), got {overlaps.shape}')
+    if not bool(cp.all(cp.isfinite(overlaps)).get()):
+        raise ValueError('overlaps must be finite')
+    if strings.ndim != 2 or strings.size == 0 or strings.dtype.kind not in 'iu':
+        raise ValueError('strings must be a nonempty 2D integer index array')
+    if bool(cp.any((strings < 0) | (strings >= len(overlaps))).get()):
+        raise ValueError('strings contains an out-of-range k-point index')
+    return overlaps, strings.astype(cp.int64, copy=False)
 
-    u, singular_values, vh = cp.linalg.svd(overlaps)
+
+def _check_singular_values(singular_values, singular_tol):
+    if not bool(cp.all(cp.isfinite(singular_values)).get()):
+        raise np.linalg.LinAlgError('Non-finite overlap singular values')
     minimum = float(singular_values.min().get())
     if minimum < singular_tol:
         raise np.linalg.LinAlgError(
             'The occupied subspaces at neighboring k-points have a '
             f'near-singular overlap (minimum singular value {minimum:.3e}). '
             'Use a denser k-point mesh or verify that the system is insulating.')
+
+
+def unitary_part(overlaps, singular_tol=1e-10):
+    '''Return the unitary polar factor of a batch of overlap matrices.'''
+    _positive_tolerance(singular_tol, 'singular_tol')
+    overlaps = cp.asarray(overlaps)
+    if overlaps.ndim < 2 or overlaps.shape[-1] != overlaps.shape[-2]:
+        raise ValueError(
+            f'overlaps must end in square matrix dimensions, got {overlaps.shape}')
+    if not bool(cp.all(cp.isfinite(overlaps)).get()):
+        raise ValueError('overlaps must be finite')
+    if overlaps.shape[-1] == 0:
+        return overlaps.copy()
+
+    u, singular_values, vh = cp.linalg.svd(overlaps)
+    _check_singular_values(singular_values, singular_tol)
+    # leave the singular values, i.e. signular values are set to 1.
     return cp.matmul(u, vh)
 
 
-def _unitary_eigenvalues(matrices, diagonal_tol=1e-9):
-    '''Diagonalize unitary matrices through commuting Hermitian parts.'''
-    matrices_h = matrices.conj().transpose(0, 2, 1)
-    real_part = .5 * (matrices + matrices_h)
-    imag_part = (matrices - matrices_h) / (2j)
-    identity = cp.eye(matrices.shape[-1])
-
-    for coefficient in (np.sqrt(2.), np.sqrt(3.), np.pi):
-        _, vectors = cp.linalg.eigh(real_part + coefficient * imag_part)
-        rotated = cp.matmul(
-            vectors.conj().transpose(0, 2, 1),
-            cp.matmul(matrices, vectors))
-        eigenvalues = cp.diagonal(rotated, axis1=1, axis2=2)
-        off_diagonal = rotated - eigenvalues[:, :, None] * identity
-        if float(cp.max(cp.abs(off_diagonal)).get()) < diagonal_tol:
-            return eigenvalues / cp.abs(eigenvalues)
-
-    raise np.linalg.LinAlgError(
-        'Failed to resolve the eigenphases of the unitary Wilson loop')
+def _unitary_eigenvalues(matrices):
+    '''Return Wilson-loop eigenvalues.'''
+    # TODO: there may be some gpu version of eigvals
+    matrices = cp.asnumpy(matrices)
+    eigenvalues = np.stack(
+        [np.linalg.eigvals(matrix) for matrix in matrices])
+    eigenvalues /= np.abs(eigenvalues)
+    return cp.asarray(eigenvalues)
 
 
-def berry_phase(overlaps, strings):
-    r'''Compute the many-band Berry phase for each closed k-point string.
-
-    The phase is accumulated as ``sum(arg(det(M_k)))`` and wrapped only after
-    completing a string. ``slogdet`` avoids determinant overflow and underflow.
+def berry_phase(overlaps, strings, singular_tol=None):
+    '''Compute the many-band Berry phase for each closed k-point string.
+    The phase is accumulated as sum(arg(det(M_k))) and wrapped only after
+    completing a string. Returns principal phases in [-pi, pi). 
+    An optional singular_tol checks near-singular links without computing
+    Wilson-loop eigenvectors.
     '''
-    overlaps = cp.asarray(overlaps)
-    strings = cp.asarray(strings, dtype=cp.int64)
-    if overlaps.ndim != 3 or overlaps.shape[1] != overlaps.shape[2]:
-        raise ValueError(
-            f'overlaps must have shape (nkpts, nband, nband), got {overlaps.shape}')
-    if strings.ndim != 2:
-        raise ValueError(f'strings must have shape (nstring, nlink), got {strings.shape}')
+    overlaps, strings = _validate_inputs(overlaps, strings)
+    if singular_tol is not None:
+        _positive_tolerance(singular_tol, 'singular_tol')
     if overlaps.shape[1] == 0:
         return cp.zeros(strings.shape[0])
+    if singular_tol is not None:
+        singular_values = cp.linalg.svd(overlaps, compute_uv=False)
+        _check_singular_values(singular_values, singular_tol)
 
     sign, logabsdet = cp.linalg.slogdet(overlaps)
     if not bool(cp.all(cp.isfinite(logabsdet)).get()):
@@ -96,22 +116,17 @@ def berry_phase(overlaps, strings):
 
 
 def hybrid_wannier_centers(overlaps, strings, singular_tol=1e-10):
-    r'''Compute hybrid Wannier centers from Wilson-loop eigenphases.
+    '''Compute hybrid Wannier centers from Wilson-loop eigenphases.
 
     Returns:
         centers : cupy.ndarray
-            Fractional centers in ``[0, 1)`` with shape
-            ``(nstring, noccupied)``.
+            Fractional centers in [0, 1) with shape
+            (nstring, noccupied).
         phases : cupy.ndarray
-            The determinant Berry phase for each string in ``[-pi, pi)``.
+            The determinant Berry phase for each string in [-pi, pi).
     '''
-    overlaps = cp.asarray(overlaps)
-    strings = cp.asarray(strings, dtype=cp.int64)
-    if overlaps.ndim != 3 or overlaps.shape[1] != overlaps.shape[2]:
-        raise ValueError(
-            f'overlaps must have shape (nkpts, nband, nband), got {overlaps.shape}')
-    if strings.ndim != 2:
-        raise ValueError(f'strings must have shape (nstring, nlink), got {strings.shape}')
+    _positive_tolerance(singular_tol, 'singular_tol')
+    overlaps, strings = _validate_inputs(overlaps, strings)
 
     nstrings = strings.shape[0]
     nband = overlaps.shape[1]
@@ -139,13 +154,8 @@ def diagonal_wannier_centers(overlaps, strings, overlap_tol=1e-12):
     Wannier gauge ``U(k)``. Without such a gauge, individual centers are not
     physical; use :func:`hybrid_wannier_centers` instead.
     '''
-    overlaps = cp.asarray(overlaps)
-    strings = cp.asarray(strings, dtype=cp.int64)
-    if overlaps.ndim != 3 or overlaps.shape[1] != overlaps.shape[2]:
-        raise ValueError(
-            f'overlaps must have shape (nkpts, nband, nband), got {overlaps.shape}')
-    if strings.ndim != 2:
-        raise ValueError(f'strings must have shape (nstring, nlink), got {strings.shape}')
+    _positive_tolerance(overlap_tol, 'overlap_tol')
+    overlaps, strings = _validate_inputs(overlaps, strings)
 
     diagonal = cp.diagonal(overlaps, axis1=1, axis2=2)
     if diagonal.size and float(cp.min(cp.abs(diagonal)).get()) < overlap_tol:

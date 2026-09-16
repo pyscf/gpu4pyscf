@@ -15,17 +15,17 @@
 '''Neighboring-k-point overlaps for Wannier-center calculations.'''
 
 import itertools
+import operator
 import numpy as np
 import cupy as cp
-
 from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.pbc.df import ft_ao
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 
 __all__ = [
     'KPointMesh',
     'periodic_ao_overlap',
     'build_mmn',
-    'build_mmn_channels',
 ]
 
 
@@ -33,6 +33,33 @@ def _asnumpy(array):
     if isinstance(array, cp.ndarray):
         return cp.asnumpy(array)
     return np.asarray(array)
+
+
+def _direction_index(direction):
+    direction = operator.index(direction)
+    if direction not in (0, 1, 2):
+        raise ValueError(f'direction must be 0, 1, or 2; got {direction}')
+    return direction
+
+
+def _commensurate_bvk_mesh(cell, kpts, kmesh=None):
+    # FTOpt folds outer BvK images without a twist phase. Every absolute
+    # k-point, not just the spacing of the mesh, must be commensurate.
+    scaled = np.asarray(cell.get_scaled_kpts(kpts))
+    if not np.all(np.isfinite(scaled)):
+        raise ValueError('kpts must be finite')
+    if kmesh is None or np.max(np.abs(scaled * kmesh - np.rint(scaled * kmesh))) > 1e-8:
+        try:
+            kmesh = kpts_to_kmesh(
+                cell, kpts, precision=1e-10, bound_by_supmol=False)
+        except RuntimeError as err:
+            raise ValueError(
+                'The GPU Fourier transform requires k-points commensurate '
+                'with a finite BvK mesh') from err
+    residual = scaled * kmesh - np.rint(scaled * kmesh)
+    if np.max(np.abs(residual)) > 1e-8:
+        raise ValueError('Cannot represent the absolute k-points on a BvK mesh')
+    return kmesh
 
 
 def _periodic_axis_values(values, tol):
@@ -51,10 +78,8 @@ def _periodic_axis_values(values, tol):
 
 
 class KPointMesh:
-    '''Topology of a full, uniform Monkhorst-Pack mesh.
-
-    The small integer topology arrays are kept on the host. Wavefunctions,
-    overlap matrices, and all linear algebra remain on the GPU.
+    '''
+    Topology of a full, uniform Monkhorst-Pack mesh.
     '''
 
     def __init__(self, cell, kpts, kmesh=None, tol=1e-7):
@@ -64,8 +89,12 @@ class KPointMesh:
                 'Run the SCF calculation on the full Monkhorst-Pack mesh.')
 
         kpts = _asnumpy(kpts)
-        if kpts.ndim != 2 or kpts.shape[1] != 3:
+        if kpts.ndim != 2 or kpts.shape[1] != 3 or len(kpts) == 0:
             raise ValueError(f'kpts must have shape (nk, 3), got {kpts.shape}')
+        if not np.all(np.isfinite(kpts)):
+            raise ValueError('kpts must be finite')
+        if not np.isfinite(tol) or tol <= 0:
+            raise ValueError('tol must be finite and positive')
 
         scaled_kpts = np.asarray(cell.get_scaled_kpts(kpts))
         wrapped_kpts = np.mod(scaled_kpts, 1.)
@@ -79,9 +108,11 @@ class KPointMesh:
         if kmesh is None:
             kmesh = inferred_kmesh
         else:
-            kmesh = np.asarray(kmesh, dtype=int)
-            if kmesh.shape != (3,) or np.any(kmesh < 1):
+            kmesh = _asnumpy(kmesh)
+            if (kmesh.shape != (3,) or not np.all(np.isfinite(kmesh)) or
+                    np.any(kmesh < 1) or np.any(kmesh != np.rint(kmesh))):
                 raise ValueError(f'kmesh must contain three positive integers, got {kmesh}')
+            kmesh = kmesh.astype(int)
             if not np.array_equal(kmesh, inferred_kmesh):
                 raise ValueError(
                     f'kmesh {kmesh.tolist()} is inconsistent with the '
@@ -114,12 +145,6 @@ class KPointMesh:
                 raise ValueError(f'Duplicate k-point mesh address {key}')
             index_by_address[key] = k
 
-        expected_addresses = itertools.product(*(range(n) for n in kmesh))
-        missing = [address for address in expected_addresses
-                   if address not in index_by_address]
-        if missing:
-            raise ValueError(f'Incomplete k-point mesh; missing address {missing[0]}')
-
         self.cell = cell
         self.kpts = kpts
         self.scaled_kpts = scaled_kpts
@@ -130,9 +155,7 @@ class KPointMesh:
 
     def neighbors(self, direction):
         '''Return the +b neighbor index and reciprocal-lattice image shift.'''
-        direction = int(direction)
-        if direction not in (0, 1, 2):
-            raise ValueError(f'direction must be 0, 1, or 2; got {direction}')
+        direction = _direction_index(direction)
 
         neighbor_indices = np.empty(len(self.kpts), dtype=int)
         image_shifts = np.empty((len(self.kpts), 3), dtype=int)
@@ -158,9 +181,7 @@ class KPointMesh:
 
     def strings(self, direction):
         '''Return k-point indices grouped into oriented closed strings.'''
-        direction = int(direction)
-        if direction not in (0, 1, 2):
-            raise ValueError(f'direction must be 0, 1, or 2; got {direction}')
+        direction = _direction_index(direction)
 
         transverse = [dim for dim in range(3) if dim != direction]
         strings = []
@@ -176,6 +197,7 @@ class KPointMesh:
         return np.asarray(strings, dtype=int)
 
     def reciprocal_step(self, direction):
+        direction = _direction_index(direction)
         return (np.asarray(self.cell.reciprocal_vectors())[direction] /
                 self.kmesh[direction])
 
@@ -188,9 +210,14 @@ def periodic_ao_overlap(cell, kpt, neighbor_kpt):
     '''
     kpt = _asnumpy(kpt).reshape(3)
     neighbor_kpt = _asnumpy(neighbor_kpt).reshape(3)
-    raw = ft_ao.ft_aopair(
-        cell, (kpt - neighbor_kpt).reshape(1, 3),
-        kpti_kptj=np.asarray([neighbor_kpt, kpt]), q=np.zeros(3))[0]
+    if not np.all(np.isfinite(neighbor_kpt)):
+        raise ValueError('neighbor_kpt must be finite')
+    bvk_mesh = _commensurate_bvk_mesh(cell, kpt[None])
+    ft_opt = ft_ao.FTOpt(cell, bvk_mesh)
+    ft_opt.permutation_symmetry = False
+    raw = ft_opt.gen_ft_kernel()(
+        (kpt - neighbor_kpt).reshape(1, 3),
+        q=np.zeros(3), kpts=kpt[None])[0, 0]
 
     # ft_aopair follows the Fourier-transform AO-pair convention used by
     # pywannier90.get_M_mat. Its matrix is the Hermitian transpose of
@@ -200,53 +227,48 @@ def periodic_ao_overlap(cell, kpt, neighbor_kpt):
 
 def build_mmn(cell, mo_coeff_kpts, kpts, kmesh, direction, batch_size=None,
               topology=None):
-    r'''Build ``M_mn(k,b) = <u_mk | u_n,k+b>`` on the GPU.'''
-    return build_mmn_channels(
-        cell, (mo_coeff_kpts,), kpts, kmesh, direction, batch_size, topology)[0]
-
-
-def build_mmn_channels(cell, mo_coeff_channels, kpts, kmesh, direction,
-                       batch_size=None, topology=None):
-    '''Build neighboring-k-point MO overlaps for one or more spin channels.
-
-    AO Fourier transforms are shared by all channels. Each coefficient array
-    must have shape ``(nkpts, nao, nband)``.
+    '''
+    Build M_mn(k,b) = <u_mk | u_n,k+b>.
     '''
     if cell.dimension != 3:
         raise NotImplementedError(
             'Wannier-center polarization currently supports 3D cells only')
     if topology is None:
         topology = KPointMesh(cell, kpts, kmesh)
+    elif (topology.cell is not cell or
+          not np.array_equal(topology.kpts, _asnumpy(kpts)) or
+          (kmesh is not None and not np.array_equal(topology.kmesh, _asnumpy(kmesh)))):
+        raise ValueError('topology must match cell, kpts, and kmesh')
     kpts = topology.kpts
     kmesh = topology.kmesh
     nkpts = len(kpts)
 
-    coeff_channels = tuple(cp.asarray(coeff) for coeff in mo_coeff_channels)
-    for coeff in coeff_channels:
-        if coeff.ndim != 3 or coeff.shape[:2] != (nkpts, cell.nao):
-            raise ValueError(
-                'Each mo_coeff array must have shape '
-                f'({nkpts}, {cell.nao}, nband); got {coeff.shape}')
+    mo_coeff_kpts = cp.asarray(mo_coeff_kpts)
+    if (mo_coeff_kpts.ndim != 3 or
+            mo_coeff_kpts.shape[:2] != (nkpts, cell.nao)):
+        raise ValueError(
+            'mo_coeff_kpts must have shape '
+            f'({nkpts}, {cell.nao}, nband); got {mo_coeff_kpts.shape}')
 
     neighbor_indices = topology.neighbors(direction)[0]
     neighbor_indices_gpu = cp.asarray(neighbor_indices)
     reciprocal_step = topology.reciprocal_step(direction)
     Gv = (-reciprocal_step).reshape(1, 3)
 
-    ft_opt = ft_ao.FTOpt(cell, kmesh)
-    ft_opt.permutation_symmetry = False
-    ft_kernel = ft_opt.gen_ft_kernel()
-
     if batch_size is None:
         batch_size = nkpts
-    batch_size = int(batch_size)
+    batch_size = operator.index(batch_size)
     if batch_size < 1:
         raise ValueError(f'batch_size must be positive, got {batch_size}')
 
-    overlaps = tuple(
-        cp.empty((nkpts, coeff.shape[2], coeff.shape[2]),
-                 dtype=cp.complex128)
-        for coeff in coeff_channels)
+    bvk_mesh = _commensurate_bvk_mesh(cell, kpts, kmesh)
+    ft_opt = ft_ao.FTOpt(cell, bvk_mesh)
+    ft_opt.permutation_symmetry = False
+    ft_kernel = ft_opt.gen_ft_kernel()
+
+    overlaps = cp.empty(
+        (nkpts, mo_coeff_kpts.shape[2], mo_coeff_kpts.shape[2]),
+        dtype=cp.complex128)
 
     for p0 in range(0, nkpts, batch_size):
         p1 = min(p0 + batch_size, nkpts)
@@ -255,13 +277,11 @@ def build_mmn_channels(cell, mo_coeff_channels, kpts, kmesh, direction,
         s_ao = raw.conj().transpose(0, 2, 1)
         neighbors = neighbor_indices_gpu[p0:p1]
 
-        for coeff, mmn in zip(coeff_channels, overlaps):
-            coeff_left = coeff[p0:p1]
-            coeff_right = coeff[neighbors]
-            tmp = cp.matmul(s_ao, coeff_right)
-            mmn[p0:p1] = cp.matmul(
-                coeff_left.conj().transpose(0, 2, 1), tmp)
+        coeff_left = mo_coeff_kpts[p0:p1]
+        coeff_right = mo_coeff_kpts[neighbors]
+        tmp = cp.matmul(s_ao, coeff_right)
+        overlaps[p0:p1] = cp.matmul(
+            coeff_left.conj().transpose(0, 2, 1), tmp)
 
-        del raw, s_ao
-
+        del raw, s_ao, coeff_left, coeff_right, tmp
     return overlaps

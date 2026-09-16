@@ -47,8 +47,8 @@ mf.kernel()
 result = berry.eval_polarization(
     mf, kmesh=kmesh, unit='C/m^2', return_details=True)
 
-# Polarization is lattice-valued. Diamond Si is inversion symmetric, so the
-# branch nearest zero must vanish as the k mesh and basis are converged.
+# Diamond Si has a zero-polarization branch. Inversion symmetry in general
+# also permits half-quantum classes; it alone does not imply zero polarization.
 polarization_near_zero, branch = berry.unwrap_polarization(
     result.total, np.zeros(3), cell, unit=result.unit, return_branch=True)
 
@@ -58,7 +58,7 @@ print('Raw total polarization (C/m^2):', result.total)
 print('Branch indices:', branch)
 print('Total polarization nearest zero (C/m^2):', polarization_near_zero)
 
-for direction, name in enumerate('xyz'):
-    centers = result.wannier.centers[0][direction]
+for direction, name in enumerate(('a1', 'a2', 'a3')):
+    centers = result.wannier.centers[direction]
     print(f'Hybrid Wannier centers along {name} (fractional):')
     print(centers)

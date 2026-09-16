@@ -21,7 +21,6 @@ from gpu4pyscf.pbc.properties.berry.berry_phase import (
 from gpu4pyscf.pbc.properties.berry.overlap import (
     KPointMesh,
     build_mmn,
-    build_mmn_channels,
     periodic_ao_overlap,
 )
 from gpu4pyscf.pbc.properties.berry.polarization import (
