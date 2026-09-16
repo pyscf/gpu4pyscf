@@ -248,7 +248,7 @@ class KnownValues(unittest.TestCase):
             basis = "def2-svp",
             ecp = "def2-svp",
             charge = -1,
-            verbose = 4,
+            verbose = 0,
         )
         mf = UKS(mol, xc = "wB97X").density_fit(auxbasis = "def2-universal-jkfit")
         mf.conv_tol = 1e-10
