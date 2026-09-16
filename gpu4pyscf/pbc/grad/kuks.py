@@ -26,7 +26,7 @@ from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.dft import multigrid_v3, BeckeGrids
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3, BeckeGrids
 from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
 
 __all__ = ['Gradients']
@@ -237,6 +237,8 @@ class Gradients(kuhf_grad.Gradients):
             de = ni.energy_derivatives(
                 xc, dm, kpts=kpts, spin=1, with_j=True, with_nuc=True)
             j_factor = 0
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            raise NotImplementedError(f'derivatives for {ni}')
         else:
             if self.grids is not None:
                 grids = self.grids

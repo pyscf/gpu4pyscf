@@ -111,7 +111,7 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *,
-               omega=None, lr_factor=1, sr_factor=1):
+               omega=None, lr_factor=None, sr_factor=None):
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
@@ -504,17 +504,17 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None):
     return ej_sigma.get()
 
 def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
-               omega=None, lr_factor=1, sr_factor=1):
+               omega=None, lr_factor=None, sr_factor=None):
     '''Return nuclear gradients of the exact-exchange energy.'''
     return get_ek_derivatives(mydf, dm, kpts, exxdiv, omega,
                               lr_factor=lr_factor, sr_factor=sr_factor)[:-3]
 
 def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
-                        lr_factor=1, sr_factor=1):
+                        lr_factor=None, sr_factor=None):
     return get_ek_derivatives(mydf, dm, kpts, exxdiv, omega, lr_factor, sr_factor)[-3:]
 
 def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
-                       omega=None, lr_factor=1, sr_factor=1):
+                       omega=None, lr_factor=None, sr_factor=None):
     '''Return nuclear gradients and strain derivatives of the exact-exchange energy.
 
     The output has shape (cell.natm+3, 3), with atomic derivatives in the
@@ -603,17 +603,16 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
-            Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx)
-            Gpq = Gpq.transpose(0,2,3,1)
-            Gpq_conj = Gpq.conj()
-            # Gpq.conj() can be computed equivalently as
-            #Gpq_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts)
-            #Gpq_conj = Gpq_conj.transpose(0,2,3,1)
+            pqG = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx).transpose(0,2,3,1)
+            pqG_conj = pqG.conj()
+            # pqG.conj() can be computed equivalently as
+            #pqG_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts)
+            #pqG_conj = pqG_conj.transpose(0,2,3,1)
 
             if is_gamma_point:
-                tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
+                tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
-                vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
+                vkG = cp.einsum('pqg,qpg->g', dm_vG, pqG[0]).real
                 if ft_opt.permutation_symmetry:
                     dm_vG *= 2
             else:
@@ -643,26 +642,21 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
                 # einsum(nijG[ki_idx],jk[ki_idx],nlkG*[ki_idx],li[kj_idx])
                 # By applying G -> -G, this energy term leads to complex
                 # conjugation to the previous case.
-                #
-                # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
-                # apply derivatives to nlkG*
-                #:tmp = contract('nijg,snjk->snikg', Gpq[kj_idx], dms[:,kj_idx])
-                #:tmp = contract('snikg,snli->nklg', tmp, dms[:,ki_idx])
-                #:dm_vG = contract('Lk,kpqg->Lpqg', expLk[:,kj_idx].conj(), tmp).conj()
-                #:if swap_2e:
-                # apply derivatives to nijG. This term is equivalent to the
-                # derivatives of nlkG*.
-                #:    tmp = contract('snjk,nlkg->snjlg', dms[:,kj_idx], Gpq.conj()[kj_idx])
-                #:    tmp = contract('snjlg,snli->njig', tmp, dms[:,ki_idx])
-                #:    dm_vG += contract('Lk,kpqg->Lpqg', expLk[:,kj_idx], tmp)
                 idx = np.empty_like(ki_idx)
                 idx[kj_idx] = ki_idx
-                dm_k = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
+                dm_k = contract('snjk,nlkg->snjlg', dms, pqG_conj)
                 dm_k = contract('snjlg,snli->njig', dm_k, dms[:,idx])
-                dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
+                dm_vG = contract('Lk,kjig->Ljig', expLk, dm_k)
+                # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_deriv kernel
+                # only processes the lower triangular parts (p>=q in pLqG). By using the
+                # other transformation for nijG
+                #     nijG = contract('Ln,jLiG->nijG', expLk[:,ki_idx].conj(), qLpG)
+                # the upper triangular part can be folded into the lower triangular parts
+                # TODO: the two types of transformation likely produce the same
+                # output. Removing the following transformation if this is true.
                 if ft_opt.permutation_symmetry:
-                    dm_vG += contract('Lk,kpqg->Lqpg', expLk[:,idx].conj(), dm_k)
-                vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
+                    dm_vG += contract('Lk,kjig->Lijg', expLk[:,idx].conj(), dm_k)
+                vkG = cp.einsum('njig,nijg->g', dm_k, pqG).real
             tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
             if swap_2e:
                 sigma += tmp * 2
@@ -686,7 +680,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(int(ft_opt.permutation_symmetry)))
-            Gpq = Gpq_conj = dm_k = tmp = dm_vG = None
+            pqG = pqG_conj = dm_k = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)

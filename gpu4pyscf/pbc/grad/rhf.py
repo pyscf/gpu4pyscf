@@ -341,15 +341,9 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
         if lr_factor != 0 or sr_factor != 0:
             with_rsjk = mf.rsjk
             assert isinstance(with_rsjk, PBCJKMatrixOpt)
-            if with_rsjk.supmol is None:
-                with_rsjk.build()
-            ejk_sigma += with_rsjk._get_ejk_sr_derivatives(
+            ejk_sigma += with_rsjk._get_ejk_derivatives(
                 dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
                 lr_factor=lr_factor, sr_factor=sr_factor)
-            if lr_factor != 0 or omega != with_rsjk.omega:
-                ejk_sigma += with_rsjk._get_ejk_lr_derivatives(
-                    dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
-                    lr_factor=lr_factor, sr_factor=sr_factor)
 
     elif isinstance(with_df, GDF):
         return _gdf_ejk_derivatives(mf, dm, kpts, j_factor, omega, lr_factor, sr_factor)

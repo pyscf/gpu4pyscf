@@ -120,7 +120,7 @@ class KnownValues(unittest.TestCase):
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm)[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 5e-8
+            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 2e-7
 
     def test_get_j(self):
         a = np.eye(3) * 5

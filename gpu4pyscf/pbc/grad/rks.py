@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import numpy as np
-from gpu4pyscf.pbc.dft import multigrid_v3, BeckeGrids
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3, BeckeGrids
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.grad import rhf
 
@@ -50,6 +50,8 @@ class Gradients(rhf.Gradients):
             de = ni.energy_derivatives(
                 xc, dm, spin=spin, with_j=True, with_nuc=True)
             j_factor = 0
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            raise NotImplementedError(f'derivatives for {ni}')
         elif xc.upper() != 'HF':
             from gpu4pyscf.pbc.grad.krks import get_vxc, get_vxc_full_response
             grids = self.grids or mf.grids

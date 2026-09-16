@@ -90,7 +90,7 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
         vk = vhfopt._get_k_sr(dm, hermi, kpts, kpts_band, exxdiv, omega,
                               lr_factor, sr_factor, verbose=verbose)
 
-    if lr_factor != 0 or omega != vhfopt.omega:
+    if vhfopt._lr_is_required(omega, lr_factor):
         vk += vhfopt._get_k_lr(dm, hermi, kpts, kpts_band, exxdiv, omega,
                                lr_factor, sr_factor)
     return vk
@@ -224,8 +224,16 @@ class PBCJKMatrixOpt:
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
         return cutoff
 
+    def _lr_is_required(self, omega, lr_factor, j_factor=0):
+        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
+        requires_lr = (
+            self.omega != omega or
+            lr_factor != 0 or j_factor != 0 or
+            exclude_dd_block)
+        return requires_lr
+
     def _get_k_sr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
-                  omega=None, lr_factor=1, sr_factor=1, verbose=None):
+                  omega=None, lr_factor=0, sr_factor=1, verbose=None):
         '''
         Build kpts adapted K matrices
         Return a (*, nkpts, nao, nao) array.
@@ -300,8 +308,12 @@ class PBCJKMatrixOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        # Note, the input lr_factor is used to determine whether _get_k_lr needs
+        # to be called. It should not be used for _check_rsh_factors
+        if omega is None:
+            omega = cell.cell.omega
         omega = abs(omega)
+        requires_lr = self._lr_is_required(omega, lr_factor)
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -427,8 +439,7 @@ class PBCJKMatrixOpt:
         # However, vk_lr may be skipped for certain RSH funcitonals like HSE06.
         # In this particular case (self.omega == omega and lr_factor == 0),
         # explicitly handle the G=0 term here.
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
-        if ((self.omega == omega and lr_factor == 0 and not exclude_dd_block) and
+        if ((not requires_lr) and
             (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             assert len(member(np.zeros(3), kpts)) > 0
@@ -463,7 +474,7 @@ class PBCJKMatrixOpt:
         return vk
 
     def _get_k_lr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
-                  omega=None, lr_factor=1, sr_factor=1):
+                  omega=None, lr_factor=None, sr_factor=None):
         if kpts_band is not None:
             raise NotImplementedError
 
@@ -607,6 +618,7 @@ class PBCJKMatrixOpt:
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None,
                        kpts=None, lr_factor=1, sr_factor=1):
         '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''
+        raise DeprecationWarning
         cell = self.cell
         if mesh is None:
             mesh = self.mesh
@@ -877,7 +889,7 @@ class PBCJKMatrixOpt:
         return vj
 
     def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None, omega=None,
-                        j_factor=1, lr_factor=1, sr_factor=1):
+                        j_factor=1, lr_factor=0, sr_factor=1):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor - k_factor / 2, where k_factor = sr_factor
@@ -886,7 +898,7 @@ class PBCJKMatrixOpt:
             dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[:-3]
 
     def _get_ejk_lr_ip1(self, dm, kpts=None, omega=None, exxdiv=None,
-                        j_factor=1, lr_factor=1, sr_factor=1):
+                        j_factor=1, lr_factor=None, sr_factor=None):
         '''Compute the derivatives of the long-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
@@ -895,12 +907,12 @@ class PBCJKMatrixOpt:
             dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[:-3]
 
     def _get_ejk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None, omega=None,
-                        j_factor=1, lr_factor=1, sr_factor=1):
+                                 j_factor=1, lr_factor=0, sr_factor=1):
         return self._get_ejk_sr_derivatives(
             dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[-3:]
 
     def _get_ejk_sr_derivatives(self, dm, kpts=None, exxdiv=None, omega=None,
-                                j_factor=1, lr_factor=1, sr_factor=1):
+                                j_factor=1, lr_factor=0, sr_factor=1):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor - k_factor / 2.
@@ -959,13 +971,15 @@ class PBCJKMatrixOpt:
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         n_dm = len(dms)
         assert n_dm <= 2
-        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
+        cutoff = self.estimate_cutoff_with_penalty(cell.precision*10)
         log_cutoff = math.log(cutoff)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
-        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        if omega is None:
+            omega = cell.cell.omega
         omega = abs(omega)
+        requires_lr = self._lr_is_required(omega, lr_factor, j_factor)
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -1062,10 +1076,37 @@ class PBCJKMatrixOpt:
         ejk_sigma = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         ejk_sigma = ejk_sigma.get()
         ejk_sigma *= 2. / nkpts**2
+
+        # The G=0 term is treated differently between the real space ejk_sr code
+        # and the AFT integral code. This difference is encountered in the
+        # ejk_lr code.
+        # Explicitly handle this difference if ejk_lr code is not executed
+        if ((not requires_lr) and
+            (cell.dimension == 3 or
+             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
+            wcoulG_for_k = -np.pi / self.omega**2 / cell.vol
+            wcoulG_strain_deriv = -wcoulG_for_k * np.eye(3)
+            if exxdiv == 'ewald':
+                #vs wcoulG_for_k += nkpts*pbctools.madelung(cell, kpts, omega=-self.omega)
+                exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, -self.omega)
+                wcoulG_for_k += exx_0
+                wcoulG_strain_deriv += exx_1
+            s0 = int1e.int1e_ovlp(cell, kpts)
+            k_dm = contract('nkpq,kqr->nkpr', dms, s0)
+            k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
+            fac = sr_factor / nkpts
+            if n_dm == 1: #RHF
+                fac *= .5
+            ejk_sigma -= int1e.ovlp_derivatives(cell, k_dm, kpts) * (fac * wcoulG_for_k)
+
+            vk_G0 = cp.einsum('kpq,kqp->', k_dm, s0).real.get()
+            ejk_sigma[-3:] -= .5 * fac / nkpts * vk_G0 * wcoulG_strain_deriv
+
         return ejk_sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, omega=None, exxdiv=None,
-                        j_factor=1, lr_factor=1, sr_factor=1):
+                                 j_factor=1, lr_factor=None, sr_factor=None):
         '''Compute the strain derivatives of the long-range part of the
         aggregated J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
@@ -1074,7 +1115,7 @@ class PBCJKMatrixOpt:
             dm, kpts, exxdiv, omega, j_factor, lr_factor, sr_factor)[-3:]
 
     def _get_ejk_lr_derivatives(self, dm, kpts=None, exxdiv=None, omega=None,
-                                j_factor=1, lr_factor=1, sr_factor=1):
+                                j_factor=1, lr_factor=None, sr_factor=None):
         '''Compute the derivatives of the long-range part of the
         aggregated J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
@@ -1379,6 +1420,29 @@ class PBCJKMatrixOpt:
         if lr_factor != 0 or sr_factor != 0:
             ejk_sigma -= get_k()
         return ejk_sigma.get()
+
+    def _get_ejk_derivatives(self, dm, kpts=None, exxdiv=None, omega=None,
+                             j_factor=1, lr_factor=None, sr_factor=None):
+        '''
+        Computes the derivatives of the aggregated J/K contribution:
+        j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
+        '''
+        if self.supmol is None:
+            self.build()
+
+        omega, lr_factor, sr_factor = _check_rsh_factors(self.cell.cell, omega, lr_factor, sr_factor)
+        omega = abs(omega)
+        ejk_sigma = self._get_ejk_sr_derivatives(
+            dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor, sr_factor=sr_factor)
+
+        requires_lr = self._lr_is_required(omega, lr_factor, j_factor)
+        logger.debug1(self.cell, '_get_ejk_derivatives requires_lr=%s', requires_lr)
+        if requires_lr:
+            ejk_sigma += self._get_ejk_lr_derivatives(
+                dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
+                lr_factor=lr_factor, sr_factor=sr_factor)
+        return ejk_sigma
+
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''

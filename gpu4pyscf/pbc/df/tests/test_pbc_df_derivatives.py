@@ -537,7 +537,7 @@ def test_uhf_ejk_derivatives_gamma_point_without_long_range():
     grad_sigma = uhf._get_ejk_derivatives(
         opt, dm, hermi=1, j_factor=1, k_factor=1, omega=omega,
         exxdiv='ewald')
-    ejk, sigma = grad_sigma[:-3], grad_sigma[-3:]
+    ek, sigma = grad_sigma[:-3], grad_sigma[-3:]
     assert abs(ek.sum(axis=0)).max() < 1e-11
 
     dm_sf = dm[0] + dm[1]
