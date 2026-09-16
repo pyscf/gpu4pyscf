@@ -239,8 +239,6 @@ def test_sr_vk_hermi0_kpts_vs_fft():
 
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
-    wcoulG_SR_at_G0 = np.pi / cell.omega**2 / cell.vol / nkpts
-    s = cell.pbc_intor('int1e_ovlp', kpts=kpts)
     assert abs(vk - ref).max() < 1e-8
 
     # Test is_real == False
