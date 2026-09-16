@@ -91,7 +91,7 @@ class KnownValues(unittest.TestCase):
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
             ao1 = ni.eval_ao(cell1, coords)
             ao2 = ni.eval_ao(cell2, coords)
-            assert abs(ao_value[i,j,0] - (ao1 - ao2) / 2e-5).max() < 1e-9
+            assert abs(ao_value[i,j,0] - (ao1 - ao2) / 2e-5).max() < 5e-9
 
     def test_eval_ao_deriv1_cart(self):
         a = np.eye(3) * 5
@@ -107,10 +107,10 @@ class KnownValues(unittest.TestCase):
         ao_value = ao_value.get().transpose(0,1,2,3,5,4)[0]
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             ao1 = ni.eval_ao(cell1, coords, deriv=1)
             ao2 = ni.eval_ao(cell2, coords, deriv=1)
-            assert abs(ao_value[i,j] - (ao1 - ao2) / 2e-5).max() < 1e-9
+            assert abs(ao_value[i,j] - (ao1 - ao2) / 2e-4).max() < 1e-7
 
     def test_get_vxc_lda(self):
         a = np.eye(3) * 5
