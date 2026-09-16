@@ -21,6 +21,7 @@ from pyscf import lib
 from pyscf.pbc import gto
 from pyscf.pbc.grad import krhf as krhf_cpu
 from gpu4pyscf.pbc.grad import krhf as krhf_gpu
+from gpu4pyscf.pbc.grad import rhf as rhf_gpu
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.pbc.df import AFTDF
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -339,6 +340,24 @@ class KnownValues(unittest.TestCase):
         r[0,0] -= 2e-3
         e2 = mfs(cell.set_geom_(r, unit='Bohr', inplace=False))
         self.assertAlmostEqual(g[0,0], (e1-e2)/2e-3, 6)
+
+    def test_ewald_strain_deriv(self):
+        disp = 1e-5
+        ref = np.empty((3, 3))
+        for i in range(3):
+            for j in range(i+1):
+                cell1, cell2 = rhf_gpu._finite_diff_cells(cell, i, j, disp)
+                e1 = cell1.ewald()
+                e2 = cell2.ewald()
+                ref[j,i] = ref[i,j] = (e1 - e2) / (2*disp)
+        dat = rhf_gpu.ewald_derivatives(cell)[-3:]
+        assert abs(dat - ref).max() < 1e-9
+
+    def test_ewald_nuclear_gradient(self):
+        from pyscf.pbc.grad.rhf import grad_nuc as cpu_grad_nuc
+        ref = cpu_grad_nuc(cell)
+        dat = rhf_gpu.ewald_derivatives(cell)[:-3]
+        assert abs(dat - ref).max() < 1e-14
 
 if __name__ == "__main__":
     print("Full Tests for KRHF Gradients")

@@ -569,6 +569,47 @@ class KnownValues(unittest.TestCase):
             e2 = .5 * cp.einsum('kij,kji->', vk, dm).real / nkpts
             assert abs(sigma[i, j] - (e1-e2)/2e-4).max() < 5e-7
 
+    def test_ewald_strain_deriv(self):
+        def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
+            from pyscf.pbc.tools.pbc import madelung
+            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+            nkpts = len(kpts)
+            ewald_G0_response = np.empty((3,3))
+            disp = 1e-5
+            for i in range(3):
+                for j in range(i+1):
+                    cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
+                    kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+                    kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+                    e1 = nkpts * madelung(cell1, kpts1, omega=omega)
+                    e2 = nkpts * madelung(cell2, kpts2, omega=omega)
+                    ewald_G0_response[j,i] = ewald_G0_response[i,j] = (e1-e2)/(2*disp)
+            exx_0 = nkpts * madelung(cell, kpts, omega)
+            return exx_0, ewald_G0_response
+
+        np.random.seed(1)
+        cell = pgto.M(
+            atom = '''
+            H   0.      0.5   3.
+            H   0.5     1.    .6
+            ''',
+            a=np.eye(3)*4. - np.random.rand(3,3),
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        kmesh = [3,2,1]
+        kpts = cell.make_kpts(kmesh)
+        omega = -0.25
+        ref = _exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        assert abs(exx_0 - ref[0]) < 1e-12
+        assert abs(exx_1 - ref[1]).max() < 1e-8
+
+        omega = 0.25
+        ref = _exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        assert abs(exx_0 - ref[0]) < 1e-12
+        assert abs(exx_1 - ref[1]).max() < 1e-8
+
 if __name__ == '__main__':
     print("Full Tests for aft")
     unittest.main()
