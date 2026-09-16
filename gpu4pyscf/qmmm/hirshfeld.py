@@ -154,6 +154,10 @@ def hirshfeld_kernel(mol, grids, dm, make_mf):
     natm = natm_without_ghost(mol)
     if natm != mol.natm:
         raise NotImplementedError("Ghost atoms are not supported in Hirshfeld yet")
+    if len(mol._ecpbas) > 0:
+        log.warn("It is not recommended to use ECP for Hirshfeld multipole calculation.")
+    if mol.pseudo:
+        raise NotImplementedError("GTH pseudopotential is not supported in Hirshfeld yet")
 
     assert callable(make_mf)
 
