@@ -17,15 +17,7 @@
 Analytical nuclear gradients for RHF with kpoints sampling
 '''
 
-import numpy as np
-import cupy as cp
-from pyscf import lib
-from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
-from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
-from gpu4pyscf.pbc.dft import multigrid
-from gpu4pyscf.pbc.gto import int1e
 
 __all__ = ['Gradients']
 

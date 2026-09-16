@@ -201,7 +201,12 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
     return grad.real
 
 def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
+    from pyscf import lib, gto
+    from pyscf.pbc.gto import pseudo
     from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+    from gpu4pyscf.lib.cupy_helper import asarray
+    from gpu4pyscf.pbc.df import ft_ao
+    from gpu4pyscf.pbc.df.aft import get_SI
     if kpts is None:
         assert dm_kpts.ndim == 2
         dm_kpts = dm_kpts[None,:,:]
