@@ -222,15 +222,14 @@ C    D
         dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(
             cell, auxcell, omega=-omega)
     cp.cuda.get_current_stream().synchronize()
-    assert abs(lib.fp(abs(dat[0])) - 3.25766577810573) < 1e-8
 
     nao = cell.nao
     ij, diag = idx
     i, j = divmod(ij, nao)
     naux = auxcell.nao
     out = cp.zeros((naux,nao,nao))
-    out[:,j,i] = dat[0]
-    out[:,i,j] = dat[0]
+    out[:,j,i] = out[:,i,j] = cp.asarray(dat[0])
+    assert abs(lib.fp(abs(out.get())) - -4.663003306619004) < 1e-8
 
     auxcell.omega = cell.omega = -omega
     cell.precision = 1e-10
@@ -683,3 +682,46 @@ def test_kpts_compressed_linear_dep():
             _dat = np.einsum('pij,plk->ijkl', out[ki], out[ki].conj(), optimize=True)
             print(ki, kj)
             assert abs(_ref - _dat).max() < 1e-8
+
+def test_diffuse_only():
+    cell = pyscf.M(
+        atom = 'He 1. .5 .5;C .1 1.3 2.1',
+        basis = {'He': [[0, [0.12, 1]]],
+                 'C' :[[0, [0.08, 1]]],},
+        a = np.eye(3) * 2.5,
+    )
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [1., 1.]], [0, [.5, 1.]]]
+    auxcell.build(False, False)
+
+    opt = rsdf_builder.SRInt3c2eOpt(cell, auxcell, 0.3)
+    opt.mesh = [7, 7, 7]
+    opt.build(separate_dd=True)
+    assert len(opt.img_idx) == 0
+
+    def unexpected_sr(*args, **kwargs):
+        raise AssertionError('An all-DD build must not evaluate SR 3c2e')
+
+    with lib.temporary_env(rsdf_builder.SRInt3c2eOpt,
+                           int3c2e_evaluator=unexpected_sr):
+        full, _ = build_cderi(cell, auxcell, int3c2e_opt=opt)
+        excluded, _ = build_cderi(cell, auxcell, exclude_dd=True, int3c2e_opt=opt)
+    eri = cp.einsum('pij,pkl->ijkl', full[0,0], full[0,0])
+    assert abs(lib.fp(eri.get()) - 0.002616152259096199) < 1e-10
+    assert cp.all(excluded[0,0] == 0)
+
+    kmesh = [3,2,1]
+    kpts = cell.make_kpts(kmesh)
+    opt = rsdf_builder.SRInt3c2eOpt(cell, auxcell, 0.3, kmesh)
+    opt.mesh = [7, 7, 7]
+    opt.build(separate_dd=True)
+    assert len(opt.img_idx) == 0
+
+    with lib.temporary_env(rsdf_builder.SRInt3c2eOpt,
+                           int3c2e_evaluator=unexpected_sr):
+        full, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh, int3c2e_opt=opt)
+        excluded, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh,
+                                  exclude_dd=True, int3c2e_opt=opt)
+    eri = cp.einsum('pij,pkl->ijkl', full[0,0], full[0,0])
+    assert abs(lib.fp(eri.get()) - 0.002616152259096199) < 1e-10
+    assert cp.all(excluded[0,0] == 0)

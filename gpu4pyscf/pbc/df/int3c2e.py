@@ -219,7 +219,14 @@ class SRInt3c2eOpt:
         self.bvk_auxcell = None
         self.bvkmesh_Ls = None
 
-    def build(self):
+    def build(self, separate_dd=False):
+        """Build pair and image lists, optionally separating diffuse pairs.
+
+        With separate_dd=True, the SR evaluator contains only compact pairs;
+        dd_ft_opt holds the complementary Fourier-transform pair list.
+        """
+        self.dd_ft_opt = None
+        self.dd_bas_idx = self.dd_ao_idx = self.dd_diag_idx = None
         cell = self.cell = SortedCell.from_cell(self.cell)
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
         auxcell = self.auxcell = SortedCell.from_cell(self.auxcell)
@@ -288,11 +295,18 @@ class SRInt3c2eOpt:
             ctypes.c_float(log_cutoff), ctypes.c_int(symmetric))
 
         mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
+        self.dd_bas_ij_cache = dd_bas_ij_cache = {}
+        if separate_dd:
+            from gpu4pyscf.pbc.scf.rsjk import _search_diffuse_pairs
+            pair_mask = _search_diffuse_pairs(cell, self.mesh)
+            dd_mask = mask & pair_mask[:,None,:]
+            # Exclude diffuse pairs from bas_ij_cache
+            mask &= ~pair_mask[:,None,:]
+
         self.bas_ij_cache = bas_ij_cache = {}
         groups = len(cell.uniq_l_ctr)
         l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
         ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
-        bas_ij_idx = []
         img = cp.arange(bvk_ncells, dtype=np.uint32) * nbas
         for i, j in ij_tasks:
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
@@ -303,29 +317,55 @@ class SRInt3c2eOpt:
             assert np.all(bas_ij < np.iinfo(np.uint32).max), "uint32 overflow"
             bas_ij = bas_ij.astype(np.uint32)
             sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
-            bas_ij = bas_ij[sub_mask]
-            bas_ij_cache[i, j] = bas_ij
-            bas_ij_idx.append(bas_ij)
+            bas_ij_cache[i, j] = bas_ij[sub_mask]
+            if separate_dd:
+                sub_mask = dd_mask[ish0:ish1,:,jsh0:jsh1]
+                dd_bas_ij_cache[i, j] = bas_ij[sub_mask]
 
-        bas_ij_idx = cp.hstack(bas_ij_idx, dtype=np.uint32)
-        img_counts = img_counts[bas_ij_idx]
-        img_offsets = cp.empty(img_counts.size+1, dtype=np.uint32)
-        img_counts.cumsum(out=img_offsets[1:])
+        bas_ij_idx = cp.hstack(list(bas_ij_cache.values()), dtype=np.uint32)
+        img_offsets = cp.empty(bas_ij_idx.size+1, dtype=np.uint32)
+        img_counts[bas_ij_idx].cumsum(out=img_offsets[1:])
         img_offsets[0] = 0
         img_idx_size = img_offsets[-1].get()
         assert img_idx_size < 2**32
         img_idx = cp.zeros(img_idx_size, dtype=np.int32)
-        libpbc.bvk_ovlp_img_idx(
-            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(len(bas_ij_idx)),
-            ctypes.byref(self._int3c2e_envs),
-            ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
-            ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
+        if len(bas_ij_idx) > 0:
+            libpbc.bvk_ovlp_img_idx(
+                ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(bas_ij_idx)),
+                ctypes.byref(self._int3c2e_envs),
+                ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff))
         self.img_idx = img_idx
         self.img_offsets = img_offsets
+
+        if separate_dd:
+            bas_ij_idx = cp.hstack(list(dd_bas_ij_cache.values()), dtype=np.uint32)
+            img_offsets = cp.empty(bas_ij_idx.size+1, dtype=np.uint32)
+            img_counts[bas_ij_idx].cumsum(out=img_offsets[1:])
+            img_offsets[0] = 0
+            img_idx_size = img_offsets[-1].get()
+            assert img_idx_size < 2**32
+            img_idx = cp.zeros(img_idx_size, dtype=np.int32)
+            if len(bas_ij_idx) > 0:
+                libpbc.bvk_ovlp_img_idx(
+                    ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(len(bas_ij_idx)),
+                    ctypes.byref(self._int3c2e_envs),
+                    ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff))
+            self.dd_img_idx = img_idx
+            self.dd_img_offsets = img_offsets
+            dd_ft_opt = FTOpt.from_intopt(self)
+            dd_ft_opt.bas_ij_cache = self.dd_bas_ij_cache
+            self.dd_ao_idx, self.dd_diag = dd_ft_opt.pair_and_diag_indices()
+            logger.debug(cell, 'Separated %d diffuse shell pairs', len(bas_ij_idx))
         return self
 
     @property

@@ -58,6 +58,10 @@ class GDF(lib.StreamObject):
 
     _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'kmesh'})
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_cderi_to_save', '_cderi', '_cderip', '_cderi_idx', '_rsh_df'),
+        reset_state=True)
+
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
         self.nao = None
@@ -96,10 +100,6 @@ class GDF(lib.StreamObject):
         self._rsh_df = {}
         return self
 
-    __getstate__, __setstate__ = lib.generate_pickle_methods(
-        excludes=('_cderi_to_save', '_cderi', '_cderip', '_cderi_idx', '_rsh_df'),
-        reset_state=True)
-
     auxbasis = df_cpu.GDF.auxbasis
 
     def dump_flags(self, verbose=None):
@@ -118,6 +118,7 @@ class GDF(lib.StreamObject):
     def build(self, j_only=None, kpts_band=None):
         warnings.warn(
             'PBC.df is currently experimental and subject to significant changes.')
+        self.reset()
         if j_only is not None:
             self._j_only = j_only
         assert kpts_band is None and self.kpts_band is None
@@ -145,7 +146,6 @@ class GDF(lib.StreamObject):
             cell, auxcell, kpts, self.kmesh, j_only=self._j_only, omega=self._omega,
             linear_dep_threshold=self.linear_dep_threshold, compress=True)
         ao_pair_mapping, diag_idx = self._cderi_idx
-        self._cderi_idx = asarray(ao_pair_mapping), asarray(diag_idx)
         logger.debug1(self, 'len(cderi)=%d len(ao_pair)=%d len(diag)=%d',
                       len(self._cderi), len(ao_pair_mapping), len(diag_idx))
         t1 = logger.timer_debug1(self, 'j3c', *t1)

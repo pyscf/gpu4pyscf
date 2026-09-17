@@ -63,9 +63,16 @@ THREADS = 256
 
 def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
                 omega=None, linear_dep_threshold=LINEAR_DEP_THR,
-                compress=False):
+                compress=False, exclude_dd=False, int3c2e_opt=None):
     '''
-    Create density fitting integral tensor
+    Create density fitting integral tensor.
+
+    Diffuse orbital pairs are evaluated entirely in reciprocal space and
+    appended after the compact pairs. With exclude_dd=True, return only the
+    compact columns and their corresponding AO-pair/diagonal indices.
+
+    This function currently only supports full-range and short-range Coulomb
+    potential.
     '''
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
@@ -73,7 +80,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     is_gamma_point = kpts is None or is_zero(kpts)
     if is_gamma_point:
         cderi, cderip, cderi_idx = compressed_cderi_gamma_point(
-            cell, auxcell, omega, linear_dep_threshold)
+            cell, auxcell, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
         kpts = np.zeros((1, 3))
         kmesh = np.array([1, 1, 1])
     elif j_only:
@@ -83,7 +90,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_j_only(
-            cell, auxcell, kmesh, omega, linear_dep_threshold)
+            cell, auxcell, kmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
     else:
         # Remote images may contribute to certain k-point mesh, contributing
         # to the finite-size effects in HFX. For sufficiently large number of
@@ -94,7 +101,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
-            cell, auxcell, kpts, kmesh, omega, linear_dep_threshold)
+            cell, auxcell, kpts, kmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
     if compress:
         return cderi, cderip, cderi_idx
 
@@ -282,14 +289,80 @@ def _guess_omega(cell, kmesh=None):
             omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
     return omega
 
+def _append_dd_cderi(opt, cderi, cd_j2c_cache, cderi_idx, omega, kpts=None):
+    '''Append the full reciprocal-space DD contribution to compact CDERI.
+    '''
+    cell = opt.cell
+    dd_ft_opt = ft_ao.FTOpt.from_intopt(opt)
+    dd_ft_opt.bas_ij_cache = opt.dd_bas_ij_cache
+    dd_ft_opt.img_idx = opt.dd_img_idx
+    dd_ft_opt.img_offsets = opt.dd_img_offsets
+
+    if len(dd_ft_opt.img_idx) == 0:
+        # No diffuse pairs
+        return cderi_idx
+
+    ncompact = len(cderi_idx[0])
+    n_dd_pairs = len(opt.dd_ao_idx)
+    ao_pair_mapping = cp.hstack((asarray(cderi_idx[0]), asarray(opt.dd_ao_idx)))
+    diag = cp.hstack((asarray(cderi_idx[1]), asarray(opt.dd_diag) + ncompact))
+    assert n_dd_pairs + ncompact == cderi[0].shape[1]
+
+    real_output = kpts is None
+    if real_output:
+        kpts = np.zeros((1, 3))
+    stride = 1 if real_output else 2
+
+    Gv, _, weights = cell.get_Gv_weights(opt.mesh)
+
+    naux_max = max(x.shape[1] for x in cd_j2c_cache)
+    j3c_buf = cp.empty((naux_max, n_dd_pairs), dtype=np.complex128)
+
+    eval_ft = dd_ft_opt.ft_evaluator()[0]
+    mem_free = int(get_avail_mem(exclude_memory_pool=True) * .8)
+    mem_free -= n_dd_pairs * naux_max * 8 # for j3c.real
+    Gblksize = min(len(Gv), mem_free // (16 * (n_dd_pairs + 2*naux_max)))
+    if Gblksize < 1:
+        raise RuntimeError('Insufficient GPU memory for diffuse-pair integrals')
+
+    for (kp, target), coeff, q in zip(cderi.items(), cd_j2c_cache, kpts):
+        coulG = get_coulG(cell, k=q, Gv=Gv, omega=-omega, wrap_around=True)
+        coulG *= weights
+        coeff = asarray(coeff)
+        naux = coeff.shape[1]
+        j3c = j3c_buf[:naux]
+        j3c.fill(0.)
+        for g0, g1 in lib.prange(0, len(Gv), Gblksize):
+            Gk = Gv[g0:g1] + q
+            auxG = ft_ao.ft_ao(opt.auxcell, Gk).T.conj()
+            auxG = coeff.T.dot(auxG)
+            auxG *= coulG[g0:g1]
+            pqG = eval_ft(Gk)
+            contract('rG,pG->rp', auxG, pqG, beta=1., out=j3c)
+        if real_output:
+            j3c = cp.asarray(j3c.real, order='C')
+        err = libvhf_rys.store_col_segment(
+            target.ctypes, ctypes.cast(j3c.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(naux), ctypes.c_int(target.shape[1]*stride),
+            ctypes.c_int(ncompact*stride),
+            ctypes.c_int((ncompact+n_dd_pairs)*stride))
+        if err != 0:
+            raise RuntimeError('store_col_segment kernel failed')
+
+    # Make the mapped host arrays ready before returning them.
+    cp.cuda.get_current_stream().synchronize()
+    return ao_pair_mapping, diag
+
 def compressed_cderi_gamma_point(cell, auxcell, omega=None,
-                                 linear_dep_threshold=LINEAR_DEP_THR):
+                                 linear_dep_threshold=LINEAR_DEP_THR,
+                                 exclude_dd=False, int3c2e_opt=None):
     kmesh = np.array([1, 1, 1])
-    return compressed_cderi_j_only(cell, auxcell, kmesh, omega,
-                                   linear_dep_threshold)
+    return compressed_cderi_j_only(
+        cell, auxcell, kmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
 
 def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
-                            linear_dep_threshold=LINEAR_DEP_THR):
+                            linear_dep_threshold=LINEAR_DEP_THR,
+                            exclude_dd=False, int3c2e_opt=None):
     assert kmesh is not None
     log = logger.new_logger(cell)
     t1 = log.init_timer()
@@ -298,13 +371,15 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         omega = 0
     else:
         omega = abs(omega)
-    rsdf_omega = _guess_omega(cell)
-    log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
-    rsdf_omega = max(omega, rsdf_omega)
+    if int3c2e_opt is None:
+        rsdf_omega = max(omega, _guess_omega(cell))
+        int3c2e_opt = SRInt3c2eOpt(
+            cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build(separate_dd=True)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-rsdf_omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
+    rsdf_omega = int3c2e_opt.omega
+    log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
 
     log.debug('Generate auxcell 2c2e integrals')
@@ -313,7 +388,10 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     naux_cart, naux = cd_j2c_cache[0].shape
 
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
-    nao_pairs = len(cderi_idx[0])
+    n_compact_pairs = nao_pairs = len(cderi_idx[0])
+    if not exclude_dd:
+        nao_pairs += len(int3c2e_opt.dd_ao_idx)
+    log.debug('nao_pairs = %d, n_compact_pairs = %d', nao_pairs, n_compact_pairs)
 
     with_long_range = omega < rsdf_omega
     if with_long_range:
@@ -330,12 +408,16 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     mem_free -= ngrids * naux * 16 # auxG_cache
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(nao_pairs, mem_free // (naux_cart*bvk_ncells*16*4))
+    batch_size = min(n_compact_pairs, mem_free // (naux_cart*bvk_ncells*16*4))
     log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
-    log.debug('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
-    cderi = empty_mapped((naux, nao_pairs))
+    if batch_size < 1 and n_compact_pairs > 0:
+        raise RuntimeError('Insufficient GPU memory')
 
-    tasks = iter(range(nao_pairs))
+    log.debug('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
+    allocate = empty_mapped if nao_pairs else np.empty
+    cderi = allocate((naux, nao_pairs))
+
+    tasks = iter(range(n_compact_pairs))
     def proc():
         device_id = cp.cuda.device.get_device_id()
         stream = cp.cuda.get_current_stream()
@@ -360,7 +442,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
 
         avail_mem = mem_free - naux_cart*batch_size*16*2
         Gblksize = int(avail_mem//(16*(batch_size+naux*2))) // 32 * 32
-        if Gblksize == 0:
+        if Gblksize <= 0:
             raise RuntimeError('Insufficient GPU memory')
         Gblksize = min(Gblksize, ngrids)
         log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
@@ -408,21 +490,28 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
                 stream.synchronize()
             t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
-    multi_gpu.run(proc, non_blocking=True)
+    if n_compact_pairs > 0:
+        multi_gpu.run(proc, non_blocking=True)
+        multi_gpu.synchronize()
+    cderi = {0: cderi}
+
+    if not exclude_dd:
+        cderi_idx = _append_dd_cderi(
+            int3c2e_opt, cderi, cd_j2c_cache, cderi_idx, omega)
 
     cderip = None
-    for k, nauxp in negative_metric_size.items():
-        # For low-dimensional systems, CDERI has negative eigenvectors
-        cderip, cderi = cderi[-nauxp:], cderi[:-nauxp]
-    # Follow the output format in compressed_cderi_kk
-    cderi = {0: cderi}
-    if cderip is not None:
-        cderip = {0: cderip}
+    if negative_metric_size:
+        cderip = {}
+        for k, nauxp in negative_metric_size.items():
+            # For low-dimensional systems, CDERI has negative eigenvectors
+            cderip[k] = cderi[k][-nauxp:]
+            cderi [k] = cderi[k][:-nauxp]
     t1 = log.timer_debug1('build cderi', *t1)
     return cderi, cderip, cderi_idx
 
 def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
-                        linear_dep_threshold=LINEAR_DEP_THR):
+                        linear_dep_threshold=LINEAR_DEP_THR, exclude_dd=False,
+                        int3c2e_opt=None):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
 
@@ -440,13 +529,15 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         omega = 0
     else:
         omega = abs(omega)
-    rsdf_omega = _guess_omega(cell)
-    log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
-    rsdf_omega = max(omega, rsdf_omega)
+    if int3c2e_opt is None:
+        rsdf_omega = max(omega, _guess_omega(cell))
+        int3c2e_opt = SRInt3c2eOpt(
+            cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build(separate_dd=True)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
+    rsdf_omega = int3c2e_opt.omega
+    log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
 
     log.debug('Generate auxcell 2c2e integrals')
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
@@ -455,7 +546,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
 
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
-    nao_pairs = len(cderi_idx[0])
+    n_compact_pairs = nao_pairs = len(cderi_idx[0])
+    if not exclude_dd:
+        nao_pairs += len(int3c2e_opt.dd_ao_idx)
+    log.debug('nao_pairs = %d, n_compact_pairs = %d', nao_pairs, n_compact_pairs)
 
     with_long_range = omega < rsdf_omega
     if with_long_range:
@@ -470,19 +564,22 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_free -= cd_j2c_cache[0].nbytes * nkpts # cd_j2c_cache
     mem_free -= ngrids * naux_max * 16 * nkpts # auxG_conj
-    log.debug('Avail GPU mem = %s B', mem_free)
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(nao_pairs, mem_free//(nkpts*naux_cart*16*4)+225)
+    batch_size = min(n_compact_pairs, mem_free//(nkpts*naux_cart*16*4)+225)
+    log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
+    if batch_size < 1 and n_compact_pairs > 0:
+        raise RuntimeError('Insufficient GPU memory')
 
     log.debug('Required %.6g GB mapped memory on host',
               len(cd_j2c_cache)*naux_max*nao_pairs*16e-9)
     cderi = {}
+    allocate = empty_mapped if nao_pairs else np.empty
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
         naux = cd_j2c_cache[j2c_idx].shape[1]
-        cderi[kp] = empty_mapped((naux,nao_pairs), dtype=np.complex128)
+        cderi[kp] = allocate((naux,nao_pairs), dtype=np.complex128)
 
-    tasks = iter(range(nao_pairs))
+    tasks = iter(range(n_compact_pairs))
     def proc():
         device_id = cp.cuda.device.get_device_id()
         stream = cp.cuda.get_current_stream()
@@ -521,7 +618,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
 
         avail_mem = mem_free - nkpts*naux_cart*batch_size*16*2
         Gblksize = int(avail_mem//(16*batch_size)) // 32 * 32
-        if Gblksize == 0:
+        if Gblksize <= 0:
             raise RuntimeError('Insufficient GPU memory')
         Gblksize = min(Gblksize, ngrids)
         log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
@@ -576,7 +673,13 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
                 stream.synchronize()
             t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
-    multi_gpu.run(proc, non_blocking=True)
+    if n_compact_pairs > 0:
+        multi_gpu.run(proc, non_blocking=True)
+        multi_gpu.synchronize()
+
+    if not exclude_dd:
+        cderi_idx = _append_dd_cderi(
+            int3c2e_opt, cderi, cd_j2c_cache, cderi_idx, omega, uniq_kpts)
 
     cderip = None
     if negative_metric_size:
@@ -741,6 +844,14 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     naux = cderi_compressed.shape[0]
     nL, nkpts = expLk.shape
     is_gamma_point = expLk.size == 1 and cderi_compressed.dtype == np.float64
+    if nao_pairs == 0:
+        # exclude_dd can leave no compact pairs. Avoid a zero-grid CUDA
+        # launch (and mapping a zero-sized, unpinned host allocation).
+        dtype = np.float64 if is_gamma_point else np.complex128
+        out = ndarray((nkpts, nao, nao, naux), dtype=dtype, buffer=out)
+        out.fill(0.)
+        return out.transpose(0, 3, 1, 2)
+
     if is_gamma_point:
         buf = out # write to the output directly
     cderi = ndarray((nao*nL*nao, naux), cderi_compressed.dtype, buffer=buf)

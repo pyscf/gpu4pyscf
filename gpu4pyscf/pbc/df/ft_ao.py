@@ -204,7 +204,6 @@ class FTOpt:
             ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
         else:
             ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
-        bas_ij_idx = []
         img = cp.arange(bvk_ncells, dtype=np.uint32) * nbas
         for i, j in ij_tasks:
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
@@ -215,11 +214,9 @@ class FTOpt:
             assert np.all(bas_ij < np.iinfo(np.uint32).max), "uint32 overflow"
             bas_ij = bas_ij.astype(np.uint32)
             sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
-            bas_ij = bas_ij[sub_mask]
-            bas_ij_cache[i, j] = bas_ij
-            bas_ij_idx.append(bas_ij)
+            bas_ij_cache[i, j] = bas_ij[sub_mask]
 
-        bas_ij_idx = cp.hstack(bas_ij_idx, dtype=np.uint32)
+        bas_ij_idx = cp.hstack(list(bas_ij_cache.values()), dtype=np.uint32)
         img_counts = img_counts[bas_ij_idx]
         img_offsets = cp.empty(img_counts.size+1, dtype=np.uint32)
         img_counts.cumsum(out=img_offsets[1:])
