@@ -93,6 +93,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     t0 = log.init_timer()
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    if dm_factor_l.shape[-1] == 0:
+        return np.zeros((cell.natm, 3)), np.zeros((3, 3))
     # transform to the AO order in sorted_cell
     dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=0)
     assert dm_factor_l.dtype == np.float64
@@ -179,9 +181,12 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
 
     def lr_3c2e(j3c_oo):
-        Gblksize = int(mem_avail//((nao+nocc)*nao*16))//32*32
+        mem_avail = get_avail_mem(exclude_memory_pool=True)
+        Gsize = max(nao**2,naux) + max(nao*nocc,naux) + naux + nao_pair
+        Gblksize = int(mem_avail*.8//(Gsize*16))//32*32
         Gblksize = min(Gblksize, ngrids)
-        assert Gblksize > 0
+        if Gblksize < 1:
+            raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
                    mem_avail*1e-9, Gblksize)
         buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
@@ -216,8 +221,18 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         solve_j2c = _gen_metric_solver(
             j2c, linear_dep_threshold, auxcell.dimension)
         metric = aux_coeff.dot(solve_j2c(aux_coeff.T))
-    j2c = aux_coeff = None
-    dm_oo = cp.einsum('uv,vij->uij', metric, j3c_oo)
+    j2c = aux_coeff = solve_j2c = None
+    # The metric acts only on the auxiliary index, so occupied blocks can be
+    # transformed in place without allocating another full naux*nocc*nocc tensor.
+    dm_oo = j3c_oo
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    occ_blksize = min(nocc, int(mem_avail*.4//(naux*nocc*8)))
+    if occ_blksize < 1:
+        raise RuntimeError('Insufficient GPU memory for GDF gradient metric')
+    for p0, p1 in lib.prange(0, nocc, occ_blksize):
+        tmp = contract('uv,vij->uij', metric, dm_oo[:,p0:p1])
+        dm_oo[:,p0:p1] = tmp
+        tmp = None
     metric = j3c_oo = None
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=1, axis2=2)
@@ -246,9 +261,12 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
 
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        Gblksize = int(mem_avail//2//((nao+nocc)*nao*16))//32*32
+        mem_avail = get_avail_mem(exclude_memory_pool=True)
+        Gsize = max(nao**2,naux) + max(nao*nocc,naux) + naux + nao_pair
+        Gblksize = int(mem_avail*.8//(Gsize*16))//32*32
         Gblksize = min(Gblksize, ngrids)
-        assert Gblksize > 0
+        if Gblksize < 1:
+            raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
