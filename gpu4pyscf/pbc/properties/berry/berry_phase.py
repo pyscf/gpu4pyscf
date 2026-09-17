@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Berry phases and Wannier centers from neighboring-k-point overlaps.'''
+'''Berry (Zak) phases and Wannier centers from neighboring-k-point overlaps.'''
 
 import numpy as np
 import cupy as cp
@@ -31,27 +31,6 @@ def _wrap_phase(phase):
     return (phase + np.pi) % TWO_PI - np.pi
 
 
-def _positive_tolerance(value, name):
-    if not np.isscalar(value) or not np.isfinite(value) or value <= 0:
-        raise ValueError(f'{name} must be finite and positive')
-
-
-def _validate_inputs(overlaps, strings):
-    overlaps = cp.asarray(overlaps)
-    strings = cp.asarray(strings)
-    if (overlaps.ndim != 3 or overlaps.shape[1] != overlaps.shape[2] or
-            overlaps.shape[0] == 0):
-        raise ValueError(
-            f'overlaps must have shape (nkpts, nband, nband), got {overlaps.shape}')
-    if not bool(cp.all(cp.isfinite(overlaps)).get()):
-        raise ValueError('overlaps must be finite')
-    if strings.ndim != 2 or strings.size == 0 or strings.dtype.kind not in 'iu':
-        raise ValueError('strings must be a nonempty 2D integer index array')
-    if bool(cp.any((strings < 0) | (strings >= len(overlaps))).get()):
-        raise ValueError('strings contains an out-of-range k-point index')
-    return overlaps, strings.astype(cp.int64, copy=False)
-
-
 def _check_singular_values(singular_values, singular_tol):
     if not bool(cp.all(cp.isfinite(singular_values)).get()):
         raise np.linalg.LinAlgError('Non-finite overlap singular values')
@@ -65,13 +44,8 @@ def _check_singular_values(singular_values, singular_tol):
 
 def unitary_part(overlaps, singular_tol=1e-10):
     '''Return the unitary polar factor of a batch of overlap matrices.'''
-    _positive_tolerance(singular_tol, 'singular_tol')
     overlaps = cp.asarray(overlaps)
-    if overlaps.ndim < 2 or overlaps.shape[-1] != overlaps.shape[-2]:
-        raise ValueError(
-            f'overlaps must end in square matrix dimensions, got {overlaps.shape}')
-    if not bool(cp.all(cp.isfinite(overlaps)).get()):
-        raise ValueError('overlaps must be finite')
+
     if overlaps.shape[-1] == 0:
         return overlaps.copy()
 
@@ -92,15 +66,13 @@ def _unitary_eigenvalues(matrices):
 
 
 def berry_phase(overlaps, strings, singular_tol=None):
-    '''Compute the many-band Berry phase for each closed k-point string.
+    '''
+    Compute the many-band Berry (Zak) phase for each closed k-point string.
     The phase is accumulated as sum(arg(det(M_k))) and wrapped only after
     completing a string. Returns principal phases in [-pi, pi). 
     An optional singular_tol checks near-singular links without computing
     Wilson-loop eigenvectors.
     '''
-    overlaps, strings = _validate_inputs(overlaps, strings)
-    if singular_tol is not None:
-        _positive_tolerance(singular_tol, 'singular_tol')
     if overlaps.shape[1] == 0:
         return cp.zeros(strings.shape[0])
     if singular_tol is not None:
@@ -125,8 +97,6 @@ def hybrid_wannier_centers(overlaps, strings, singular_tol=1e-10):
         phases : cupy.ndarray
             The determinant Berry phase for each string in [-pi, pi).
     '''
-    _positive_tolerance(singular_tol, 'singular_tol')
-    overlaps, strings = _validate_inputs(overlaps, strings)
 
     nstrings = strings.shape[0]
     nband = overlaps.shape[1]
@@ -148,14 +118,12 @@ def hybrid_wannier_centers(overlaps, strings, singular_tol=1e-10):
 
 
 def diagonal_wannier_centers(overlaps, strings, overlap_tol=1e-12):
-    r'''Compute band-resolved centers in an externally fixed Wannier gauge.
+    '''Compute band-resolved centers in an externally fixed Wannier gauge.
 
     This formula is intended for overlaps already rotated by a localized
-    Wannier gauge ``U(k)``. Without such a gauge, individual centers are not
-    physical; use :func:`hybrid_wannier_centers` instead.
+    Wannier gauge U(k). Without such a gauge, individual centers are not
+    physical; use hybrid_wannier_centers instead.
     '''
-    _positive_tolerance(overlap_tol, 'overlap_tol')
-    overlaps, strings = _validate_inputs(overlaps, strings)
 
     diagonal = cp.diagonal(overlaps, axis1=1, axis2=2)
     if diagonal.size and float(cp.min(cp.abs(diagonal)).get()) < overlap_tol:
