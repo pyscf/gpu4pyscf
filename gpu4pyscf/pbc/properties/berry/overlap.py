@@ -46,20 +46,16 @@ def _commensurate_bvk_mesh(cell, kpts, kmesh=None):
     # FTOpt folds outer BvK images without a twist phase. Every absolute
     # k-point, not just the spacing of the mesh, must be commensurate.
     scaled = np.asarray(cell.get_scaled_kpts(kpts))
-    if not np.all(np.isfinite(scaled)):
-        raise ValueError('kpts must be finite')
-    if kmesh is None or np.max(np.abs(scaled * kmesh - np.rint(scaled * kmesh))) > 1e-8:
-        try:
-            kmesh = kpts_to_kmesh(
-                cell, kpts, precision=1e-10, bound_by_supmol=False)
-        except RuntimeError as err:
-            raise ValueError(
-                'The GPU Fourier transform requires k-points commensurate '
-                'with a finite BvK mesh') from err
-    residual = scaled * kmesh - np.rint(scaled * kmesh)
-    if np.max(np.abs(residual)) > 1e-8:
-        raise ValueError('Cannot represent the absolute k-points on a BvK mesh')
-    return kmesh
+    if (kmesh is not None and
+            np.max(np.abs(scaled * kmesh - np.rint(scaled * kmesh))) <= 1e-8):
+        return kmesh
+    try:
+        return kpts_to_kmesh(
+            cell, kpts, precision=1e-10, bound_by_supmol=False)
+    except RuntimeError as err:
+        raise ValueError(
+            'The GPU Fourier transform requires k-points commensurate '
+            'with a finite BvK mesh') from err
 
 
 def _periodic_axis_values(values, tol):
@@ -91,10 +87,6 @@ class KPointMesh:
         kpts = _asnumpy(kpts)
         if kpts.ndim != 2 or kpts.shape[1] != 3 or len(kpts) == 0:
             raise ValueError(f'kpts must have shape (nk, 3), got {kpts.shape}')
-        if not np.all(np.isfinite(kpts)):
-            raise ValueError('kpts must be finite')
-        if not np.isfinite(tol) or tol <= 0:
-            raise ValueError('tol must be finite and positive')
 
         scaled_kpts = np.asarray(cell.get_scaled_kpts(kpts))
         wrapped_kpts = np.mod(scaled_kpts, 1.)
@@ -109,14 +101,11 @@ class KPointMesh:
             kmesh = inferred_kmesh
         else:
             kmesh = _asnumpy(kmesh)
-            if (kmesh.shape != (3,) or not np.all(np.isfinite(kmesh)) or
-                    np.any(kmesh < 1) or np.any(kmesh != np.rint(kmesh))):
-                raise ValueError(f'kmesh must contain three positive integers, got {kmesh}')
-            kmesh = kmesh.astype(int)
             if not np.array_equal(kmesh, inferred_kmesh):
                 raise ValueError(
                     f'kmesh {kmesh.tolist()} is inconsistent with the '
                     f'k-points ({inferred_kmesh.tolist()} unique coordinates)')
+            kmesh = inferred_kmesh
 
         if np.prod(kmesh) != len(kpts):
             raise ValueError(
@@ -135,15 +124,11 @@ class KPointMesh:
             distance = np.abs(
                 np.mod(wrapped_kpts[:, dim, None] - values[None, :] + .5, 1.) - .5)
             addresses[:, dim] = np.argmin(distance, axis=1)
-            if np.max(np.min(distance, axis=1)) > tol:
-                raise ValueError(f'Failed to map k-points along direction {dim}')
 
-        index_by_address = {}
-        for k, address in enumerate(addresses):
-            key = tuple(address)
-            if key in index_by_address:
-                raise ValueError(f'Duplicate k-point mesh address {key}')
-            index_by_address[key] = k
+        index_by_address = {
+            tuple(address): k for k, address in enumerate(addresses)}
+        if len(index_by_address) != len(kpts):
+            raise ValueError('A full Monkhorst-Pack mesh is required')
 
         self.cell = cell
         self.kpts = kpts
@@ -151,7 +136,6 @@ class KPointMesh:
         self.kmesh = kmesh
         self.addresses = addresses
         self.index_by_address = index_by_address
-        self.tol = tol
 
     def neighbors(self, direction):
         '''Return the +b neighbor index and reciprocal-lattice image shift.'''
@@ -171,10 +155,6 @@ class KPointMesh:
 
             target = self.scaled_kpts[k] + step
             shift = np.rint(target - self.scaled_kpts[neighbor]).astype(int)
-            error = target - self.scaled_kpts[neighbor] - shift
-            if np.max(np.abs(error)) > self.tol:
-                raise ValueError(
-                    f'Failed to identify the reciprocal image for k-point {k}')
             image_shifts[k] = shift
 
         return neighbor_indices, image_shifts
@@ -203,15 +183,12 @@ class KPointMesh:
 
 
 def periodic_ao_overlap(cell, kpt, neighbor_kpt):
-    r'''Compute ``<f_mu,k | f_nu,k'>`` in the reference cell on the GPU.
-
-    ``neighbor_kpt`` may lie outside the first Brillouin zone. This is needed
-    for the closing link, where it is ``k_0 + G`` rather than merely ``k_0``.
+    '''Compute <f_mu,k | f_nu,k'> in the reference cell.
+    neighbor_kpt may lie outside the first Brillouin zone. This is needed
+    for the closing link, where it is k_0 + G rather than merely k_0.
     '''
     kpt = _asnumpy(kpt).reshape(3)
     neighbor_kpt = _asnumpy(neighbor_kpt).reshape(3)
-    if not np.all(np.isfinite(neighbor_kpt)):
-        raise ValueError('neighbor_kpt must be finite')
     bvk_mesh = _commensurate_bvk_mesh(cell, kpt[None])
     ft_opt = ft_ao.FTOpt(cell, bvk_mesh)
     ft_opt.permutation_symmetry = False
@@ -219,8 +196,8 @@ def periodic_ao_overlap(cell, kpt, neighbor_kpt):
         (kpt - neighbor_kpt).reshape(1, 3),
         q=np.zeros(3), kpts=kpt[None])[0, 0]
 
-    # ft_aopair follows the Fourier-transform AO-pair convention used by
-    # pywannier90.get_M_mat. Its matrix is the Hermitian transpose of
+    # ft_aopair follows the convention pywannier90.get_M_mat. 
+    # Its matrix is the Hermitian transpose of
     # <f_mu,k | f_nu,k'> in the row/column convention used below.
     return raw.conj().T
 
@@ -228,17 +205,13 @@ def periodic_ao_overlap(cell, kpt, neighbor_kpt):
 def build_mmn(cell, mo_coeff_kpts, kpts, kmesh, direction, batch_size=None,
               topology=None):
     '''
-    Build M_mn(k,b) = <u_mk | u_n,k+b>.
+    M_mn(k,b) = <u_mk | u_n,k+b>.
     '''
     if cell.dimension != 3:
         raise NotImplementedError(
             'Wannier-center polarization currently supports 3D cells only')
     if topology is None:
         topology = KPointMesh(cell, kpts, kmesh)
-    elif (topology.cell is not cell or
-          not np.array_equal(topology.kpts, _asnumpy(kpts)) or
-          (kmesh is not None and not np.array_equal(topology.kmesh, _asnumpy(kmesh)))):
-        raise ValueError('topology must match cell, kpts, and kmesh')
     kpts = topology.kpts
     kmesh = topology.kmesh
     nkpts = len(kpts)
@@ -257,7 +230,6 @@ def build_mmn(cell, mo_coeff_kpts, kpts, kmesh, direction, batch_size=None,
 
     if batch_size is None:
         batch_size = nkpts
-    batch_size = operator.index(batch_size)
     if batch_size < 1:
         raise ValueError(f'batch_size must be positive, got {batch_size}')
 
@@ -273,7 +245,7 @@ def build_mmn(cell, mo_coeff_kpts, kpts, kmesh, direction, batch_size=None,
     for p0 in range(0, nkpts, batch_size):
         p1 = min(p0 + batch_size, nkpts)
         raw = ft_kernel(
-            Gv, q=np.zeros(3), kpts=kpts[p0:p1])[:, 0]
+            Gv, q=np.zeros(3), kpts=kpts[p0:p1])[:, 0] # Gv (-b) avoids the boundray G problem.
         s_ao = raw.conj().transpose(0, 2, 1)
         neighbors = neighbor_indices_gpu[p0:p1]
 

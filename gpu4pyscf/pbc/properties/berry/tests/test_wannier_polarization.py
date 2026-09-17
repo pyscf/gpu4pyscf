@@ -274,7 +274,7 @@ class KnownValues(unittest.TestCase):
 
     def test_invalid_mesh_and_bvk_inputs(self):
         mf = self._mock_mf()
-        for kpts in (np.empty((0, 3)), np.full((1, 3), np.nan), mf.kpts[[0, 0, 2, 3]]):
+        for kpts in (np.empty((0, 3)), mf.kpts[[0, 0, 2, 3]]):
             with self.subTest(kpts=kpts), self.assertRaises(ValueError):
                 berry.KPointMesh(mf.cell, kpts)
         with self.assertRaises(ValueError):

@@ -21,7 +21,6 @@ import cupy as cp
 
 from pyscf.data import nist
 from gpu4pyscf.pbc.properties.berry.berry_phase import (
-    _positive_tolerance,
     berry_phase,
     diagonal_wannier_centers,
     hybrid_wannier_centers,
@@ -81,6 +80,7 @@ def _unit_factor(unit):
 
 
 def _occupied_coefficients(mf, occupation_tol=1e-7):
+    # TODO: in current version, kpoints must be in the same order as the kpts in mf
     if not bool(getattr(mf, 'converged', True)):
         raise RuntimeError('The mean-field calculation is not converged')
     if not hasattr(mf, 'mo_coeff') or not hasattr(mf, 'mo_occ'):
@@ -91,13 +91,7 @@ def _occupied_coefficients(mf, occupation_tol=1e-7):
     if coeff.ndim == 4 or occupation.ndim == 3:
         raise NotImplementedError(
             'Unrestricted mean-field objects are not supported')
-    if coeff.ndim != 3 or occupation.ndim != 2:
-        raise ValueError(
-            'Restricted mo_coeff and mo_occ must have shapes '
-            '(nkpts, nao, nmo) and (nkpts, nmo)')
 
-    if occupation.shape != (coeff.shape[0], coeff.shape[2]):
-        raise ValueError('mo_occ must match the k-point and band dimensions of mo_coeff')
     if coeff.shape[0] == 0:
         raise ValueError('At least one k-point is required')
 
@@ -131,8 +125,7 @@ def _apply_wannier_gauge(coeff, wannier_gauge, tol=1e-7):
     if gauge.shape != expected:
         raise ValueError(
             f'Wannier gauge must have shape {expected}, got {gauge.shape}')
-    if nocc == 0:
-        return coeff
+
     identity = cp.eye(nocc)
     error = cp.max(cp.abs(
         cp.matmul(gauge.conj().transpose(0, 2, 1), gauge) - identity))
@@ -147,7 +140,7 @@ def _unwrap_transverse_phases(phases, kmesh, direction):
     shape = phases.shape
     transverse_shape = tuple(
         kmesh[dim] for dim in range(3) if dim != direction)
-    # (Nd1, Nd2) for phases or (Nd1, Nd2, nocc) for wannier centers
+    # (Nd1, Nd2) for phases or (Nd1, Nd2, nocc) for hybrid wannier centers
     phases = phases.reshape(transverse_shape + shape[1:]) 
     for axis in range(2):
         phases = cp.unwrap(phases, axis=axis)
@@ -173,12 +166,8 @@ def _sum_diagonal_centers(centers, kmesh, direction):
 
 
 def _prepare_input(mf, kmesh, wannier_gauge=None):
-    if not hasattr(mf, 'cell') or not hasattr(mf, 'kpts'):
-        raise ValueError('mf must be a periodic k-point mean-field object')
     topology = KPointMesh(mf.cell, mf.kpts, kmesh)
     coeff = _occupied_coefficients(mf)
-    if coeff.shape[0] != len(topology.kpts):
-        raise ValueError('mo_coeff and kpts contain different numbers of k-points')
     coeff = _apply_wannier_gauge(coeff, wannier_gauge)
     return topology, coeff
 
@@ -200,7 +189,6 @@ def eval_wannier_centers(mf, kmesh=None, batch_size=None, method='wilson',
     the default. method='diagonal' is only meaningful with an externally
     supplied localized wannier_gauge.
     '''
-    _positive_tolerance(singular_tol, 'singular_tol')
     if method not in ('wilson', 'diagonal'):
         raise ValueError(f"method must be 'wilson' or 'diagonal', got {method!r}")
     if method == 'diagonal' and wannier_gauge is None:
@@ -250,7 +238,6 @@ def eval_berry_phase(mf, kmesh=None, batch_size=None, singular_tol=1e-10):
 
     Does not diagonalize Wilson loops or choose a transverse phase branch.
     '''
-    _positive_tolerance(singular_tol, 'singular_tol')
     topology, coeff = _prepare_input(mf, kmesh)
     phases = []
     for _, overlaps, strings in _directional_overlaps(
@@ -258,7 +245,7 @@ def eval_berry_phase(mf, kmesh=None, batch_size=None, singular_tol=1e-10):
         phases.append(cp.asnumpy(
             berry_phase(overlaps, strings, singular_tol=singular_tol)))
         del overlaps
-    return tuple(phases)
+    return tuple(phases) # contains nstrings
 
 
 def electronic_polarization(cell, wannier, unit='au'):
