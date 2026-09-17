@@ -62,6 +62,8 @@ DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 OMEGA = 0.4
 NBAS_MAX = 1048576
 Q_COND_MARGIN = 4.
+# Some cuTENSOR contractions require a 32 MiB workspace even for small blocks.
+_LR_WORKSPACE_RESERVE = 32 * 1024**2
 
 def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
           lr_factor=None, sr_factor=None, exxdiv=None, verbose=None):
@@ -546,6 +548,7 @@ class PBCJKMatrixOpt:
         kws /= nkpts
 
         avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .9)
+        avail_mem -= _LR_WORKSPACE_RESERVE
         avail_mem -= n_dm*nkpts*nao1**2 * 16 # intermediates for vk or dms
         Gblksize = int(avail_mem/(16*unit))//8*8
         if Gblksize < 8:
@@ -1246,12 +1249,6 @@ class PBCJKMatrixOpt:
 
         def get_k():
             cpu0 = cpu1 = log.init_timer()
-            avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
-            blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
-            if blksize == 0:
-                raise RuntimeError('Insufficient GPU memory')
-            blksize = min(blksize, ngrids, 16384)
-            log.debug1('blksize=%d', blksize)
 
             if exclude_dd_block:
                 diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao)
@@ -1276,6 +1273,7 @@ class PBCJKMatrixOpt:
                     wcoulG_1 -= wcoulG_LR_1
                     wcoulG_1 *= sr_factor
                     wcoulG_1 += wcoulG_LR_1 * lr_factor
+                    wcoulG_LR_0 = wcoulG_LR_1 = None
                 wcoulG_SR_0, wcoulG_SR_1 = get_wcoulG(cell, Gvk, -self.omega)
                 if remove_G0:
                     wcoulG_SR_at_G0 = np.pi / self.omega**2 * kws
@@ -1287,6 +1285,9 @@ class PBCJKMatrixOpt:
                     wcoulG_0 += wcoulG_SR_0
                     wcoulG_1 += wcoulG_SR_1
 
+                blksize = _lr_k_deriv_blksize(
+                    nao, nkpts, bvk_ncells, n_dm, ngrids, with_stress=True)
+                log.debug1('blksize=%d', blksize)
                 swap_2e = kp != kp_conj
                 for p0, p1 in lib.prange(0, ngrids, blksize):
                     nGv = p1 - p0
@@ -1296,6 +1297,7 @@ class PBCJKMatrixOpt:
                     if is_gamma_point:
                         tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                         dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
+                        tmp = None
                         vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
                         if ft_opt.permutation_symmetry:
                             dm_vG *= 2
@@ -1307,7 +1309,9 @@ class PBCJKMatrixOpt:
                         vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
                         dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
                         if ft_opt.permutation_symmetry:
-                            dm_vG += contract('Lk,kpqg->Lqpg', expLk[:,idx].conj(), dm_k)
+                            contract('Lk,kpqg->Lqpg', expLk[:,idx].conj(), dm_k,
+                                     beta=1, out=dm_vG)
+                        dm_k = None
                     tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
                     if swap_2e:
                         sigma += tmp * 2
@@ -1315,6 +1319,7 @@ class PBCJKMatrixOpt:
                     else:
                         sigma += tmp
                         dm_vG *= wcoulG_0[p0:p1]
+                    tmp = vkG = None
                     dm_vG = cp.asarray(dm_vG, order='C')
                     GvT = cp.asarray(Gvk[p0:p1].T.ravel())
                     err = kern(
@@ -1333,12 +1338,14 @@ class PBCJKMatrixOpt:
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
+                    dm_vG = None
                     if exclude_dd_block and len(bas_ij_wo_dd) > 0:
                         Gpq[:,diffuse_i,diffuse_j] = 0.
                         Gpq_conj[:,diffuse_i,diffuse_j] = 0.
                         if is_gamma_point:
                             tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                             dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
+                            tmp = None
                             vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
                             if ft_opt.permutation_symmetry:
                                 dm_vG *= 2
@@ -1348,7 +1355,9 @@ class PBCJKMatrixOpt:
                             vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
                             dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
                             if ft_opt.permutation_symmetry:
-                                dm_vG += contract('Lk,kpqg->Lqpg', expLk[:,idx].conj(), dm_k)
+                                contract('Lk,kpqg->Lqpg', expLk[:,idx].conj(), dm_k,
+                                         beta=1, out=dm_vG)
+                            dm_k = None
                         tmp = cp.einsum('xyg,g->xy', wcoulG_SR_1[:,:,p0:p1], vkG)
                         if swap_2e:
                             sigma += tmp * 2
@@ -1356,6 +1365,7 @@ class PBCJKMatrixOpt:
                         else:
                             sigma += tmp
                             dm_vG *= wcoulG_SR_0[p0:p1]
+                        tmp = vkG = None
                         dm_vG = cp.asarray(dm_vG, order='C')
                         err = kern(
                             ctypes.cast(ek_sigma[:-3].data.ptr, ctypes.c_void_p),
@@ -1870,6 +1880,40 @@ def _group_by_split_points(q_cond, split_points):
     # Sorting the values, from large to small. This allows the integral
     # screening testing terminating early.
     return cp.hstack(subsets[::-1])
+
+def _lr_k_deriv_blksize(nao, nkpts, bvk_ncells, n_dm, ngrids,
+                        with_stress=False):
+    # Count simultaneously live complex AO-pair tensors, not just the FT pair.
+    # Each term is measured in nao**2 complex values per G point.
+    # 1. bvk_ncells + nkpts:
+    #    ft_ao.py, ft_kernel:
+    #      out: (nao, bvk_ncells, nao, nGv), the pLqG input
+    #      tmp: (nkpts, nao, nao, nGv), the kpqG output later named Gpq
+    # 2. (n_dm + 2) * nkpts:
+    #    rsjk.get_k:
+    #      Gpq/Gpq_conj: 2 * nkpts
+    #      first density contraction: n_dm * nkpts
+    # 3. 2 * nkpts + 2 * bvk_ncells:
+    #      Gpq and the second density contraction: 2 * nkpts
+    #      dm_vG and the fallback symmetry output: 2 * bvk_ncells
+    unit = max(bvk_ncells + nkpts,
+               (n_dm + 2) * nkpts,
+               2 * nkpts + 2 * bvk_ncells)
+
+    if with_stress:
+        # The unified gradient/stress path allocates Gpq_conj and retains
+        # additional density intermediates while evaluating the stress.
+        unit = max(unit + nkpts, 4 * nkpts + bvk_ncells)
+    bytes_per_grid = 16 * nao**2 * unit
+    avail_mem = (int(get_avail_mem(exclude_memory_pool=True) * .8)
+                 - 2 * n_dm * nkpts * nao**2 * 16 - _LR_WORKSPACE_RESERVE)
+    blksize = min(avail_mem // bytes_per_grid, ngrids, 16384)
+    if blksize < 1:
+        raise MemoryError('Insufficient GPU memory for RSJK exchange derivatives')
+    if blksize >= 16:
+        blksize = blksize // 16 * 16
+    return blksize
+
 
 def _get_vk_wcoulG_and_SR(cell, kpt, kpts, exxdiv, mesh, Gv, Gv_weight,
                           rsjk_omega, omega, lr_factor, sr_factor):
