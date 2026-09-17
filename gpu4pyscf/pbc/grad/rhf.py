@@ -273,8 +273,11 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
             fn = krhf._get_ejk_derivatives
         else:
             fn = kuhf._get_ejk_derivatives
-        rsdf_omega = _guess_omega(cell)
-        opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh).build()
+        rsdf_omega = max(abs(omega), _guess_omega(cell))
+        # DD responses are implemented for Gamma RHF and Gamma J-only.
+        separate_dd = kpts is None and (is_rhf or k_factor == 0)
+        opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh).build(
+            separate_dd=separate_dd)
         return fn(opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega,
                   linear_dep_threshold=with_df.linear_dep_threshold)
 
@@ -330,7 +333,9 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
             else:
                 kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut)
             rsdf_omega = 0.3
-            int3c2e_opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh).build()
+            int3c2e_opt = SRInt3c2eOpt(
+                cell, with_df.auxcell, rsdf_omega, kmesh).build(
+                    separate_dd=kpts is None)
             if is_rhf:
                 ejk_sigma = _get_ejk_derivatives(
                     int3c2e_opt, dm, kpts, hermi, k_factor=0)

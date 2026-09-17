@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import numpy as np
+import pytest
 import cupy as cp
 import pyscf
 from pyscf.pbc import gto
@@ -115,12 +116,9 @@ def test_ej_derivatives_gamma_point_without_long_range():
     assert abs(grad.sum(axis=0)).max() < 1e-11
 
     disp = 1e-4
-    dm_cart = opt.cell.apply_C_mat_CT(dm)
     def eval_j(c, ac):
-        opt = int3c2e.SRInt3c2eOpt(c, ac, omega).build()
-        jaux = opt.contract_dm(dm_cart)
-        j2c = sr_int2c2e(ac, omega)
-        return float(cp.linalg.solve(j2c, jaux).dot(jaux).get()) * .5
+        # Match the builder's G=0-removed short-range Coulomb convention.
+        return _gamma_df_energy(c, ac, dm, abs(omega), omega, 0)
 
     _check_gradient(grad, cell, auxcell, eval_j)
 
@@ -794,3 +792,59 @@ def test_uhf_ejk_derivatives_kpts_with_long_range1():
         e1 = eval_jk(cell1, acell1)
         e2 = eval_jk(cell2, acell2)
         assert abs(sigma[i, j] - (e1-e2)/2/disp) < 5e-7
+
+
+
+def _gamma_df_energy(cell, auxcell, dm, split_omega, omega, k_factor):
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, split_omega).build(separate_dd=True)
+    data, negative, idx = rsdf_builder.compressed_cderi_gamma_point(
+        cell, auxcell, omega=omega, int3c2e_opt=opt)
+    assert negative is None
+    rows, cols = divmod(cp.asarray(idx[0]), cell.nao)
+    cderi = cp.zeros((data[0].shape[0], cell.nao, cell.nao))
+    cderi[:, rows, cols] = cderi[:, cols, rows] = cp.asarray(data[0])
+    rho = cp.einsum('rij,ji->r', cderi, dm)
+    energy = .5 * rho.dot(rho)
+    if k_factor:
+        ld = cp.einsum('rij,jk->rik', cderi, dm)
+        energy -= .25 * k_factor * cp.einsum('rij,rji->', ld, ld)
+    return float(energy.get())
+
+
+@pytest.mark.parametrize('omega', [0, -.4])
+@pytest.mark.parametrize('k_factor', [0, 1])
+@pytest.mark.parametrize('diffuse_only', [False, True])
+def test_gamma_dd_derivatives(omega, k_factor, diffuse_only):
+    basis = [[0, [.08, 1.]], [1, [.12, 1.]]]
+    if not diffuse_only:
+        basis.insert(0, [0, [4., 1.]])
+    cell = pyscf.M(atom='He .2 .4 .1; He 2.1 1.2 1.8',
+                   a=np.eye(3)*5, unit='Bohr', basis=basis,
+                   precision=1e-10, verbose=0)
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [2., 1.]], [0, [.3, 1.]],
+                     [1, [.4, 1.]], [2, [.5, 1.]]]
+    auxcell.build()
+    rng = np.random.default_rng(17)
+    coeff = rng.random((cell.nao, 2)) - .5
+    dm = cp.asarray(2 * coeff.dot(coeff.T))
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, .4).build(separate_dd=True)
+    assert len(opt.dd_ao_idx) > 0
+    assert bool(len(opt.pair_and_diag_indices()[0])) == (not diffuse_only)
+    result = rhf._get_ejk_derivatives(
+        opt, dm, hermi=1, k_factor=k_factor, omega=omega)
+    unsplit = int3c2e.SRInt3c2eOpt(cell, auxcell, .4).build()
+    ref = rhf._get_ejk_derivatives(
+        unsplit, dm, hermi=1, k_factor=k_factor, omega=omega)
+    np.testing.assert_allclose(result, ref, atol=2e-7, rtol=0)
+    np.testing.assert_allclose(result[:-3].sum(axis=0), 0, atol=1e-10)
+
+    def energy(c, ac):
+        return _gamma_df_energy(c, ac, dm, .4, omega, k_factor)
+    _check_gradient(result[:-3], cell, auxcell, energy, tol=5e-7)
+    disp = 1e-4
+    for i, j in [(0, 0), (0, 1)]:
+        c1, c2 = _finite_diff_cells(cell, i, j, disp=disp)
+        a1, a2 = _finite_diff_cells(auxcell, i, j, disp=disp)
+        numerical = (energy(c1, a1) - energy(c2, a2)) / (2*disp)
+        assert abs(result[-3+i, j] - numerical) < 5e-7
