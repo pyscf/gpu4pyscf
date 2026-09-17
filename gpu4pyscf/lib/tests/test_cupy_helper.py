@@ -20,9 +20,32 @@ from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
     add_sparse, takebak, empty_mapped, dist_matrix,
-    grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph,
-    copy_array)
+    grouped_dot, grouped_gemm, cond, cart2sph,
+    copy_array, contract)
 from gpu4pyscf.lib import cusolver
+
+def cart2sph_cutensor(t, axis=0, ang=1, out=None):
+    '''
+    transform 'axis' of a tensor from cartesian basis into spherical basis with cutensor
+    '''
+    from gpu4pyscf.gto import mole
+    if(ang <= 1):
+        if(out is not None): out[:] = t
+        return t
+    size = list(t.shape)
+    c2s = mole.cart2sph_by_l(ang)
+    if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
+    li_size = c2s.shape
+    nli = size[axis] // li_size[0]
+    i0 = max(1, np.prod(size[:axis]))
+    i3 = max(1, np.prod(size[axis+1:]))
+    out_shape = size[:axis] + [nli*li_size[1]] + size[axis+1:]
+
+    t_cart = t.reshape([i0*nli, li_size[0], i3])
+    if(out is not None):
+        out = out.reshape([i0*nli, li_size[1], i3])
+    t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
+    return t_sph.reshape(out_shape)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):

@@ -26,7 +26,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned,
-    tag_array)
+    scatter_add)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
 from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
@@ -77,8 +77,11 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     Computes the first-order derivatives (nuclear gradients and strain
     derivatives) of the energy contributions from J and K terms per atom.
     '''
-    if kpts is None:
+    if kpts is None or kpts.ndim == 1:
         assert dm.ndim == 2
+        assert dm.dtype == np.float64
+        if kpts is not None:
+            assert is_zero(kpts)
         return rhf._get_ejk_derivatives(
             int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, omega, verbose,
             linear_dep_threshold)
@@ -101,15 +104,6 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     t0 = log.init_timer()
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
-    if (hermi == 1 and len(kpts) == 1 and is_zero(kpts) and bvk_ncells == 1 and
-        dm_factor_l.dtype == np.float64 and
-        (dm_factor_r is None or dm_factor_r.dtype == np.float64)):
-        dm_gamma = tag_array(
-            cp.asarray(dm[0]), factor_l=dm_factor_l[0],
-            factor_r=None if dm_factor_r is None else dm_factor_r[0])
-        return rhf._get_ejk_derivatives(
-            int3c2e_opt, dm_gamma, hermi, j_factor, k_factor, exxdiv,
-            omega, verbose, linear_dep_threshold)
     # transform to the AO order in sorted_cell
     dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=1)
     if dm_factor_r is None:
@@ -120,7 +114,6 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
 
     pair_addresses, diag_idx = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=False)
-    i_addr, j_addr = divmod(pair_addresses, bvk_ncells*nao)
     nao_pair = len(pair_addresses)
     aux_loc = auxcell.ao_loc
     naux = int(aux_loc[-1])
@@ -195,9 +188,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             j3c_tmp = contract('jLikK,LI->KIijk', j3c, expLk_conj, out=j3c_tmp)
             j3c_ij[order_KI] = j3c_tmp.reshape(nkpts**2,-1)
             j3c_tmp = contract('iLjkK,LJ->KJijk', j3c, expLk, out=j3c_tmp)
-            # Basic slices avoid a full-size advanced-indexing copy.
-            for ij, kj in enumerate(order_KJ):
-                j3c_ij[kj] += j3c_tmp.reshape(nkpts**2,-1)[ij]
+            #:j3c_ij[order_KJ] += j3c_tmp.reshape(nkpts**2,-1)
+            j3c_ij = scatter_add(j3c_ij, j3c_tmp.reshape(nkpts**2,-1), order_KJ)
             j3c_ij = j3c_ij.reshape(nkpts, nkpts, nao, nao, dk)
 
             tmp = ndarray((nkpts, nkpts, nocc, nao, dk), dtype=np.complex128, buffer=buf2)

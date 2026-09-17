@@ -23,7 +23,8 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned)
+    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned,
+    copy_symmetric)
 from gpu4pyscf.lib.utils import nearest_power2
 from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern, get_ao_pair_loc
 from gpu4pyscf.df.grad.rhf import factorize_dm
@@ -202,7 +203,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             pqG = eval_ft(Gv[p0:p1], out=buf)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            #:pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            pqG = copy_symmetric(pqG, i_addr, j_addr)
             tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
             ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
             contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
@@ -285,7 +287,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
             pqG = eval_ft(Gv[p0:p1], out=buf)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            pqG = copy_symmetric(pqG, i_addr, j_addr)
             beta = 0
             dm_auxG = ndarray((naux,nGv*2), buffer=buf2)
             if j_factor != 0:

@@ -169,7 +169,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             pqG = eval_ft(Gv[p0:p1], out=buf)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            #:pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            pqG = copy_symmetric(pqG, i_addr, j_addr)
             tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
             ijG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
             contract('pqG,npi->niqG', pqG, dm_factor_r, out=tmp)
@@ -238,7 +239,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
             pqG = eval_ft(Gv[p0:p1], out=buf)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            pqG = copy_symmetric(pqG, i_addr, j_addr)
             beta = 0
             dm_auxG = ndarray((naux,nGv*2), buffer=buf2)
             if j_factor != 0:

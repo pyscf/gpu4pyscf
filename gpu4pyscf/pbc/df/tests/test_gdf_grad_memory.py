@@ -64,24 +64,6 @@ def test_buffer_budget():
             80*1024**3, 1488, 1110804, 24912, 384, 1, 1, 28, 2)
 
 
-def test_real_gamma_matches_kpoint_path():
-    for module, unrestricted in [(krhf, False), (kuhf, True)]:
-        opt, dm, kpts = make_system([1, 1, 1], unrestricted)
-        for omega in [.3, 0.]:
-            for j_factor in [0, 1]:
-                with mock.patch.object(module, 'is_zero', return_value=False):
-                    reference = module._get_ejk_derivatives(
-                        opt, dm, kpts, hermi=1, omega=omega,
-                        j_factor=j_factor, exxdiv='ewald')
-                result = module._get_ejk_derivatives(
-                    opt, dm, kpts, hermi=1, omega=omega,
-                    j_factor=j_factor, exxdiv='ewald')
-                for value, expected in zip(result, reference):
-                    np.testing.assert_allclose(
-                        value, expected, atol=2e-9, rtol=1e-9,
-                        err_msg=str((module.__name__, omega, j_factor)))
-
-
 def test_auxiliary_blocks_and_tail():
     for module, unrestricted in [(krhf, False), (kuhf, True)]:
         opt, dm, kpts = make_system([2, 1, 1], unrestricted)
@@ -92,45 +74,6 @@ def test_auxiliary_blocks_and_tail():
                 opt, dm, kpts, hermi=1, omega=.3)
         for value, expected in zip(result, reference):
             np.testing.assert_allclose(value, expected, atol=2e-9, rtol=1e-9)
-
-
-def test_complex_gamma_is_not_cast_to_real():
-    opt, dm, kpts = make_system([1, 1, 1])
-    factor = dm.factor_l.astype(np.complex128)
-    factor[:,::2] *= 1j
-    complex_dm = tag_array(factor @ factor.swapaxes(-1, -2).conj(),
-                           factor_l=factor, factor_r=None)
-    with mock.patch.object(krhf.rhf, '_get_ejk_derivatives',
-                           side_effect=AssertionError('Unexpected real dispatch')):
-        result = krhf._get_ejk_derivatives(
-            opt, complex_dm, kpts, hermi=1, omega=.3)
-    assert all(np.isfinite(value).all() for value in result)
-
-
-def test_gamma_metric_blocks_and_zero_density():
-    opt, dm, kpts = make_system([1, 1, 1])
-    reference = krhf._get_ejk_derivatives(
-        opt, dm, kpts, hermi=1, omega=.3)
-    original = rhf.get_avail_mem
-    calls = [0]
-
-    def available(exclude_memory_pool=False):
-        calls[0] += 1
-        # The third query sizes the metric output after SR and LR construction.
-        if calls[0] == 3:
-            return opt.auxcell.nao * 5 * 8 * 5
-        return original(exclude_memory_pool)
-
-    with mock.patch.object(rhf, 'get_avail_mem', side_effect=available):
-        result = krhf._get_ejk_derivatives(
-            opt, dm, kpts, hermi=1, omega=.3)
-    for value, expected in zip(result, reference):
-        np.testing.assert_allclose(value, expected, atol=2e-9, rtol=1e-9)
-    zero = tag_array(cp.zeros_like(dm), factor_l=dm.factor_l[:,:,:0], factor_r=None)
-    result = krhf._get_ejk_derivatives(
-        opt, zero, kpts, hermi=1, omega=.3)
-    for value in result:
-        np.testing.assert_array_equal(value, np.zeros_like(value))
 
 
 def test_fourier_blocks():
