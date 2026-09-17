@@ -32,7 +32,7 @@ from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
 from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
 from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
-from gpu4pyscf.pbc.df.grad import rhf, uhf
+from gpu4pyscf.pbc.df.grad import uhf
 from gpu4pyscf.pbc.df.grad.krhf import (
     _get_ej_derivatives, _get_j3c_block_sizes, _get_lr_block_size)
 from gpu4pyscf.pbc.df.grad.rhf import (
@@ -83,26 +83,12 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         (j_factor == 0 or not omega) and
         dm_factor_l.dtype == np.float64 and
         (dm_factor_r is None or dm_factor_r.dtype == np.float64)):
-        # Exchange has no cross-spin terms. Process each spin through the
-        # real Gamma-point path to avoid the full complex spin tensor.
-        ejk = np.zeros((cell.natm, 3))
-        sigma = np.zeros((3, 3))
-        if j_factor != 0:
-            ej, sigma_j = rhf._get_ej_derivatives(
-                int3c2e_opt, dm[0,0]+dm[1,0], hermi, omega, verbose,
-                linear_dep_threshold)
-            ejk += ej * j_factor
-            sigma += sigma_j * j_factor
-        for spin in range(2):
-            dm_spin = tag_array(
-                cp.asarray(dm[spin,0]), factor_l=dm_factor_l[spin,0],
-                factor_r=None if dm_factor_r is None else dm_factor_r[spin,0])
-            ek, sigma_k = rhf._get_ejk_derivatives(
-                int3c2e_opt, dm_spin, hermi, 0, 2*k_factor, exxdiv,
-                omega, verbose, linear_dep_threshold)
-            ejk += ek
-            sigma += sigma_k
-        return ejk, sigma
+        dm_gamma = tag_array(
+            cp.asarray(dm[:,0]), factor_l=dm_factor_l[:,0],
+            factor_r=None if dm_factor_r is None else dm_factor_r[:,0])
+        return uhf._get_ejk_derivatives(
+            int3c2e_opt, dm_gamma, hermi, j_factor, k_factor, exxdiv,
+            omega, verbose, linear_dep_threshold)
     # transform to the AO order in sorted_cell
     assert dm.ndim == 4
     dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=2)
