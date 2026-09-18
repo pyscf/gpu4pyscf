@@ -12,17 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib.util
+import os
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
 import numpy as np
 import cupy as cp
 from pyscf.data import nist
-from pyscf.pbc import gto
+from pyscf.pbc import gto, scf
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from gpu4pyscf.pbc.properties import berry
 from gpu4pyscf.pbc.properties.berry import polarization as polarization_lib
 from gpu4pyscf.pbc.properties.berry.overlap import _commensurate_bvk_mesh
+
+
+HAS_LIBWANNIER90 = importlib.util.find_spec('libwannier90') is not None
 
 
 def _random_unitary(rng, n):
@@ -196,6 +202,78 @@ class KnownValues(unittest.TestCase):
         ]
         np.testing.assert_allclose(
             result.center_sums_fractional, expected, atol=1e-14)
+
+    @unittest.skipUnless(HAS_LIBWANNIER90, 'requires libwannier90')
+    def test_mlwf_gauge_matches_wilson_centers(self):
+        from pyscf.pbc.tools import pywannier90
+
+        lattice = np.diag([7., 8., 9.])
+        atom_fractional = np.asarray([
+            [.18, .23, .31],
+            [.67, .58, .72],
+        ])
+        cell = gto.Cell(
+            atom=[['He', position @ lattice]
+                  for position in atom_fractional],
+            a=lattice,
+            unit='Bohr',
+            basis={'He': [[0, (1.2, 1.)]]},
+            precision=1e-7,
+            verbose=0,
+        )
+        cell.build()
+        kmesh = np.asarray([1, 1, 1])
+        kpts = cell.make_kpts(kmesh)
+        mf = scf.KRHF(cell, kpts=kpts, exxdiv=None).density_fit()
+        mf.conv_tol = 1e-9
+        mf.kernel()
+        self.assertTrue(mf.converged)
+
+        w90 = pywannier90.W90(
+            mf, cell, kmesh, num_wann=2,
+            other_keywords='num_iter = 100\nconv_tol = 1.d-10\n')
+        w90.use_bloch_phases = True
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                os.chdir(tmpdir)
+                w90.kernel()
+            finally:
+                os.chdir(cwd)
+
+        self.assertTrue(np.all(w90.lwindow))
+        # pyWannier90 forms C_tilde = C @ U_opt.T @ U.T.
+        # U_opt is diagonal in this case
+        gauge = np.asarray([
+            w90.U_matrix_opt[k][:, w90.lwindow[k]].T
+            @ w90.U_matrix[k].T
+            for k in range(len(kpts))
+        ])
+        direct = berry.eval_wannier_centers(mf, kmesh=kmesh)
+        diagonal = berry.eval_wannier_centers(
+            mf, kmesh=kmesh, method='diagonal',
+            wannier_gauge=gauge)
+
+        for direction in range(3):
+            np.testing.assert_allclose(
+                np.sort(diagonal.centers[direction], axis=1),
+                np.sort(direct.centers[direction], axis=1),
+                atol=2e-7)
+
+        center_sum_difference = (
+            diagonal.center_sums_fractional
+            - direct.center_sums_fractional)
+        np.testing.assert_allclose(
+            center_sum_difference - np.rint(center_sum_difference),
+            0., atol=2e-7)
+
+        w90_centers_fractional = (
+            w90.wann_centres / nist.BOHR @ np.linalg.inv(lattice))
+        for direction in range(3):
+            np.testing.assert_allclose(
+                np.sort(diagonal.centers[direction][0]),
+                np.sort(np.mod(w90_centers_fractional[:, direction], 1.)),
+                atol=2e-7)
 
     def test_atomic_limit_centers_and_total_polarization(self):
         lattice = np.diag([7., 8., 9.])
