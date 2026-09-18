@@ -361,7 +361,6 @@ class KnownValues(unittest.TestCase):
                 berry.KPointMesh(mf.cell, kpts)
         with self.assertRaises(ValueError):
             berry.KPointMesh(mf.cell, mf.kpts, [1, 3, 1])
-        topology = berry.KPointMesh(mf.cell, mf.kpts)
 
         shifted = mf.cell.get_abs_kpts([[.25 + 4e-7, 0, 0]])
         with self.assertRaises(ValueError):
