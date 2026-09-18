@@ -43,7 +43,7 @@ from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff, _weighted_coulG_LR
+from gpu4pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff
 
 
 def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
@@ -886,8 +886,15 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         dm = cp.asarray(dm.real, order='C')
         dm *= 1./nkpts
 
-    Gv, _, kws = cell.get_Gv_weights(mesh)
+    Gv, _, kws = get_Gv_weights(cell, mesh)
     ngrids = len(Gv)
+    wcoulG_LR0, wcoulG_LR1 = get_wcoulG(
+        cell, Gv, int3c2e_opt.omega)
+    wcoulG_SR_at_G0 = np.pi / int3c2e_opt.omega**2 * kws
+    wcoulG_LR0[0] -= wcoulG_SR_at_G0
+    wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
+    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+
     if with_pseudo:
         raise NotImplementedError("")
         # #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
@@ -899,11 +906,9 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         #     exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
         #     ZG[0] -= charges.dot(np.pi/exps) / cell.vol
     else:
+        pass
         # ZG = _get_ZSI(cell, mesh).conj()
         # ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
-
-        wcoulG_LR = _weighted_coulG_LR(cell, Gv, omega, kws)
-    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
 
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
     aux_loc = auxcell.ao_loc
@@ -948,7 +953,7 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         rho_nucG[p0:p1] = charges.dot(
             auxG.view(np.float64)).view(np.complex128)
 
-    vG = rhoG * wcoulG_LR
+    vG = rhoG * wcoulG_LR0
     GvT = cp.asarray(Gv.T.ravel())
     ej_sigma_aux = cp.zeros([cell.natm+3, 3])
     aux_ft_envs = RysIntEnvVars.new(
@@ -965,7 +970,7 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         raise RuntimeError('ft_ao_deriv failed')
 
     ej_sigma_lr = cp.zeros([cell.natm+3, 3])
-    vG_conj = rho_nucG.conj() * wcoulG_LR
+    vG_conj = rho_nucG.conj() * wcoulG_LR0
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     err = libpbc.PBC_ft_aopair_ej_deriv(
@@ -987,6 +992,8 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
 
     ej_sigma_lr *= 2
     ej_sigma_lr += ej_sigma_aux
+    ej_sigma_lr[-3:] += cp.einsum(
+        'g,g,xyg->xy', rho_nucG, rhoG.conj(), wcoulG_LR1).real
 
     ej_sigma = ej_sigma_lr
     t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
