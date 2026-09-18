@@ -28,7 +28,7 @@ from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft.numint import eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft import UniformGrids, BeckeGrids
-from gpu4pyscf.pbc.dft import multigrid_v3
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
 from gpu4pyscf.pbc.df import ft_ao, GDF
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.gto import int1e
@@ -38,6 +38,8 @@ from gpu4pyscf.pbc.grad.pp import (
     vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, _get_ejk_derivatives
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
+from gpu4pyscf.pbc.scf import hf as pbchf
+from gpu4pyscf.pbc.df.grad.krhf import get_nuc
 
 __all__ = ['Gradients']
 
@@ -354,21 +356,13 @@ class Gradients(GradientsBase):
         if isinstance(ni, multigrid_v3.MultiGridNumInt):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            raise NotImplementedError("")
+        elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
+            raise NotImplementedError("")
         else:
-            hcore_deriv = self.hcore_generator(cell, kpts)
-            dh1e = cp.empty([cell.natm, 3])
-            for ia in range(cell.natm):
-                h1ao = hcore_deriv(ia)
-                dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
-            grad_sigma[:-3] += dh1e.get() / nkpts
-            if isinstance(self.grids or getattr(mf, 'grids', None), BeckeGrids):
-                grad_sigma[-3:] = np.nan
-            else:
-                # hcore_generator includes kinetic gradients, but not kinetic strain.
-                grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0, kpts)[-3:]
-                ni = multigrid_v3.MultiGridNumInt(cell)
-                grad_sigma[-3:] += ni.energy_strain_gradient(
-                    'HF', dm0, kpts, spin=0, with_j=False, with_nuc=True)
+            grad_sigma += get_nuc(cell, dm0, kpts)
+            grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
 
         if cell._pseudo:
             grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0, kpts=kpts) / nkpts

@@ -23,11 +23,12 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.tools.k2gamma import double_translation_indices
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.df import aft as aft_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned)
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
+from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, SRInt3c2eOpt
 from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
 from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
@@ -41,6 +42,8 @@ from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff, _weighted_coulG_LR
 
 
 def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
@@ -830,3 +833,233 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
     '''Compatibility wrapper returning only the atomic Coulomb derivatives.'''
     return _get_ej_derivatives(
         int3c2e_opt, dm, kpts, hermi, omega, verbose, linear_dep_threshold)[:-3]
+
+def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbose=None):
+    log = logger.new_logger(cell, verbose)
+    t0 = log.init_timer()
+
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_gamma_point = kpts is None or is_zero(kpts)
+    if is_single_kpt:
+        kpts = kpts.reshape(1, 3)
+    if is_gamma_point:
+        bvk_kmesh = np.ones(3, dtype=int)
+    else:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+
+    # Guess range-separation parameter based on system size
+    omega = 0.4
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    nGv = np.prod(mesh)
+    ke_cutoff *= (3e3/nGv)**(2./3)
+    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    mesh = cell.symmetrize_mesh(mesh)
+    log.debug('get_pp_loc_part1_grad: omega = %g Ecut = %s mesh = %s',
+              omega, ke_cutoff, mesh)
+
+    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
+    int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
+    charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
+    nuc = int3c2e_opt.contract_auxvec(charges, kpts)
+
+    cell = int3c2e_opt.cell
+    auxcell = int3c2e_opt.auxcell
+
+    dm = cp.asarray(dm)
+    dm = cell.apply_C_mat_CT(dm)
+    if hermi != 1:
+        dm = transpose_sum(dm, inplace=True)
+        dm[:] *= .5
+
+    if kpts is None or is_zero(kpts):
+        dm = cp.asarray(dm.real, order='C')
+        nkpts = 1
+    else:
+        assert len(int3c2e_opt.bvkmesh_Ls) == len(kpts)
+        nkpts = len(kpts)
+        #:expLk = cp.exp(1j*asarray(int3c2e_opt.bvkmesh_Ls).dot(asarray(kpts).T))
+        expLk = fft_matrix(int3c2e_opt.bvk_kmesh)
+        dm = contract('Lk,kpq->Lpq', expLk, dm)
+        dm = cp.asarray(dm.real, order='C')
+        dm *= 1./nkpts
+
+    Gv, _, kws = cell.get_Gv_weights(mesh)
+    ngrids = len(Gv)
+    if with_pseudo:
+        raise NotImplementedError("")
+        # #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
+        # ZG = ft_ao.ft_ao(fakenuc, Gv).conj()
+        # ZG = ZG.dot(charges)
+        # ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
+        # if ((cell.dimension == 3 or
+        #      (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+        #     exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
+        #     ZG[0] -= charges.dot(np.pi/exps) / cell.vol
+    else:
+        # ZG = _get_ZSI(cell, mesh).conj()
+        # ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
+
+        wcoulG_LR = _weighted_coulG_LR(cell, Gv, omega, kws)
+    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+
+    bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
+    aux_loc = auxcell.ao_loc
+    nao = dm.shape[-1]
+    naux = int(aux_loc[-1])
+
+    eval_ft = ft_opt.ft_evaluator(
+        compressing=True, cart=True, original_ao_order=False)[0]
+    pair_addresses, diag_idx = ft_opt.pair_and_diag_indices(
+        cart=True, original_ao_order=False)
+    i_addr, j_addr = divmod(pair_addresses, bvk_ncells * nao)
+    dm_tril = dm.reshape(bvk_ncells*nao, nao).real[j_addr, i_addr]
+    dm_tril[diag_idx] *= .5
+    dm_tril *= 2
+
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    nao_pair = len(dm_tril)
+    Gblksize = int(mem_avail*.8//((nao_pair+naux*2)*16))//32*32
+    Gblksize = min(Gblksize, ngrids)
+    assert Gblksize > 0
+    log.debug1('%.3f GB free memory. blksize=%d for LR part',
+                mem_avail*1e-9, Gblksize)
+
+    rhoG = cp.empty(ngrids, dtype=np.complex128)
+    buf  = cp.empty(max(nao_pair,naux)*Gblksize, dtype=np.complex128)
+    for p0, p1 in lib.prange(0, ngrids, Gblksize):
+        nGv = p1 - p0
+        # conj((r|G)^{[0]}) (ij|G)^{[0]}
+        pqG = eval_ft(Gv[p0:p1], out=buf)
+        rhoGz = cp.einsum('pG,p->G', pqG.view(np.float64), dm_tril)
+        rhoG[p0:p1] = rhoGz.view(np.complex128)
+
+    aft_envs = ft_opt.aft_envs
+    shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    Gblksize = int(mem_avail*.8//(naux*2*16))//32*32
+    Gblksize = min(Gblksize, ngrids)
+    rho_nucG = cp.empty(ngrids, dtype=np.complex128)
+    buf = cp.empty(naux*Gblksize, dtype=np.complex128)
+    for p0, p1 in lib.prange(0, ngrids, Gblksize):
+        auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
+        rho_nucG[p0:p1] = charges.dot(
+            auxG.view(np.float64)).view(np.complex128)
+
+    vG = rhoG * wcoulG_LR
+    GvT = cp.asarray(Gv.T.ravel())
+    ej_sigma_aux = cp.zeros([cell.natm+3, 3])
+    aux_ft_envs = RysIntEnvVars.new(
+        auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
+        _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
+    err = libpbc.PBC_ft_ao_deriv(
+        ctypes.cast(ej_sigma_aux[:-3].data.ptr, ctypes.c_void_p),
+        ctypes.cast(ej_sigma_aux[-3:].data.ptr, ctypes.c_void_p),
+        ctypes.cast(charges.data.ptr, ctypes.c_void_p),
+        ctypes.cast(vG.data.ptr, ctypes.c_void_p),
+        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+        ctypes.byref(aux_ft_envs), ctypes.c_int(ngrids))
+    if err != 0:
+        raise RuntimeError('ft_ao_deriv failed')
+
+    ej_sigma_lr = cp.zeros([cell.natm+3, 3])
+    vG_conj = rho_nucG.conj() * wcoulG_LR
+    bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    err = libpbc.PBC_ft_aopair_ej_deriv(
+        ctypes.cast(ej_sigma_lr[:-3].data.ptr, ctypes.c_void_p),
+        ctypes.cast(ej_sigma_lr[-3:].data.ptr, ctypes.c_void_p),
+        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+        ctypes.cast(vG_conj.data.ptr, ctypes.c_void_p),
+        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+        ctypes.byref(aft_envs),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(shm_size),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ft_opt.permutation_symmetry))
+    if err != 0:
+        raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
+
+    ej_sigma_lr *= 2
+    ej_sigma_lr += ej_sigma_aux
+
+    ej_sigma = ej_sigma_lr
+    t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
+    ft_opt = None
+
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+        gout_width=54, deriv=(1,0,0))
+    lmax = cell.uniq_l_ctr[:,0].max()
+    laux = auxcell.uniq_l_ctr[:,0].max()
+    shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+
+    l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
+    l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
+        l_ctr_aux_offsets, auxcell.uniq_l_ctr, POOL_SIZE)
+    ksh_offsets_cpu = l_ctr_aux_offsets
+    ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
+
+    nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
+    shl_pair_batch_size = rhf._get_shl_pair_batch_size(
+        nksh_per_batch, bvk_ncells)
+    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+        int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
+
+    diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
+    diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
+    log_cutoff = math.log(int3c2e_opt.cutoff)
+
+    ej_sigma_sr = cp.zeros([cell.natm+3, 3])
+    workers = gpu_specs['multiProcessorCount']
+    pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+    head = pool[-1:]
+    task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
+    int3c2e_envs = int3c2e_opt.int3c2e_envs
+    kern = libpbc.PBCsr_ejk_int3c2e_deriv
+    err = kern(
+        ctypes.cast(ej_sigma_sr[:-3].data.ptr, ctypes.c_void_p),
+        ctypes.cast(ej_sigma_sr[-3:].data.ptr, ctypes.c_void_p),
+        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charges.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(-int3c2e_opt.omega),
+        ctypes.byref(int3c2e_envs),
+        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+        ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
+        ctypes.cast(head.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(shm_size_max),
+        ctypes.c_int(len(shl_pair_offsets) - 1),
+        ctypes.c_int(len(ksh_offsets_gpu) - 1),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
+        ctypes.cast(int3c2e_opt.img_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(int3c2e_opt.img_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+        lib.c_null_ptr(),
+        ctypes.c_int(0),
+        ctypes.c_int(auxcell.nbas),
+        ctypes.c_int(naux),
+        ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+        ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+        ctypes.c_float(log_cutoff))
+    if err != 0:
+        raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
+    ej_sigma += ej_sigma_sr * 2
+
+    t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+    return ej_sigma.get()
+
+def get_nuc(cell, dm, kpts=None, hermi=1):
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+    nuc = get_pp_loc_part1_grad(cell, dm, kpts, hermi, with_pseudo=False, verbose=log)
+    log.timer('get_nuc gradient', *t0)
+    return nuc
+
+def get_pp(cell, dm, kpts=None, hermi=1):
+    raise NotImplementedError("")

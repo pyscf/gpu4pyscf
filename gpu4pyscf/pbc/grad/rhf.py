@@ -25,13 +25,15 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 import gpu4pyscf.grad.rhf as mol_rhf
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.dft import multigrid_v3
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df import aft_jk, AFTDF, GDF
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.dft import KohnShamDFT, BeckeGrids
 from gpu4pyscf.pbc.grad.pp import (
     vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
+from gpu4pyscf.pbc.scf import hf as pbchf
+from gpu4pyscf.pbc.df.grad.krhf import get_nuc
 from gpu4pyscf.gto.mole import groupby
 
 __all__ = ['Gradients']
@@ -184,22 +186,13 @@ class Gradients(GradientsBase):
         if isinstance(ni, multigrid_v3.MultiGridNumInt):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0)
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            raise NotImplementedError("")
+        elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
+            raise NotImplementedError("")
         else:
-            from gpu4pyscf.pbc.grad.krhf import hcore_generator
-            hcore_deriv = hcore_generator(self, cell, np.zeros((1, 3)))
-            dh1e = cp.empty([cell.natm, 3])
-            for ia in range(cell.natm):
-                h1ao = hcore_deriv(ia)
-                dh1e[ia] = cp.einsum('xij,ji->x', h1ao[0], dm0).real
-            grad_sigma[:-3] += dh1e.get()
-            if isinstance(self.grids or getattr(mf, 'grids', None), BeckeGrids):
-                grad_sigma[-3:] = np.nan
-            else:
-                # hcore_generator includes kinetic gradients, but not kinetic strain.
-                grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0)[-3:]
-                ni = multigrid_v3.MultiGridNumInt(cell)
-                grad_sigma[-3:] += ni.energy_strain_gradient(
-                    'HF', dm0, spin=0, with_j=False, with_nuc=True)
+            grad_sigma += get_nuc(cell, dm0)
+            grad_sigma += int1e.kin_derivatives(cell, dm0)
 
         if cell._pseudo:
             grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0)
@@ -375,8 +368,9 @@ def strain_tensor_dispalcement(x, y, disp):
     return E_strain
 
 def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
+    cell = cell.copy()
+    cell.verbose = 0
     if precision is not None:
-        cell = cell.copy()
         cell.precision = precision
     a = cell.lattice_vectors()
     r = cell.atom_coords()
