@@ -19,7 +19,7 @@ from pyscf.pbc import gto
 from gpu4pyscf.pbc.properties import berry
 
 
-lattice_constant = 10.26  # Bohr
+lattice_constant = 10.26
 cell = gto.Cell(
     a=np.asarray([
         [0., lattice_constant / 2, lattice_constant / 2],
