@@ -863,7 +863,6 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
     int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
     charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
-    nuc = int3c2e_opt.contract_auxvec(charges, kpts)
 
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
