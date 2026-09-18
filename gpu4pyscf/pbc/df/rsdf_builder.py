@@ -35,7 +35,7 @@ from pyscf.pbc.lib.kpts_helper import member
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray,
-    libcupy_helper)
+    libcupy_helper, tag_array)
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.df.df import libvhf_rys
@@ -70,6 +70,8 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     Diffuse orbital pairs are evaluated entirely in reciprocal space and
     appended after the compact pairs. With exclude_dd=True, return only the
     compact columns and their corresponding AO-pair/diagonal indices.
+    Compressed columns use sorted Cartesian AOs. The pair-address array carries
+    a sorted_cell attribute for recontraction when unpacking.
 
     This function currently only supports full-range and short-range Coulomb
     potential.
@@ -110,6 +112,8 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         assert len(kpt_iters) == len(cderi)
 
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
+    pair_address = tag_array(
+        pair_address, sorted_cell=getattr(cderi_idx[0], 'sorted_cell', None))
     conj_mapping = cp.asarray(conj_images_in_bvk_cell(kmesh), dtype=np.int32)
     bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
@@ -315,7 +319,7 @@ def _append_dd_cderi(opt, cderi, cd_j2c_cache, cderi_idx, cderi_dd_idx, omega, k
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
     j3c_buf = cp.empty((naux_max, n_dd_pairs), dtype=np.complex128)
 
-    eval_ft = dd_ft_opt.ft_evaluator()[0]
+    eval_ft = dd_ft_opt.ft_evaluator(cart=True, original_ao_order=False)[0]
     mem_free = int(get_avail_mem(exclude_memory_pool=True) * .8)
     mem_free -= n_dd_pairs * naux_max * 8 # for j3c.real
     Gblksize = min(len(Gv), mem_free // (16 * (n_dd_pairs + 2*naux_max)))
@@ -384,11 +388,12 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         auxcell, None, omega, rsdf_omega, linear_dep_threshold)
     naux_cart, naux = cd_j2c_cache[0].shape
 
-    cderi_idx = int3c2e_opt.pair_and_diag_indices()
+    cderi_idx = int3c2e_opt.pair_and_diag_indices(cart=True, original_ao_order=False)
     cderi_dd_idx = None
     n_compact_pairs = nao_pairs = len(cderi_idx[0])
     if not exclude_dd and int3c2e_opt.dd_ft_opt is not None:
-        cderi_dd_idx = int3c2e_opt.dd_ft_opt.pair_and_diag_indices()
+        cderi_dd_idx = int3c2e_opt.dd_ft_opt.pair_and_diag_indices(
+            cart=True, original_ao_order=False)
         nao_pairs += len(cderi_dd_idx[0])
     log.debug('nao_pairs = %d, n_compact_pairs = %d', nao_pairs, n_compact_pairs)
 
@@ -429,13 +434,13 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
 
         eval_j3c, aux_sorting, ao_pair_offsets = int3c2e_opt.int3c2e_evaluator(
-            ao_pair_batch_size=batch_size, bas_ij_aggregated=bas_ij_aggregated)[:3]
+            ao_pair_batch_size=batch_size, cart=True, bas_ij_aggregated=bas_ij_aggregated)[:3]
         shl_pair_batches = len(ao_pair_offsets) - 1
         aux_coeff = cp.asarray(cd_j2c_cache[0])
 
         ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
         eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
-            batch_size, bas_ij_aggregated=bas_ij_aggregated)
+            batch_size, cart=True, original_ao_order=False, bas_ij_aggregated=bas_ij_aggregated)
         assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
         log.debug1('cache auxG')
@@ -510,6 +515,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
             cderip[k] = cderi[k][-nauxp:]
             cderi [k] = cderi[k][:-nauxp]
     t1 = log.timer_debug1('build cderi', *t1)
+    cderi_idx = (tag_array(cderi_idx[0], sorted_cell=cell), cderi_idx[1])
     return cderi, cderip, cderi_idx
 
 def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
@@ -548,11 +554,12 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     naux_cart = cd_j2c_cache[0].shape[0]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
 
-    cderi_idx = int3c2e_opt.pair_and_diag_indices()
+    cderi_idx = int3c2e_opt.pair_and_diag_indices(cart=True, original_ao_order=False)
     cderi_dd_idx = None
     n_compact_pairs = nao_pairs = len(cderi_idx[0])
     if not exclude_dd and int3c2e_opt.dd_ft_opt is not None:
-        cderi_dd_idx = int3c2e_opt.dd_ft_opt.pair_and_diag_indices()
+        cderi_dd_idx = int3c2e_opt.dd_ft_opt.pair_and_diag_indices(
+            cart=True, original_ao_order=False)
         nao_pairs += len(cderi_dd_idx[0])
     log.debug('nao_pairs = %d, n_compact_pairs = %d', nao_pairs, n_compact_pairs)
 
@@ -593,7 +600,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
 
         eval_j3c, aux_sorting, ao_pair_offsets = int3c2e_opt.int3c2e_evaluator(
-            ao_pair_batch_size=batch_size, bas_ij_aggregated=bas_ij_aggregated)[:3]
+            ao_pair_batch_size=batch_size, cart=True, bas_ij_aggregated=bas_ij_aggregated)[:3]
         shl_pair_batches = len(ao_pair_offsets) - 1
 
         expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
@@ -603,7 +610,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
 
         ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
         eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
-            batch_size, bas_ij_aggregated=bas_ij_aggregated)
+            batch_size, cart=True, original_ao_order=False, bas_ij_aggregated=bas_ij_aggregated)
         assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
         log.debug1('cache auxG')
@@ -679,8 +686,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         multi_gpu.synchronize()
 
     if not exclude_dd:
+        t1 = log.timer_debug1(f'compact part of GDF tensor', *t0)
         cderi_idx = _append_dd_cderi(
             int3c2e_opt, cderi, cd_j2c_cache, cderi_idx, cderi_dd_idx, omega, uniq_kpts)
+        t1 = log.timer_debug1(f'diffuse part of GDF tensor', *t1)
 
     cderip = None
     if negative_metric_size:
@@ -690,6 +699,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
             cderip[kp] = cderi[kp][-nauxp:]
             cderi [kp] = cderi[kp][:-nauxp]
     log.timer_debug1('build cderi', *t0)
+    cderi_idx = (tag_array(cderi_idx[0], sorted_cell=cell), cderi_idx[1])
     return cderi, cderip, cderi_idx
 
 def _precontract_j2c_aux_coeff(auxcell, kpts, omega, rsdf_omega,
@@ -811,6 +821,30 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
     return out
 
 def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
+                     expLk, nao, axis=0, buf=None, out=None):
+    """Unpack CDERI and recontract sorted Cartesian AOs to the original basis.
+
+    Tagged pair addresses from the compressed builders identify the SortedCell.
+    Untagged addresses retain the original unpacking interface. ``buf`` and
+    ``out`` supplied by callers are sized for contracted AOs, so the primitive
+    workspace is allocated separately.
+    """
+    sorted_cell = getattr(pair_address, 'sorted_cell', None)
+    if sorted_cell is None:
+        return _unpack_cderi_raw(cderi_compressed, pair_address, kj_idx,
+                                 conj_mapping, expLk, nao, axis, buf, out)
+    assert nao == sorted_cell.mol.nao
+    cderi = _unpack_cderi_raw(
+        cderi_compressed, pair_address, kj_idx, conj_mapping, expLk,
+        sorted_cell.nao, axis)
+    # Keep the auxiliary axis contiguous for real and complex recontraction.
+    cderi = cp.ascontiguousarray(cderi.transpose(0, 2, 3, 1))
+    cderi = sorted_cell.apply_CT_dot(cderi, axis=1)
+    cderi = sorted_cell.apply_CT_dot(cderi, axis=2, out=out)
+    return cderi.transpose(0, 3, 1, 2)
+
+
+def _unpack_cderi_raw(cderi_compressed, pair_address, kj_idx, conj_mapping,
                      expLk, nao, axis=0, buf=None, out=None):
     r'''
     Constructs a dense cderi tensor from a partially compressed cderi at a

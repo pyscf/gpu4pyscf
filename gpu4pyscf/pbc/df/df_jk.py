@@ -26,7 +26,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.lib.cupy_helper import contract, unpack_tril, ndarray
+from gpu4pyscf.lib.cupy_helper import contract, unpack_tril, ndarray, tag_array
 from gpu4pyscf.pbc.df.fft_jk import (
     _ewald_exxdiv_for_G0, _format_dms, _format_jks, _factorize_dm)
 from gpu4pyscf.pbc.df import rsdf_builder
@@ -75,12 +75,17 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # Alter the contraction order for
     # rho = einsum('piLj,LK,Kji->p', cderi, expLk, dm)
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
+    pair_address, diag = mydf._cderi_idx
+    sorted_cell = getattr(pair_address, 'sorted_cell', None)
+    pair_address = cp.asarray(pair_address, dtype=np.int32)
+    pair_address = tag_array(pair_address, sorted_cell=sorted_cell)
+    if sorted_cell is not None:
+        dms = sorted_cell.apply_C_mat_CT(dms.reshape(-1, nao, nao))
+        dms = dms.reshape(nset, nkpts, sorted_cell.nao, sorted_cell.nao)
     expLk = fft_matrix(mydf.kmesh)
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
-    pair_address, diag = mydf._cderi_idx
-    pair_address = cp.asarray(pair_address, dtype=np.int32)
     dm_sparse = dm_sparse[:,pair_address]
     dm_sparse[:,diag] *= .5
 
@@ -187,7 +192,11 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = int(mem_free * .8)
-    blksize = avail_mem // (nkpts*nao**2*3 * 16)
+    unit = 3 * nao**2
+    sorted_cell = getattr(mydf._cderi_idx[0], 'sorted_cell', None)
+    if sorted_cell is not None:
+        unit += 2*sorted_cell.nao**2 + nao*sorted_cell.nao
+    blksize = avail_mem // (nkpts*unit * 16)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)

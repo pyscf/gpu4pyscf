@@ -52,12 +52,14 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
     vj = vk = None
     if with_j:
         ao_pair_mapping, diag = mydf._cderi_idx
-        rows, cols = divmod(ao_pair_mapping, nao)
-        dm_sparse = dms[:,rows,cols]
+        sorted_cell = getattr(ao_pair_mapping, 'sorted_cell', None)
+        dm_sorted = dms if sorted_cell is None else sorted_cell.apply_C_mat_CT(dms)
+        rows, cols = divmod(ao_pair_mapping, dm_sorted.shape[-1])
+        dm_sparse = dm_sorted[:,rows,cols]
         if hermi == 1:
             dm_sparse *= 2
         else:
-            dm_sparse += dms[:,cols,rows]
+            dm_sparse += dm_sorted[:,cols,rows]
         dm_sparse[:,diag] *= .5
 
     if getattr(dm, 'mo_coeff', None) is not None:
@@ -136,8 +138,10 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
     if with_j:
         vj_packed = [j for j, k in results]
         vj_packed = multi_gpu.array_reduce(vj_packed, inplace=True)
-        vj = cp.zeros_like(dms)
+        vj = cp.zeros_like(dm_sorted)
         vj[:,cols,rows] = vj[:,rows,cols] = vj_packed
+        if sorted_cell is not None:
+            vj = sorted_cell.apply_CT_mat_C(vj)
         vj = vj.reshape(out_shape)
 
     if with_k:

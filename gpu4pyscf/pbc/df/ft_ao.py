@@ -353,8 +353,6 @@ class FTOpt:
                 self.bas_ij_cache, nsp_per_block)
         else:
             bas_ij_idx, shl_pair_offsets = bas_ij_aggregated
-        img_idx = cp.asarray(self.img_idx)
-        img_offsets = cp.asarray(self.img_offsets)
 
         if cart is None:
             cart = cell.cell.cart
@@ -382,6 +380,8 @@ class FTOpt:
         pool = cp.empty(workers*POOL_SIZE+1, dtype=np.float64)
         head = pool[-1:]
         aft_envs = self.aft_envs
+        img_idx = cp.asarray(self.img_idx)
+        img_offsets = cp.asarray(self.img_offsets)
         bvk_ncells = len(self.bvkmesh_Ls)
         kern = libpbc.build_ft_aopair
 

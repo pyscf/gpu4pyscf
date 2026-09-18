@@ -599,8 +599,8 @@ def copy_symmetric(a, i_addr, j_addr, stream=None):
     err = libcupy_helper.copy_symmetric(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.cast(i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(j.data.ptr, ctypes.c_void_p),
+        ctypes.cast(i_addr.data.ptr, ctypes.c_void_p),
+        ctypes.cast(j_addr.data.ptr, ctypes.c_void_p),
         ctypes.c_int(npairs), ctypes.c_int(N1), ctypes.c_int(N2))
     if err != 0:
         raise RuntimeError('copy_symmetric kernel failed')
@@ -616,7 +616,7 @@ def scatter_add(a, idx, b, alpha=1, stream=None):
     if b.dtype == np.complex128:
         ncol *= 2
     idx = cupy.asarray(idx, dtype=np.int32)
-    err = libcupy_helper.copy_symmetric(
+    err = libcupy_helper.scatter_add(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.cast(b.data.ptr, ctypes.c_void_p),
