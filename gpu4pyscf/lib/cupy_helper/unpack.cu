@@ -350,7 +350,7 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
 int copy_symmetric(cudaStream_t stream, double *a, int *i_addr, int *j_addr,
                    int npairs, int N1, int N2)
 {
-    copy_symmetric_kernel<<<npairs, 512, 0, stream>>>(a, i_addr, j_addr, N1, N2);
+    copy_symmetric_kernel<<<npairs, 1024, 0, stream>>>(a, i_addr, j_addr, N1, N2);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "copy_symmetric error %s\n", cudaGetErrorString(err));
@@ -362,7 +362,7 @@ int copy_symmetric(cudaStream_t stream, double *a, int *i_addr, int *j_addr,
 int scatter_add(cudaStream_t stream, double *a, double *b, int *idx,
                 double alpha, int nrow, int ncol)
 {
-    scatter_add_kernel<<<nrow, 512, 0, stream>>>(a, b, idx, alpha, ncol);
+    scatter_add_kernel<<<nrow, 1024, 0, stream>>>(a, b, idx, alpha, ncol);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "scatter_add_kernel error %s\n", cudaGetErrorString(err));

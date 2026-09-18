@@ -1137,7 +1137,8 @@ class PBCJKMatrixOpt:
         Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
         ngrids = len(Gv)
 
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+                aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         shm_size = aft_jk._estimate_max_shm_size(cell, (1,0))
         log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d',
@@ -1145,7 +1146,7 @@ class PBCJKMatrixOpt:
 
         if exclude_dd_block:
             bas_ij_wo_dd, img_idx_wo_dd, shl_pair_offsets_wo_dd = \
-                    _generate_shl_pairs(ft_opt, self.dd_bas_idx)
+                    _shl_pairs_for_derivative_kernel(ft_opt, self.dd_bas_idx)
 
         def get_j():
             t0 = log.init_timer()
@@ -1939,7 +1940,7 @@ def _get_vk_wcoulG_and_SR(cell, kpt, kpts, exxdiv, mesh, Gv, Gv_weight,
     wcoulG_SR *= sr_factor * Gv_weight
     return wcoulG, wcoulG_SR
 
-def _generate_shl_pairs(ft_opt, dd_bas_idx):
+def _shl_pairs_for_derivative_kernel(ft_opt, dd_bas_idx):
     cell = ft_opt.cell
     bvk_ncells = len(ft_opt.bvkmesh_Ls)
     nbas = cell.nbas

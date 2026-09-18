@@ -168,7 +168,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             j3c_ij[order_KI] = j3c_tmp.reshape(nkpts**2,-1)
             j3c_tmp = contract('iLjkK,LJ->KJijk', j3c, expLk, out=j3c_tmp)
             #:j3c_ij[order_KJ] += j3c_tmp.reshape(nkpts**2,-1)
-            j3c_ij = scatter_add(j3c_ij, j3c_tmp.reshape(nkpts**2,-1), order_KJ)
+            j3c_ij = scatter_add(j3c_ij, order_KJ, j3c_tmp.reshape(nkpts**2,-1))
             j3c_ij = j3c_ij.reshape(nkpts, nkpts, nao, nao, dk)
 
             tmp = ndarray((nkpts, nkpts, nocc, nao, dk), dtype=np.complex128, buffer=buf2)
@@ -321,7 +321,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         Gk = _Gv_wrap_around(auxcell, Gk, cp.zeros(3), mesh)
         Gk = Gk.reshape(nkpts_uniq, ngrids, 3)
 
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+                aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))

@@ -18,6 +18,7 @@ Functions for computing nuclear gradients and strain derivatives
 
 import math
 import ctypes
+import copy
 import numpy as np
 import cupy as cp
 from pyscf import lib
@@ -72,38 +73,6 @@ def _get_shl_pair_batch_size(nksh_per_batch, bvk_ncells):
     return nearest_power2(max_pairs)
 
 
-def _ft_partitions(opt, omega):
-    """Reciprocal pair contributions; only the compact pass updates J2c."""
-    cell = opt.cell
-    mesh = opt.mesh if omega < opt.omega else [1] * 3
-    if omega >= opt.omega:
-        assert cell.dimension == 3
-    Gv, _, weights = get_Gv_weights(cell, mesh)
-    w0, w1 = get_wcoulG(cell, Gv, opt.omega)
-    if omega:
-        v0, v1 = get_wcoulG(cell, Gv, omega)
-        w0 -= v0
-        w1 -= v1
-    sr_g0 = np.pi / opt.omega**2 * weights
-    w0[0] -= sr_g0
-    w1[:, :, 0] += sr_g0 * cp.eye(3)
-    yield ft_ao.FTOpt.from_intopt(opt), Gv, w0, w1, True
-
-    if any(len(x) for x in getattr(opt, 'dd_bas_ij_cache', {}).values()):
-        ft = ft_ao.FTOpt.from_intopt(opt)
-        ft.bas_ij_cache = opt.dd_bas_ij_cache
-        ft.img_idx = opt.dd_img_idx
-        ft.img_offsets = opt.dd_img_offsets
-        Gv = get_Gv_weights(cell, opt.mesh)[0]
-        # Full (or target SR) Coulomb, without the compact SR G=0 correction.
-        w0, w1 = get_wcoulG(cell, Gv, 0)
-        if omega:
-            v0, v1 = get_wcoulG(cell, Gv, omega)
-            w0 -= v0
-            w1 -= v1
-        yield ft, Gv, w0, w1, False
-
-
 def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                          exxdiv=None, omega=None, verbose=None,
                          linear_dep_threshold=LINEAR_DEP_THR):
@@ -126,8 +95,6 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     t0 = log.init_timer()
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
-    if dm_factor_l.shape[-1] == 0:
-        return np.zeros((cell.natm, 3)), np.zeros((3, 3))
     # transform to the AO order in sorted_cell
     dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=0)
     assert dm_factor_l.dtype == np.float64
@@ -135,77 +102,77 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         dm_factor_r = dm_factor_l
     else:
         dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=0)
-    nao, nocc = dm_factor_l.shape
     log.debug1('dm_factor shape %s', dm_factor_l.shape)
-
-    pair_addresses = int3c2e_opt.pair_and_diag_indices(
-        cart=True, original_ao_order=False)[0]
-    i_addr, j_addr = divmod(pair_addresses, nao)
-    nao_pair = len(pair_addresses)
+    nao, nocc = dm_factor_l.shape
     aux_loc = auxcell.ao_loc
     naux = int(aux_loc[-1])
 
+    pair_addresses, diag_idx = int3c2e_opt.pair_and_diag_indices(
+        cart=True, original_ao_order=False)
+    compact_idx = pair_addresses = cp.asarray(pair_addresses, dtype=np.int32)
+    nao_pair = n_compact_pairs = len(pair_addresses)
+    dd_ft_opt = int3c2e_opt.dd_ft_opt
+    separated_dd = dd_ft_opt is not None
+    if separated_dd:
+        dd_ao_idx, dd_diag = dd_ft_opt.pair_and_diag_indices(
+            cart=True, original_ao_order=False)
+        pair_addresses = cp.hstack([compact_idx, dd_ao_idx], dtype=np.int32)
+        diag_idx = cp.hstack([diag_idx, n_compact_pairs + dd_diag])
+        nao_pair = len(pair_addresses)
+
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free - naux*nocc**2*8 - nao**2*8
-    batch_size = max(1, min(naux, int(mem_avail*.5/(max(1, nao_pair)*8*bvk_ncells))))
+    batch_size = max(1, min(naux, int(mem_avail*.5/(max(1, n_compact_pairs)*8*bvk_ncells))))
     aux_batches = 0
-    if nao_pair:
+    if n_compact_pairs == 0:
+        j3c_oo = cp.zeros((naux, nocc, nocc))
+    else:
         assert batch_size < POOL_SIZE
         eval_j3c, _, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
             aux_batch_size=batch_size, cart=True)
         aux_batches = len(aux_offsets) - 1
+        blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*2*8))//8*8))
+        log.debug1('%.3f GB free memory. n_compact_pairs=%d naux=%d batch_size=%d blksize=%d',
+                   mem_free*1e-9, n_compact_pairs, naux, batch_size, blksize)
 
-    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*2*8))//8*8))
-    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
-               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
-
-    aux0 = aux1 = 0
-    j3c_full = cp.zeros((nao, nao, blksize))
-    buf = cp.empty((batch_size, nao_pair))
-    buf1 = cp.empty((blksize, nocc, nao))
-    j3c_oo = cp.zeros((naux, nocc, nocc))
-    for kbatch in range(aux_batches):
-        compressed = eval_j3c(aux_batch_id=kbatch, out=buf)[:,0,:]
-        naux_in_batch = compressed.shape[1]
-        for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-            dk = k1 - k0
-            aux0, aux1 = aux1, aux1 + dk
-            j3c = j3c_full[:,:,:dk]
-            j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
-            tmp = ndarray((nocc, nao, dk), buffer=buf1)
-            contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
-            contract('iqr,qj->rij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
-    j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
-    t0 = log.timer_debug1('contract dm', *t0)
+        i_addr, j_addr = divmod(compact_idx, nao)
+        aux0 = aux1 = 0
+        j3c_full = cp.zeros((nao, nao, blksize))
+        buf = cp.empty((batch_size, n_compact_pairs))
+        buf1 = cp.empty((blksize, nocc, nao))
+        j3c_oo = cp.empty((naux, nocc, nocc))
+        for kbatch in range(aux_batches):
+            compressed = eval_j3c(aux_batch_id=kbatch, out=buf)[:,0,:]
+            naux_in_batch = compressed.shape[1]
+            for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                dk = k1 - k0
+                aux0, aux1 = aux1, aux1 + dk
+                j3c = j3c_full[:,:,:dk]
+                j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
+                tmp = ndarray((nocc, nao, dk), buffer=buf1)
+                contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
+                contract('iqr,qj->rij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
+        j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
+        t0 = log.timer_debug1('contract dm', *t0)
 
     # Adjust the rcut because the default cell.rcut is estimated based on
-    # overlap integrals
-    precision = auxcell.precision * 1e-6
-    log.debug('Set 2c2e integrals precision %g', precision)
-    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, int3c2e_opt.omega, precision)
-    int2c2e_opt = Int2c2eOpt(auxcell)
-    j2c = int2c2e_opt.int2c2e(sort_output=False)
+    # overlap integrals.
+    rcut = _estimate_sr_2c2e_rcut(
+        auxcell, int3c2e_opt.omega, auxcell.precision*1e-6)
+    with lib.temporary_env(auxcell, rcut=rcut):
+        int2c2e_opt = Int2c2eOpt(auxcell)
+    j2c = int2c2e_opt.int2c2e(sort_output=False, omega=-int3c2e_opt.omega)
 
     ################################
     # LR part 0th order
     mesh = int3c2e_opt.mesh
     log.debug('mesh for LR coulG %s', mesh)
-    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-    eval_ft = ft_opt.ft_evaluator(
-        compressing=False, cart=True, original_ao_order=False)[0]
 
     if omega is None:
         omega = 0
     else:
         omega = abs(omega)
-    ft_partitions = list(_ft_partitions(int3c2e_opt, omega))
-
-    with_long_range = omega < int3c2e_opt.omega
-    if with_long_range:
-        mesh = int3c2e_opt.mesh
-    else:
-        assert cell.dimension == 3
-        mesh = [1] * 3
+    mesh = int3c2e_opt.mesh
     Gv, _, kws = get_Gv_weights(cell, mesh)
     ngrids = len(Gv)
     wcoulG_LR0, wcoulG_LR1 = get_wcoulG(cell, Gv, int3c2e_opt.omega)
@@ -217,50 +184,64 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     wcoulG_LR0[0] -= wcoulG_SR_at_G0
     wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
 
-    def lr_3c2e(j3c_oo):
-        ngrids = len(Gv)
-        addresses = ft_opt.pair_and_diag_indices(
-            cart=True, original_ao_order=False)[0]
-        i_addr, j_addr = divmod(addresses, nao)
-        eval_ft = None
-        if len(addresses):
-            eval_ft = ft_opt.ft_evaluator(
-                compressing=False, cart=True, original_ao_order=False)[0]
+    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+    if not separated_dd:
+        eval_ft = ft_opt.ft_evaluator(
+            compressing=True, cart=True, original_ao_order=False)[0]
+    else:
+        wcoulG_FR0, wcoulG_FR1 = get_wcoulG(cell, Gv, -omega)
 
-        mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gsize = max(nao**2,naux) + max(nao*nocc,naux) + naux + nao_pair
-        Gblksize = int(mem_avail*.8//(Gsize*16))//32*32
+        if n_compact_pairs > 0:
+            eval_compact = ft_opt.ft_evaluator(
+                compressing=True, cart=True, original_ao_order=False)[0]
+        eval_dd = dd_ft_opt.ft_evaluator(
+            compressing=True, cart=True, original_ao_order=False)[0]
+
+        def eval_ft(Gv, out=None):
+            # Preserve compact/DD column ordering using each partition's own
+            # shell, image and AO offsets through the existing FT interface.
+            result = ndarray((nao_pair, len(Gv)), dtype=np.complex128, buffer=out)
+            if n_compact_pairs > 0:
+                eval_compact(Gv, out=result[:n_compact_pairs])
+            eval_dd(Gv, out=result[n_compact_pairs:])
+            return result
+
+    def lr_3c2e(j3c_oo):
+        i_addr, j_addr = divmod(pair_addresses, nao)
+        unit = max(nao**2, naux) + max(nao*nocc, naux) + naux + nao_pair
+        Gblksize = int(mem_avail*.8//(unit*16))//32*32
         Gblksize = min(Gblksize, ngrids)
-        if Gblksize < 1:
-            raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
+        assert Gblksize > 0
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
                    mem_avail*1e-9, Gblksize)
         buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty(max(nao*nocc,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(max(nao*nocc, naux)*Gblksize, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
+        buf3 = cp.empty(nao_pair*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf1).T
-            auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf2).T
+            auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
             cp.multiply(auxG, wcoulG_LR0[p0:p1], out=auxGw)
-            auxGw = auxGw.view(np.float64)
-            if with_metric:
-                contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
-            if eval_ft is None:
-                continue
+            contract('iG,jG->ij', auxG.view(np.float64), auxGw.view(np.float64),
+                     beta=1, out=j2c)
+            auxG = auxG.view(np.float64)
+
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
-            pqG = eval_ft(Gv[p0:p1], out=buf)
+            pqG_compressed = eval_ft(Gv[p0:p1], out=buf3)
+            pqG_compressed[:n_compact_pairs] *= wcoulG_LR0[p0:p1]
+            if separated_dd:
+                pqG_compressed[n_compact_pairs:] *= wcoulG_FR0[p0:p1]
+            pqG = ndarray((nao,nao,nGv), dtype=np.complex128, buffer=buf)
+            symmetric_scatter(pqG, i_addr, j_addr, pqG_compressed)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            #:pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
-            pqG = copy_symmetric(pqG, i_addr, j_addr)
             tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
             ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
             contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
             contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
-            contract('rG,ijG->rij', auxGw, ijG, beta=1, out=j3c_oo)
+            contract('rG,ijG->rij', auxG, ijG, beta=1, out=j3c_oo)
         return j3c_oo
-    for ft, Gv, w0, _, with_metric in ft_partitions:
-        j3c_oo = lr_3c2e(j3c_oo, ft, Gv, w0, with_metric)
+    j3c_oo = lr_3c2e(j3c_oo)
 
     ################################
     # (d/dX P|Q) contributions
@@ -273,13 +254,9 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             j2c, linear_dep_threshold, auxcell.dimension)
         metric = aux_coeff.dot(solve_j2c(aux_coeff.T))
     j2c = aux_coeff = solve_j2c = None
-    # The metric acts only on the auxiliary index, so occupied blocks can be
-    # transformed in place without allocating another full naux*nocc*nocc tensor.
     dm_oo = j3c_oo
-    mem_avail = get_avail_mem(exclude_memory_pool=True)
     occ_blksize = min(nocc, int(mem_avail*.4//(naux*nocc*8)))
-    if occ_blksize < 1:
-        raise RuntimeError('Insufficient GPU memory for GDF gradient metric')
+    assert occ_blksize > 0
     for p0, p1 in lib.prange(0, nocc, occ_blksize):
         tmp = contract('uv,vij->uij', metric, dm_oo[:,p0:p1])
         dm_oo[:,p0:p1] = tmp
@@ -303,29 +280,32 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
 
     ################################
     # LR part response
-    def lr_3c2e_response(ft_opt, Gv, wcoulG_LR0, wcoulG_LR1, with_metric):
-        ngrids = len(Gv)
-        addresses = ft_opt.pair_and_diag_indices(
-            cart=True, original_ao_order=False)[0]
-        i_addr, j_addr = divmod(addresses, nao)
-        eval_ft = None
-        if len(addresses):
-            eval_ft = ft_opt.ft_evaluator(
-                compressing=False, cart=True, original_ao_order=False)[0]
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
+    def lr_3c2e_response():
         aft_envs = ft_opt.aft_envs
         aux_ft_envs = RysIntEnvVars.new(
             auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
             _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
 
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+                aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
+        if separated_dd:
+            dd_bas_ij_idx, dd_bas_ij_img_idx, dd_shl_pair_offsets = \
+                    aft_jk._shl_pairs_for_derivative_kernel(dd_ft_opt)
+            bas_ij_idx = cp.hstack([bas_ij_idx, dd_bas_ij_idx])
+            bas_ij_img_idx = cp.hstack([bas_ij_img_idx, dd_bas_ij_img_idx])
+            shl_pair_offsets = cp.hstack([
+                shl_pair_offsets[:-1], shl_pair_offsets[-1] + dd_shl_pair_offsets])
+
+        i_addr, j_addr = divmod(pair_addresses, nao)
+        # The derivative kernel reads (j,i), whereas compressed FT tensors
+        # store (i,j). Weight only the entries actually read by the kernel.
+        response_idx = j_addr * nao + i_addr
+
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gsize = max(nao**2,naux) + max(nao*nocc,naux) + naux + nao_pair
-        Gblksize = int(mem_avail*.8//(Gsize*16))//32*32
+        unit = max(nao**2, naux) + max(nao*nocc, naux) + naux*2 + nao_pair
+        Gblksize = int(mem_avail*.8//(unit*16))//32*32
         Gblksize = min(Gblksize, ngrids)
-        if Gblksize < 1:
-            raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
+        assert Gblksize > 0
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
@@ -337,48 +317,105 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         kern_auxG = libpbc.PBC_ft_ao_deriv
         null_ptr = lib.c_null_ptr()
         buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty(max(nao*nocc,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(max(nao*nocc, naux)*Gblksize, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
+        buf3 = cp.empty(nao_pair*Gblksize, dtype=np.complex128)
+        buf_auxG = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
+            GvT = cp.asarray(Gv[p0:p1].T, order='C')
+            auxG = ft_ao.ft_ao(auxcell, GvT.T, out=buf_auxG).T
+
+            # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
+            auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
+            auxG_conj = cp.conj(auxG, out=auxG_conj)
+            auxG_conj = auxG_conj.view(np.float64)
+
+            # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
+            # dm_oo must be symmetric
+            dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
+            dm_ooG = ndarray((nocc**2, nGv*2), buffer=buf)
+            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
+            dm_oo.reshape(naux, nocc*nocc).T.dot(auxG_conj, out=dm_ooG)
+            dm_ooG = dm_ooG.reshape(nocc,nocc,nGv*2)
+            contract('jiG,qi->jqG', dm_ooG, dm_factor_r, out=tmp)
+            beta = 0
+            if j_factor != 0:
+                vG = auxvec.dot(auxG_conj)
+                cp.multiply(dm_sorted[:,:,None], vG, out=dm_vG)
+                beta = j_factor
+            contract('jqG,pj->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
+            dm_vG = dm_vG.view(np.complex128).reshape(nao*nao, nGv)
+            dm_vG_compressed = cp.take(
+                dm_vG, pair_addresses, axis=0,
+                out=ndarray((nao_pair, nGv), dtype=np.complex128, buffer=buf3))
+
+            if n_compact_pairs > 0:
+                indexed_scale(dm_vG, response_idx[:n_compact_pairs], wcoulG_LR0[p0:p1])
+            if separated_dd:
+                indexed_scale(dm_vG, response_idx[n_compact_pairs:], wcoulG_FR0[p0:p1])
+            err = kern(
+                ctypes.cast(ejk_sigma_lr[:-3].data.ptr, ctypes.c_void_p),
+                ctypes.cast(ejk_sigma_lr[-3:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
+                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                ctypes.byref(aft_envs),
+                ctypes.c_int(len(shl_pair_offsets) - 1),
+                ctypes.c_int(nGv),
+                ctypes.c_int(shm_size),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ft_opt.permutation_symmetry))
+            if err != 0:
+                raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
+
+            pqG_compressed = eval_ft(Gv[p0:p1], out=buf)
+            dm_vG_compressed[diag_idx] *= .5
+            vG = cp.einsum('rg,rg->g', pqG_compressed[:n_compact_pairs],
+                           dm_vG_compressed[:n_compact_pairs]).real
+            sigma_G += 2 * cp.einsum('g,xyg->xy', vG, wcoulG_LR1[:,:,p0:p1])
+            if separated_dd:
+                vG = cp.einsum('rg,rg->g', pqG_compressed[n_compact_pairs:],
+                               dm_vG_compressed[n_compact_pairs:]).real
+                sigma_G += 2 * cp.einsum('g,xyg->xy', vG, wcoulG_FR1[:,:,p0:p1])
+
             # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
-            if eval_ft is None:
-                pqG = ndarray((nao, nao, nGv*2), buffer=buf)
-                pqG.fill(0.)
-            else:
-                pqG = eval_ft(Gv[p0:p1], out=buf)
-                pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            pqG = copy_symmetric(pqG, i_addr, j_addr)
+            pqG_swap = dm_vG_compressed # swap pqG_compressed, to release buf
+            cp.multiply(pqG_compressed[:n_compact_pairs], wcoulG_LR0[p0:p1],
+                        out=pqG_swap[:n_compact_pairs])
+            if separated_dd:
+                cp.multiply(pqG_compressed[n_compact_pairs:], wcoulG_FR0[p0:p1],
+                            out=pqG_swap[n_compact_pairs:])
+            pqGw = ndarray((nao,nao,nGv), dtype=np.complex128, buffer=buf)
+            symmetric_scatter(pqGw, i_addr, j_addr, pqG_swap)
+            pqGw = pqGw.view(np.float64).reshape(nao,nao,nGv*2)
+
             beta = 0
             dm_auxG = ndarray((naux,nGv*2), buffer=buf2)
             if j_factor != 0:
-                rhoGz = cp.einsum('pqG,qp->G', pqG, dm_sorted)
+                rhoGz = cp.einsum('pqG,qp->G', pqGw, dm_sorted)
                 cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
                 beta = j_factor
-            # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqG, c, c, dm_oo, 1j*Gv, conj(auxG))
+            # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqGw, c, c, dm_oo, 1j*Gv, conj(auxG))
             tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
             ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
-            contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
+            contract('pqG,pi->iqG', pqGw, dm_factor_r, out=tmp)
             contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
             # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
             # contracting all [0] order terms -> dm_auxG
             contract('rji,ijG->rG', dm_oo, ijG, -.5*k_factor, beta, out=dm_auxG)
             dm_auxG = dm_auxG.view(np.complex128)
 
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf1).T
-            vG = cp.einsum('rg,rg->g', dm_auxG, auxG.conj()).real
-
             # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
             # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
-            vG *= 2
-            if with_metric:
-                dm_auxG1 = contract('sr,sG->rG', dm_aux, auxG.view(np.float64),
-                    out=ndarray((naux,nGv*2), buffer=buf)).view(np.complex128)
-                vG -= cp.einsum('rg,rg->g', dm_auxG1, auxG.conj()).real
-                dm_auxG -= dm_auxG1
-            sigma_G += .5 * cp.einsum('g,xyg->xy', vG, wcoulG_LR1[:,:,p0:p1])
+            dm_auxG1 = contract('sr,sG->rG', dm_aux, auxG.view(np.float64),
+                                out=ndarray((naux,nGv*2), buffer=buf)).view(np.complex128)
+            vG = cp.einsum('rg,rg->g', dm_auxG1, auxG.conj()).real
+            sigma_G -= .5 * cp.einsum('g,xyg->xy', vG, wcoulG_LR1[:,:,p0:p1])
 
-            dm_auxG *= wcoulG_LR0[p0:p1]
+            dm_auxG1 *= wcoulG_LR0[p0:p1]
+            dm_auxG -= dm_auxG1
             dm_auxG = dm_auxG.view(np.float64)
 
             # contract to (r|G)^{[1]}.
@@ -398,7 +435,6 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             #:for i in range(3):
             #:    cp.multiply(auxG, -1j*Gv[p0:p1,i], out=ip_auxG)
             #:    partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
-            GvT = cp.asarray(Gv[p0:p1].T.ravel())
             err = kern_auxG(
                 ctypes.cast(ejk_sigma_aux[:-3].data.ptr, ctypes.c_void_p),
                 ctypes.cast(ejk_sigma_aux[-3:].data.ptr, ctypes.c_void_p),
@@ -410,60 +446,19 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             if err != 0:
                 raise RuntimeError('ft_ao_deriv failed')
 
-            if nbatches_shl_pair == 0:
-                continue
-
-            # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
-            auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
-            auxG_conj = cp.conj(auxG, out=auxG_conj)
-            auxG_conj *= wcoulG_LR0[p0:p1]
-            auxG_conj = auxG_conj.view(np.float64)
-
-            # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
-            # dm_oo must be symmetric
-            dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
-            dm_ooG = ndarray((nocc**2, nGv*2), buffer=buf)
-            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
-            dm_oo.reshape(naux, nocc*nocc).T.dot(auxG_conj, out=dm_ooG)
-            dm_ooG = dm_ooG.reshape(nocc,nocc,nGv*2)
-            contract('jiG,qi->jqG', dm_ooG, dm_factor_r, out=tmp)
-            beta = 0
-            if j_factor != 0:
-                vG = auxvec.dot(auxG_conj)
-                cp.multiply(dm_sorted[:,:,None], vG, out=dm_vG)
-                beta = j_factor
-            contract('jqG,pj->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
-            err = kern(
-                ctypes.cast(ejk_sigma_lr[:-3].data.ptr, ctypes.c_void_p),
-                ctypes.cast(ejk_sigma_lr[-3:].data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
-                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                ctypes.byref(aft_envs),
-                ctypes.c_int(nbatches_shl_pair),
-                ctypes.c_int(nGv),
-                ctypes.c_int(shm_size),
-                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ft_opt.permutation_symmetry))
-            if err != 0:
-                raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
-
         ejk_sigma_lr *= 2 # due to i>=j symmetry in CUDA kernel
         ejk_sigma_lr += ejk_sigma_aux
         ejk_sigma_lr[-3:] += sigma_G
         return ejk_sigma_lr
 
-    for ft, Gv, w0, w1, with_metric in ft_partitions:
-        ejk_sigma += lr_3c2e_response(ft, Gv, w0, w1, with_metric)
-    ft_partitions = None
+    ejk_sigma += lr_3c2e_response()
     log.timer_debug1('LR coulomb', *t0)
     dm_aux = None
 
     ################################
     # SR int3c2e response
     # contract the derivatives and the pseudo DM/rho
-    if nao_pair:
+    if n_compact_pairs > 0:
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
             gout_width=54, deriv=(1,0,0))
         lmax = cell.uniq_l_ctr[:,0].max()
@@ -496,13 +491,13 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         int3c2e_envs = int3c2e_opt.int3c2e_envs
         kern = libpbc.PBCsr_ejk_int3c2e_deriv
         aux0 = aux1 = 0
-        buf = cp.empty((nao_pair*batch_size))
+        buf = cp.empty((n_compact_pairs*batch_size))
         buf1 = cp.empty((blksize, nao, nao))
         buf2 = cp.empty((blksize, nao, nao))
         for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
             aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
             naux_in_batch = aux_loc[ksh_offsets_cpu[kbatch+1]] - aux_ao_offset
-            compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
+            compressed = ndarray((n_compact_pairs, naux_in_batch), buffer=buf)
             for k0, k1 in lib.prange(0, naux_in_batch, blksize):
                 dk = k1 - k0
                 aux0, aux1 = aux1, aux1 + dk
@@ -515,13 +510,13 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 contract('rji,qj->iqr', dm_oo[aux0:aux1], dm_factor_l, out=tmp)
                 contract('iqr,pi->pqr', tmp, dm_factor_r, -.5*k_factor, beta, out=dm_tensor)
                 if hermi == 1:
-                    cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0,
+                    cp.take(dm_tensor.reshape(-1,dk), compact_idx, axis=0,
                             out=compressed[:,k0:k1])
                 else:
                     dm_tensor1 = ndarray((nao,nao,dk), buffer=buf2)
                     dm_tensor1[:] = dm_tensor.transpose(1,0,2)
                     dm_tensor1[:] += dm_tensor
-                    cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
+                    cp.take(dm_tensor1.reshape(-1,dk), compact_idx, axis=0,
                             out=compressed[:,k0:k1])
             err = kern(
                 ctypes.cast(ejk_sigma_sr[:-3].data.ptr, ctypes.c_void_p),
@@ -586,13 +581,14 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
+    assert cell.dimension == 3
     assert dm.dtype == np.float64
 
     dm = cell.apply_C_mat_CT(dm)
     if hermi != 1:
         dm = transpose_sum(dm, inplace=True)
         dm[:] *= .5
-    has_compact = any(len(x) for x in int3c2e_opt.bas_ij_cache.values())
+    has_compact = len(int3c2e_opt.img_idx) > 0
     if has_compact:
         auxvec = int3c2e_opt.contract_dm(dm, hermi=1)
     else:
@@ -602,24 +598,24 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     aux_loc = auxcell.ao_loc
     naux = int(aux_loc[-1])
 
-    precision = auxcell.precision * 1e-6
-    log.debug('Set 2c2e integrals precision %g', precision)
-    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, int3c2e_opt.omega, precision)
-    int2c2e_opt = Int2c2eOpt(auxcell)
-    j2c = int2c2e_opt.int2c2e(sort_output=False)
+    # Adjust the rcut because the default cell.rcut is estimated based on
+    # overlap integrals.
+    rcut = _estimate_sr_2c2e_rcut(
+        auxcell, int3c2e_opt.omega, auxcell.precision*1e-6)
+    with lib.temporary_env(auxcell, rcut=rcut):
+        int2c2e_opt = Int2c2eOpt(auxcell)
+    j2c = int2c2e_opt.int2c2e(sort_output=False, omega=-int3c2e_opt.omega)
 
     ################################
     # LR part 0th order
-    omega = 0 if omega is None else abs(omega)
-    ft_partitions = list(_ft_partitions(int3c2e_opt, omega))
+    if omega is None:
+        omega = 0
+    else:
+        omega = abs(omega)
+    dd_ft_opt = int3c2e_opt.dd_ft_opt
+    separated_dd = dd_ft_opt is not None
 
-    def lr_3c2e(ft_opt, Gv, wcoulG_LR0, with_metric):
-        ngrids = len(Gv)
-        has_pairs = any(len(x) for x in ft_opt.bas_ij_cache.values())
-        eval_ft = None
-        if has_pairs:
-            eval_ft = ft_opt.ft_evaluator(
-                compressing=True, cart=True, original_ao_order=False)[0]
+    def lr_3c2e(ft_opt, wcoulG, update_metric):
         pair_addresses, diag_idx = ft_opt.pair_and_diag_indices(
             cart=True, original_ao_order=False)
         dm_tril = dm.ravel()[pair_addresses]
@@ -628,6 +624,10 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
 
         mem_avail = get_avail_mem(exclude_memory_pool=True)
         nao_pair = len(dm_tril)
+        eval_ft = None
+        if nao_pair > 0:
+            eval_ft = ft_opt.ft_evaluator(
+                compressing=True, cart=True, original_ao_order=False)[0]
         Gblksize = int(mem_avail//2//((nao_pair+naux*2)*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
@@ -650,19 +650,34 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
 
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
             auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
-            cp.multiply(auxG, wcoulG_LR0[p0:p1], out=auxGw)
+            cp.multiply(auxG, wcoulG[p0:p1], out=auxGw)
             auxGw = auxGw.view(np.float64)
-            if with_metric:
+            if update_metric:
                 contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
             auxvec_LR += auxGw.dot(rhoGz)
         return auxvec_LR, rhoG
 
-    rhoG_parts = []
-    for ft, Gv, w0, _, with_metric in ft_partitions:
-        auxvec_LR, rhoG = lr_3c2e(ft, Gv, w0, with_metric)
-        auxvec += auxcell.apply_CT_dot(auxvec_LR)
-        rhoG_parts.append(rhoG)
-    auxvec_LR = None
+    mesh = int3c2e_opt.mesh
+    log.debug('mesh for LR coulG %s', mesh)
+    Gv, _, kws = get_Gv_weights(cell, mesh)
+    ngrids = len(Gv)
+    wcoulG_LR0, wcoulG_LR1 = get_wcoulG(cell, Gv, int3c2e_opt.omega)
+    if omega != 0:
+        wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gv, omega)
+        wcoulG_LR0 -= wcoulG_0
+        wcoulG_LR1 -= wcoulG_1
+    wcoulG_SR_at_G0 = np.pi / int3c2e_opt.omega**2 * kws
+    wcoulG_LR0[0] -= wcoulG_SR_at_G0
+    wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
+    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+    auxvec_LR, rhoG_LR = lr_3c2e(ft_opt, wcoulG_LR0, True)
+
+    if separated_dd:
+        wcoulG_FR0, wcoulG_FR1 = get_wcoulG(cell, Gv, -omega)
+        auxvec_FR, rhoG_FR = lr_3c2e(dd_ft_opt, wcoulG_FR0, False)
+        auxvec_LR += auxvec_FR
+
+    auxvec += auxcell.apply_CT_dot(auxvec_LR)
     t0 = log.timer_debug1('lr_int3c2e via aft', *t0)
 
     ################################
@@ -685,8 +700,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
 
     #########################
     # LR part response
-    def lr_3c2e_response(ft_opt, Gv, wcoulG_LR0, wcoulG_LR1, with_metric, rhoG):
-        ngrids = len(Gv)
+    def lr_3c2e_response(ft_opt, rhoG, wcoulG0, wcoulG1, update_metric):
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
         mem_avail = get_avail_mem(exclude_memory_pool=True)
@@ -708,7 +722,10 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
             #ip_vG -= rho_auxG[p0:p1] * wcoulG_LR0[p0:p1] * 1j * Gv[p0:p1].T
             #partial_daux += cp.einsum('xg,ag->xa', ip_vG.view(np.float64),
             #                          auxG.view(np.float64))
-        vG = (rhoG - rho_auxG * with_metric) * wcoulG_LR0
+        if update_metric:
+            vG = (rhoG - rho_auxG) * wcoulG0
+        else:
+            vG = rhoG * wcoulG0
         GvT = cp.asarray(Gv.T.ravel())
         ej_sigma_aux = cp.zeros([cell.natm+3, 3])
         aux_ft_envs = RysIntEnvVars.new(
@@ -725,11 +742,11 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         if err != 0:
             raise RuntimeError('ft_ao_deriv failed')
 
-        vG_conj = rho_auxG.conj() * wcoulG_LR0
         ej_sigma_lr = cp.zeros([cell.natm+3, 3])
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
-        if nbatches_shl_pair:
+        if has_compact > 0:
+            vG_conj = rho_auxG.conj() * wcoulG0
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+                    aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
             err = libpbc.PBC_ft_aopair_ej_deriv(
                 ctypes.cast(ej_sigma_lr[:-3].data.ptr, ctypes.c_void_p),
                 ctypes.cast(ej_sigma_lr[-3:].data.ptr, ctypes.c_void_p),
@@ -737,7 +754,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
                 ctypes.cast(vG_conj.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),
-                ctypes.c_int(nbatches_shl_pair),
+                ctypes.c_int(len(shl_pair_offsets) - 1),
                 ctypes.c_int(ngrids),
                 ctypes.c_int(shm_size),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
@@ -749,13 +766,15 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
 
         ej_sigma_lr *= 2 # due to i>=j symmetry in CUDA kernel
         ej_sigma_lr += ej_sigma_aux
-        ej_sigma_lr[-3:] += .5 * cp.einsum('g,g,xyg->xy', rho_auxG,
-                                (rhoG*2-rho_auxG*with_metric).conj(), wcoulG_LR1).real
+        ej_sigma_lr[-3:] += cp.einsum('g,xyg->xy', (rho_auxG*rhoG.conj()).real, wcoulG1)
+        if update_metric:
+            ej_sigma_lr[-3:] -= .5 * cp.einsum(
+                'g,xyg->xy', (rho_auxG*rho_auxG.conj()).real, wcoulG1)
         return ej_sigma_lr
 
-    for (ft, Gv, w0, w1, with_metric), rhoG in zip(ft_partitions, rhoG_parts):
-        ej_sigma += lr_3c2e_response(ft, Gv, w0, w1, with_metric, rhoG)
-    ft_partitions = rhoG_parts = None
+    ej_sigma += lr_3c2e_response(ft_opt, rhoG_LR, wcoulG_LR0, wcoulG_LR1, True)
+    if separated_dd:
+        ej_sigma += lr_3c2e_response(dd_ft_opt, rhoG_FR, wcoulG_FR0, wcoulG_FR1, False)
     t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
 
     ################################
@@ -838,3 +857,70 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     '''Compatibility wrapper returning only the atomic Coulomb derivatives.'''
     return _get_ej_derivatives(
         int3c2e_opt, dm, hermi, omega, verbose, linear_dep_threshold)[:-3]
+
+
+_kernel_registery = {}
+
+def indexed_scale(a, idx, b):
+    '''a[idx] *= b'''
+    fn_name = 'indexed_scale'
+    if fn_name not in _kernel_registery:
+        _kernel_registery[fn_name] = cp.RawKernel(r'''
+#include <cuComplex.h>
+extern "C" __global__
+void ''' + fn_name + r'''(cuDoubleComplex *a, int *idx, double *b, int ncol) {
+    int i = blockIdx.x;
+    size_t row = idx[i];
+    size_t off = row * ncol;
+    for (int j = threadIdx.x; j < ncol; j += blockDim.x) {
+        double w = b[j];
+        cuDoubleComplex val = a[off + j];
+        val.x *= w;
+        val.y *= w;
+        a[off + j] = val;
+    }
+}''', fn_name)
+    kernel = _kernel_registery[fn_name]
+    idx = cp.asarray(idx, dtype=np.int32)
+    ncol = a.shape[1]
+    assert a.ndim == 2 and a.flags.c_contiguous
+    assert a.dtype == cp.complex128
+    assert b.dtype == cp.float64 and b.flags.c_contiguous
+    assert len(b) == ncol
+    if len(idx) == 0:
+        return a
+    kernel((len(idx),), (1024,), (a, idx, b, cp.int32(ncol)))
+    return a
+
+def symmetric_scatter(a, i_addr, j_addr, b):
+    '''a[i_addr,j_addr,:] = a[j_addr,i_addr,:] = b[:,:]'''
+    fn_name = 'symmetric_scatter'
+    if fn_name not in _kernel_registery:
+        _kernel_registery[fn_name] = cp.RawKernel(r'''
+extern "C" __global__
+void ''' + fn_name + r'''(double *a, double *b, int* i_addr, int* j_addr, int N, int ncol) {
+    size_t k = blockIdx.x;
+    size_t i = i_addr[k];
+    size_t j = j_addr[k];
+    size_t base_ij = (i * N + j) * ncol;
+    size_t base_ji = (j * N + i) * ncol;
+    size_t base_b =  k * ncol;
+    for (int c = threadIdx.x; c < ncol; c += blockDim.x) {
+        double val = b[base_b + c];
+        a[base_ij + c] = val;
+        a[base_ji + c] = val;
+    }
+}
+''', fn_name)
+    kernel = _kernel_registery[fn_name]
+    i_addr = cp.asarray(i_addr, dtype=np.int32)
+    j_addr = cp.asarray(j_addr, dtype=np.int32)
+    n, ncol = a.shape[1:3]
+    assert a.dtype == b.dtype
+    a.fill(0.)
+    if len(i_addr) == 0:
+        return a
+    if a.dtype == cp.complex128:
+        ncol *= 2
+    kernel((len(i_addr),), (1024,), (a, b, i_addr, j_addr, cp.int32(n), cp.int32(ncol)))
+    return a

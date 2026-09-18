@@ -216,8 +216,12 @@ class SRInt3c2eOpt:
         self._int3c2e_envs = None
         self.bas_ij_cache = None
         self.bvkcell = None
-        self.bvk_auxcell = None
         self.bvkmesh_Ls = None
+        self.bvk_auxcell = None
+        self.bas_ij_cache = None
+        self.img_idx = None
+        self.img_offsets = None
+        self.dd_ft_opt = None
 
     def build(self, separate_dd=False):
         """Build pair and image lists, optionally separating diffuse pairs.
@@ -225,8 +229,6 @@ class SRInt3c2eOpt:
         With separate_dd=True, the SR evaluator contains only compact pairs;
         dd_ft_opt holds the complementary Fourier-transform pair list.
         """
-        self.dd_ft_opt = None
-        self.dd_bas_idx = self.dd_ao_idx = self.dd_diag_idx = None
         cell = self.cell = SortedCell.from_cell(self.cell)
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
         auxcell = self.auxcell = SortedCell.from_cell(self.auxcell)
@@ -295,7 +297,7 @@ class SRInt3c2eOpt:
             ctypes.c_float(log_cutoff), ctypes.c_int(symmetric))
 
         mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
-        self.dd_bas_ij_cache = dd_bas_ij_cache = {}
+        dd_bas_ij_cache = {}
         if separate_dd:
             from gpu4pyscf.pbc.scf.rsjk import _search_diffuse_pairs
             pair_mask = _search_diffuse_pairs(cell, self.mesh)
@@ -344,13 +346,13 @@ class SRInt3c2eOpt:
 
         if separate_dd:
             bas_ij_idx = cp.hstack(list(dd_bas_ij_cache.values()), dtype=np.uint32)
-            img_offsets = cp.empty(bas_ij_idx.size+1, dtype=np.uint32)
-            img_counts[bas_ij_idx].cumsum(out=img_offsets[1:])
-            img_offsets[0] = 0
-            img_idx_size = img_offsets[-1].get()
-            assert img_idx_size < 2**32
-            img_idx = cp.zeros(img_idx_size, dtype=np.int32)
             if len(bas_ij_idx) > 0:
+                img_offsets = cp.empty(bas_ij_idx.size+1, dtype=np.uint32)
+                img_counts[bas_ij_idx].cumsum(out=img_offsets[1:])
+                img_offsets[0] = 0
+                img_idx_size = img_offsets[-1].get()
+                assert img_idx_size < 2**32
+                img_idx = cp.zeros(img_idx_size, dtype=np.int32)
                 libpbc.bvk_ovlp_img_idx(
                     ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
@@ -360,12 +362,11 @@ class SRInt3c2eOpt:
                     ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff))
-            self.dd_img_idx = img_idx
-            self.dd_img_offsets = img_offsets
-            dd_ft_opt = FTOpt.from_intopt(self)
-            dd_ft_opt.bas_ij_cache = self.dd_bas_ij_cache
-            self.dd_ao_idx, self.dd_diag = dd_ft_opt.pair_and_diag_indices()
-            logger.debug(cell, 'Separated %d diffuse shell pairs', len(bas_ij_idx))
+                self.dd_ft_opt = dd_ft_opt = FTOpt.from_intopt(self)
+                dd_ft_opt.bas_ij_cache = dd_bas_ij_cache
+                dd_ft_opt.img_idx = img_idx
+                dd_ft_opt.img_offsets = img_offsets
+                logger.debug(cell, 'Separated %d diffuse shell pairs', len(bas_ij_idx))
         return self
 
     @property
@@ -434,6 +435,8 @@ class SRInt3c2eOpt:
                 self.bas_ij_cache, 1000000)
         else:
             bas_ij_idx, batched_shl_pair_offsets = bas_ij_aggregated
+        img_idx = cp.asarray(self.img_idx)
+        img_offsets = cp.asarray(self.img_offsets)
 
         # For each primitive shell-pair in bas_ij_idx, ao_pair_loc points to the
         # addresses of first element for the contracted pair-GTOs. In each
@@ -478,8 +481,6 @@ class SRInt3c2eOpt:
         task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
         c2s_pool = cp.empty((workers, THREADS*GOUT_WIDTH))
         int3c2e_envs = self.int3c2e_envs
-        img_idx = cp.asarray(self.img_idx)
-        img_offsets = cp.asarray(self.img_offsets)
         kern = libpbc.PBCsr_int3c2e_latsum23
 
         def evaluate_j3c(shl_pair_batch_id=0, aux_batch_id=0, out=None):

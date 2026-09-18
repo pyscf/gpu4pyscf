@@ -289,23 +289,20 @@ def _guess_omega(cell, kmesh=None):
             omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
     return omega
 
-def _append_dd_cderi(opt, cderi, cd_j2c_cache, cderi_idx, omega, kpts=None):
+def _append_dd_cderi(opt, cderi, cd_j2c_cache, cderi_idx, cderi_dd_idx, omega, kpts=None):
     '''Append the full reciprocal-space DD contribution to compact CDERI.
     '''
-    cell = opt.cell
-    dd_ft_opt = ft_ao.FTOpt.from_intopt(opt)
-    dd_ft_opt.bas_ij_cache = opt.dd_bas_ij_cache
-    dd_ft_opt.img_idx = opt.dd_img_idx
-    dd_ft_opt.img_offsets = opt.dd_img_offsets
-
-    if len(dd_ft_opt.img_idx) == 0:
+    dd_ft_opt = opt.dd_ft_opt
+    if dd_ft_opt is None or len(dd_ft_opt.img_idx) == 0:
         # No diffuse pairs
         return cderi_idx
 
+    cell = opt.cell
     ncompact = len(cderi_idx[0])
-    n_dd_pairs = len(opt.dd_ao_idx)
-    ao_pair_mapping = cp.hstack((asarray(cderi_idx[0]), asarray(opt.dd_ao_idx)))
-    diag = cp.hstack((asarray(cderi_idx[1]), asarray(opt.dd_diag) + ncompact))
+    dd_ao_idx, dd_diag = cderi_dd_idx
+    ao_pair_mapping = cp.hstack((asarray(cderi_idx[0]), asarray(dd_ao_idx)))
+    diag = cp.hstack((asarray(cderi_idx[1]), asarray(dd_diag) + ncompact))
+    n_dd_pairs = len(dd_ao_idx)
     assert n_dd_pairs + ncompact == cderi[0].shape[1]
 
     real_output = kpts is None
@@ -388,9 +385,11 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     naux_cart, naux = cd_j2c_cache[0].shape
 
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
+    cderi_dd_idx = None
     n_compact_pairs = nao_pairs = len(cderi_idx[0])
-    if not exclude_dd:
-        nao_pairs += len(int3c2e_opt.dd_ao_idx)
+    if not exclude_dd and int3c2e_opt.dd_ft_opt is not None:
+        cderi_dd_idx = int3c2e_opt.dd_ft_opt.pair_and_diag_indices()
+        nao_pairs += len(cderi_dd_idx[0])
     log.debug('nao_pairs = %d, n_compact_pairs = %d', nao_pairs, n_compact_pairs)
 
     with_long_range = omega < rsdf_omega
@@ -423,6 +422,10 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         stream = cp.cuda.get_current_stream()
         t1 = log.init_timer()
         nsp_per_block = ft_ao.ft_ao_scheme()[0]
+        # To ensure the same subsets of orbital paris (ao_pair_offsets) are
+        # evaluated in int3c2e_evaluator and ft_evaluator, the two integral
+        # evaluators must use the same bas_ij_idx and shl_pair_offsets (held by
+        # bas_ij_aggregated)
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
 
         eval_j3c, aux_sorting, ao_pair_offsets = int3c2e_opt.int3c2e_evaluator(
@@ -497,7 +500,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
 
     if not exclude_dd:
         cderi_idx = _append_dd_cderi(
-            int3c2e_opt, cderi, cd_j2c_cache, cderi_idx, omega)
+            int3c2e_opt, cderi, cd_j2c_cache, cderi_idx, cderi_dd_idx, omega)
 
     cderip = None
     if negative_metric_size:
@@ -546,9 +549,11 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
 
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
+    cderi_dd_idx = None
     n_compact_pairs = nao_pairs = len(cderi_idx[0])
-    if not exclude_dd:
-        nao_pairs += len(int3c2e_opt.dd_ao_idx)
+    if not exclude_dd and int3c2e_opt.dd_ft_opt is not None:
+        cderi_dd_idx = int3c2e_opt.dd_ft_opt.pair_and_diag_indices()
+        nao_pairs += len(cderi_dd_idx[0])
     log.debug('nao_pairs = %d, n_compact_pairs = %d', nao_pairs, n_compact_pairs)
 
     with_long_range = omega < rsdf_omega
@@ -599,10 +604,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
         eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
             batch_size, bas_ij_aggregated=bas_ij_aggregated)
-        # To ensure the same subsets of orbital paris (ao_pair_offsets) are
-        # evaluated in int3c2e_evaluator and ft_evaluator, the bas_ij_idx
-        # and shl_pair_offsets (bas_ij_aggregated) must be shared
-        # by the two evaluators
         assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
         log.debug1('cache auxG')
@@ -679,7 +680,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
 
     if not exclude_dd:
         cderi_idx = _append_dd_cderi(
-            int3c2e_opt, cderi, cd_j2c_cache, cderi_idx, omega, uniq_kpts)
+            int3c2e_opt, cderi, cd_j2c_cache, cderi_idx, cderi_dd_idx, omega, uniq_kpts)
 
     cderip = None
     if negative_metric_size:

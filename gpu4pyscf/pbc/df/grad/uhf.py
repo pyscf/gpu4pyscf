@@ -23,7 +23,7 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, ndarray, get_avail_mem, empty_aligned)
+    contract, ndarray, get_avail_mem, empty_aligned, copy_symmetric)
 from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern, get_ao_pair_loc
 from gpu4pyscf.df.grad.rhf import factorize_dm
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
@@ -210,7 +210,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     ################################
     # LR part response
     def lr_3c2e_response():
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+                aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         aft_envs = ft_opt.aft_envs
         aux_ft_envs = RysIntEnvVars.new(

@@ -16,7 +16,8 @@ import numpy as np
 import pytest
 import cupy as cp
 import pyscf
-from pyscf.pbc import gto
+from pyscf.pbc import gto, tools
+from pyscf.pbc.df import FFTDF
 from pyscf.pbc.df.df import make_auxcell
 from gpu4pyscf.lib.cupy_helper import tag_array, contract
 from gpu4pyscf.pbc.df import int3c2e
@@ -116,9 +117,12 @@ def test_ej_derivatives_gamma_point_without_long_range():
     assert abs(grad.sum(axis=0)).max() < 1e-11
 
     disp = 1e-4
+    dm_cart = opt.cell.apply_C_mat_CT(dm)
     def eval_j(c, ac):
-        # Match the builder's G=0-removed short-range Coulomb convention.
-        return _gamma_df_energy(c, ac, dm, abs(omega), omega, 0)
+        opt = int3c2e.SRInt3c2eOpt(c, ac, omega).build()
+        jaux = opt.contract_dm(dm_cart)
+        j2c = sr_int2c2e(ac, omega)
+        return float(cp.linalg.solve(j2c, jaux).dot(jaux).get()) * .5
 
     _check_gradient(grad, cell, auxcell, eval_j)
 
@@ -794,15 +798,21 @@ def test_uhf_ejk_derivatives_kpts_with_long_range1():
         assert abs(sigma[i, j] - (e1-e2)/2/disp) < 5e-7
 
 
+def _gamma_df_energy(cell, auxcell, dm, omega, k_factor):
+    mydf = FFTDF(cell)
+    mydf.mesh = mesh = np.maximum(cell.mesh, auxcell.mesh)
+    coords = mydf.grids.coords
+    ao = mydf._numint.eval_ao(cell, coords, np.zeros(3))[0]
+    aux = mydf._numint.eval_ao(auxcell, coords, np.zeros(3))[0]
+    coulG = tools.get_coulG(cell, mesh=mesh, omega=-abs(omega or 0))
+    auxG = tools.fft(np.asarray(aux.T, order='C'), mesh)
 
-def _gamma_df_energy(cell, auxcell, dm, split_omega, omega, k_factor):
-    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, split_omega).build(separate_dd=True)
-    data, negative, idx = rsdf_builder.compressed_cderi_gamma_point(
-        cell, auxcell, omega=omega, int3c2e_opt=opt)
+    vaux = tools.ifft(auxG * coulG, mesh).real * (cell.vol / len(coords))
+    j2c = cp.asarray(vaux.dot(aux))
+    j3c = cp.asarray(np.einsum('rg,gi,gj->rij', vaux, ao, ao, optimize=True))
+    metric, negative, _ = rsdf_builder.decompose_j2c(j2c, prefer_ed=True)
     assert negative is None
-    rows, cols = divmod(cp.asarray(idx[0]), cell.nao)
-    cderi = cp.zeros((data[0].shape[0], cell.nao, cell.nao))
-    cderi[:, rows, cols] = cderi[:, cols, rows] = cp.asarray(data[0])
+    cderi = contract('rp,rij->pij', metric, j3c)
     rho = cp.einsum('rij,ji->r', cderi, dm)
     energy = .5 * rho.dot(rho)
     if k_factor:
@@ -811,40 +821,75 @@ def _gamma_df_energy(cell, auxcell, dm, split_omega, omega, k_factor):
     return float(energy.get())
 
 
-@pytest.mark.parametrize('omega', [0, -.4])
-@pytest.mark.parametrize('k_factor', [0, 1])
-@pytest.mark.parametrize('diffuse_only', [False, True])
-def test_gamma_dd_derivatives(omega, k_factor, diffuse_only):
-    basis = [[0, [.08, 1.]], [1, [.12, 1.]]]
-    if not diffuse_only:
-        basis.insert(0, [0, [4., 1.]])
-    cell = pyscf.M(atom='He .2 .4 .1; He 2.1 1.2 1.8',
-                   a=np.eye(3)*5, unit='Bohr', basis=basis,
-                   precision=1e-10, verbose=0)
+def test_rdf_ejk_derivatives():
+    cell = pyscf.M(
+        atom='He .2 .4 .1; He 2.1 1.2 1.8',
+        a=np.eye(3)*5, unit='Bohr',
+        basis=[[0, [.9, 1.]], [0, [.5, 1.]], [0, [.1, 1.]]],
+        verbose=0)
     auxcell = cell.copy()
-    auxcell.basis = [[0, [2., 1.]], [0, [.3, 1.]],
-                     [1, [.4, 1.]], [2, [.5, 1.]]]
-    auxcell.build()
-    rng = np.random.default_rng(17)
-    coeff = rng.random((cell.nao, 2)) - .5
+    auxcell.basis = [[0, [1.2, 1.]], [0, [.4, 1.]],
+                     [1, [.3, 1.]]]
+    auxcell.build(False, False)
+    np.random.seed(11)
+    coeff = np.random.rand(cell.nao, 2) - .5
     dm = cp.asarray(2 * coeff.dot(coeff.T))
-    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, .4).build(separate_dd=True)
-    assert len(opt.dd_ao_idx) > 0
-    assert bool(len(opt.pair_and_diag_indices()[0])) == (not diffuse_only)
+
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, .5).build(separate_dd=True)
+
+    for k_factor in (0, 1):
+        for omega in (0, -.4):
+            result = rhf._get_ejk_derivatives(
+                opt, dm, hermi=1, k_factor=k_factor, omega=omega)
+            np.testing.assert_allclose(result[:-3].sum(axis=0), 0, atol=1e-10)
+
+            def energy(c, ac):
+                return _gamma_df_energy(c, ac, dm, omega, k_factor)
+
+            _check_gradient(result[:-3], cell, auxcell, energy, tol=5e-7)
+
+            sigma = result[-3:]
+            disp = 1e-4
+            for i, j in [(0, 0), (0, 1)]:
+                c1, c2 = _finite_diff_cells(cell, i, j, disp=disp)
+                a1, a2 = _finite_diff_cells(auxcell, i, j, disp=disp)
+                e1 = energy(c1, a1)
+                e2 = energy(c2, a2)
+                assert abs(sigma[i, j] - (e1-e2)/(2*disp)) < 1e-8
+
+def test_gamma_diffuse_only():
+    cell = pyscf.M(
+        atom='He .2 .4 .1; He 2.1 1.2 1.8',
+        a=np.eye(3)*5, unit='Bohr',
+        basis=[[0, [.15, 1.]]],
+        verbose=0)
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [.3, 1.]], [1, [.3, 1.]]]
+    auxcell.build(False, False)
+    np.random.seed(11)
+    coeff = np.random.rand(cell.nao, 2) - .5
+    dm = cp.asarray(2 * coeff.dot(coeff.T))
+
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, .5).build(separate_dd=True)
+    assert opt.dd_ft_opt is not None
+    assert len(opt.img_idx) == 0
+
+    k_factor = 1
+    omega = 0
     result = rhf._get_ejk_derivatives(
         opt, dm, hermi=1, k_factor=k_factor, omega=omega)
-    unsplit = int3c2e.SRInt3c2eOpt(cell, auxcell, .4).build()
-    ref = rhf._get_ejk_derivatives(
-        unsplit, dm, hermi=1, k_factor=k_factor, omega=omega)
-    np.testing.assert_allclose(result, ref, atol=2e-7, rtol=0)
     np.testing.assert_allclose(result[:-3].sum(axis=0), 0, atol=1e-10)
 
     def energy(c, ac):
-        return _gamma_df_energy(c, ac, dm, .4, omega, k_factor)
+        return _gamma_df_energy(c, ac, dm, omega, k_factor)
+
     _check_gradient(result[:-3], cell, auxcell, energy, tol=5e-7)
+
+    sigma = result[-3:]
     disp = 1e-4
     for i, j in [(0, 0), (0, 1)]:
         c1, c2 = _finite_diff_cells(cell, i, j, disp=disp)
         a1, a2 = _finite_diff_cells(auxcell, i, j, disp=disp)
-        numerical = (energy(c1, a1) - energy(c2, a2)) / (2*disp)
-        assert abs(result[-3+i, j] - numerical) < 5e-7
+        e1 = energy(c1, a1)
+        e2 = energy(c2, a2)
+        assert abs(sigma[i, j] - (e1-e2)/(2*disp)) < 1e-8

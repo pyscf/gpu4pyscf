@@ -73,7 +73,7 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
     return ft_kernel(Gv, q, kptjs)
 
 def ft_ao(cell, Gv, shls_slice=None, b=None,
-          gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None,
+          gxyz=None, Gvbase=None, kpt=None, verbose=None,
           sort_output=None, out=None):
     '''Analytical Fourier transform basis functions on Gv grids.
 
@@ -91,7 +91,10 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         cell.natm, cell.nbas, cell._atm, cell._bas, _env, ao_loc)
     ngrids = len(Gv)
     assert ngrids < np.iinfo(np.int32).max, "possible int32 overflow"
-    GvT = (asarray(Gv.T) + asarray(kpt[:,None])).ravel()
+    if kpt is None:
+        GvT = asarray(Gv.T).ravel()
+    else:
+        GvT = (asarray(Gv.T) + asarray(kpt[:,None])).ravel()
     nao = ao_loc[-1]
     out = ndarray((nao, ngrids), dtype=np.complex128, buffer=out)
     err = libpbc.build_ft_ao(
@@ -127,7 +130,7 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
 # TODO: merge with pbc.gto.int1e._Int1eOpt
 class FTOpt:
     def __init__(self, cell, bvk_kmesh=None):
-        self.cell = SortedGTO.from_cell(cell)
+        self.cell = cell
         if bvk_kmesh is None:
             bvk_kmesh = np.ones(3, dtype=int)
         self.bvk_kmesh = bvk_kmesh
@@ -136,10 +139,9 @@ class FTOpt:
         self._aft_envs = None
         self.bvkcell = None
         self.bvkmesh_Ls = None
-        self.Ls = None
         self.permutation_symmetry = True
-        self.img_idx = None
         self.bas_ij_cache = None
+        self.img_idx = None
         self.img_offsets = None
 
     @classmethod
@@ -147,15 +149,20 @@ class FTOpt:
         from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
         assert isinstance(opt, SRInt3c2eOpt)
         ft_opt = FTOpt(opt.cell, opt.bvk_kmesh)
-        ft_opt.__dict__.update(opt.__dict__)
+        ft_opt.rcut = opt.rcut
         ft_opt._aft_envs = opt.rys_envs
+        ft_opt.bvkcell = opt.bvkcell
+        ft_opt.bvkmesh_Ls = opt.bvkmesh_Ls
+        ft_opt.bas_ij_cache = opt.bas_ij_cache
+        ft_opt.img_idx = opt.img_idx
+        ft_opt.img_offsets = opt.img_offsets
         ft_opt.permutation_symmetry = True
         assert ft_opt.img_idx is not None
         return ft_opt
 
     def build(self):
         log = logger.new_logger(self.cell)
-        cell = self.cell
+        cell = self.cell = SortedGTO.from_cell(self.cell)
         bvk_kmesh = self.bvk_kmesh
         bvk_ncells = np.prod(bvk_kmesh)
         self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
@@ -346,6 +353,8 @@ class FTOpt:
                 self.bas_ij_cache, nsp_per_block)
         else:
             bas_ij_idx, shl_pair_offsets = bas_ij_aggregated
+        img_idx = cp.asarray(self.img_idx)
+        img_offsets = cp.asarray(self.img_offsets)
 
         if cart is None:
             cart = cell.cell.cart
@@ -373,8 +382,6 @@ class FTOpt:
         pool = cp.empty(workers*POOL_SIZE+1, dtype=np.float64)
         head = pool[-1:]
         aft_envs = self.aft_envs
-        img_idx = cp.asarray(self.img_idx)
-        img_offsets = cp.asarray(self.img_offsets)
         bvk_ncells = len(self.bvkmesh_Ls)
         kern = libpbc.build_ft_aopair
 
@@ -651,7 +658,7 @@ def ft_ao_scheme(shm_size=SHM_SIZE, gout_width=GOUT_WIDTH, deriv=None,
     g_size = (li+1+i_inc)*(lj+1+j_inc)
     unit = g_size*3
     nsp_per_block = _nearest_power2(shm_size // (nGv_per_block*(unit*16)))
-    nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
+    nsp_per_block = np.minimum(nsp_per_block, nsp_max)
     gout_stride = cp.asarray(rem_threads // nsp_per_block, dtype=np.int32)
     shm_size = nGv_per_block * nsp_per_block * (unit*16)
     shm_size += nsp_per_block * 3 * 8
