@@ -15,6 +15,7 @@
 import cupy
 import numpy
 from pyscf import mcscf as cpu_mcscf
+from pyscf.fci.addons import SpinPenaltyFCISolver
 from pyscf.mcscf import mc1step as cpu_mc1step
 
 from gpu4pyscf.df import df as gpu_df
@@ -54,7 +55,8 @@ class _DFCAS:
             dm, hermi, with_j=with_j, with_k=with_k, omega=omega)
 
     def get_h2eff(self, mo_coeff=None):
-        wall0 = logger.perf_counter()
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
         ncore = self.ncore
         nocc = ncore + self.ncas
         if mo_coeff is None:
@@ -63,10 +65,7 @@ class _DFCAS:
             mo_coeff = mo_coeff[:, ncore:nocc]
         eri = self.with_df.ao2mo(mo_coeff)
         out = eri.get() if isinstance(eri, cupy.ndarray) else eri
-        timing = getattr(self, 'timing', None)
-        if isinstance(timing, dict):
-            timing['ao2mo_wall'] = (timing.get('ao2mo_wall', 0.) +
-                                    logger.perf_counter() - wall0)
+        log.timer('DF CASCI AO2MO', *t0)
         return out
 
     def to_cpu(self):
@@ -108,6 +107,8 @@ class DFCASSCF(_DFCAS, _CASSCF):
 
 
 def from_cpu(mc):
+    if isinstance(mc.fcisolver, SpinPenaltyFCISolver):
+        raise NotImplementedError('GPU FCI spin penalties are not implemented')
     cls = DFCASSCF if isinstance(mc, cpu_mc1step.CASSCF) else DFCASCI
     out = cls(mc._scf, mc.ncas, mc.nelecas,
               auxbasis=mc.with_df.auxbasis, ncore=mc.ncore)

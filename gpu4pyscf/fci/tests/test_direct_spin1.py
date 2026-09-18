@@ -15,6 +15,7 @@
 import unittest
 
 import cupy as cp
+import numpy as np
 import pyscf
 
 from gpu4pyscf.fci.direct_spin1 import FCISolver
@@ -22,9 +23,33 @@ from gpu4pyscf.fci.direct_spin1 import contract_2e
 from gpu4pyscf.fci.direct_spin1 import make_rdm12
 from pyscf import ao2mo, mcscf, scf
 from pyscf.fci import direct_spin1
+from pyscf.fci.addons import fix_spin_
 
 
 class KnownValues(unittest.TestCase):
+    def test_spin_penalty_unsupported(self):
+        solver = fix_spin_(FCISolver(), shift=2., ss=2.)
+        with self.assertRaisesRegex(NotImplementedError, 'spin penalties'):
+            solver.kernel(np.diag([0., 1.]), np.zeros((2, 2, 2, 2)),
+                          2, (1, 1))
+
+    def test_multiple_roots_from_single_guess(self):
+        h1e = np.diag([0., 1.])
+        eri = np.zeros((2, 2, 2, 2))
+        cpu = direct_spin1.FCISolver()
+        _, ci0 = cpu.kernel(h1e, eri, 2, (1, 1))
+        ref, _ = cpu.kernel(h1e, eri, 2, (1, 1), ci0=ci0, nroots=2)
+        hdiag = cpu.make_hdiag(h1e, eri, 2, (1, 1))
+        excited_guess = cpu.get_init_guess(2, (1, 1), 2, hdiag)[1]
+        for guess in (ci0, cp.asarray(ci0), excited_guess):
+            with self.subTest(guess=guess):
+                solver = FCISolver()
+                energies, roots = solver.kernel(
+                    h1e, eri, 2, (1, 1), ci0=guess, nroots=2)
+                self.assertTrue(solver.converged.all())
+                self.assertEqual(len(roots), 2)
+                np.testing.assert_allclose(energies, ref, atol=1e-10)
+
     def test_cpu_gpu(self):
         norb = 6
         nelec = (3, 3)
@@ -43,7 +68,8 @@ class KnownValues(unittest.TestCase):
         self.assertLess(abs(out.get() - ref).max(), 1e-10)
 
         solver = FCISolver()
-        e_gpu, ci_gpu = solver.kernel(h1e, eri, norb, nelec, ecore=ecore)
+        e_gpu, ci_gpu = solver.kernel(
+            h1e, eri, norb, nelec, ecore=ecore, max_memory=0)
 
         self.assertTrue(solver.converged)
         self.assertIsInstance(ci_gpu, cp.ndarray)

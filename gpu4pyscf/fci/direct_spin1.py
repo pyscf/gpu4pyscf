@@ -18,6 +18,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.fci import cistring
 from pyscf.fci import direct_spin1
+from pyscf.fci.addons import SpinPenaltyFCISolver
 
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import get_avail_mem
@@ -346,12 +347,10 @@ def davidson1(aop, x0, precond, tol=1e-12, max_cycle=50, max_space=12,
     required_memory = ((2 * max_space + work_vectors) * vector_bytes +
                        max_space**2 * x0.dtype.itemsize)
     available_memory = get_avail_mem()
-    memory_limit = min(max_memory * 1e6, available_memory)
-    if required_memory > memory_limit:
+    if required_memory > available_memory:
         raise MemoryError(
             f'GPU Davidson subspace requires '
             f'{required_memory / 1e6:.0f} MB in-core; '
-            f'max_memory={max_memory:.0f} MB, '
             f'available GPU memory={available_memory / 1e6:.0f} MB')
     log.debug('Davidson max_space %d, in-core memory %.0f MB', max_space,
               required_memory / 1e6)
@@ -365,7 +364,7 @@ def davidson1(aop, x0, precond, tol=1e-12, max_cycle=50, max_space=12,
             f'Failed to allocate GPU Davidson subspace of size {max_space}') \
             from err
 
-    converged = cp.zeros(nroots, dtype=bool)
+    converged = np.zeros(nroots, dtype=bool)
     energy = previous_energy = None
     ritz = None
     trial = _qr(x0, lindep)
@@ -407,22 +406,22 @@ def davidson1(aop, x0, precond, tol=1e-12, max_cycle=50, max_space=12,
         ritz = coeff.dot(xs[:space])
         aritz = coeff.dot(ax[:space])
         residual = aritz - energy[:, None] * ritz
-        residual_norm = cp.linalg.norm(residual, axis=1)
+        residual_norm = cp.linalg.norm(residual, axis=1).get()
         if previous_energy is None:
-            de = cp.full_like(energy, cp.inf)
+            de = np.full(nroots, np.inf)
         else:
-            de = energy - previous_energy
-        converged = ((cp.abs(de) < tol) &
+            de = (energy - previous_energy).get()
+        converged = ((np.abs(de) < tol) &
                      (residual_norm < tol_residual))
 
         max_residual = residual_norm.max()
-        max_de = cp.abs(de).max()
-        if bool(cp.all(converged).get()):
+        max_de = np.abs(de).max()
+        if converged.all():
             log.debug('converged %d %d  |r|= %.3g  e= %s  max|de|= %.3g',
                       cycle, space, max_residual, energy, max_de)
             break
 
-        active = cp.where(
+        active = np.where(
             ~converged & (residual_norm**2 > lindep))[0]
         if len(active) == 0:
             converged = residual_norm < tol_residual
@@ -455,6 +454,8 @@ class FCISolver(direct_spin1.FCISolver):
     def kernel(self, h1e, eri, norb, nelec, ci0=None,
                tol=None, lindep=None, max_cycle=None, max_space=None,
                nroots=None, max_memory=None, verbose=None, ecore=None, **kwargs):
+        if isinstance(self, SpinPenaltyFCISolver):
+            raise NotImplementedError('GPU FCI spin penalties are not implemented')
         if nroots is None:
             nroots = self.nroots
         if tol is None:
@@ -486,16 +487,10 @@ class FCISolver(direct_spin1.FCISolver):
         elif callable(ci0):
             ci0 = ci0()
 
-        hop_calls = 0
-        hop_vectors = 0
-
         def hop(cis):
-            nonlocal hop_calls, hop_vectors
             t0 = log.init_timer()
             out = contract_2e(
                 h2e, cis, norb, nelec, gpu_link_index).reshape(len(cis), -1)
-            hop_calls += 1
-            hop_vectors += len(cis)
             log.timer_debug1(
                 f'contract_2e for {len(cis)} CI vectors', *t0)
             return out
@@ -515,34 +510,22 @@ class FCISolver(direct_spin1.FCISolver):
         else:
             ci0 = cp.asarray(ci0, dtype=cp.float64)
         ci0 = ci0.reshape(-1, hdiag.size)
+        if len(ci0) < nroots:
+            # Include all default guesses: a supplied vector may duplicate one.
+            extra = self.get_init_guess(norb, nelec, nroots, hdiag)
+            extra = cp.stack([cp.asarray(x, dtype=cp.float64) for x in extra])
+            ci0 = cp.concatenate((ci0, extra))
         if max_memory is None:
             max_memory = self.max_memory
 
-        setup_t1 = log.timer('FCI setup', *fci_t0)
-        setup_wall = setup_t1[1] - fci_t0[1]
-        davidson_t0 = log.init_timer()
+        davidson_t0 = log.timer('FCI setup', *fci_t0)
         converged, energies, ci = davidson1(
             hop, ci0, precond, tol=tol, tol_residual=tol_residual,
             lindep=lindep, nroots=nroots, max_cycle=max_cycle,
             max_space=max_space,
             max_memory=max_memory, verbose=log)
-        davidson_t1 = log.timer('FCI Davidson', *davidson_t0)
-        davidson_wall = davidson_t1[1] - davidson_t0[1]
-        total_t1 = log.timer('GPU FCI solver', *fci_t0)
-        total_wall = total_t1[1] - fci_t0[1]
-        self.timing = {
-            'total_wall': total_wall,
-            'setup_wall': setup_wall,
-            'davidson_wall': davidson_wall,
-            'davidson_iterations': hop_calls,
-            'davidson_avg_wall': davidson_wall / max(1, hop_calls),
-            'contract_2e_calls': hop_calls,
-            'contract_2e_vectors': hop_vectors,
-        }
-        log.debug('GPU FCI timing: total %.3f s; setup %.3f s; Davidson '
-                  '%.3f s in %d iterations (%.3f s/iteration)',
-                  total_wall, setup_wall, davidson_wall, hop_calls,
-                  self.timing['davidson_avg_wall'])
+        log.timer('FCI Davidson', *davidson_t0)
+        log.timer('GPU FCI solver', *fci_t0)
 
         neleca, nelecb = nelec
         na = lib.comb(norb, neleca)
@@ -550,11 +533,11 @@ class FCISolver(direct_spin1.FCISolver):
         self.norb = norb
         self.nelec = nelec
         if nroots == 1:
-            self.converged = bool(converged[0].get())
+            self.converged = bool(converged[0])
             self.eci = float(energies[0]) + ecore
             self.ci = ci[0].reshape(na, nb)
         else:
-            self.converged = cp.asnumpy(converged)
+            self.converged = converged
             self.eci = energies + ecore
             self.ci = [root.reshape(na, nb) for root in ci[:nroots]]
         return self.eci, self.ci

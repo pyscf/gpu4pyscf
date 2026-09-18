@@ -13,10 +13,13 @@
 # limitations under the License.
 
 import unittest
+import tempfile
+from unittest import mock
 
 import cupy
 import pyscf
-from pyscf import dft, mcscf as cpu_mcscf, scf
+from pyscf import dft, lib, mcscf as cpu_mcscf, scf
+from pyscf.fci import direct_spin1
 
 from gpu4pyscf import mcscf
 from gpu4pyscf.fci.direct_spin1 import FCISolver
@@ -54,12 +57,6 @@ class KnownValues(unittest.TestCase):
         self.assertIsInstance(mc.mo_coeff, cupy.ndarray)
         self.assertTrue(mc.converged)
         self.assertLess(abs(e_tot - -107.5445420582518), 2e-8)
-        self.assertGreater(mc.timing['macro_cycles'], 1)
-        self.assertLessEqual(mc.timing['macro_cycles'], mc.max_cycle_macro)
-        self.assertGreater(mc.timing['ao2mo_wall'], 0.)
-        self.assertGreater(mc.timing['fci_wall'], 0.)
-        self.assertGreater(mc.timing['orbital_derivatives_wall'], 0.)
-        self.assertGreater(mc.timing['total_wall'], 0.)
 
     def test_rks_reference(self):
         ref = cpu_mcscf.DFCASCI(
@@ -73,6 +70,51 @@ class KnownValues(unittest.TestCase):
         self.assertIs(mc._scf, self.mf_rks_gpu)
         self.assertIs(mc.with_df, self.mf_rks_gpu.with_df)
         self.assertLess(abs(e_tot - ref.kernel()[0]), 1e-8)
+
+    def test_unconverged_fci(self):
+        mol = pyscf.M(
+            atom='H 0 0 0; H 0 0 1; H 0 1.2 0; H 0 1.2 1.3',
+            basis='sto-3g', verbose=0)
+        mf = scf.RHF(mol).density_fit(auxbasis='weigend').run()
+        mc = mcscf.DFCASSCF(mf.to_gpu(), 4, 4)
+        mc.chkfile = None
+        mc.max_cycle_macro = 3
+        mc.fcisolver.max_cycle = 1
+        mc.kernel()
+        self.assertFalse(mc.fcisolver.converged)
+        self.assertFalse(mc.converged)
+
+        mc.fcisolver.max_cycle = 50
+        e_tot = mc.kernel()[0]
+        ref = cpu_mcscf.DFCASCI(mf, 4, 4)
+        ref.canonicalization = False
+        self.assertTrue(mc.fcisolver.converged)
+        self.assertTrue(mc.converged)
+        self.assertLess(abs(e_tot - ref.kernel()[0]), 1e-8)
+
+    def test_checkpoint_consistency(self):
+        mc = mcscf.DFCASSCF(self.mf_gpu, 4, 4)
+        mc.max_cycle_macro = 2
+        mc.chk_ci = True
+        ref = cpu_mcscf.DFCASCI(self.mf_cpu, 4, 4, auxbasis='weigend')
+        dump_chk = mc.dump_chk
+
+        def check_checkpoint(env):
+            dump_chk(env)
+            data = lib.chkfile.load(mc.chkfile, 'mcscf')
+            h1e, ecore = ref.get_h1eff(data['mo_coeff'])
+            eri = ref.get_h2eff(data['mo_coeff'])
+            energy = direct_spin1.energy(h1e, eri, data['ci'], 4, (2, 2)) + ecore
+            self.assertLess(abs(energy - data['e_tot']), 1e-8)
+            dm1 = direct_spin1.make_rdm1(data['ci'], 4, (2, 2))
+            self.assertLess(abs(dm1 - data['casdm1']).max(), 1e-10)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mc.chkfile = tmpdir + '/casscf.chk'
+            with mock.patch.object(mc, 'dump_chk',
+                                   side_effect=check_checkpoint) as save:
+                mc.kernel()
+                self.assertGreaterEqual(save.call_count, 2)
 
 
 if __name__ == '__main__':

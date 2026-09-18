@@ -28,7 +28,8 @@ from gpu4pyscf.scf import hf
 
 def h1e_for_cas(casci, mo_coeff=None, ncas=None, ncore=None, hcore=None,
                 return_corevhf=False):
-    wall0 = logger.perf_counter()
+    log = logger.new_logger(casci)
+    t0 = log.init_timer()
     if mo_coeff is None:
         mo_coeff = casci.mo_coeff
     if ncas is None:
@@ -57,15 +58,11 @@ def h1e_for_cas(casci, mo_coeff=None, ncas=None, ncore=None, hcore=None,
     out = h1eff.get(), float(energy_core)
     if return_corevhf:
         out += (corevhf,)
-    timing = getattr(casci, 'timing', None)
-    if isinstance(timing, dict):
-        timing['h1e_wall'] = (timing.get('h1e_wall', 0.) +
-                              logger.perf_counter() - wall0)
+    log.timer('CAS effective one-electron integrals', *t0)
     return out
 
 
 class _CASCI(cpu_casci.CASCI):
-    _keys = cpu_casci.CASCI._keys.union({'timing'})
     canonicalization = False
 
     get_h1eff = h1e_for_cas
@@ -129,24 +126,8 @@ class _CASCI(cpu_casci.CASCI):
             raise NotImplementedError('GPU CASCI canonicalization is not implemented')
         if self.natorb:
             raise NotImplementedError('GPU CASCI natural orbitals are not implemented')
-        self.timing = {}
-        wall0 = logger.perf_counter()
-        out = super().kernel(mo_coeff, ci0, verbose)
-        total_wall = logger.perf_counter() - wall0
-        fci_timing = dict(getattr(self.fcisolver, 'timing', {}))
-        ao2mo_wall = self.timing.get('ao2mo_wall', 0.)
-        h1e_wall = self.timing.get('h1e_wall', 0.)
-        fci_wall = fci_timing.get('total_wall', 0.)
-        postprocess_wall = total_wall - ao2mo_wall - h1e_wall - fci_wall
-        self.timing.update({
-            'total_wall': total_wall,
-            'ao2mo_wall': ao2mo_wall,
-            'h1e_wall': h1e_wall,
-            'fci': fci_timing,
-            'postprocess_wall': postprocess_wall,
-        })
         log = logger.new_logger(self, verbose)
-        log.debug('CASCI timing: total %.3f s; AO2MO %.3f s; h1e %.3f s; '
-                  'FCI %.3f s; postprocess %.3f s', total_wall, ao2mo_wall,
-                  h1e_wall, fci_wall, postprocess_wall)
+        t0 = log.init_timer()
+        out = super().kernel(mo_coeff, ci0, verbose)
+        log.timer('GPU CASCI', *t0)
         return out

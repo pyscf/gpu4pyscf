@@ -62,9 +62,6 @@ class KnownValues(unittest.TestCase):
         e_cpu = mc_cpu.kernel()[0]
         e_gpu = mc_gpu.kernel()[0]
         self.assertLess(abs(e_gpu - e_cpu), 1e-8)
-        self.assertGreater(mc_gpu.timing['ao2mo_wall'], 0)
-        self.assertGreater(mc_gpu.timing['h1e_wall'], 0)
-        self.assertGreater(mc_gpu.timing['fci']['contract_2e_calls'], 0)
 
     def test_rks_reference(self):
         mc_cpu = cpu_mcscf.DFCASCI(
@@ -95,6 +92,18 @@ class KnownValues(unittest.TestCase):
         self.assertIsNotNone(mc_to_cpu.with_df)
         mc_to_cpu.canonicalization = False
         self.assertLess(abs(mc_to_cpu.kernel()[0] - ref), 1e-8)
+
+    def test_spin_penalty_unsupported(self):
+        for cls in (mcscf.DFCASCI, mcscf.DFCASSCF):
+            with self.subTest(cls=cls):
+                mc = cls(self.mf_gpu, 4, 4).fix_spin_(ss=2.)
+                with self.assertRaisesRegex(NotImplementedError, 'spin penalties'):
+                    mc.kernel()
+        for cls in (cpu_mcscf.DFCASCI, cpu_mcscf.DFCASSCF):
+            with self.subTest(cpu_cls=cls):
+                mc = cls(self.mf_cpu, 4, 4).fix_spin_(ss=2.)
+                with self.assertRaisesRegex(NotImplementedError, 'spin penalties'):
+                    mc.to_gpu()
 
 
 if __name__ == '__main__':

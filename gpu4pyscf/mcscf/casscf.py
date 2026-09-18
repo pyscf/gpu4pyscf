@@ -131,7 +131,7 @@ def build_rotation_matrix(casscf, mo, terms, denom_floor=1e-8,
 def kernel(casscf, mo_coeff, tol=1e-7, conv_tol_grad=None, ci0=None,
            callback=None, verbose=logger.NOTE, dump_chk=True):
     log = logger.new_logger(casscf, verbose)
-    cput0 = (logger.process_clock(), logger.perf_counter())
+    cput0 = log.init_timer()
     if callback is None:
         callback = casscf.callback
     if ci0 is None:
@@ -147,51 +147,28 @@ def kernel(casscf, mo_coeff, tol=1e-7, conv_tol_grad=None, ci0=None,
     e_tot = e_cas = fcivec = eris = casdm1 = None
     denom_floor = casscf.denom_floor
     max_stepsize = casscf.max_stepsize
-    timing = casscf.timing = {
-        'macro_cycles': 0,
-        'hcore_wall': 0.,
-        'ao2mo_wall': 0.,
-        'h1e_wall': 0.,
-        'fci_wall': 0.,
-        'fci_setup_wall': 0.,
-        'fci_davidson_wall': 0.,
-        'fci_iterations': 0,
-        'rdm_wall': 0.,
-        'orbital_derivatives_wall': 0.,
-        'orbital_rotation_wall': 0.,
-    }
-    t0 = log.init_timer()
     hcore = cupy.asarray(casscf.get_hcore())
-    timing['hcore_wall'] = log.timer_silent(*t0)[2] * 1e-3
+    t2m = t1m = log.timer('Initializing diagonal-Hessian CASSCF', *cput0)
 
     for istep in range(1, casscf.max_cycle_macro + 1):
-        t0 = log.init_timer()
         eris = casscf.ao2mo(mo, hcore=hcore)
-        timing['ao2mo_wall'] += log.timer_silent(*t0)[2] * 1e-3
+        t2m = log.timer('update eri', *t2m)
 
-        t0 = log.init_timer()
         e_tot, e_cas, fcivec = casscf.casci(
             mo, ci0, eris, log, locals())
-        timing['fci_wall'] += log.timer_silent(*t0)[2] * 1e-3
-        fci_timing = getattr(casscf.fcisolver, 'timing', {})
-        timing['fci_setup_wall'] += fci_timing.get('setup_wall', 0.)
-        timing['fci_davidson_wall'] += fci_timing.get('davidson_wall', 0.)
-        timing['fci_iterations'] += fci_timing.get('davidson_iterations', 0)
+        t2m = log.timer('CASCI solver', *t2m)
 
-        t0 = log.init_timer()
         casdm1, casdm2 = casscf.fcisolver.make_rdm12(fcivec, casscf.ncas,
                                                      casscf.nelecas)
         casdm1 = cupy.asarray(casdm1)
         casdm2 = cupy.asarray(casdm2)
-        timing['rdm_wall'] += log.timer_silent(*t0)[2] * 1e-3
+        t2m = log.timer('CAS DM', *t2m)
 
-        t0 = log.init_timer()
         terms = gen_g_hdiag(casscf, mo, casdm1, casdm2, eris)
         g_norm = max((float(cupy.abs(x).max().get())
                       for x in terms[:3] if x.size), default=0.)
-        timing['orbital_derivatives_wall'] += (
-            log.timer_silent(*t0)[2] * 1e-3)
-        timing['macro_cycles'] = istep
+        t2m = log.timer('orbital derivatives', *t2m)
+        t2m = t1m = log.timer('macro iter %2d' % istep, *t1m)
         de = e_tot - e_last if e_last is not None else e_tot
         log.info('cycle %3d  E = %#.15g  de = %.6g  |g| = %.6g',
                  istep, e_tot, de, g_norm)
@@ -200,7 +177,8 @@ def kernel(casscf, mo_coeff, tol=1e-7, conv_tol_grad=None, ci0=None,
         if callable(callback):
             callback(locals())
 
-        if e_last is not None and abs(de) < tol and g_norm < conv_tol_grad:
+        if (e_last is not None and abs(de) < tol and g_norm < conv_tol_grad
+                and casscf.fcisolver.converged):
             conv = True
             break
         e_last = e_tot
@@ -208,10 +186,6 @@ def kernel(casscf, mo_coeff, tol=1e-7, conv_tol_grad=None, ci0=None,
         if istep == casscf.max_cycle_macro:
             break
 
-        t0 = log.init_timer()
-        s = build_rotation_matrix(casscf, mo, terms, denom_floor, max_stepsize)
-        mo = mo @ expm(s)
-        timing['orbital_rotation_wall'] += log.timer_silent(*t0)[2] * 1e-3
         if dump_chk and casscf.chkfile:
             chk_env = locals().copy()
             chk_env['mo'] = cupy.asnumpy(mo)
@@ -219,6 +193,10 @@ def kernel(casscf, mo_coeff, tol=1e-7, conv_tol_grad=None, ci0=None,
             if casscf.chk_ci:
                 chk_env['fcivec'] = cupy.asnumpy(fcivec)
             casscf.dump_chk(chk_env)
+
+        s = build_rotation_matrix(casscf, mo, terms, denom_floor, max_stepsize)
+        mo = mo @ expm(s)
+        t2m = log.timer('orbital rotation', *t2m)
 
     if conv:
         log.info('Diagonal-Hessian CASSCF converged in %3d steps', istep)
@@ -236,7 +214,7 @@ def kernel(casscf, mo_coeff, tol=1e-7, conv_tol_grad=None, ci0=None,
 
 
 class _CASSCF(cpu_mc1step.CASSCF):
-    _keys = cpu_mc1step.CASSCF._keys.union({'denom_floor', 'timing'})
+    _keys = cpu_mc1step.CASSCF._keys.union({'denom_floor'})
     canonicalization = False
     denom_floor = 1e-8
     max_stepsize = .04
@@ -290,9 +268,6 @@ class _CASSCF(cpu_mc1step.CASSCF):
             raise NotImplementedError('GPU CASSCF canonicalization is not implemented')
         if self.natorb:
             raise NotImplementedError('GPU CASSCF natural orbitals are not implemented')
-        self.timing = {}
-        wall0 = logger.perf_counter()
-
         if mo_coeff is None:
             if self.mo_coeff is None and self._scf.mol.nelectron > 0:
                 self._scf.run()
@@ -315,22 +290,5 @@ class _CASSCF(cpu_mc1step.CASSCF):
         logger.note(self, 'CASSCF energy = %#.15g', self.e_tot)
         self._finalize()
 
-        total_wall = logger.perf_counter() - wall0
-        accounted_wall = sum(self.timing[key] for key in (
-            'hcore_wall', 'ao2mo_wall', 'fci_wall', 'rdm_wall',
-            'orbital_derivatives_wall', 'orbital_rotation_wall'))
-        self.timing['total_wall'] = total_wall
-        self.timing['other_wall'] = max(0., total_wall - accounted_wall)
-        log = logger.new_logger(self)
-        log.debug(
-            'CASSCF timing: total %.3f s in %d cycles; hcore %.3f s; '
-            'AO2MO %.3f s; FCI %.3f s; RDM %.3f s; orbital derivatives '
-            '%.3f s; orbital rotation %.3f s; other %.3f s',
-            total_wall, self.timing['macro_cycles'],
-            self.timing['hcore_wall'],
-            self.timing['ao2mo_wall'], self.timing['fci_wall'],
-            self.timing['rdm_wall'],
-            self.timing['orbital_derivatives_wall'],
-            self.timing['orbital_rotation_wall'], self.timing['other_wall'])
         return (self.e_tot, self.e_cas, self.ci, self.mo_coeff,
                 self.mo_energy)
