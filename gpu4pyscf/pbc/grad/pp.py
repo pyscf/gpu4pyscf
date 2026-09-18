@@ -105,7 +105,6 @@ def _derivatives_intor(cross_int1e, dm, kern, deriv):
     cell = cross_int1e.cell
     assert dm.ndim == 3
     assert dm.dtype == np.float64
-    nkpts = len(dm)
 
     tmp = cross_int1e.cell2.apply_C_dot(dm, axis=2)
     dm = cross_int1e.cell1.apply_C_dot(tmp, axis=1)
