@@ -84,17 +84,17 @@ def berry_phase(overlaps, strings, singular_tol=None):
         raise np.linalg.LinAlgError(
             'A neighboring-k-point overlap matrix is singular')
     link_phases = cp.angle(sign)
-    return _wrap_phase(cp.sum(link_phases[strings], axis=1))
+    return _wrap_phase(cp.sum(link_phases[strings], axis=1)) # (nstring,) overall phases
 
 
 def hybrid_wannier_centers(overlaps, strings, singular_tol=1e-10):
     '''Compute hybrid Wannier centers from Wilson-loop eigenphases.
 
     Returns:
-        centers : cupy.ndarray
+        centers : cupy.ndarray, **individual phases** as each band
             Fractional centers in [0, 1) with shape
             (nstring, noccupied).
-        phases : cupy.ndarray
+        phases : cupy.ndarray, **overall phases**, sum of all bands
             The determinant Berry phase for each string in [-pi, pi).
     '''
 
@@ -113,7 +113,7 @@ def hybrid_wannier_centers(overlaps, strings, singular_tol=1e-10):
     eigenvalues = _unitary_eigenvalues(loops)
     eigenphases = cp.angle(eigenvalues)
     centers = cp.mod(-eigenphases / TWO_PI, 1.)
-    centers.sort(axis=1)
+    centers.sort(axis=1) # (nstring, noccupied)
     return centers, phases
 
 

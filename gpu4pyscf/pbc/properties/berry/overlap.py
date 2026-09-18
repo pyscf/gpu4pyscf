@@ -205,7 +205,7 @@ def periodic_ao_overlap(cell, kpt, neighbor_kpt):
 def build_mmn(cell, mo_coeff_kpts, kpts, kmesh, direction, batch_size=None,
               topology=None):
     '''
-    M_mn(k,b) = <u_mk | u_n,k+b>.
+    M_mn(k,b) = <u_mk | u_n,k+b>. (nkpts, nband, nband)
     '''
     if cell.dimension != 3:
         raise NotImplementedError(
