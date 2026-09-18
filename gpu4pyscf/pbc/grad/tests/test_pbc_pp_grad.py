@@ -131,7 +131,7 @@ def _cpu_vppnl_nuc_grad(cell, dm, kpts=None):
         grad[ia] -= np.einsum('kdpq,kqp->d', dppnl[:, :, p0:p1, :],
                               dm_dmH[:, :, p0:p1])
 
-    return grad.real
+    return grad.real / nkpts
 
 def vppnl_nuc_grad(cell, dm, kpts=None):
     '''Nuclear gradients of the non-local part of the GTH pseudo potential,

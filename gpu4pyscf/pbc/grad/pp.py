@@ -95,8 +95,8 @@ def ppnl_derivatives(cell, dm, kpts=None):
         opt = int1e.CrossInt1e(pcell, sorted_cell, bvk_kmesh)
         for rn in range(hl_dim):
             kern, deriv = derivative_kernels[rn]
-            as_dm = weights[rn].reshape(nkpts, n_hl*nd, nao)
-            grad_sigma += _derivatives_intor(opt, as_dm, kern, deriv)
+            as_dm = weights[rn].reshape(-1, n_hl*nd, nao)
+            grad_sigma += _derivatives_intor(opt, as_dm, kern, deriv) / nkpts
     return grad_sigma
 
 def _derivatives_intor(cross_int1e, dm, kern, deriv):
@@ -142,5 +142,4 @@ def _derivatives_intor(cross_int1e, dm, kern, deriv):
             'fakecell for ppnl must have the same number of atoms as the AO cell')
     grad = (grad[:natm] + grad[natm:]).get()
     grad_sigma = np.vstack([grad, sigma.get()])
-    grad_sigma /= nkpts
     return grad_sigma
