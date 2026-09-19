@@ -32,8 +32,7 @@ from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.pbc.df import aft_jk, AFTDF, GDF
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.dft import KohnShamDFT, BeckeGrids
-from gpu4pyscf.pbc.grad.pp import (
-    vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
+from gpu4pyscf.pbc.grad.pp import ppnl_derivatives
 from gpu4pyscf.gto.mole import groupby
 
 __all__ = ['Gradients']
@@ -211,8 +210,7 @@ class Gradients(GradientsBase):
                     'HF', dm0, spin=0, with_j=False, with_nuc=True)
 
         if cell._pseudo:
-            grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0)
-            grad_sigma[-3:] += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0)
+            grad_sigma += ppnl_derivatives(cell, dm0)
         t1 = log.timer_debug1('gradients of 1e part', *t1)
 
         dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ)
