@@ -21,10 +21,13 @@ from gpu4pyscf.pbc.dft.rks import RKS
 from gpu4pyscf.pbc.dft.krks import KRKS
 from gpu4pyscf.pbc.scf.hf import RHF
 from gpu4pyscf.pbc.scf.khf import KRHF
+from gpu4pyscf.pbc.scf.uhf import UHF
+from gpu4pyscf.pbc.dft.kuks import KUKS
 from gpu4pyscf.pbc.dft.gen_grid import BeckeGrids
 from gpu4pyscf.pbc.df.grad.krhf import get_nuc
 from gpu4pyscf.pbc.gto.int1e import kin_derivatives
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 
 def numerical_hcore_gradient_and_stresstensor(cell, dm, kmesh):
     if dm.ndim == 2:
@@ -60,7 +63,6 @@ def numerical_hcore_gradient_and_stresstensor(cell, dm, kmesh):
     translation_invariance = np.sum(numerical_gradient, axis=0)
     assert np.max(np.abs(translation_invariance)) < 1e-8, "Bad numerical gradient"
 
-    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     for i_xyz in range(3):
         for j_xyz in range(3):
             cell_p, cell_m = _finite_diff_cells(cell, i_xyz, j_xyz, disp = dx)
@@ -102,7 +104,6 @@ def numerical_gradient_and_stresstensor(cell, get_energy):
     translation_invariance = np.sum(numerical_gradient, axis=0)
     assert np.max(np.abs(translation_invariance)) < 1e-7, "Bad numerical gradient"
 
-    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     for i_xyz in range(3):
         for j_xyz in range(3):
             cell_p, cell_m = _finite_diff_cells(cell, i_xyz, j_xyz, disp = dx)
@@ -144,7 +145,7 @@ class KnownValues(unittest.TestCase):
 
         gobj = mf.Gradients()
         test_gradient = gobj.kernel()
-        test_derivatives = np.vstack((test_gradient, gobj.stress))
+        test_derivatives = np.vstack((test_gradient, gobj.stress * cell.vol))
 
         # Energy check is consistency check
         ref_energy = -78.84270992380236
@@ -161,7 +162,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 5e-8
-        # assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-7 # TODO: Something actually wrong here
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 1e-7
 
         dm = mf.make_rdm1()
         kmesh = np.array([1,1,1])
@@ -176,7 +177,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_hcore_derivatives[:-3, :] - ref_hcore_derivatives[:-3, :])) < 3e-8
         assert np.max(np.abs(test_hcore_derivatives[-3:, :] - ref_hcore_derivatives[-3:, :])) < 3e-7
 
-    def test_gdf_hcore_derivatives_rks_large_cell(self):
+    def test_gdf_hcore_derivatives_rks(self):
         cell = pyscf.M(
             atom = """
                 O 15.43509000 9.59549000 8.94968000
@@ -203,7 +204,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
         gobj.grid_response = True
         test_gradient = gobj.kernel()
-        test_derivatives = np.vstack((test_gradient, gobj.stress))
+        test_derivatives = np.vstack((test_gradient, gobj.stress * cell.vol))
 
         # Energy check is consistency check
         ref_energy = -79.23783762162086
@@ -261,7 +262,7 @@ class KnownValues(unittest.TestCase):
 
         gobj = mf.Gradients()
         test_gradient = gobj.kernel()
-        test_derivatives = np.vstack((test_gradient, gobj.stress))
+        test_derivatives = np.vstack((test_gradient, gobj.stress * cell.vol))
 
         # Energy check is consistency check
         ref_energy = -75.68294188844864
@@ -277,7 +278,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 5e-7
-        # assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-6 # TODO: Something actually wrong here
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-7
 
         dm = mf.make_rdm1()
         kpts = cell.make_kpts(kmesh)
@@ -300,7 +301,7 @@ class KnownValues(unittest.TestCase):
             atom = 'C 0.,  0.,  0.; C 0.8917,  0.8917,  0.8917',
             basis = 'def2-svp',
             mesh = [10086] * 3,
-            verbose = 4,
+            verbose = 0,
         )
 
         kmesh = np.array([3,1,1])
@@ -319,7 +320,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
         gobj.grid_response = True
         test_gradient = gobj.kernel()
-        test_derivatives = np.vstack((test_gradient, gobj.stress))
+        test_derivatives = np.vstack((test_gradient, gobj.stress * cell.vol))
 
         # Energy check is consistency check
         ref_energy = -75.65250113719456
@@ -348,6 +349,114 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_hcore_derivatives[:-3, :] - ref_hcore_derivatives[:-3, :])) < 3e-8
         assert np.max(np.abs(test_hcore_derivatives[-3:, :] - ref_hcore_derivatives[-3:, :])) < 3e-7
 
+    def test_gdf_hcore_derivatives_uhf(self):
+        cell = pyscf.M(
+            atom = """
+                O 15.43509000 9.59549000 8.94968000
+                H 15.05724000 9.21878000 9.73314000
+                H 0.51550474 9.33856000 9.01857000
+                He 2.51550474 9.33856000 9.01857000
+            """,
+            a = np.eye(3) * 15.9069652593,
+            unit = "Angstrom",
+            charge = 1,
+            spin = 1,
+            basis = "6-31g",
+            verbose = 0,
+        )
+
+        def get_energy(cell):
+            mf = UHF(cell).density_fit(auxbasis="def2-universal-jkfit")
+            mf.conv_tol = 1e-11
+            e = mf.kernel()
+            assert mf.converged
+            return e, mf
+        test_energy, mf = get_energy(cell)
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+        test_derivatives = np.vstack((test_gradient, gobj.stress * cell.vol))
+
+        # Energy check is consistency check
+        ref_energy = -78.48457315211476
+        # ref_derivatives = numerical_gradient_and_stresstensor(cell, get_energy)
+        ref_derivatives = np.array([
+            [-0.0555001189184168,  0.00711174671153  ,  0.0089337752484653],
+            [ 0.0414229687351053,  0.0090893369275591, -0.0309807412435248],
+            [ 0.0139675427135444, -0.0163045759649094,  0.0220698445474454],
+            [ 0.0001096094592867,  0.0001034923968746, -0.0000228787655487],
+            [ 0.0143442309763486, -0.0362892617999933,  0.0630823853953189],
+            [-0.0362892622263189,  0.0190900627927704,  0.0113875727691948],
+            [ 0.0630823866032415,  0.0113875747587144, -0.0252774496800612],
+        ])
+
+        assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 1e-7
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 1e-7
+
+    def test_gdf_hcore_derivatives_kuks(self):
+        cell = pyscf.M(
+            a = '''0.      1.7834  1.8834
+                   1.7834  0.      1.7834
+                   1.7834  1.7834  0.    ''',
+            atom = 'C 0.,  0.,  0.; C 0.8917,  0.9017,  0.8917',
+            basis = """
+            BASIS "ao basis" SPHERICAL PRINT
+            #BASIS SET: (12s,6p) -> [2s,1p]
+            C    S
+                0.7427370491E+03       0.9163596281E-02
+                0.1361800249E+03       0.4936149294E-01
+                0.3809826352E+02       0.1685383049E+00
+                0.1308778177E+02       0.3705627997E+00
+                0.5082368648E+01       0.4164915298E+00
+                0.2093200076E+01       0.1303340841E+00
+            C    SP
+                0.3049723950E+02      -0.1325278809E-01       0.3759696623E-02
+                0.6036199601E+01      -0.4699171014E-01       0.3767936984E-01
+                0.1876046337E+01      -0.3378537151E-01       0.1738967435E+00
+                0.7217826470E+00       0.2502417861E+00       0.4180364347E+00
+                # 0.3134706954E+00       0.5951172526E+00       0.4258595477E+00
+                # 0.1436865550E+00       0.2407061763E+00       0.1017082955E+00
+            END
+            """, # Modified sto-6g
+            mesh = [10086] * 3,
+            precision = 1e-9,
+            verbose = 0,
+        )
+
+        kmesh = np.array([3,1,1])
+
+        def get_energy(cell):
+            kpts = cell.make_kpts(kmesh)
+            mf = KUKS(cell, xc="PBE0", kpts=kpts).density_fit(auxbasis="def2-universal-jkfit")
+            mf.grids = BeckeGrids(cell)
+            mf.grids.atom_grid = (99, 590)
+            mf.conv_tol = 1e-11
+            e = mf.kernel()
+            assert mf.converged
+            return e, mf
+        test_energy, mf = get_energy(cell)
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+        test_derivatives = np.vstack((test_gradient, gobj.stress * cell.vol))
+
+        # Energy check is consistency check
+        ref_energy = -73.96736967398559
+        # ref_derivatives = numerical_gradient_and_stresstensor(cell, get_energy)
+        ref_derivatives = np.array([
+            [-0.0432393890292815,  0.0152970496714033,  0.0907656186655004],
+            [ 0.0432393193250391, -0.0152969768407729, -0.0907655656590123],
+            [ 1.2659054821284599, -0.2414305584608201, -0.2869095677482392],
+            [-0.2414146290874442,  1.2612306482395752,  0.305671657088169 ],
+            [-0.2868897047392238,  0.3056643988941232,  1.4221600833508319],
+        ])
+
+        assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 1e-6
+        # assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 1e-6 # TODO: Support Becke grid stress tensor
 
 if __name__ == '__main__':
     print("Full Tests for PBC GDF Hcore gradient and stress tensor")
