@@ -201,10 +201,10 @@ class KnownValues(unittest.TestCase):
         control.build(kmesh, xctype='LDA')
         self.assertTrue(control.aft_buckets)
 
+        original_a = cell_orth.lattice_vectors().copy()
         cell = cell_orth.copy()
-        a = cell.lattice_vectors()
-        a[0, 1] = 6e-6
-        cell.a = a
+        cell.a = original_a.copy()
+        cell.a[0, 1] = 6e-6
 
         kpts = cell.make_kpts(kmesh, wrap_around=True)
         dm = np.tile(np.eye(cell.nao), (len(kpts), 1, 1))
@@ -212,9 +212,10 @@ class KnownValues(unittest.TestCase):
         rho = ni.get_rho(dm, kpts)
 
         self.assertTrue(multigrid._is_orthogonal_lattice(
-            cell.lattice_vectors())) # Original cell is orthogonal
+            cell.lattice_vectors())) # Primitive cell passes the threshold
         self.assertFalse(multigrid._is_orthogonal_lattice(
-            ni.bvkcell.lattice_vectors())) # BVK cell is not orthogonal, this will cause discrepancy
+            ni.bvkcell.lattice_vectors())) # BvK cell exceeds the threshold
+        np.testing.assert_array_equal(cell_orth.lattice_vectors(), original_a)
         self.assertIsNone(ni.aft_buckets)
         self.assertTrue(ni.fft_buckets)
         self.assertTrue(bool(cp.isfinite(rho).all()))
