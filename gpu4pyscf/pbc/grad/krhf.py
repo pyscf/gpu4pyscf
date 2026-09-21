@@ -38,7 +38,7 @@ from gpu4pyscf.pbc.grad.pp import ppnl_derivatives
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, _get_ejk_derivatives
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
 from gpu4pyscf.pbc.scf import hf as pbchf
-from gpu4pyscf.pbc.df.grad.krhf import get_nuc
+from gpu4pyscf.pbc.df.grad.krhf import get_nuc, get_pp_loc
 
 __all__ = ['Gradients']
 
@@ -292,7 +292,10 @@ class Gradients(GradientsBase):
         elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
             grad_sigma += get_nuc_fftdf(self, cell, dm0, kpts)
         else:
-            grad_sigma += get_nuc(cell, dm0, kpts)
+            if cell._pseudo:
+                grad_sigma += get_pp_loc(cell, dm0, kpts)
+            else:
+                grad_sigma += get_nuc(cell, dm0, kpts)
             grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
 
         if cell._pseudo:

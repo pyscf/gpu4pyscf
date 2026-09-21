@@ -934,19 +934,9 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
     ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
 
     if with_pseudo:
-        raise NotImplementedError("")
-        # #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
-        # ZG = ft_ao.ft_ao(fakenuc, Gv).conj()
-        # ZG = ZG.dot(charges)
-        # ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
-        # if ((cell.dimension == 3 or
-        #      (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-        #     exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
-        #     ZG[0] -= charges.dot(np.pi/exps) / cell.vol
+        raise NotImplementedError("get_pp_loc_part1_grad(with_pseudo = True) not implemented yet")
     else:
         pass
-        # ZG = _get_ZSI(cell, mesh).conj()
-        # ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
 
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
     aux_loc = auxcell.ao_loc
@@ -1106,5 +1096,11 @@ def get_nuc(cell, dm, kpts=None, hermi=1):
     log.timer('get_nuc gradient', *t0)
     return nuc
 
-def get_pp(cell, dm, kpts=None, hermi=1):
-    raise NotImplementedError("")
+def get_pp_loc(cell, dm, kpts=None, hermi=1):
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+    depp = get_pp_loc_part1_grad(cell, dm, kpts, hermi, with_pseudo=True, verbose=log)
+    raise NotImplementedError("get_pp_loc_part2_grad not implemented yet")
+    # depp += get_pp_loc_part2_grad(cell, dm, kpts, hermi)
+    log.timer('get_pp_loc gradient', *t0)
+    return depp

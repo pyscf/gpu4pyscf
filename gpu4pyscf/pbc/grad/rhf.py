@@ -35,7 +35,7 @@ from gpu4pyscf.pbc.dft import KohnShamDFT, BeckeGrids
 from gpu4pyscf.pbc.grad.pp import ppnl_derivatives
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf.pbc.scf import hf as pbchf
-from gpu4pyscf.pbc.df.grad.krhf import get_nuc
+from gpu4pyscf.pbc.df.grad.krhf import get_nuc, get_pp_loc
 
 __all__ = ['Gradients']
 
@@ -200,7 +200,10 @@ class Gradients(GradientsBase):
         elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
             grad_sigma += get_nuc_fftdf(self, cell, dm0, np.zeros((1,3)))
         else:
-            grad_sigma += get_nuc(cell, dm0)
+            if cell._pseudo:
+                grad_sigma += get_pp_loc(cell, dm0)
+            else:
+                grad_sigma += get_nuc(cell, dm0)
             grad_sigma += int1e.kin_derivatives(cell, dm0)
 
         if cell._pseudo:
