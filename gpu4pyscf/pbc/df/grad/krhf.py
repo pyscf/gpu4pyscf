@@ -934,9 +934,12 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
     ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
 
     if with_pseudo:
-        raise NotImplementedError("get_pp_loc_part1_grad(with_pseudo = True) not implemented yet")
+        assert (cell.dimension == 3 or
+                (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))
+        exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
+        pp_G0_term = -charges.dot(np.pi/exps) * kws
     else:
-        pass
+        pp_G0_term = 0
 
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
     aux_loc = auxcell.ao_loc
@@ -999,6 +1002,7 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
 
     ej_sigma_lr = cp.zeros([cell.natm+3, 3])
     vG_conj = rho_nucG.conj() * wcoulG_LR0
+    vG_conj[0] += pp_G0_term
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     err = libpbc.PBC_ft_aopair_ej_deriv(
@@ -1022,6 +1026,7 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
     ej_sigma_lr += ej_sigma_aux
     ej_sigma_lr[-3:] += cp.einsum(
         'g,g,xyg->xy', rho_nucG, rhoG.conj(), wcoulG_LR1).real
+    ej_sigma_lr[-3:] -= cp.eye(3) * (rhoG[0] * pp_G0_term).real
 
     ej_sigma = ej_sigma_lr
     t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
