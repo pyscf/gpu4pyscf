@@ -190,14 +190,15 @@ class Gradients(GradientsBase):
         if is_uhf:
             dm0 = dm0[0] + dm0[1]
 
+        from gpu4pyscf.pbc.grad.krhf import get_nuc_fftdf
         ni = mf._numint
         if isinstance(ni, multigrid_v3.MultiGridNumInt):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0)
         elif isinstance(ni, multigrid.MultiGridNumIntBase):
-            raise NotImplementedError("")
+            grad_sigma += get_nuc_fftdf(self, cell, dm0, np.zeros((1,3)))
         elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
-            raise NotImplementedError("")
+            grad_sigma += get_nuc_fftdf(self, cell, dm0, np.zeros((1,3)))
         else:
             grad_sigma += get_nuc(cell, dm0)
             grad_sigma += int1e.kin_derivatives(cell, dm0)

@@ -148,6 +148,25 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         return hcore
     return hcore_deriv
 
+def get_nuc_fftdf(mf_grad, cell, dm0, kpts):
+    nkpts = len(kpts)
+    if nkpts == 1:
+        if dm0.ndim == 2:
+            dm0 = dm0[None, :, :]
+    grad_sigma = np.zeros((cell.natm + 3, 3))
+    hcore_deriv = hcore_generator(mf_grad, cell, kpts)
+    dh1e = cp.empty([cell.natm, 3])
+    for ia in range(cell.natm):
+        h1ao = hcore_deriv(ia)
+        dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
+    grad_sigma[:-3] += dh1e.get() / nkpts
+    # hcore_generator includes kinetic gradients, but not kinetic strain.
+    grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0, kpts)[-3:]
+    ni = multigrid_v3.MultiGridNumInt(cell)
+    grad_sigma[-3:] += ni.energy_strain_gradient(
+        'HF', dm0, kpts, spin=0, with_j=False, with_nuc=True)
+    return grad_sigma
+
 class GradientsBase(pbchf_grad.GradientsBase):
     '''
     Basic nuclear gradient functions for non-relativistic methods
@@ -246,7 +265,6 @@ class Gradients(GradientsBase):
         else:
             is_uhf = mf.istype('UHF')
             kpts = mf.kpt
-        nkpts = len(kpts)
 
         if getattr(mf, 'disp', None):
             raise NotImplementedError('dispersion correction')
@@ -270,9 +288,9 @@ class Gradients(GradientsBase):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
         elif isinstance(ni, multigrid.MultiGridNumIntBase):
-            raise NotImplementedError("")
+            grad_sigma += get_nuc_fftdf(self, cell, dm0, kpts)
         elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
-            raise NotImplementedError("")
+            grad_sigma += get_nuc_fftdf(self, cell, dm0, kpts)
         else:
             grad_sigma += get_nuc(cell, dm0, kpts)
             grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
