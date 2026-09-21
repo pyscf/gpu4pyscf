@@ -65,12 +65,15 @@ LMAX = 4
 
 _kernel_registery = {}
 
+def _is_orthogonal_lattice(a):
+    return abs(a - np.diag(a.diagonal())).max() < 1e-5
+
 def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
     cell = ni.sorted_cell
     bvkcell = ni.bvkcell
 
     a = bvkcell.lattice_vectors()
-    assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
+    assert _is_orthogonal_lattice(a), 'Must be orthogonal lattice'
     b = cell.reciprocal_vectors()
 
     nkpts = len(ni.bvkmesh_Ls)
@@ -2077,7 +2080,8 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         bas_ij_idx = _non_trivial_bvk_pairs(self, precision)
 
         # Initialize buckets
-        is_orth_lattice = abs(a - np.diag(a.diagonal())).max() < 1e-5
+        is_orth_lattice = _is_orthogonal_lattice(
+            bvkcell.lattice_vectors())
         self.aft_buckets = None
         self.fft_buckets = None
 
