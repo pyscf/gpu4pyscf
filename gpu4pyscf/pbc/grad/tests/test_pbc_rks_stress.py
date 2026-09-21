@@ -226,7 +226,7 @@ class KnownValues(unittest.TestCase):
             assert abs(dat[i,j] - de/2e-4) < 2e-7
 
     def test_get_pp(self):
-        from gpu4pyscf.pbc.grad.pp import _get_pp_nonloc_strain_derivatives
+        from gpu4pyscf.pbc.grad.pp import ppnl_derivatives
         a = np.eye(3) * 5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
@@ -240,7 +240,7 @@ class KnownValues(unittest.TestCase):
         ni = MultiGridNumInt(cell)
         ni.allow_mesh_reduction = False
         dat = ni.energy_derivatives(xc, dm, spin=0, with_nuc=True, with_j=False)[-3:]
-        dat += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, cp.array(dm))
+        dat += ppnl_derivatives(cell, cp.array(dm))[-3:]
         ni = NumInt()
         kpt = np.zeros(3)
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:

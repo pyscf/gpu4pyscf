@@ -26,7 +26,8 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df import aft as aft_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned)
+    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned,
+    tag_array)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, SRInt3c2eOpt
 from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
@@ -44,6 +45,32 @@ from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff
+
+
+def _get_j3c_block_sizes(mem_free, nao, nao_pair, naux, nocc, nkpts,
+                         bvk_ncells, aux_shl_size, nspin=1):
+    # Reserve the occupied-pair tensor before budgeting the working buffers.
+    mem_avail = mem_free - nspin*naux*nkpts**2*nocc**2*16
+    batch_bytes = nao_pair * (bvk_ncells*8 + nkpts*16)
+    block_bytes = nao**2 * (bvk_ncells*nkpts + 2*bvk_ncells**2) * 16
+    batch_size = min(naux, POOL_SIZE//bvk_ncells,
+                     int(mem_avail*.2/batch_bytes))
+    blksize = min(batch_size, int(mem_avail*.6/block_bytes))
+    if batch_size < aux_shl_size or blksize < 1:
+        raise RuntimeError('Insufficient GPU memory for GDF gradient buffers')
+    return batch_size, blksize
+
+
+def _get_lr_block_size(nao, nocc, naux, nkpts, nkpts_uniq, ngrids, nspin=1):
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    # Advanced indexing of occupied pairs creates two auxiliary-sized arrays.
+    mem_avail -= 2*nspin*naux*nkpts*nocc**2*16
+    Gsize = (nkpts*(2*nao**2 + nspin*nao*nocc + nspin*nocc**2) +
+             2*naux*(nkpts_uniq+1))
+    blksize = min(ngrids, int(mem_avail*.8//(Gsize*16))//32*32)
+    if blksize < 1:
+        raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
+    return blksize
 
 
 def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
@@ -77,6 +104,15 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     t0 = log.init_timer()
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    if (hermi == 1 and len(kpts) == 1 and is_zero(kpts) and bvk_ncells == 1 and
+        dm_factor_l.dtype == np.float64 and
+        (dm_factor_r is None or dm_factor_r.dtype == np.float64)):
+        dm_gamma = tag_array(
+            cp.asarray(dm[0]), factor_l=dm_factor_l[0],
+            factor_r=None if dm_factor_r is None else dm_factor_r[0])
+        return rhf._get_ejk_derivatives(
+            int3c2e_opt, dm_gamma, hermi, j_factor, k_factor, exxdiv,
+            omega, verbose, linear_dep_threshold)
     # transform to the AO order in sorted_cell
     dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=1)
     if dm_factor_r is None:
@@ -98,14 +134,13 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
-    buffer_size = mem_free // 4
-    batch_size = max(1, min(naux, buffer_size // (nao_pair*8*bvk_ncells)))
-    assert batch_size < POOL_SIZE
+    batch_size, blksize = _get_j3c_block_sizes(
+        mem_free, nao, nao_pair, naux, nocc, nkpts, bvk_ncells,
+        int(np.diff(aux_loc).max()))
     eval_j3c, _, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, cart=True)
     aux_batches = len(aux_offsets) - 1
 
-    blksize = max(1, min(naux, buffer_size // ((nao*bvk_ncells)**2*8)))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
@@ -122,6 +157,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     #        out[ijk_conserv[kk,kj],kj] += j3c_tmp[kk,kj]
     #        => order_KJ = [ijk_conserv[kk,kj],kj]
     order_KJ = (ijk_conserv * nkpts + cp.arange(nkpts)).ravel()
+    order_KJ = cp.asnumpy(order_KJ)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao*bvk_ncells*nao,blksize,nkpts), dtype=np.complex128)
@@ -162,12 +198,15 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             j3c_tmp = contract('jLikK,LI->KIijk', j3c, expLk_conj, out=j3c_tmp)
             j3c_ij[order_KI] = j3c_tmp.reshape(nkpts**2,-1)
             j3c_tmp = contract('iLjkK,LJ->KJijk', j3c, expLk, out=j3c_tmp)
-            j3c_ij[order_KJ] += j3c_tmp.reshape(nkpts**2,-1)
+            # Basic slices avoid a full-size advanced-indexing copy.
+            for ij, kj in enumerate(order_KJ):
+                j3c_ij[kj] += j3c_tmp.reshape(nkpts**2,-1)[ij]
             j3c_ij = j3c_ij.reshape(nkpts, nkpts, nao, nao, dk)
 
             tmp = ndarray((nkpts, nkpts, nocc, nao, dk), dtype=np.complex128, buffer=buf2)
             contract('IJpqr,Ipi->IJiqr', j3c_ij, dm_factor_r, out=tmp)
             contract('IJiqr,Jqj->rIJij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
+        compressed = None
     j3c_full = buf = buf1 = buf2 = eval_j3c = None
     compressed = j3c = j3c_tmp = j3c_ij = tmp = None
     t0 = log.timer_debug1('contract dm', *t0)
@@ -220,9 +259,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
 
     def lr_3c2e(j3c_oo):
         mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gblksize = int(mem_avail*.8//((nao*2+nocc)*nao*16*nkpts))//32*32
-        Gblksize = min(Gblksize, ngrids)
-        assert Gblksize > 0
+        Gblksize = _get_lr_block_size(
+            nao, nocc, naux, nkpts, nkpts_uniq, ngrids)
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
                    mem_avail*1e-9, Gblksize)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
@@ -240,12 +278,14 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                 ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l[kj_idx])
                 j3c_oo[:,ki_idx,kj_idx] += contract(
                     'rG,kijG->rkij', auxGw[:,j2c_idx], ijG)
+                tmp = ijG = None
                 if kp != kp_conj:
                     tmp = contract('kqpG,kpi->kiqG', pqG.conj(), dm_factor_r[kj_idx])
                     ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l)
                     j3c_oo[:,kj_idx,ki_idx] += contract(
                         'rG,kijG->rkij', auxGw[:,j2c_idx].conj(), ijG)
-                pqG = None
+                pqG = tmp = ijG = None
+            auxG = auxGw = None
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
 
@@ -313,10 +353,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gblksize = int(mem_avail*.8//((nao*2+nocc)*nao*16*nkpts))//32*32
-        Gblksize = min(Gblksize, ngrids)
-        assert Gblksize > 0
+        Gblksize = _get_lr_block_size(nao, nocc, naux, nkpts, nkpts_uniq, ngrids)
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
@@ -328,7 +365,6 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
             _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
         null_ptr = lib.c_null_ptr()
-        vG = cp.empty(ngrids, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
@@ -366,6 +402,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                 dm_auxG -= dm_auxG1
                 dm_auxG *= wcoulG_LR0[j2c_idx, p0:p1]
                 dm_auxG = dm_auxG.view(np.float64)
+                pqG = tmp = ijG = dm_auxG1 = rhoG_metric = None
 
                 # contract to (r|G)^{[1]} = einsum('ag,ag->a', (iG IFT(aux)), dm_auxG)
                 GkT = cp.asarray(Gk[j2c_idx,p0:p1].T.ravel())
@@ -386,19 +423,21 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                 # dm_oo must be symmetric
                 dm_ooG = contract('rkji,rG->kijG', dm_oo_k, auxG_conj)
                 tmp = contract('kijG,kpi->kpjG', dm_ooG, dm_factor_r)
+                dm_ooG = None
                 dm_vG = contract('kpjG,kqj->kpqG', tmp, dm_factor_l[kj_idx], -.5*k_factor)
+                tmp = None
                 LpqG = contract('Lk,kpqG->LqpG', expLk[:,kj_idx], dm_vG)
                 if ft_opt.permutation_symmetry:
                     #TODO: This transformation is likely identical to the
                     # previous one. Scale LpqG by a factor of two instead.
-                    LpqG += contract('Lk,kpqG->LpqG', expLk.conj(), dm_vG)
+                    contract('Lk,kpqG->LpqG', expLk_conj, dm_vG, beta=1, out=LpqG)
 
                 if j_factor != 0 and kp == 0:
                     vG = auxvec.dot(auxG_conj) * j_factor
                     if ft_opt.permutation_symmetry:
                         vG *= 2
                     bvk_dm = contract('Lk,kpq->Lpq', expLk, dm_sorted)
-                    LpqG += bvk_dm[:,:,:,None] * vG
+                    contract('Lpq,G->LpqG', bvk_dm, vG, beta=1, out=LpqG)
                 dm_vG = cp.asarray(LpqG, order='C')
 
                 GvT = cp.asarray((Gv[p0:p1]+kpts[kp]).T.ravel())

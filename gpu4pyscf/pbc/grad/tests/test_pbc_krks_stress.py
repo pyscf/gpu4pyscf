@@ -304,8 +304,7 @@ class KnownValues(unittest.TestCase):
         ni = MultiGridNumInt(cell)
         ni.allow_mesh_reduction = False
         dat = ni.energy_derivatives(xc, dm, spin=0, kpts=kpts, with_nuc=True, with_j=False)[-3:]
-        dat += pp_grad._get_pp_nonloc_strain_derivatives(
-            cell, cell.mesh, cp.array(dm), kpts)
+        dat += pp_grad.ppnl_derivatives(cell, cp.array(dm), kpts)[-3:]
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
@@ -337,8 +336,7 @@ class KnownValues(unittest.TestCase):
         ni = MultiGridNumInt(cell)
         ni.allow_mesh_reduction = False
         dat = ni.energy_derivatives(xc, dm, spin=0, kpts=kpts, with_nuc=True, with_j=False)[-3:]
-        dat += pp_grad._get_pp_nonloc_strain_derivatives(
-            cell, cell.mesh, cp.array(dm), kpts)
+        dat += pp_grad.ppnl_derivatives(cell, cp.array(dm), kpts)[-3:]
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
