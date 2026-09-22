@@ -123,10 +123,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free - naux*nocc**2*8 - nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(max(1, n_compact_pairs)*8*bvk_ncells))))
-    aux_batches = 0
-    if n_compact_pairs == 0:
-        j3c_oo = cp.zeros((naux, nocc, nocc))
-    else:
+
+    def sr_int3c2e():
         assert batch_size < POOL_SIZE
         eval_j3c, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
             aux_batch_size=batch_size, cart=True)
@@ -154,6 +152,12 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
                 contract('iqr,qj->rij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
         j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
+        return j3c_oo
+
+    if n_compact_pairs == 0:
+        j3c_oo = cp.zeros((naux, nocc, nocc))
+    else:
+        j3c_oo = sr_int3c2e()
         t0 = log.timer_debug1('contract dm', *t0)
 
     # Adjust the rcut because the default cell.rcut is estimated based on
@@ -746,26 +750,25 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
             raise RuntimeError('ft_ao_deriv failed')
 
         ej_sigma_lr = cp.zeros([cell.natm+3, 3])
-        if len(ft_opt.img_idx) > 0:
-            vG_conj = rho_auxG.conj() * wcoulG0
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
-                    aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
-            err = libpbc.PBC_ft_aopair_ej_deriv(
-                ctypes.cast(ej_sigma_lr[:-3].data.ptr, ctypes.c_void_p),
-                ctypes.cast(ej_sigma_lr[-3:].data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-                ctypes.cast(vG_conj.data.ptr, ctypes.c_void_p),
-                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                ctypes.byref(aft_envs),
-                ctypes.c_int(len(shl_pair_offsets) - 1),
-                ctypes.c_int(ngrids),
-                ctypes.c_int(shm_size),
-                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ft_opt.permutation_symmetry))
-            if err != 0:
-                raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
+        vG_conj = rho_auxG.conj() * wcoulG0
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+                aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
+        err = libpbc.PBC_ft_aopair_ej_deriv(
+            ctypes.cast(ej_sigma_lr[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(ej_sigma_lr[-3:].data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.cast(vG_conj.data.ptr, ctypes.c_void_p),
+            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+            ctypes.byref(aft_envs),
+            ctypes.c_int(len(shl_pair_offsets) - 1),
+            ctypes.c_int(ngrids),
+            ctypes.c_int(shm_size),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ft_opt.permutation_symmetry))
+        if err != 0:
+            raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 
         ej_sigma_lr *= 2 # due to i>=j symmetry in CUDA kernel
         ej_sigma_lr += ej_sigma_aux
@@ -775,7 +778,8 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
                 'g,xyg->xy', (rho_auxG*rho_auxG.conj()).real, wcoulG1)
         return ej_sigma_lr
 
-    ej_sigma += lr_3c2e_response(ft_opt, rhoG_LR, wcoulG_LR0, wcoulG_LR1, True)
+    if len(ft_opt.img_idx) > 0:
+        ej_sigma += lr_3c2e_response(ft_opt, rhoG_LR, wcoulG_LR0, wcoulG_LR1, True)
     if separated_dd:
         ej_sigma += lr_3c2e_response(dd_ft_opt, rhoG_FR, wcoulG_FR0, wcoulG_FR1, False)
     t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)

@@ -390,7 +390,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     mem_free -= ngrids * naux * 16 # auxG_cache
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(n_compact_pairs+1, mem_free // (naux_cart*bvk_ncells*16*4))
+    batch_size = min(n_compact_pairs+1, int(mem_free*0.7) // (naux_cart*bvk_ncells*16*4))
     log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
     if batch_size < 1:
         raise RuntimeError('Insufficient GPU memory')
@@ -577,7 +577,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     mem_free -= ngrids * naux_cart * 16 * nkpts # auxG_conj
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(n_compact_pairs+1, mem_free//(bvk_ncells*naux_cart*16*4))
+    batch_size = min(n_compact_pairs+1, int(mem_free*0.7)//(bvk_ncells*naux_cart*16*4))
     log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
     if batch_size < 1:
         raise RuntimeError('Insufficient GPU memory')

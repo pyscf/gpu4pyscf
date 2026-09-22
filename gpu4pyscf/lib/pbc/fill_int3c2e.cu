@@ -1105,6 +1105,9 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
                            int nauxbas, int naux, int to_sph,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
+    if (nbatches_shl_pair == 0 || nbatches_ksh == 0) {
+        return 0;
+    }
     cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
