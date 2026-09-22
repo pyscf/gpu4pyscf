@@ -390,16 +390,14 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     mem_free -= ngrids * naux * 16 # auxG_cache
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(n_compact_pairs, mem_free // (naux_cart*bvk_ncells*16*4))
+    batch_size = min(n_compact_pairs+1, mem_free // (naux_cart*bvk_ncells*16*4))
     log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
-    if batch_size < 1 and n_compact_pairs > 0:
+    if batch_size < 1:
         raise RuntimeError('Insufficient GPU memory')
 
     cart = cell.cell.cart
-    # The evaluator defines both the primitive batches and contracted columns.
     context_device = cp.cuda.device.get_device_id()
-    context = int3c2e_opt.int3c2e_evaluator(
-        ao_pair_batch_size=max(1, batch_size), cart=cart)
+    context = int3c2e_opt.int3c2e_evaluator(ao_pair_batch_size=batch_size, cart=cart)
     bas_ij_batches = context[1]
     nao = cell.cell.nao
 
@@ -436,7 +434,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         local_context = context
         if device_id != context_device:
             local_context = int3c2e_opt.int3c2e_evaluator(
-                ao_pair_batch_size=max(1, batch_size), cart=cell.cell.cart)
+                ao_pair_batch_size=batch_size, cart=cell.cell.cart)
         eval_j3c, bas_ij_batches, _ = local_context
 
         shl_pair_batches = len(ao_pair_counts)
@@ -451,7 +449,8 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         auxG = cp.asarray(cd_j2c_cache[0]).T.dot(ft_ao.ft_ao(auxcell, Gv).T)
         auxG *= cp.asarray(coulG)
 
-        avail_mem = mem_free - max_pair_size*(naux_cart*bvk_ncells+naux)*8
+        avail_mem = mem_free - max_pair_size*naux_cart*bvk_ncells*8 # buf1
+        avail_mem -= max_pair_size*naux*8 # buf0
         Gblksize = int(avail_mem//(16*(max_pair_size+naux*2))) // 32 * 32
         if Gblksize <= 0:
             raise RuntimeError('Insufficient GPU memory')
@@ -578,15 +577,14 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     mem_free -= ngrids * naux_cart * 16 * nkpts # auxG_conj
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(n_compact_pairs, mem_free//(bvk_ncells*naux_cart*16*4))
+    batch_size = min(n_compact_pairs+1, mem_free//(bvk_ncells*naux_cart*16*4))
     log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
     if batch_size < 1:
         raise RuntimeError('Insufficient GPU memory')
 
     cart = cell.cell.cart
     context_device = cp.cuda.device.get_device_id()
-    context = int3c2e_opt.int3c2e_evaluator(
-        ao_pair_batch_size=batch_size, cart=cart)
+    context = int3c2e_opt.int3c2e_evaluator(ao_pair_batch_size=batch_size, cart=cart)
     bas_ij_batches = context[1]
     nao = cell.cell.nao
 
@@ -623,7 +621,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         local_context = context
         if device_id != context_device:
             local_context = int3c2e_opt.int3c2e_evaluator(
-                ao_pair_batch_size=max(1, batch_size), cart=cart)
+                ao_pair_batch_size=batch_size, cart=cart)
         eval_j3c, bas_ij_batches, _ = local_context
         shl_pair_batches = len(bas_ij_batches)
 
@@ -646,24 +644,23 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         auxG_conj.imag *= -1
         auxG_conj *= cp.asarray(coulG)
 
-        avail_mem = mem_free - max_pair_size*(bvk_ncells*naux_cart*8 +
-                                              (nkpts*naux_cart+naux_max)*16)
+        avail_mem = mem_free - max_pair_size*max(2, bvk_ncells)*naux_cart*8 # buf1
+        avail_mem -= max_pair_size * nkpts*naux_cart*16 # buf0
         Gblksize = int(avail_mem//(16*(max_pair_size+naux_cart*2))) // 32 * 32
         if Gblksize <= 0:
             raise RuntimeError('Insufficient GPU memory')
         Gblksize = min(Gblksize, ngrids)
         log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
                    ngrids, Gblksize, naux_max, batch_size)
-        sr_buf = cp.empty(max_pair_size*bvk_ncells*naux_cart)
         buf0 = cp.empty(nkpts*max_pair_size*naux_cart, dtype=np.complex128)
-        buf1 = cp.empty(max_pair_size*naux_max, dtype=np.complex128)
+        buf1 = cp.empty(max_pair_size*max(2, bvk_ncells)*naux_cart)
         buf2 = cp.empty(max_pair_size*Gblksize, dtype=np.complex128)
         write_buf = empty_mapped(max_pair_size*naux_max, dtype=np.complex128)
         write_buf1 = empty_mapped(max_pair_size*naux_max, dtype=np.complex128)
         future = None
         for batch_id in tasks:
             log.debug1('batch %d/%d', batch_id, shl_pair_batches)
-            j3c = eval_j3c(shl_pair_batch_id=batch_id, out=sr_buf)
+            j3c = eval_j3c(shl_pair_batch_id=batch_id, out=buf1)
             if j3c.size == 0:
                 continue
 

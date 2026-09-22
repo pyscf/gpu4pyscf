@@ -1101,8 +1101,8 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
                            uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                            int *img_idx, uint32_t *sp_img_offsets,
                            int *gout_stride_lookup, int *ao_pair_loc,
-                           int ao_pair_offset, int nao_pairs,
-                           int aux_offset, int nauxbas, int naux, int to_sph,
+                           int ao_pair_offset, int aux_offset,
+                           int nauxbas, int naux, int to_sph,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);

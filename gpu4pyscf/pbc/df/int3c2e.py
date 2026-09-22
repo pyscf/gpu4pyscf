@@ -315,14 +315,43 @@ class SRInt3c2eOpt:
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff), ctypes.c_int(symmetric))
 
-        mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
+        mask = img_counts > 0
         dd_bas_ij_cache = {}
         if separate_dd:
-            from gpu4pyscf.pbc.scf.rsjk import _search_diffuse_pairs
-            pair_mask = _search_diffuse_pairs(cell, self.mesh)
-            dd_mask = mask & pair_mask[:,None,:]
-            # Exclude diffuse pairs from bas_ij_cache
-            mask &= ~pair_mask[:,None,:]
+            # Needs more tests to determine which scheme to use
+            if 1:
+                from gpu4pyscf.pbc.scf.rsjk import _search_diffuse_pairs
+                mask = mask.reshape(nbas, bvk_ncells, nbas)
+                pair_mask = _search_diffuse_pairs(cell, self.mesh)
+                dd_mask = mask & pair_mask[:,None,:]
+                # Exclude diffuse pairs from bas_ij_cache
+                mask &= ~pair_mask[:,None,:]
+            else:
+                from gpu4pyscf.pbc.tools.pbc import mesh_to_ke
+                exps, coef = extract_pgto_params(cell, 'compact')
+                exps = cp.asarray(exps, dtype=np.float32)
+                coef = cp.asarray(coef, dtype=np.float32)
+                bas_ij_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=cp.int64)
+                npairs = len(bas_ij_idx)
+                dressed_precision = cell.precision * max(1, 1e-2*cell.vol)
+                Ecut = cp.empty(npairs, dtype=np.float32)
+                err = libpbc.estimate_aft_Ecut1(
+                    ctypes.cast(Ecut.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.byref(self._int3c2e_envs),
+                    ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(coef.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(npairs),
+                    ctypes.c_float(math.log(dressed_precision)))
+                if err != 0:
+                    raise RuntimeError('estimate_aft_Ecut kernel failed')
+                ke_cutoff = mesh_to_ke(cell.lattice_vectors(), self.mesh).min()
+                dd_mask = mask.copy()
+                mask[bas_ij_idx[Ecut <= ke_cutoff]] = False
+                dd_mask[bas_ij_idx[Ecut > ke_cutoff]] = False
+                dd_mask = dd_mask.reshape(nbas, bvk_ncells, nbas)
+
+        mask = mask.reshape(nbas, bvk_ncells, nbas)
 
         self.bas_ij_cache = bas_ij_cache = {}
         groups = len(cell.uniq_l_ctr)
@@ -913,7 +942,7 @@ def _create_pair_recontractor(cell, bas_ij_batches, cart, bvk_ncells=1):
             (out_idx[:out_count].copy(), out_offsets[:inp_count+1].copy(),
              coef[:out_count].copy()))
 
-    pair_addresses = pair_addresses[:cderi_npairs.value]
+    pair_addresses = pair_addresses[:cderi_npairs.value].copy()
 
     def recontract(batch_id, cderi, j3c):
         """Scatter [primitive_pair, aux] data into shared CDERI.

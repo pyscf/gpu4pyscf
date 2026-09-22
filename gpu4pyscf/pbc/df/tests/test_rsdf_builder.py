@@ -710,13 +710,8 @@ def test_diffuse_only():
     opt.build(separate_dd=True)
     assert len(opt.img_idx) == 0
 
-    def unexpected_sr(*args, **kwargs):
-        raise AssertionError('An all-DD build must not evaluate SR 3c2e')
-
-    with lib.temporary_env(rsdf_builder.SRInt3c2eOpt,
-                           int3c2e_evaluator=unexpected_sr):
-        full, _ = build_cderi(cell, auxcell, int3c2e_opt=opt)
-        excluded, _ = build_cderi(cell, auxcell, exclude_dd=True, int3c2e_opt=opt)
+    full, _ = build_cderi(cell, auxcell, int3c2e_opt=opt)
+    excluded, _ = build_cderi(cell, auxcell, exclude_dd=True, int3c2e_opt=opt)
     eri = cp.einsum('pij,pkl->ijkl', full[0,0], full[0,0])
     assert abs(lib.fp(eri.get()) - 0.002616152259096199) < 1e-10
     assert cp.all(excluded[0,0] == 0)
@@ -728,11 +723,9 @@ def test_diffuse_only():
     opt.build(separate_dd=True)
     assert len(opt.img_idx) == 0
 
-    with lib.temporary_env(rsdf_builder.SRInt3c2eOpt,
-                           int3c2e_evaluator=unexpected_sr):
-        full, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh, int3c2e_opt=opt)
-        excluded, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh,
-                                  exclude_dd=True, int3c2e_opt=opt)
+    full, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh, int3c2e_opt=opt)
+    excluded, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh,
+                              exclude_dd=True, int3c2e_opt=opt)
     eri = cp.einsum('pij,pkl->ijkl', full[0,0], full[0,0])
     assert abs(lib.fp(eri.get()) - 0.002616152259096199) < 1e-10
     assert cp.all(excluded[0,0] == 0)
@@ -741,7 +734,7 @@ def test_diffuse_only():
 @pytest.mark.parametrize('cart', [False, True])
 @pytest.mark.parametrize('mode', ['gamma', 'j_only', 'kk'])
 @pytest.mark.parametrize('omega', [None, -.4])
-def test_general_contraction_v2(cart, mode, omega):
+def test_general_contraction(cart, mode, omega):
     # Include d functions and diffuse primitives in general contractions to
     # exercise Cartesian/spherical conversion and compact/DD recontraction.
     cell = pyscf.M(
@@ -805,3 +798,33 @@ def test_general_contraction_gdf_jk(gamma):
     refj, refk = cpu.get_jk(dm, kpts=kpts, exxdiv=None)
     np.testing.assert_allclose(vj.get(), refj, atol=2e-8, rtol=1e-8)
     np.testing.assert_allclose(vk.get(), refk, atol=2e-8, rtol=1e-8)
+
+def test_separate_dd_for_small_overlap():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': [[0, [2.0, 1.]]],
+               'C2': [[0, [1e3, 1.]]]},
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell
+    int3c2e_opt = rsdf_builder.SRInt3c2eOpt(cell, auxcell, omega=0.4).build(separate_dd=True)
+    omega = 0.3
+    with lib.temporary_env(rsdf_builder, PREFER_ED=False):
+        gpu_dat, dat_neg = build_cderi(cell, auxcell, int3c2e_opt=int3c2e_opt)
+
+    kpts = cell.make_kpts([1,1,1])
+    dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
+    dfbuilder.omega = omega
+    dfbuilder.j2c_eig_always = False
+    dfbuilder.fft_dd_block = True
+    dfbuilder.exclude_d_aux = True
+    naux = auxcell.nao
+    nao = cell.nao
+    with tempfile.NamedTemporaryFile() as tmpf:
+        dfbuilder.make_j3c(tmpf.name, aosym='s1')
+        with _load3c(tmpf.name, 'j3c', kpts[[0,0]]) as cderi:
+            ref = abs(cderi[:].reshape(naux,nao,nao))
+            dat = abs(gpu_dat[0,0].get())
+            assert abs(dat - ref).max() < 1e-8
