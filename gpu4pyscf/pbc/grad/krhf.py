@@ -28,7 +28,7 @@ from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft.numint import eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.dft import UniformGrids, BeckeGrids
-from gpu4pyscf.pbc.dft import multigrid_v3
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
 from gpu4pyscf.pbc.df import ft_ao, GDF
 from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.gto import int1e
@@ -37,6 +37,8 @@ from gpu4pyscf.pbc import tools as pbctools
 from gpu4pyscf.pbc.grad.pp import ppnl_derivatives
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, _get_ejk_derivatives
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
+from gpu4pyscf.pbc.scf import hf as pbchf
+from gpu4pyscf.pbc.df.grad.krhf import get_nuc, get_pp_loc
 
 __all__ = ['Gradients']
 
@@ -146,91 +148,24 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         return hcore
     return hcore_deriv
 
-def get_nuc_strain_deriv(mf_grad, cell, dm, kpts):
-    '''Strain derivatives for nuclear attraction or pp-local with k-points sampling
-
-    This function is deprecated.
-    '''
-    from gpu4pyscf.lib.cupy_helper import sandwich_dot
-    from gpu4pyscf.pbc.grad.krks_stress import (
-        _eval_ao_strain_derivatives, _get_vpplocG_strain_derivatives,
-        _get_coulG_strain_derivatives, ALIGNED)
-    assert cell.low_dim_ft_type != 'inf_vacuum'
-    assert cell.dimension != 1
-    assert kpts.ndim == 2
-    assert dm.ndim == 3
-    if not cell.cart:
-        c2s = asarray(cell.cart2sph_coeff())
-        dm = sandwich_dot(dm, c2s.T)
-        # Ensure all AOs are evaluated in the Cartesian GTOs as ao_ks strain
-        # derivatives currently supports Cartesian format only
-        cell = cell.copy()
-        cell.cart = True
-    nkpts, nao = dm.shape[:2]
-    assert nkpts == len(kpts)
-
-    grids = UniformGrids(cell)
-    grids_idx = grids.argsort(tile=8)
-    grids_coords = grids.coords[grids_idx]
-    ngrids = len(grids_coords)
-    mesh = grids.mesh
-
-    def partial_dot(bra, ket):
-        '''conj(ig),ig->g'''
-        rho = cp.einsum('ig,ig->g', bra.real, ket.real)
-        rho += cp.einsum('ig,ig->g', bra.imag, ket.imag)
-        return rho
-
-    eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=1)
-    max_memory = 4e9
-    blksize = int((max_memory/16/(nkpts*10*nao))/ ALIGNED) * ALIGNED
-
-    rho0 = cp.zeros(ngrids)
-    rho1 = cp.zeros((3,3, ngrids))
-
-    for p0, p1 in lib.prange(0, ngrids, blksize):
-        coords = cp.asarray(grids_coords[p0:p1].T, order='C').T
-        ao_ks = eval_ao_kpts(cell, coords, kpts, deriv=1, opt=eval_gto_opt)
-        ao_ks_strain = _eval_ao_strain_derivatives(
-            cell, coords, kpts, deriv=0, opt=eval_gto_opt)
-        coordsT = coords.T
-        for k, dm_k in enumerate(dm):
-            ao = ao_ks[k].transpose(0,2,1)
-            ao_strain = ao_ks_strain[k]
-            ao1 = ao_strain[:,:,0]
-            # Adding the response of the grids
-            ao1 += contract('xig,yg->xyig', ao[1:4], coordsT)
-            c0 = dm_k.T.dot(ao[0])
-            rho0[p0:p1] += partial_dot(ao[0], c0).real
-            rho1[:,:,p0:p1] += contract('xyig,ig->xyg', ao1, c0.conj()).real
-
-    rho0 *= 1./nkpts
-    # *2 for rho1 because the derivatives were applied to the bra only
-    rho1 *= 2./nkpts
-
-    rho0_fft_order = cp.empty_like(rho0)
-    rho1_fft_order = cp.empty_like(rho1)
-    rho0_fft_order[grids_idx] = rho0
-    rho1_fft_order[:,:,grids_idx] = rho1
-    rho0, rho1 = rho0_fft_order, rho1_fft_order
-    rhoG = pbctools.fft(rho0, mesh)
-
-    if cell._pseudo:
-        vpplocG_0, vpplocG_1 = _get_vpplocG_strain_derivatives(cell, mesh)
-        vpplocR = pbctools.ifft(vpplocG_0, mesh).real
-        Ene = contract('xyg,g->xy', rho1, vpplocR).real.get()
-        Ene += contract('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
-    else:
-        Gv = cell.get_Gv(mesh)
-        coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
-        # SI corresponds to Fourier components of the fractional atomic
-        # positions within the cell. It does not respond to the strain
-        # transformation
-        ZG = _get_ZSI(cell, mesh)
-        vR = pbctools.ifft(ZG * coulG_0, mesh).real
-        Ene = contract('xyg,g->xy', rho1, vR).real.get()
-        Ene += contract('xyg,g->xy', coulG_1, rhoG.conj()*ZG).real.get() * (1./ngrids)
-    return Ene
+def get_nuc_fftdf(mf_grad, cell, dm0, kpts):
+    nkpts = len(kpts)
+    if nkpts == 1:
+        if dm0.ndim == 2:
+            dm0 = dm0[None, :, :]
+    grad_sigma = np.zeros((cell.natm + 3, 3))
+    hcore_deriv = hcore_generator(mf_grad, cell, kpts)
+    dh1e = cp.empty([cell.natm, 3])
+    for ia in range(cell.natm):
+        h1ao = hcore_deriv(ia)
+        dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
+    grad_sigma[:-3] += dh1e.get() / nkpts
+    # hcore_generator includes kinetic gradients, but not kinetic strain.
+    grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0, kpts)[-3:]
+    ni = multigrid_v3.MultiGridNumInt(cell)
+    grad_sigma[-3:] += ni.energy_strain_gradient(
+        'HF', dm0, kpts, spin=0, with_j=False, with_nuc=True)
+    return grad_sigma
 
 class GradientsBase(pbchf_grad.GradientsBase):
     '''
@@ -330,7 +265,6 @@ class Gradients(GradientsBase):
         else:
             is_uhf = mf.istype('UHF')
             kpts = mf.kpt
-        nkpts = len(kpts)
 
         if getattr(mf, 'disp', None):
             raise NotImplementedError('dispersion correction')
@@ -353,21 +287,16 @@ class Gradients(GradientsBase):
         if isinstance(ni, multigrid_v3.MultiGridNumInt):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            grad_sigma += get_nuc_fftdf(self, cell, dm0, kpts)
+        elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
+            grad_sigma += get_nuc_fftdf(self, cell, dm0, kpts)
         else:
-            hcore_deriv = self.hcore_generator(cell, kpts)
-            dh1e = cp.empty([cell.natm, 3])
-            for ia in range(cell.natm):
-                h1ao = hcore_deriv(ia)
-                dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
-            grad_sigma[:-3] += dh1e.get() / nkpts
-            if isinstance(self.grids or getattr(mf, 'grids', None), BeckeGrids):
-                grad_sigma[-3:] = np.nan
+            if cell._pseudo:
+                grad_sigma += get_pp_loc(cell, dm0, kpts)
             else:
-                # hcore_generator includes kinetic gradients, but not kinetic strain.
-                grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0, kpts)[-3:]
-                ni = multigrid_v3.MultiGridNumInt(cell)
-                grad_sigma[-3:] += ni.energy_strain_gradient(
-                    'HF', dm0, kpts, spin=0, with_j=False, with_nuc=True)
+                grad_sigma += get_nuc(cell, dm0, kpts)
+            grad_sigma += int1e.kin_derivatives(cell, dm0, kpts)
 
         if cell._pseudo:
             grad_sigma += ppnl_derivatives(cell, dm0, kpts)
