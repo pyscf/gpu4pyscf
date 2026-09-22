@@ -451,18 +451,18 @@ class Int3c2eOpt:
         nao_pair = sph_pair_loc[-1].get()
         naux = compressed_eri3c.shape[1]
         out = cp.zeros((nao_pair, naux))
-        int3c2e_envs = self.int3c2e_envs
+        envs = PBCIntEnvVars.from_RysIntEnvs(self.int3c2e_envs)
+        assert envs.nbas == mol.nbas
         compressed = 1
         libvhf_rys.int3c2e_cart2sph(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
             ctypes.cast(compressed_eri3c.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int3c2e_envs),
+            ctypes.byref(envs),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(sph_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.cast(cart_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(bas_ij_idx)),
-            ctypes.c_int(naux), ctypes.c_int(mol.nbas),
-            ctypes.c_int(0), ctypes.c_int(compressed))
+            ctypes.c_int(naux), ctypes.c_int(0), ctypes.c_int(compressed))
         return out
 
     def pair_and_diag_indices(self, cart=None, original_ao_order=True):
@@ -671,24 +671,22 @@ def int2c2e_ip1_per_atom(auxmol, dm, omega=None, lr_factor=None, sr_factor=None)
     return int2c2e_ip1_per_atom(
         auxmol, dm, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
-def _create_pair_recontraction(mol, int3c2e_context):
+def _create_pair_recontractor(mol, int3c2e_context):
     assert isinstance(mol, SortedMole)
     recontract_bas = cp.asnumpy(mol.recontract_bas)
     recontract_coef = cp.asnumpy(mol.recontract_coef)
     recontraction_idx = cp.asnumpy(mol.recontraction_idx)
 
+    nprims = recontract_bas[:,NPRIM_OF]
     orig_shell_for_sorted_bas = np.empty(mol.nbas, dtype=np.int32)
     orig_shell_for_sorted_bas[recontraction_idx] = \
-            np.repeat(np.arange(mol.mol.nbas), recontract_bas[:,NPRIM_OF])
+            np.repeat(np.arange(len(recontract_bas)), nprims)
 
     # Generate np.hstack([np.arange(i) for i in recontract_bas[:,NPRIM_OF]])
-    nprims = recontract_bas[:,NPRIM_OF]
     prim_offsets = np.append(0, np.cumsum(nprims))
     prim_id_within_shell = np.empty(mol.nbas, dtype=np.int32)
     prim_id_within_shell[recontraction_idx] = \
             np.arange(mol.nbas) - np.repeat(prim_offsets[:-1], nprims)
-
-    nctrs = recontract_bas[orig_shell_for_sorted_bas, NCTR_OF]
 
     bas_ij_idx, shl_pair_offsets, pair_splits, cart = int3c2e_context[:4]
     bas_ij_splits = shl_pair_offsets[pair_splits].get()
@@ -696,9 +694,10 @@ def _create_pair_recontraction(mol, int3c2e_context):
 
     l = mol._bas[:,ANG_OF]
     if cart:
-        nf = (l + 1) * (l + 2) // 2 * nctrs
+        nf = (l + 1) * (l + 2) // 2
     else:
-        nf = (l * 2 + 1) * nctrs
+        nf = (l * 2 + 1)
+    nf *= recontract_bas[orig_shell_for_sorted_bas, NCTR_OF]
 
     ao_pair_counts = []
     contracted_ao_pair_counts = []
@@ -707,7 +706,6 @@ def _create_pair_recontraction(mol, int3c2e_context):
     nbas_sorted = mol.nbas
     ao_loc = mol.mol.ao_loc
     nao = int(ao_loc[-1])
-    output_lut = np.full((nao, nao), -1, dtype=np.int32)
     pair_addresses = np.empty(nao**2, dtype=np.int32)
     offset = 0
     for batch_id, bas_ij_idx in enumerate(bas_ij_batches):
@@ -724,18 +722,18 @@ def _create_pair_recontraction(mol, int3c2e_context):
         count = ctypes.c_int(0)
         cderi_npairs = libvhf_rys.pair_recontraction_info(
             inp_idx.ctypes, out_idx.ctypes, coef.ctypes, ctypes.byref(count),
-            pair_addresses[offset:].ctypes, output_lut.ctypes,
+            pair_addresses[offset:].ctypes,
             bas_ij_idx.ctypes, ctypes.c_int(len(bas_ij_idx)),
             orig_shell_for_sorted_bas.ctypes, prim_id_within_shell.ctypes,
             recontract_bas.ctypes, recontract_coef.ctypes,
             ao_loc.ctypes,
-            ctypes.c_int(nbas_sorted),
-            ctypes.c_int(nao))
+            ctypes.c_int(nbas_sorted), ctypes.c_int(nao), ctypes.c_int(cart))
         count = count.value
         ao_pair_counts.append(count)
         contracted_ao_pair_counts.append(cderi_npairs)
         recontraction_params.append(
-            (inp_idx[:count], out_idx[:count], coef[:count]))
+            (asarray(inp_idx[:count]), asarray(out_idx[:count]),
+             asarray(coef[:count])))
         offset += cderi_npairs
     pair_addresses = pair_addresses[:offset]
 
@@ -747,9 +745,6 @@ def _create_pair_recontraction(mol, int3c2e_context):
             return out
         out[:] = 0.
         inp_idx, out_idx, coef = recontraction_params[batch_id]
-        inp_idx = asarray(inp_idx)
-        out_idx = asarray(out_idx)
-        coef = asarray(coef)
         count = len(inp_idx)
         err = libvhf_rys.recontract_ao_pair(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),

@@ -16,28 +16,29 @@
 Functions for computing nuclear gradients and strain derivatives
 '''
 
+import math
 import ctypes
+import copy
 import numpy as np
 import cupy as cp
-from pyscf import lib, gto
-from pyscf.pbc.tools import pbc as pbctools
+from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem)
+    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned)
 from gpu4pyscf.lib.utils import nearest_power2
-from gpu4pyscf.scf.jk import SHM_SIZE
 from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern, get_ao_pair_loc
 from gpu4pyscf.df.grad.rhf import factorize_dm
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
-from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, int3c2e_scheme
+from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, int3c2e_scheme
 from gpu4pyscf.pbc.df.rsdf_builder import decompose_j2c, LINEAR_DEP_THR
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
-from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff, PTR_BAS_COORD
+from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.grad.krks_stress import (
     _get_weighted_coulG_strain_derivatives as get_wcoulG)
 from gpu4pyscf.pbc.tools.pbc import madelung
+from gpu4pyscf.__config__ import props as gpu_specs
 
 
 def _gen_metric_solver(j2c, linear_dep_threshold=LINEAR_DEP_THR,
@@ -69,111 +70,6 @@ def _get_shl_pair_batch_size(nksh_per_batch, bvk_ncells):
             f'CUDA task pool is too small: POOL_SIZE={POOL_SIZE}, '
             f'max_nksh={max_nksh}, bvk_ncells={bvk_ncells}')
     return nearest_power2(max_pairs)
-
-
-def _sr_supermol_evaluator(intopt, ksh_offsets, ao_pair_loc=None, cutoff=None):
-    """Evaluate SR responses on explicit images, using unit-cell densities.
-
-    As in RSJK's ExtendedMole, translated shells carry their own coordinates.
-    Only i is restricted to the reference cell.  The overlap-screened j shells
-    and all auxiliary images are ordinary molecular shells in the CUDA kernel.
-    Set cutoff=0 to disable distance screening for validation.
-    """
-    cell, auxcell = intopt.cell, intopt.auxcell
-    assert len(intopt.bvkmesh_Ls) == 1
-    assert cell.natm == auxcell.natm
-    Ls = intopt.int3c2e_envs._env_ref_holder[-1].get()
-    nimgs = len(Ls)
-    assert np.all(Ls[0] == 0)
-
-    def extend(mol):
-        supmol = gto.Mole()
-        supmol.__dict__.update(mol.__dict__)
-        supmol = pbctools._build_supcell_(supmol, mol, Ls)
-        supmol._bas[:,PTR_BAS_COORD] = supmol._atm[
-            supmol._bas[:,gto.ATOM_OF],gto.PTR_COORD]
-        return supmol
-
-    supmol, supaux = extend(cell), extend(auxcell)
-    atm, bas, env = gto.conc_env(
-        supmol._atm, supmol._bas, _scale_sp_ctr_coeff(supmol),
-        supaux._atm, supaux._bas, _scale_sp_ctr_coeff(supaux))
-    # conc_env does not update the GPU-specific coordinate pointer.
-    bas[supmol.nbas:,PTR_BAS_COORD] += len(supmol._env)
-    # AO addresses deliberately refer to the unit cell, not the cluster.
-    ao_loc = np.concatenate((np.tile(cell.ao_loc[:-1], nimgs),
-                             np.tile(auxcell.ao_loc[:-1], nimgs), [0]))
-    envs = RysIntEnvVars.new(len(atm), len(bas), atm, bas, env,
-                            np.asarray(ao_loc, dtype=np.int32))
-    # Bounds for absolute contracted-shell envelopes, independent of the DM.
-    # Use the same scaled coefficients as the integral kernel. The most diffuse
-    # exponent controls decay; the largest exponent bounds nuclear derivatives.
-    # Images share exponents and coefficients, so prepare each bound once.
-    shell_data, shell_mapping = np.unique(
-        bas[:,[gto.NPRIM_OF, gto.PTR_EXP, gto.PTR_COEFF]], axis=0,
-        return_inverse=True)
-    shell_bounds = np.empty((len(shell_data), 3), dtype=np.float32)
-    for ish, (nprim, pexp, pcoeff) in enumerate(shell_data):
-        exps = env[pexp:pexp+nprim]
-        coeff = env[pcoeff:pcoeff+nprim]
-        shell_bounds[ish] = exps.min(), exps.max(), np.log(np.abs(coeff).sum())
-    shell_bounds = cp.asarray(shell_bounds[shell_mapping])
-    if cutoff is None:
-        cutoff = intopt.cutoff
-    log_cutoff = np.log(cutoff) if cutoff > 0 else -np.inf
-    img_offsets = intopt.img_offsets.get()
-    img_idx = intopt.img_idx.get()
-    pairs, offsets, parents = [], [0], []
-    p0 = 0
-    for unit_pairs in intopt.bas_ij_cache.values():
-        unit_pairs = asarray(unit_pairs).get()
-        p1 = p0 + len(unit_pairs)
-        parent = np.repeat(np.arange(p0, p1), np.diff(img_offsets[p0:p1+1]))
-        i, j = np.divmod(unit_pairs[parent-p0], cell.nbas)
-        j = j + img_idx[img_offsets[p0]:img_offsets[p1]]*cell.nbas
-        pairs.append(i*len(bas)+j)
-        parents.append(parent)
-        count = len(parent)
-        end = offsets[-1] + count
-        offsets.extend(range(offsets[-1]+128, end, 128))
-        if count:
-            offsets.append(end)
-        p0 = p1
-    bas_ij = cp.asarray(np.concatenate(pairs), dtype=np.uint32)
-    offsets = cp.asarray(offsets, dtype=np.int32)
-    pair_loc = None
-    if ao_pair_loc is not None:
-        pair_loc = cp.asarray(ao_pair_loc)[cp.asarray(np.concatenate(parents))]
-    # Reserve a 256-entry task queue in addition to the integral workspace.
-    task_queue_bytes = 256 * np.dtype(np.int32).itemsize
-    _, gout_stride, shm = int3c2e_scheme(
-        shm_size=SHM_SIZE-task_queue_bytes, gout_width=54, deriv=(1,0,0))
-    shm_size = int(shm[:auxcell.uniq_l_ctr[:,0].max()+1,
-                       :cell.uniq_l_ctr[:,0].max()+1,
-                       :cell.uniq_l_ctr[:,0].max()+1].max()) + task_queue_bytes
-
-    def evaluate(dm, density, batch=None, aux_offset=0):
-        selected = range(len(ksh_offsets)-1) if batch is None else [batch]
-        # Each range has a homogeneous contraction pattern in one image.
-        ranges = [(supmol.nbas+img*auxcell.nbas+ksh_offsets[b],
-                   supmol.nbas+img*auxcell.nbas+ksh_offsets[b+1])
-                  for img in range(nimgs) for b in selected]
-        ranges = cp.asarray(ranges, dtype=np.int32)
-        result = cp.zeros((cell.natm+3, 3))
-        ptr = lambda a: lib.c_null_ptr() if a is None else ctypes.c_void_p(a.data.ptr)
-        err = libpbc.PBCsr_ejk_int3c2e_supermol(
-            ptr(result[:-3]), ptr(result[-3:]), ptr(dm), ptr(density),
-            ctypes.c_double(-intopt.omega), ctypes.byref(envs),
-            ctypes.c_int(shm_size), ctypes.c_int(len(offsets)-1),
-            ctypes.c_int(len(ranges)), ptr(bas_ij), ptr(offsets), ptr(ranges),
-            ptr(gout_stride), ptr(pair_loc), ctypes.c_int(aux_offset),
-            ctypes.c_int(density.shape[-1]), ctypes.c_int(cell.nbas),
-            ctypes.c_int(cell.natm), ctypes.c_int(cell.ao_loc[-1]),
-            ptr(shell_bounds), ctypes.c_float(log_cutoff))
-        if err:
-            raise RuntimeError('PBCsr_ejk_int3c2e_supermol failed')
-        return result
-    return evaluate
 
 
 def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
@@ -562,14 +458,37 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     # SR int3c2e response
     # contract the derivatives and the pseudo DM/rho
     if n_compact_pairs > 0:
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            gout_width=54, deriv=(1,0,0))
+        lmax = cell.uniq_l_ctr[:,0].max()
+        laux = auxcell.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+
         l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
         l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
             l_ctr_aux_offsets, auxcell.uniq_l_ctr, batch_size)
         ksh_offsets_cpu = l_ctr_aux_offsets
+        ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
+        nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
+        shl_pair_batch_size = _get_shl_pair_batch_size(
+            nksh_per_batch, bvk_ncells)
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+            int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
         ao_pair_loc = get_ao_pair_loc(cell.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache, cart=True)
-        eval_sr = _sr_supermol_evaluator(int3c2e_opt, ksh_offsets_cpu, ao_pair_loc)
+
+        diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
+        diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
+        log_cutoff = math.log(int3c2e_opt.cutoff)
+
+        assert cell.natm == auxcell.natm
         ejk_sigma_sr = cp.zeros([cell.natm+3, 3])
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+        head = pool[-1:]
+        task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
+        int3c2e_envs = int3c2e_opt.int3c2e_envs
+        kern = libpbc.PBCsr_ejk_int3c2e_deriv
         aux0 = aux1 = 0
         buf = cp.empty((n_compact_pairs*batch_size))
         buf1 = cp.empty((blksize, nao, nao))
@@ -598,7 +517,34 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                     dm_tensor1[:] += dm_tensor
                     cp.take(dm_tensor1.reshape(-1,dk), compact_idx, axis=0,
                             out=compressed[:,k0:k1])
-            ejk_sigma_sr += eval_sr(None, compressed, kbatch, aux_ao_offset)
+            err = kern(
+                ctypes.cast(ejk_sigma_sr[:-3].data.ptr, ctypes.c_void_p),
+                ctypes.cast(ejk_sigma_sr[-3:].data.ptr, ctypes.c_void_p),
+                lib.c_null_ptr(),
+                ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
+                ctypes.c_double(-int3c2e_opt.omega),
+                ctypes.byref(int3c2e_envs),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(head.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(shm_size_max),
+                ctypes.c_int(len(shl_pair_offsets) - 1),
+                ctypes.c_int(1),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(int3c2e_opt.img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(int3c2e_opt.img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(aux_ao_offset),
+                ctypes.c_int(auxcell.nbas),
+                ctypes.c_int(naux_in_batch),
+                ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff))
+            if err != 0:
+                raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
         if hermi == 1:
             ejk_sigma_sr *= 2.
         ejk_sigma += ejk_sigma_sr
@@ -630,6 +576,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     '''
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
+    bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
@@ -832,9 +779,65 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     ################################
     # SR int3c2e response
     if has_compact:
-        ksh_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
-        eval_sr = _sr_supermol_evaluator(int3c2e_opt, ksh_offsets)
-        ej_sigma += eval_sr(dm, auxvec) * 2
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            gout_width=54, deriv=(1,0,0))
+        lmax = cell.uniq_l_ctr[:,0].max()
+        laux = auxcell.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+
+        l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
+        l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
+            l_ctr_aux_offsets, auxcell.uniq_l_ctr, POOL_SIZE)
+        ksh_offsets_cpu = l_ctr_aux_offsets
+        ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
+
+        nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
+        shl_pair_batch_size = _get_shl_pair_batch_size(
+            nksh_per_batch, bvk_ncells)
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+            int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
+
+        diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
+        diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
+        log_cutoff = math.log(int3c2e_opt.cutoff)
+
+        assert cell.natm == auxcell.natm
+        ej_sigma_sr = cp.zeros([cell.natm+3, 3])
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+        head = pool[-1:]
+        task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
+        int3c2e_envs = int3c2e_opt.int3c2e_envs
+        kern = libpbc.PBCsr_ejk_int3c2e_deriv
+        err = kern(
+            ctypes.cast(ej_sigma_sr[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(ej_sigma_sr[-3:].data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(-int3c2e_opt.omega),
+            ctypes.byref(int3c2e_envs),
+            ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+            ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
+            ctypes.cast(head.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(shm_size_max),
+            ctypes.c_int(len(shl_pair_offsets) - 1),
+            ctypes.c_int(len(ksh_offsets_gpu) - 1),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
+            ctypes.cast(int3c2e_opt.img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(int3c2e_opt.img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            lib.c_null_ptr(),
+            ctypes.c_int(0),
+            ctypes.c_int(auxcell.nbas),
+            ctypes.c_int(naux),
+            ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
+        ej_sigma += ej_sigma_sr * 2
         t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
     return ej_sigma.get()
 

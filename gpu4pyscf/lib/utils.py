@@ -157,6 +157,9 @@ def splits_by_blocksize(cum, block_size):
     Returns:
         splits: split points in cum, starting with 0 and ending with len(cum)-1.
     '''
+    if len(cum) == 1:
+        return [0]
+
     bound = block_size
     tot = cum[-1]
     splits = [0]

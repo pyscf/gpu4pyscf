@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cupy_helper import block_diag, asarray, hermi_triu
 from gpu4pyscf.lib.cusolver import eigh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, ghf
-from gpu4pyscf.gto.mole import SortedGTO
+from gpu4pyscf.gto.mole import SortedGTO, PBCIntEnvVars
 from gpu4pyscf.df.int3c2e_bdiv import libvhf_rys, contract_int3c2e_auxvec
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import utils
@@ -584,20 +584,20 @@ def _orbital_pair_cart2sph(mol, arrays, hermi=1, bas_ij_idx=None):
     sph_pair_loc = ao_loc[ish] * nao + ao_loc[jsh]
 
     assert arrays.shape[0] == arrays.shape[1] == nao_cart
-    rys_envs = mol.rys_envs
+    envs = PBCIntEnvVars.from_RysIntEnvs(mol.rys_envs)
+    assert envs.nbas == mol.nbas
     naux = arrays.shape[2]
     out = cp.zeros((nao, nao, naux))
     compressed = 0
     err = libvhf_rys.int3c2e_cart2sph(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.cast(arrays.data.ptr, ctypes.c_void_p),
-        ctypes.byref(rys_envs),
+        ctypes.byref(envs),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(sph_pair_loc.data.ptr, ctypes.c_void_p),
         ctypes.cast(cart_pair_loc.data.ptr, ctypes.c_void_p),
         ctypes.c_int(len(bas_ij_idx)),
-        ctypes.c_int(naux), ctypes.c_int(mol.nbas),
-        ctypes.c_int(nao), ctypes.c_int(compressed))
+        ctypes.c_int(naux), ctypes.c_int(nao), ctypes.c_int(compressed))
     if err != 0:
         raise RuntimeError('int3c2e_cart2sph kernel failed')
     if is_complex:

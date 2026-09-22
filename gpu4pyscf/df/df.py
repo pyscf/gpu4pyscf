@@ -550,7 +550,7 @@ def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
 
     if needs_recontraction:
         recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses = \
-                int3c2e_bdiv._create_pair_recontraction(sorted_mol, clone_context)
+                int3c2e_bdiv._create_pair_recontractor(sorted_mol, clone_context)
         cderi_offsets = np.append(0, np.cumsum(contracted_ao_pair_counts))
         cderi_batch_size = int(max(contracted_ao_pair_counts))
         cderi_npairs = len(pair_addresses)
@@ -619,6 +619,7 @@ def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 # TODO: async-write to host memory in another stream
                 err = libvhf_rys.transpose_write(
+                    ctypes.cast(cp.cuda.get_current_stream().ptr, ctypes.c_void_p),
                     cderi_cpu.ctypes,
                     ctypes.cast(cderi_gpu.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux), ctypes.c_int(cderi_npairs),

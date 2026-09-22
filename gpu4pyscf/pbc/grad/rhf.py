@@ -277,7 +277,7 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
         rsdf_omega = max(abs(omega), _guess_omega(cell))
         # DD responses are implemented for Gamma RHF and Gamma J-only.
         opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh)
-        opt.cell = SortedCell.from_cell(cell, decontract=True)
+        opt.cell = SortedCell.from_cell(cell, decontract=True, diffuse_cutoff=0.25)
         opt.build(separate_dd=True)
         return fn(opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega,
                   linear_dep_threshold=with_df.linear_dep_threshold)
@@ -335,7 +335,7 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
                 kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut)
             rsdf_omega = 0.3
             opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh)
-            opt.cell = SortedCell.from_cell(cell, decontract=True)
+            opt.cell = SortedCell.from_cell(cell, decontract=True, diffuse_cutoff=0.25)
             opt.build(separate_dd=True)
             if is_rhf:
                 ejk_sigma = _get_ejk_derivatives(opt, dm, kpts, hermi, k_factor=0)

@@ -12,7 +12,7 @@ add_library(pbc SHARED
   rys_contract_j.cu
   unrolled_rys_k.cu
   nr_eval_gto.cu
-  sorting.c
+  sorting.c write_cderi.c int3c2e_recontract.c
   fill_triu.cu
 )
 

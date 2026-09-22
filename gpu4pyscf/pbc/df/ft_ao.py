@@ -332,7 +332,7 @@ class FTOpt:
         return ao_pair_addresses, diag
 
     def ft_evaluator(self, batch_size=None, compressing=True, cart=None,
-                     original_ao_order=True, bas_ij_aggregated=None):
+                     original_ao_order=True, bas_ij_batches=None):
         r'''
         Generate the analytical fourier transform kernel for AO products
 
@@ -340,6 +340,12 @@ class FTOpt:
 
         By default, the output tensor is saved in the shape [nGv, nao, nao] for
         single k-point case and [nkpts, nGv, nao, nao] for multiple k-points
+
+        bas_ij_batches accepts the (pair indices, block offsets) batches
+        returned by SRInt3c2eOpt.int3c2e_evaluator directly. They must
+        partition the full cache in cache order. Their batch boundaries
+        override batch_size and must coincide with FT block boundaries.
+        FT retains its own kernel blocks within each batch.
         '''
         if self._aft_envs is None:
             self.build()
@@ -348,11 +354,8 @@ class FTOpt:
         nsp_per_block, gout_stride, shm_size = ft_ao_scheme(cache_cart_idx=True)
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
-        if bas_ij_aggregated is None:
-            bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
-                self.bas_ij_cache, nsp_per_block)
-        else:
-            bas_ij_idx, shl_pair_offsets = bas_ij_aggregated
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+            self.bas_ij_cache, nsp_per_block)
 
         if cart is None:
             cart = cell.cell.cart
@@ -368,7 +371,14 @@ class FTOpt:
             ao_loc = np.append(ao_loc[cell.sorted_idx], nao)
         ao_loc = cp.asarray(ao_loc, dtype=np.int32)
 
-        if batch_size is None:
+        if bas_ij_batches is not None:
+            batch_offsets = np.cumsum([0] + [len(pairs) for pairs, _ in bas_ij_batches])
+            block_offsets = shl_pair_offsets.get()
+            assert np.isin(batch_offsets, block_offsets).all(), \
+                'SR batch boundaries must coincide with FT block boundaries'
+            pair_splits = np.searchsorted(block_offsets, batch_offsets)
+            ao_pair_offsets = ao_pair_loc[shl_pair_offsets[pair_splits]].get()
+        elif batch_size is None:
             pair_splits = [0, len(shl_pair_offsets)-1]
             ao_pair_offsets = [0, ao_pair_loc[-1].get()]
         else:
