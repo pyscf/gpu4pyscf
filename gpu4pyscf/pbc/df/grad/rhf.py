@@ -90,6 +90,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
+    assert bvk_ncells == 1, 'Gamma derivatives require a one-cell BvK mesh'
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
@@ -127,7 +128,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         j3c_oo = cp.zeros((naux, nocc, nocc))
     else:
         assert batch_size < POOL_SIZE
-        eval_j3c, _, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
+        eval_j3c, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
             aux_batch_size=batch_size, cart=True)
         aux_batches = len(aux_offsets) - 1
         blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*2*8))//8*8))
@@ -137,7 +138,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         i_addr, j_addr = divmod(compact_idx, nao)
         aux0 = aux1 = 0
         j3c_full = cp.zeros((nao, nao, blksize))
-        buf = cp.empty((batch_size, n_compact_pairs))
+        max_aux_batch = int(np.diff(aux_offsets).max())
+        buf = cp.empty((max_aux_batch, n_compact_pairs))
         buf1 = cp.empty((blksize, nocc, nao))
         j3c_oo = cp.empty((naux, nocc, nocc))
         for kbatch in range(aux_batches):
@@ -490,7 +492,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         int3c2e_envs = int3c2e_opt.int3c2e_envs
         kern = libpbc.PBCsr_ejk_int3c2e_deriv
         aux0 = aux1 = 0
-        buf = cp.empty((n_compact_pairs*batch_size))
+        max_aux_batch = int(np.diff(aux_loc[ksh_offsets_cpu]).max())
+        buf = cp.empty(n_compact_pairs*max_aux_batch)
         buf1 = cp.empty((blksize, nao, nao))
         buf2 = cp.empty((blksize, nao, nao))
         for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
@@ -577,6 +580,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
+    assert bvk_ncells == 1, 'Gamma derivatives require a one-cell BvK mesh'
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
@@ -742,7 +746,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
             raise RuntimeError('ft_ao_deriv failed')
 
         ej_sigma_lr = cp.zeros([cell.natm+3, 3])
-        if has_compact > 0:
+        if len(ft_opt.img_idx) > 0:
             vG_conj = rho_auxG.conj() * wcoulG0
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
                     aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
