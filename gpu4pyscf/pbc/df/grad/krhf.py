@@ -29,18 +29,19 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned,
     scatter_add)
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
+from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
+from gpu4pyscf.pbc.df.int3c2e import (
+    libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, int3c2e_scheme, SRInt3c2eOpt,
+    _get_shl_pair_per_block)
+from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR, _unpack_cderi_v2
-from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.grad import rhf
 from gpu4pyscf.pbc.df.grad.rhf import (
     factorize_dm, get_ao_pair_loc, _split_l_ctr_pattern, indexed_scale)
-from gpu4pyscf.pbc.df.int3c2e import int3c2e_scheme, SRInt3c2eOpt
-from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.grad.krks_stress import (
     _get_weighted_coulG_strain_derivatives as get_wcoulG)
-from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
+from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.lib.kpts_helper import (
@@ -555,7 +556,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
         nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
-        shl_pair_batch_size = rhf._get_shl_pair_batch_size(
+        shl_pair_batch_size = _get_shl_pair_per_block(
             nksh_per_batch, bvk_ncells)
         bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
             int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
@@ -940,7 +941,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
         nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
-        shl_pair_batch_size = rhf._get_shl_pair_batch_size(
+        shl_pair_batch_size = _get_shl_pair_per_block(
             nksh_per_batch, bvk_ncells)
         bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
             int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)

@@ -32,11 +32,11 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, transpose_sum, ndarray, empty_aligned, hermi_triu,
     get_avail_mem)
-from gpu4pyscf.lib.utils import splits_by_blocksize
+from gpu4pyscf.lib.utils import splits_by_blocksize, nearest_power2
 from gpu4pyscf.gto.mole import (
     groupby, PTR_BAS_COORD, extract_pgto_params, SortedCell,
     PBCIntEnvVars, _scale_sp_ctr_coeff)
-from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
+from gpu4pyscf.scf.jk import SHM_SIZE
 from gpu4pyscf.df.int3c2e_bdiv import (
     get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern, libvhf_rys,
     int3c2e_scheme as mol_int3c2e_scheme)
@@ -536,11 +536,7 @@ class SRInt3c2eOpt:
         aux_groups, aux_offsets = _group_ksh_batches(
             l_ctr_aux_offsets, uniq_l_ctr_aux, aux_loc, aux_batch_size)
 
-        ksh_dims = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
-        pair_per_block = POOL_SIZE // (ksh_dims.max() * bvk_ncells)
-        assert pair_per_block > 0, 'aux_batch_size is too large'
-
-        pair_per_block = min(pair_per_block, 8)
+        pair_per_block = _get_shl_pair_per_block(np.diff(l_ctr_aux_offsets), bvk_ncells)
         bas_ij_batches = self._split_bas_ij_idx(ao_pair_batch_size, pair_per_block)
         shl_pair_batch_offsets = _counts_to_offsets(
             np.asarray([len(pairs) for pairs, _ in bas_ij_batches], dtype=np.int64))
@@ -652,7 +648,10 @@ class SRInt3c2eOpt:
         lmax = cell.uniq_l_ctr[:,0].max()
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(self.bas_ij_cache, 1000000)
+        bvk_ncells = len(self.bvkmesh_Ls)
+        pair_per_block = _get_shl_pair_per_block(auxcell.l_ctr_counts, bvk_ncells)
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+            self.bas_ij_cache, pair_per_block)
 
         diffuse_exps = cp.asarray(self.diffuse_exps)
         diffuse_coefs = cp.asarray(self.diffuse_coefs)
@@ -712,7 +711,8 @@ class SRInt3c2eOpt:
         lmax = cell.uniq_l_ctr[:,0].max()
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-        bas_ij_idx = cell.aggregate_shl_pairs(self.bas_ij_cache, 1000000)[0]
+        pair_per_block = _get_shl_pair_per_block(auxcell.l_ctr_counts, bvk_ncells)
+        bas_ij_idx = cell.aggregate_shl_pairs(self.bas_ij_cache, pair_per_block)[0]
 
         l_ctr_aux_offsets = _counts_to_offsets(auxcell.l_ctr_counts)
         ksh_offsets = cp.asarray(l_ctr_aux_offsets, dtype=np.int32)
@@ -826,6 +826,17 @@ def estimate_rcut(cell, auxcell, omega):
     r0 = (np.log(fac * (sfac*r0+1e-200)**(l3-1) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
+
+def _get_shl_pair_per_block(nksh_per_block, bvk_ncells):
+    '''Add the BvK-cell constraint to the maximum number of shell pairs.'''
+    max_nksh = int(nksh_per_block.max())
+    max_pairs = POOL_SIZE // (max_nksh * bvk_ncells)
+    if max_pairs < 1:
+        raise RuntimeError(
+            f'CUDA task pool is too small: POOL_SIZE={POOL_SIZE}, '
+            f'max_nksh={max_nksh}, bvk_ncells={bvk_ncells}')
+    # Limit to 8 triplets per block for better load balance
+    return min(8, nearest_power2(max_pairs))
 
 class _GroupedBatch:
     batch_range = None

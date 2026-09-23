@@ -24,16 +24,17 @@ from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, ndarray, get_avail_mem, empty_aligned)
+from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern, get_ao_pair_loc
 from gpu4pyscf.df.grad.rhf import factorize_dm
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
-from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, int3c2e_scheme
-from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
+from gpu4pyscf.pbc.df.int3c2e import (
+    libpbc, POOL_SIZE, MAX_IMGS_PER_TASK, int3c2e_scheme, _get_shl_pair_per_block)
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
+from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
 from gpu4pyscf.pbc.df.grad.rhf import (
-    _gen_metric_solver, _get_shl_pair_batch_size, _get_ej_derivatives,
+    _gen_metric_solver, _get_ej_derivatives,
     indexed_scale, symmetric_scatter)
-from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.grad.krks_stress import (
@@ -457,7 +458,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
         nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
-        shl_pair_batch_size = _get_shl_pair_batch_size(
+        shl_pair_batch_size = _get_shl_pair_per_block(
             nksh_per_batch, bvk_ncells)
         bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
             int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)

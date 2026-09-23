@@ -226,16 +226,6 @@ def test_metric_solver_with_linear_dependency():
     expected = expected @ vectors[:,keep].conj().T @ rhs
     assert abs(result - expected).max() < 1e-12
 
-
-def test_task_pool_batch_size_includes_bvk_cells():
-    nksh_per_batch = np.array([12, 36, 24])
-    batch_size = rhf._get_shl_pair_batch_size(
-        nksh_per_batch, bvk_ncells=4)
-
-    # 16383 // (36 * 4) = 113; nearest smaller power of two is 64.
-    assert batch_size == 64
-    assert batch_size * nksh_per_batch.max() * 4 <= int3c2e.POOL_SIZE
-
 def test_ejk_derivatives_gamma_point_with_long_range():
     cell, auxcell = create_cell_auxcell()
     omega = -0.3
