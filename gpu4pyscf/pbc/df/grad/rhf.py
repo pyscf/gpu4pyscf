@@ -623,6 +623,17 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
     separated_dd = dd_ft_opt is not None
 
     def lr_3c2e(ft_opt, wcoulG, update_metric):
+        auxvec_LR = cp.zeros(naux)
+        rhoG = cp.zeros(ngrids, dtype=np.complex128)
+
+        eval_ft = None
+        if len(ft_opt.img_idx) > 0:
+            eval_ft = ft_opt.ft_evaluator(
+                compressing=True, cart=True, original_ao_order=False)[0]
+
+        if len(ft_opt.img_idx) == 0 and not update_metric:
+            return auxvec_LR, rhoG
+
         pair_addresses, diag_idx = ft_opt.pair_and_diag_indices(
             cart=True, original_ao_order=False)
         dm_tril = dm.ravel()[pair_addresses]
@@ -631,18 +642,12 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
 
         mem_avail = get_avail_mem(exclude_memory_pool=True)
         nao_pair = len(dm_tril)
-        eval_ft = None
-        if nao_pair > 0:
-            eval_ft = ft_opt.ft_evaluator(
-                compressing=True, cart=True, original_ao_order=False)[0]
         Gblksize = int(mem_avail//2//((nao_pair+naux*2)*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
                    mem_avail*1e-9, Gblksize)
 
-        auxvec_LR = cp.zeros(naux)
-        rhoG = cp.empty(ngrids, dtype=np.complex128)
         buf  = cp.empty(max(nao_pair,naux)*Gblksize, dtype=np.complex128)
         buf1 = cp.empty((naux,Gblksize), dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
