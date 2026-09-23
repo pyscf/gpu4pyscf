@@ -732,22 +732,35 @@ def _estimate_max_shm_size(cell, deriv_ij=None):
     return shm_size
 
 def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
-    from pyscf.pbc.tools.pbc import madelung
-    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
-    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size, cutoff_to_mesh
+    from gpu4pyscf.pbc.df.aft import _get_ZSI
+    from gpu4pyscf.pbc.dft import multigrid_v3
+    from gpu4pyscf.pbc.grad.rhf import ewald_derivatives
     nkpts = len(kpts)
-    ewald_G0_response = np.empty((3,3))
-    disp = max(1e-5, (cell.precision*.1)**.5)
-    for i in range(3):
-        for j in range(i+1):
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
-            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-            e1 = nkpts * madelung(cell1, kpts1, omega=omega)
-            e2 = nkpts * madelung(cell2, kpts2, omega=omega)
-            ewald_G0_response[j,i] = ewald_G0_response[i,j] = (e1-e2)/(2*disp)
+    ecell = cell.copy(deep=False)
+    ecell._atm = np.array([[1, cell._env.size, 0, 0, 0, 0]])
+    ecell._env = np.append(cell._env, [0., 0., 0.])
+    ecell.unit = 'B'
+    ecell.a = cell.lattice_vectors() * get_monkhorst_pack_size(cell, kpts)[:,None]
+    if omega == 0:
+        ewald_G0_response = -2 * ewald_derivatives(ecell)[-3:]
+    else:
+        precision = cell.precision
+        Ecut = 10.
+        Ecut = np.log(16*np.pi**2/(2*omega**2*(2*Ecut)**.5) / precision + 1.) * 2*omega**2
+        Ecut = np.log(16*np.pi**2/(2*omega**2*(2*Ecut)**.5) / precision + 1.) * 2*omega**2
+        mesh = cutoff_to_mesh(ecell.a, Ecut)
+        ZSI = _get_ZSI(ecell, mesh)
+        Gv_bases = multigrid_v3._get_Gv_bases(mesh, ecell.reciprocal_vectors())
+        ne_deriv = multigrid_v3._ne_derivatives(ecell, ZSI, Gv_bases, omega).get()
+        ewald_G0_response = -ne_deriv[-3:]
+        energy = multigrid_v3._get_coulomb_in_place(ZSI, Gv_bases, omega)[0].get()
+        energy *= 1. / ecell.vol
+        ewald_G0_response += np.eye(3) * energy
+        if omega < 0:
+            ewald_G0_response = -2 * ewald_derivatives(ecell)[-3:] - ewald_G0_response
     exx_0 = nkpts * madelung(cell, kpts, omega)
-    return exx_0, ewald_G0_response
+    return exx_0, nkpts * ewald_G0_response
 
 ##################################################
 #

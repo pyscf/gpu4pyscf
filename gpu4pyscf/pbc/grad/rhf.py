@@ -15,32 +15,34 @@
 
 import cupy as cp
 import numpy as np
+from scipy.special import erfc
 
 from pyscf.gto import ATOM_OF
 from pyscf import lib
 from pyscf import gto
-import pyscf.pbc.grad.rhf as cpu_rhf
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import dist_matrix, asarray
 import gpu4pyscf.grad.rhf as mol_rhf
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.dft import multigrid_v3
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.pbc.df import aft_jk, AFTDF, GDF
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.dft import KohnShamDFT, BeckeGrids
-from gpu4pyscf.pbc.grad.pp import (
-    vppnl_nuc_grad, _get_pp_nonloc_strain_derivatives)
+from gpu4pyscf.pbc.grad.pp import ppnl_derivatives
 from gpu4pyscf.gto.mole import groupby
+from gpu4pyscf.pbc.scf import hf as pbchf
+from gpu4pyscf.pbc.df.grad.krhf import get_nuc, get_pp_loc
 
 __all__ = ['Gradients']
 
 class GradientsBase(mol_rhf.GradientsBase):
     _keys = {'cell'}
 
-    grad_nuc    = cpu_rhf.GradientsBase.grad_nuc
     get_hcore   = NotImplemented
     get_ovlp    = NotImplemented
     grad_elec   = NotImplemented
@@ -65,6 +67,13 @@ class GradientsBase(mol_rhf.GradientsBase):
         self.stress = None
         self.base.reset(cell)
         return self
+
+    def grad_nuc(self, cell=None, atmlst=None):
+        """Nuclear Ewald energy gradient in Hartree/Bohr."""
+        if cell is None:
+            cell = self.cell
+        grad = ewald_derivatives(cell)[:-3]
+        return grad if atmlst is None else grad[atmlst]
 
     def get_veff(self, dm=None):
         '''
@@ -99,8 +108,9 @@ class GradientsBase(mol_rhf.GradientsBase):
             self.dump_flags()
 
         de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
-        self.de = de[:-3] + self.grad_nuc()
-        self.stress = (de[-3:] + ewald(self.cell)) / self.cell.vol
+        de += ewald_derivatives(self.cell)
+        self.de = de[:-3]
+        self.stress = de[-3:] / self.cell.vol
         log.timer('SCF gradients', *t0)
         self._finalize()
         return self.de
@@ -181,30 +191,24 @@ class Gradients(GradientsBase):
         if is_uhf:
             dm0 = dm0[0] + dm0[1]
 
+        from gpu4pyscf.pbc.grad.krhf import get_nuc_fftdf
         ni = mf._numint
         if isinstance(ni, multigrid_v3.MultiGridNumInt):
             # Vne or pploc contribution is evaluated in energy_ee
             grad_sigma += int1e.kin_derivatives(cell, dm0)
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            grad_sigma += get_nuc_fftdf(self, cell, dm0, np.zeros((1,3)))
+        elif np.prod(cell.mesh) < pbchf.ALLOWED_FFT_MESH_SIZE:
+            grad_sigma += get_nuc_fftdf(self, cell, dm0, np.zeros((1,3)))
         else:
-            from gpu4pyscf.pbc.grad.krhf import hcore_generator
-            hcore_deriv = hcore_generator(self, cell, np.zeros((1, 3)))
-            dh1e = cp.empty([cell.natm, 3])
-            for ia in range(cell.natm):
-                h1ao = hcore_deriv(ia)
-                dh1e[ia] = cp.einsum('xij,ji->x', h1ao[0], dm0).real
-            grad_sigma[:-3] += dh1e.get()
-            if isinstance(self.grids or getattr(mf, 'grids', None), BeckeGrids):
-                grad_sigma[-3:] = np.nan
+            if cell._pseudo:
+                grad_sigma += get_pp_loc(cell, dm0)
             else:
-                # hcore_generator includes kinetic gradients, but not kinetic strain.
-                grad_sigma[-3:] += int1e.kin_derivatives(cell, dm0)[-3:]
-                ni = multigrid_v3.MultiGridNumInt(cell)
-                grad_sigma[-3:] += ni.energy_strain_gradient(
-                    'HF', dm0, spin=0, with_j=False, with_nuc=True)
+                grad_sigma += get_nuc(cell, dm0)
+            grad_sigma += int1e.kin_derivatives(cell, dm0)
 
         if cell._pseudo:
-            grad_sigma[:-3] += vppnl_nuc_grad(cell, dm0)
-            grad_sigma[-3:] += _get_pp_nonloc_strain_derivatives(cell, cell.mesh, dm0)
+            grad_sigma += ppnl_derivatives(cell, dm0)
         t1 = log.timer_debug1('gradients of 1e part', *t1)
 
         dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ)
@@ -379,8 +383,9 @@ def strain_tensor_dispalcement(x, y, disp):
     return E_strain
 
 def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
+    cell = cell.copy()
+    cell.verbose = 0
     if precision is not None:
-        cell = cell.copy()
         cell.precision = precision
     a = cell.lattice_vectors()
     r = cell.atom_coords()
@@ -402,13 +407,52 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
         cell2.build(False, False)
     return cell1, cell2
 
-def ewald(cell):
-    disp = max(1e-5, (cell.precision*.1)**.5)
-    out = np.empty((3, 3))
-    for i in range(3):
-        for j in range(i+1):
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
-            e1 = cell1.ewald()
-            e2 = cell2.ewald()
-            out[j,i] = out[i,j] = (e1 - e2) / (2*disp)
-    return out
+def ewald_derivatives(cell, ew_eta=None, ew_cut=None):
+    """Atomic and strain derivatives of the Ewald energy for a 3D cell.
+
+    Returns an (natm+3, 3) array with nuclear gradients in Hartree/Bohr
+    followed by strain derivatives in Hartree (not divided by cell volume).
+    """
+    if cell.dimension != 3:
+        raise NotImplementedError('Analytical Ewald derivatives require a 3D cell')
+
+    if cell.natm == 0:
+        return np.zeros((cell.natm+3, 3))
+
+    grad_sigma = cp.zeros((cell.natm+3, 3))
+
+    if ew_eta is None or ew_cut is None:
+        ew_eta, ew_cut = cell.get_ewald_params()
+    charges = cell.atom_charges()
+    coords = asarray(cell.atom_coords())
+    charge_pairs = asarray(charges[:,None] * charges)
+    Ls = asarray(cell.get_lattice_Ls(rcut=ew_cut))
+    blksize = int(1e7 // (charge_pairs.size*3))
+    for p0, p1 in lib.prange(0, len(Ls), blksize):
+        rij = coords[:,None,:] - coords[None,:,:] + Ls[p0:p1,None,None,:]
+        r2 = cp.einsum('nijx,nijx->nij', rij, rij)
+        r2[r2 < 1e-30] = np.inf
+        r = cp.sqrt(r2)
+        fac = erfc(ew_eta*r)/r + 2*ew_eta/np.sqrt(np.pi)*np.exp(-ew_eta**2*r2)
+        fac *= charge_pairs / r2
+        grad_sigma[:-3] -= cp.einsum('nij,nijx->ix', fac, rij)
+        grad_sigma[-3:] -= .5 * cp.einsum('nij,nijx,nijy->xy', fac, rij, rij)
+
+    vol = cell.vol
+    log_precision = np.log(cell.precision / (charges.sum()*16*np.pi**2))
+    mesh = cell.cutoff_to_mesh(-2*ew_eta**2*log_precision)
+
+    grad_sigma = grad_sigma.get()
+
+    ZSI = _get_ZSI(cell, mesh)
+    Gv_bases = multigrid_v3._get_Gv_bases(mesh, cell.reciprocal_vectors())
+    ne_deriv = multigrid_v3._ne_derivatives(cell, ZSI, Gv_bases, ew_eta).get()
+    grad_sigma[:-3] += ne_deriv[:-3]
+    grad_sigma[-3:] += .5 * ne_deriv[-3:]
+    energy = multigrid_v3._get_coulomb_in_place(ZSI, Gv_bases, ew_eta)[0].get()
+    energy *= .5 / vol
+    grad_sigma[-3:] -= np.eye(3) * energy
+    # Self and background terms have no atomic derivatives. At fixed eta,
+    # only the background energy -pi*Q^2/(2*eta^2*V) contributes to strain.
+    grad_sigma[-3:] += np.eye(3) * (np.pi*charges.sum()**2/(2*ew_eta**2*vol))
+    return grad_sigma

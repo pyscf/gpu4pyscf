@@ -20,7 +20,7 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc.gto import Cell
 from pyscf.pbc.gto.cell import _estimate_rcut
-from pyscf.pbc.tools.pbc import super_cell, _build_supcell_, get_lattice_Ls
+from pyscf.pbc.tools.pbc import super_cell
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.gto.mole import extract_pgto_params
@@ -85,19 +85,19 @@ def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
 
 def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r2_origi', 1, (0, 2), kpts, sort_output)
+    return opt.intor('PBCint1e_r2_origi', 1, (2, 0), kpts, sort_output)
 
 def int1e_r4_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r4_origi', 1, (0, 4), kpts, sort_output)
+    return opt.intor('PBCint1e_r4_origi', 1, (4, 0), kpts, sort_output)
 
 def int1e_r2_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r2_origi_ip2', 3, (0, 3), kpts, sort_output)
+    return opt.intor('PBCint1e_r2_origi_ip2', 3, (2, 1), kpts, sort_output)
 
 def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r4_origi_ip2', 3, (0, 5), kpts, sort_output)
+    return opt.intor('PBCint1e_r4_origi_ip2', 3, (4, 1), kpts, sort_output)
 
 def ovlp_derivatives(cell, dm, kpts=None, kmesh=None):
     assert isinstance(cell, Cell)
@@ -429,8 +429,7 @@ class CrossInt1e(_Int1eOpt):
     def intor(self, kern, comp, deriv_ij, kpts=None, sort_output=True,
               out=None, buf=None, shls_slice=None):
         shls_slice = (0, self.cell1.nbas, self.cell1.nbas, self.cell.nbas)
-        out = super().intor(kern, comp, deriv_ij, kpts, False, out, buf,
-                             shls_slice)
+        out = super().intor(kern, comp, deriv_ij, kpts, False, out, buf, shls_slice)
         if sort_output:
             leading_shape = out.shape[:-2]
             n1, n2 = out.shape[-2:]
@@ -512,7 +511,7 @@ def _shell_overlap_mask(cell, hermi=1, precision=1e-14, Ls=None, envs=None,
 def _bvkcell_lattice_sum_Ls(bvkcell, rcut=None):
     if rcut is None:
         rcut = bvkcell.rcut
-    Ls = get_lattice_Ls(bvkcell, rcut=rcut, discard=False)
+    Ls = bvkcell.get_lattice_Ls(rcut=rcut, discard=False)
     if len(Ls) > 1:
         r = asarray(bvkcell.atom_coords())
         dist_max = dist_matrix(r, r).max().get()

@@ -195,6 +195,31 @@ def eval_nucG_SI_gradient(cell, mesh, rho_g):
     return de, sigma
 
 class KnownValues(unittest.TestCase):
+    def test_aft_disabled_for_nonorthogonal_bvk_cell(self):
+        kmesh = np.array([2, 2, 2])
+        control = multigrid.MultiGridNumInt(cell_orth)
+        control.build(kmesh, xctype='LDA')
+        self.assertTrue(control.aft_buckets)
+
+        original_a = cell_orth.lattice_vectors().copy()
+        cell = cell_orth.copy()
+        cell.a = original_a.copy()
+        cell.a[0, 1] = 6e-6
+
+        kpts = cell.make_kpts(kmesh, wrap_around=True)
+        dm = np.tile(np.eye(cell.nao), (len(kpts), 1, 1))
+        ni = multigrid.MultiGridNumInt(cell)
+        rho = ni.get_rho(dm, kpts)
+
+        self.assertTrue(multigrid._is_orthogonal_lattice(
+            cell.lattice_vectors())) # Primitive cell passes the threshold
+        self.assertFalse(multigrid._is_orthogonal_lattice(
+            ni.bvkcell.lattice_vectors())) # BvK cell exceeds the threshold
+        np.testing.assert_array_equal(cell_orth.lattice_vectors(), original_a)
+        self.assertIsNone(ni.aft_buckets)
+        self.assertTrue(ni.fft_buckets)
+        self.assertTrue(bool(cp.isfinite(rho).all()))
+
     def test_get_pp(self):
         ref = MultiGridNumInt_cpu(cell_orth).get_pp()
         if ref.ndim == 2: # In pyscf==2.8.0
