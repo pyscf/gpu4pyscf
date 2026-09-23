@@ -33,8 +33,7 @@ from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR, _unpack_cderi_v2
 from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.grad import uhf
-from gpu4pyscf.pbc.df.grad.krhf import (
-    _get_ej_derivatives, _get_j3c_block_sizes, _get_lr_block_size)
+from gpu4pyscf.pbc.df.grad.krhf import _get_ej_derivatives
 from gpu4pyscf.pbc.df.grad.rhf import (
     factorize_dm, get_ao_pair_loc, _split_l_ctr_pattern, _gen_metric_solver,
     _get_shl_pair_batch_size, indexed_scale)
@@ -116,9 +115,20 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     mem_free = get_avail_mem(exclude_memory_pool=True)
     batch_size = blksize = 0
     if n_compact_pairs > 0:
-        batch_size, blksize = _get_j3c_block_sizes(
-            mem_free, nao, n_compact_pairs, naux, nocc, nkpts, bvk_ncells,
-            int(np.diff(aux_loc).max()), nspin=2)
+        mem_avail = mem_free
+        mem_avail -= 2*naux*nkpts**2*nocc**2 * 16  # j3c_oo
+        # Bytes per auxiliary function in an integral batch.
+        batch_bytes = n_compact_pairs*bvk_ncells * 8  # compressed j3c
+        batch_bytes += n_compact_pairs*nkpts * 16  # compressed * expLk
+        # Bytes per auxiliary function in an AO contraction block.
+        block_bytes = nao**2*bvk_ncells*nkpts * 16  # j3c_full
+        block_bytes += nao**2*bvk_ncells**2 * 16  # buf1: j3c_ij
+        block_bytes += nao**2*bvk_ncells**2 * 16  # buf2: j3c_tmp / tmp
+        batch_size = min(naux, POOL_SIZE//bvk_ncells,
+                         int(mem_avail*.2/batch_bytes))
+        blksize = min(batch_size, int(mem_avail*.6/block_bytes))
+        if batch_size < int(np.diff(aux_loc).max()) or blksize < 1:
+            raise RuntimeError('Insufficient GPU memory for GDF gradient buffers')
 
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
@@ -277,9 +287,19 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         return pqG.transpose(0, 2, 3, 1)
 
     def lr_3c2e(j3c_oo):
-        mem_avail = get_avail_mem(exclude_memory_pool=True)
-        Gblksize = _get_lr_block_size(
-            nao, nocc, naux, nkpts, nkpts_uniq, ngrids, nspin=2)
+        mem_avail = get_avail_mem()
+        mem_avail -= 2*naux*nkpts*nocc**2 * 16  # j3c_oo[:,:,ki_idx,kj_idx]
+        mem_avail -= 2*naux*nkpts*nocc**2 * 16  # auxG * ijG
+        # Complex elements per G-vector; conservative sum across stages.
+        Gsize = nao_pair * 2 # pqG_compressed
+        Gsize += bvk_ncells*nao**2  # cderi workspace in _unpack_cderi_v2
+        Gsize += nkpts*nao**2 # pqG, pqG.conj()
+        Gsize += 2*nkpts*(nao+nocc)*nocc  # ijG
+        Gsize += naux*nkpts_uniq * 2 # auxG, auxGw
+        Gsize += naux  # auxG[:,j2c_idx]
+        Gblksize = min(ngrids, int(mem_avail*.8//(Gsize*16))//32*32)
+        if Gblksize < 1:
+            raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
                    mem_avail*1e-9, Gblksize)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
@@ -289,9 +309,10 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             auxGw = auxG.conj()
             auxGw *= wcoulG_LR0[:,p0:p1]
             contract('iKG,jKG->Kij', auxGw, auxG, beta=1, out=j2c)
+            pqG_compressed = None
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-                pqG_compressed = eval_ft(Gv[p0:p1] + kpts[kp])
+                pqG_compressed = eval_ft(Gv[p0:p1] + kpts[kp], out=pqG_compressed)
                 pqG_compressed[:n_compact_pairs] *= wcoulG_LR0[j2c_idx,p0:p1]
                 if separated_dd:
                     pqG_compressed[n_compact_pairs:] *= wcoulG_FR0[j2c_idx,p0:p1]
@@ -302,11 +323,13 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                     'rG,skijG->srkij', auxG[:,j2c_idx].conj(), ijG)
                 tmp = ijG = None
                 if kp != kp_conj:
-                    tmp = contract('kqpG,skpi->skiqG', pqG.conj(), dm_factor_r[:,kj_idx])
+                    pqG_conj = pqG
+                    pqG_conj.imag *= -1
+                    tmp = contract('kqpG,skpi->skiqG', pqG, dm_factor_r[:,kj_idx])
                     ijG = contract('skiqG,skqj->skijG', tmp, dm_factor_l)
                     j3c_oo[:,:,kj_idx,ki_idx] += contract(
                         'rG,skijG->srkij', auxG[:,j2c_idx], ijG)
-                pqG = tmp = ijG = None
+                pqG = pqG_conj = tmp = ijG = None
             auxG = auxGw = None
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
@@ -388,7 +411,18 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         response_idx = j_addr * nao + i_addr
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        Gblksize = _get_lr_block_size(nao, nocc, naux, nkpts, nkpts_uniq, ngrids, nspin=2)
+        mem_avail = get_avail_mem()
+        mem_avail -= 2*naux*nkpts*nocc**2 * 16  # dm_oo_k = dm_oo[:,:,kj_idx,ki_idx]
+        # Complex elements per G-vector; conservative sum across stages.
+        Gsize = nao_pair * 2 # dm_vG_compressed, pqG_compressed
+        Gsize += bvk_ncells*nao**2  # workspace in _unpack_cderi_v2
+        Gsize += nkpts*nao**2 # dm_vG
+        Gsize += 2*nkpts*(nao+nocc)*nocc  # dm_vG, dm_ooG
+        Gsize += naux*nkpts_uniq # auxG
+        Gsize += naux * 3 # dm_auxG, auxG_conj, dm_auxG1
+        Gblksize = min(ngrids, int(mem_avail*.8//(Gsize*16))//32*32)
+        if Gblksize < 1:
+            raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
@@ -400,7 +434,6 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
             _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
         null_ptr = lib.c_null_ptr()
-        buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
             auxG = ft_ao.ft_ao(auxcell, Gk[:,p0:p1].reshape(-1,3)).T
@@ -427,7 +460,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                         vG *= 2
                     bvk_dm = contract('Lk,kpq->Lpq', expLk, dm_sorted)
                     contract('Lpq,G->LpqG', bvk_dm, vG, beta=1, out=LpqG)
-                dm_vG = cp.asarray(LpqG, order='C')
+                    bvk_dm = None
+                dm_vG = cp.asarray(LpqG, order='C').reshape(-1, nGv)
                 dm_vG_compressed = dm_vG[response_idx]
                 if n_compact_pairs > 0:
                     indexed_scale(dm_vG, response_idx[:n_compact_pairs], wcoulG_LR0[j2c_idx,p0:p1])
@@ -470,7 +504,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                 pqG = unpack_ft(pqG_compressed, kj_idx)
 
                 beta = 0
-                dm_auxG = ndarray((naux,nGv), dtype=np.complex128, buffer=buf2)
+                dm_auxG = ndarray((naux,nGv), dtype=np.complex128)
                 if j_factor != 0 and kp == 0:
                     rhoGz = cp.einsum('kpqG,kqp->G', pqG, dm_sorted)
                     cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)

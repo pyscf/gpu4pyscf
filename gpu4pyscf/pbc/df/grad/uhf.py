@@ -92,7 +92,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         nao_pair = len(pair_addresses)
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
-    mem_avail = mem_free - 2*naux*nocc**2*8 - nao**2*8
+    mem_avail = mem_free
+    mem_avail -= 2*naux*nocc**2 * 8  # j3c_oo, both spins
     batch_size = max(1, min(naux, int(mem_avail*.5/(max(1, n_compact_pairs)*8*bvk_ncells))))
     blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*8))//8*8))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
@@ -186,7 +187,10 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
 
     def lr_3c2e(j3c_oo):
         i_addr, j_addr = divmod(pair_addresses, nao)
-        unit = max(nao**2, 2*nocc**2, naux) + max(2*nao*nocc, naux) + naux + nao_pair
+        unit = max(nao**2, 2*nocc**2, naux)  # buf: pqG, ijG
+        unit += max(2*nao*nocc, naux)  # buf1: tmp / auxGw
+        unit += naux  # buf2: auxG
+        unit += nao_pair  # buf3: pqG_compressed
         Gblksize = int(mem_avail*.8//(unit*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
@@ -279,7 +283,11 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         response_idx = j_addr * nao + i_addr
 
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        unit = max(nao**2, 2*nocc**2, naux) + max(2*nao*nocc, naux) + naux*2 + nao_pair
+        unit = max(nao**2, 2*nocc**2, naux)  # buf: pqG, dm_ooG
+        unit += max(2*nao*nocc, naux)  # buf1: tmp / auxGw
+        unit += naux  # buf2: auxG / dm_auxG
+        unit += nao_pair  # buf3: pqG_compressed
+        unit += naux  # buf_auxG
         Gblksize = int(mem_avail*.8//(unit*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
