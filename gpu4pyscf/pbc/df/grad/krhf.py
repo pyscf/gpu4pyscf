@@ -217,7 +217,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         compressed = j3c = j3c_tmp = j3c_ij = tmp = None
         return j3c_oo
 
-    if len(int3c2e_opt.img_idx) > 0:
+    if n_compact_pairs > 0:
         j3c_oo = sr_int3c2e()
         t0 = log.timer_debug1('contract dm', *t0)
     else:

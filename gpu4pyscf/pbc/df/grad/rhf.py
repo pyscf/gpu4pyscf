@@ -123,15 +123,15 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free - naux*nocc**2*8 - nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(max(1, n_compact_pairs)*8*bvk_ncells))))
+    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*8))//8*8))
+    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
+               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
     def sr_int3c2e():
         assert batch_size < POOL_SIZE
         eval_j3c, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
             aux_batch_size=batch_size, cart=True)
         aux_batches = len(aux_offsets) - 1
-        blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*2*8))//8*8))
-        log.debug1('%.3f GB free memory. n_compact_pairs=%d naux=%d batch_size=%d blksize=%d',
-                   mem_free*1e-9, n_compact_pairs, naux, batch_size, blksize)
 
         i_addr, j_addr = divmod(compact_idx, nao)
         aux0 = aux1 = 0
@@ -458,6 +458,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
 
     ejk_sigma += lr_3c2e_response()
     log.timer_debug1('LR coulomb', *t0)
+    ft_opt = eval_ft = None
     dm_aux = None
 
     ################################
