@@ -165,26 +165,25 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     wcoulG_LR1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
 
     ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-    if not separated_dd:
-        eval_ft = ft_opt.ft_evaluator(
+    eval_compact = None
+    if n_compact_pairs > 0:
+        eval_compact = ft_opt.ft_evaluator(
             compressing=True, cart=True, original_ao_order=False)[0]
-    else:
+    if separated_dd:
         wcoulG_FR0, wcoulG_FR1 = get_wcoulG(cell, Gv, -omega)
 
-        if n_compact_pairs > 0:
-            eval_compact = ft_opt.ft_evaluator(
-                compressing=True, cart=True, original_ao_order=False)[0]
         eval_dd = dd_ft_opt.ft_evaluator(
             compressing=True, cart=True, original_ao_order=False)[0]
 
-        def eval_ft(Gv, out=None):
-            # Preserve compact/DD column ordering using each partition's own
-            # shell, image and AO offsets through the existing FT interface.
-            result = ndarray((nao_pair, len(Gv)), dtype=np.complex128, buffer=out)
-            if n_compact_pairs > 0:
-                eval_compact(Gv, out=result[:n_compact_pairs])
+    def eval_ft(Gv, out=None):
+        # Preserve compact/DD column ordering using each partition's own
+        # shell, image and AO offsets through the existing FT interface.
+        result = ndarray((nao_pair, len(Gv)), dtype=np.complex128, buffer=out)
+        if n_compact_pairs > 0:
+            eval_compact(Gv, out=result[:n_compact_pairs])
+        if separated_dd:
             eval_dd(Gv, out=result[n_compact_pairs:])
-            return result
+        return result
 
     def lr_3c2e(j3c_oo):
         i_addr, j_addr = divmod(pair_addresses, nao)
@@ -438,7 +437,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
 
     ejk_sigma += lr_3c2e_response()
     log.timer_debug1('LR coulomb', *t0)
-    ft_opt = eval_ft = None
+    ft_opt = eval_compact = eval_dd = None
     dm_aux = None
 
     ################################

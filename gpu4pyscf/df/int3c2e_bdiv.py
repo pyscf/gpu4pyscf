@@ -33,7 +33,8 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
-    PTR_BAS_COORD, SortedMole, RysIntEnvVars, extract_pgto_params, groupby)
+    PTR_BAS_COORD, SortedMole, RysIntEnvVars, PBCIntEnvVars,
+    extract_pgto_params, groupby)
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, _cache_q_cond_and_non0pairs,
     _check_rsh_factors, SHM_SIZE, libvhf_rys)

@@ -399,7 +399,6 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     context_device = cp.cuda.device.get_device_id()
     context = int3c2e_opt.int3c2e_evaluator(ao_pair_batch_size=batch_size, cart=cart)
     bas_ij_batches = context[1]
-    nao = cell.cell.nao
 
     with_dd = not exclude_dd and int3c2e_opt.dd_ft_opt is not None
     if not with_dd:
@@ -428,7 +427,6 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     tasks = iter(range(len(ao_pair_counts)))
     def proc():
         device_id = cp.cuda.device.get_device_id()
-        stream = cp.cuda.get_current_stream()
         t1 = log.init_timer()
 
         local_context = context
@@ -507,10 +505,10 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     cderi = {0: cderi}
 
     if with_dd:
-        t1 = log.timer_debug1(f'compact part of GDF tensor', *t0)
+        t1 = log.timer_debug1('compact part of GDF tensor', *t0)
         _append_dd_cderi(
             int3c2e_opt, cderi, cd_j2c_cache, omega, recontract)
-        t1 = log.timer_debug1(f'diffuse part of GDF tensor', *t1)
+        t1 = log.timer_debug1('diffuse part of GDF tensor', *t1)
 
     cderip = None
     if negative_metric_size:
@@ -560,8 +558,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     n_compact_pairs = int3c2e_opt.get_n_compact_pairs()
     log.debug1('n_compact_pairs = %d', n_compact_pairs)
 
-    is_gamma_point = kmesh is None or np.prod(kmesh) == 1
-
     with_long_range = omega < rsdf_omega
     if with_long_range:
         mesh = int3c2e_opt.mesh
@@ -586,7 +582,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     context_device = cp.cuda.device.get_device_id()
     context = int3c2e_opt.int3c2e_evaluator(ao_pair_batch_size=batch_size, cart=cart)
     bas_ij_batches = context[1]
-    nao = cell.cell.nao
 
     with_dd = not exclude_dd and int3c2e_opt.dd_ft_opt is not None
     if not with_dd:
@@ -616,8 +611,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     tasks = iter(range(len(ao_pair_counts)))
     def proc():
         device_id = cp.cuda.device.get_device_id()
-        stream = cp.cuda.get_current_stream()
         t1 = log.init_timer()
+
         local_context = context
         if device_id != context_device:
             local_context = int3c2e_opt.int3c2e_evaluator(
@@ -684,7 +679,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
                 cderi_k = ndarray((pair_size, naux), dtype=np.complex128, buffer=buf1)
                 cderi_k = j3c[j2c_idx].dot(aux_coeff, out=cderi_k)
                 host_j3c = np.ndarray((pair_size, naux), dtype=np.complex128, buffer=write_buf)
-                cderi_k.get(out=host_j3c, stream=stream)
+                cderi_k.get(out=host_j3c)
                 if future is not None:
                     future.result()
                 future = writer.submit(

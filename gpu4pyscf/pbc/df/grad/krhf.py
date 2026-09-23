@@ -535,7 +535,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
 
     ejk_sigma += lr_3c2e_response()
     log.timer_debug1('LR coulomb', *t0)
-    ft_opt = eval_compact = eval_ft = eval_dd = None
+    ft_opt = eval_compact = eval_dd = None
     dm_aux = None
 
     ################################

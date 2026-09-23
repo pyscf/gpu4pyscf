@@ -904,20 +904,15 @@ def _create_pair_recontractor(cell, bas_ij_batches, cart, bvk_ncells=1):
     prim_id_within_shell[recontraction_idx] = (
         np.arange(cell.nbas) - np.repeat(prim_offsets[:-1], nprims))
 
-    l = cell._bas[:,ANG_OF]
     l_ctr = recontract_bas[:,ANG_OF]
     if cart:
-        nf_prim = (l + 1) * (l + 2) // 2
         nf_ctr = (l_ctr + 1) * (l_ctr + 2) // 2
     else:
-        nf_prim = l * 2 + 1
         nf_ctr = l_ctr * 2 + 1
-    # if dd is excluded, recontract_bas[:,NPRIM_OF] is wrong???
     nf_ctr = nf_ctr * recontract_bas[:,NCTR_OF]
 
     ao_loc = np.asarray(_counts_to_offsets(nf_ctr), dtype=np.int32)
     nao = int(ao_loc[-1])
-    bvk_nbas = cell.nbas * bvk_ncells
 
     NOT_INITIALIZED = -1
     output_lut = np.full(nao**2*bvk_ncells, NOT_INITIALIZED, dtype=np.int32)
