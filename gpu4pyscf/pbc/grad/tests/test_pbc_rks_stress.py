@@ -82,7 +82,8 @@ class KnownValues(unittest.TestCase):
                      basis=[[0, [.5, 1]],
                             [1, [1.5, 1], [.5, 1]],
                             [2, [.8, 1]],
-                            [3, [.7, 1]]], a=a, unit='Bohr', cart=True)
+                            [3, [.7, 1]],
+                            [4, [.6, 1]]], a=a, unit='Bohr', cart=True)
         coords = np.random.rand(10, 3)
         ao_value = _eval_ao_strain_derivatives(cell, coords)
         ao_value = ao_value.get().transpose(0,1,2,3,5,4)[0]
@@ -101,7 +102,8 @@ class KnownValues(unittest.TestCase):
                      basis=[[0, [.5, 1]],
                             [1, [1.5, 1], [.5, 1]],
                             [2, [.8, 1]],
-                            [3, [.7, 1]]], a=a, unit='Bohr', cart=True)
+                            [3, [.7, 1]],
+                            [4, [.6, 1]]], a=a, unit='Bohr', cart=True)
         coords = np.random.rand(10, 3)
         ao_value = _eval_ao_strain_derivatives(cell, coords, deriv=1)
         ao_value = ao_value.get().transpose(0,1,2,3,5,4)[0]
