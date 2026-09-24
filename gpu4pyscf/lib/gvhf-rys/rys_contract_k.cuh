@@ -15,31 +15,144 @@
  */
 
 #pragma once
-
 #include <cuda.h>
 #include <cuda_runtime.h>
+
 #include "gvhf-rys/vhf.cuh"
 
-__device__ __forceinline__
+// Abstracts 2D-kernel gout thread-index setup. Used 4x in this header.
+#ifdef USE_SYCL
+#define SETUP_GOUT_KERNEL() \
+    auto item = syclex::this_work_item::get_nd_item<2>(); \
+    int nsq_per_block = item.get_local_range(1); \
+    int gout_id       = item.get_local_id(0); \
+    int gout_stride   = item.get_local_range(0);
+#else
+#define SETUP_GOUT_KERNEL() \
+    int nsq_per_block = blockDim.x; \
+    int gout_id       = threadIdx.y; \
+    int gout_stride   = blockDim.y;
+#endif
+
+#ifdef USE_SYCL
+
+// Please mind that this is a copy of the values in rys_constant.cu
+// Given the support for C++ seperate constexpr declaration and definition
+// is until C++20, we do use this var as `static constexpr`
+static constexpr int _c_cartesian_lexical_xyz[252] = {
+    // s
+    0, 0, 0,
+    // p
+    1, 0, 0,
+    0, 1, 0,
+    0, 0, 1,
+    // d
+    2, 0, 0,
+    1, 1, 0,
+    1, 0, 1,
+    0, 2, 0,
+    0, 1, 1,
+    0, 0, 2,
+    // f
+    3, 0, 0,
+    2, 1, 0,
+    2, 0, 1,
+    1, 2, 0,
+    1, 1, 1,
+    1, 0, 2,
+    0, 3, 0,
+    0, 2, 1,
+    0, 1, 2,
+    0, 0, 3,
+    // g
+    4, 0, 0,
+    3, 1, 0,
+    3, 0, 1,
+    2, 2, 0,
+    2, 1, 1,
+    2, 0, 2,
+    1, 3, 0,
+    1, 2, 1,
+    1, 1, 2,
+    1, 0, 3,
+    0, 4, 0,
+    0, 3, 1,
+    0, 2, 2,
+    0, 1, 3,
+    0, 0, 4,
+    // h
+    5, 0, 0,
+    4, 1, 0,
+    4, 0, 1,
+    3, 2, 0,
+    3, 1, 1,
+    3, 0, 2,
+    2, 3, 0,
+    2, 2, 1,
+    2, 1, 2,
+    2, 0, 3,
+    1, 4, 0,
+    1, 3, 1,
+    1, 2, 2,
+    1, 1, 3,
+    1, 0, 4,
+    0, 5, 0,
+    0, 4, 1,
+    0, 3, 2,
+    0, 2, 3,
+    0, 1, 4,
+    0, 0, 5,
+    // j
+    6, 0, 0,
+    5, 1, 0,
+    5, 0, 1,
+    4, 2, 0,
+    4, 1, 1,
+    4, 0, 2,
+    3, 3, 0,
+    3, 2, 1,
+    3, 1, 2,
+    3, 0, 3,
+    2, 4, 0,
+    2, 3, 1,
+    2, 2, 2,
+    2, 1, 3,
+    2, 0, 4,
+    1, 5, 0,
+    1, 4, 1,
+    1, 3, 2,
+    1, 2, 3,
+    1, 1, 4,
+    1, 0, 5,
+    0, 6, 0,
+    0, 5, 1,
+    0, 4, 2,
+    0, 3, 3,
+    0, 2, 4,
+    0, 1, 5,
+    0, 0, 6,
+};
+#endif // USE_SYCL
+
+
+DEVICE_INLINE
 int lex_xyz_offset(int l) {
     // the offsets for _c_cartesian_lexical_xyz = l*(l+1)*(l+2)/6 * 3
     return l*(l+1)*(l+2) / 2;
 }
 
-__device__ __forceinline__
+DEVICE_INLINE
 int lex_xyz_address(int l, int i)
 {
     return _c_cartesian_lexical_xyz[lex_xyz_offset(l) + i];
 }
 
 template <int LIJ>
-__device__ __forceinline__
+DEVICE_INLINE
 void vrr(double *g, double *ri, double *rj, double *Rpq, double aj_aij, double rt_aij,
          double b10, int g_size)
 {
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    SETUP_GOUT_KERNEL();
     for (int n = gout_id; n < 3; n += gout_stride) {
         double *_gx = g + n * g_size * nsq_per_block;
         double Rpa = (rj[n] - ri[n]) * aj_aij;
@@ -58,13 +171,11 @@ void vrr(double *g, double *ri, double *rj, double *Rpq, double aj_aij, double r
 }
 
 template <int LKL>
-__device__ __forceinline__
+DEVICE_INLINE
 void trr(double *g, double *rlrk, double *Rpq, double al_akl, double rt_akl,
          double b00, double b01, int lij3, int stride_k, int g_size)
 {
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    SETUP_GOUT_KERNEL();
     for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
         __syncthreads();
         int i = n / 3; //for i in range(lij+1):
@@ -99,12 +210,10 @@ void trr(double *g, double *rlrk, double *Rpq, double al_akl, double rt_akl,
 }
 
 template <int LI, int LJ>
-__device__ __forceinline__
+DEVICE_INLINE
 void hrr_ij(double *g, double *rjri, int count, int g_size)
 {
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    SETUP_GOUT_KERNEL();
     constexpr int lij = LI + LJ;
     constexpr int stride_j = LI + 1;
     constexpr int stride_k = stride_j * (LJ + 1);
@@ -128,12 +237,10 @@ void hrr_ij(double *g, double *rjri, int count, int g_size)
     }
 }
 template <int LK, int LL>
-__device__ __forceinline__
+DEVICE_INLINE
 void hrr_kl(double *g, double *rlrk, int stride_k)
 {
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    SETUP_GOUT_KERNEL();
     constexpr int lkl = LK + LL;
     for (int n = gout_id; n < stride_k*3; n += gout_stride) {
         int i = n / 3;
@@ -157,7 +264,7 @@ void hrr_kl(double *g, double *rlrk, int stride_k)
 }
 
 template <int I, int J, int K, int L>
-__device__ __forceinline__
+DEVICE_INLINE
 void inner_dot(double *gout, double *g,
                int *addr_i, int *addr_j,
                int *addr_k, int *addr_l)
@@ -187,7 +294,7 @@ void inner_dot(double *gout, double *g,
     } } } }
 }
 
-__device__ __forceinline__
+DEVICE_INLINE
 void load_dm(double *dm, double *dm_cache, int nao, int i0, int j0,
              int ioff, int joff, int nfi, int nfj)
 {
@@ -206,7 +313,7 @@ void load_dm(double *dm, double *dm_cache, int nao, int i0, int j0,
 }
 
 template <int I, int J, int K, int L>
-__device__ __forceinline__
+DEVICE_INLINE
 void dot_dm(double *vk, double *dm_cache, double *gout, int nao, int i0, int l0,
             int ioff, int loff, int nfi, int nfl)
 {
@@ -230,3 +337,5 @@ void dot_dm(double *vk, double *dm_cache, double *gout, int nao, int i0, int l0,
         atomicAdd(vk_local+i*nao+l, v);
     } }
 }
+
+#undef SETUP_GOUT_KERNEL

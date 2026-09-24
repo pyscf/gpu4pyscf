@@ -33,17 +33,44 @@ __global__ static
 void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
                             double omega, double lr_factor, double sr_factor,
                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                            int *gout_stride_lookup)
+                            int *gout_stride_lookup
+                            #ifdef USE_SYCL
+                            , sycl::nd_item<1> &item, char *shm_mem
+                            #endif
+                            )
 {
+    #ifdef USE_SYCL
+    int sp_block_id = item.get_group(0);
+    int thread_id = item.get_local_id(0);
+
+    auto thread_block = item.get_group();
+    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nbas = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nroots = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nao = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
+    #else
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double *img_coords = envs.img_coords;
+
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int nbas;
     __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
+
+    extern __shared__ double shared_memory[];
+    #endif
+
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *img_coords = envs.img_coords;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -73,12 +100,11 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
     int stride_j = li + 2;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     double goutx[GOUT_IP_WIDTH];
     double gouty[GOUT_IP_WIDTH];
     double goutz[GOUT_IP_WIDTH];
@@ -270,17 +296,44 @@ __global__ static
 void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                           double omega, double lr_factor, double sr_factor,
                           int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                          int *gout_stride_lookup)
+                          int *gout_stride_lookup
+                          #ifdef USE_SYCL
+                          , sycl::nd_item<1> &item, char *shm_mem
+                          #endif
+                          )
 {
+    #ifdef USE_SYCL
+    int sp_block_id = item.get_group(0);
+    int thread_id = item.get_local_id(0);
+
+    auto thread_block = item.get_group();
+    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nbas = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nroots = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nao = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
+    #else
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double *img_coords = envs.img_coords;
+
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int nbas;
     __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
+
+    extern __shared__ double shared_memory[];
+    #endif
+
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *img_coords = envs.img_coords;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -311,12 +364,11 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     int j_1 = stride_j*nsp_per_block;
     int g_size = stride_j * (lj + 2);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double v_ix = 0;
@@ -496,6 +548,19 @@ int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs,
                      int nbatches_shl_pair, int *shl_pair_offsets,
                      uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
+    #ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> blocks(nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class pbc_int2c2e_ip1_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+        pbc_int2c2e_ip1_kernel(out, dev_envs, omega, lr_factor, sr_factor,
+                               shl_pair_offsets, bas_ij_idx, gout_stride_lookup,
+                               item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
     cudaFuncSetAttribute(pbc_int2c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     pbc_int2c2e_ip1_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
             out, *envs, omega, lr_factor, sr_factor,
@@ -505,6 +570,7 @@ int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs,
         fprintf(stderr, "CUDA Error in int2c2e_ip1 kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -513,6 +579,19 @@ int e_int2c2e_ip1(double *out, double *dm, PBCIntEnvVars *envs,
                   int nbatches_shl_pair, int *shl_pair_offsets,
                   uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
+    #ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> blocks(nbatches_shl_pair);
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class e_int2c2e_ip1_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+        e_int2c2e_ip1_kernel(out, dm, dev_envs, omega, lr_factor, sr_factor,
+                             shl_pair_offsets, bas_ij_idx, gout_stride_lookup,
+                             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
     cudaFuncSetAttribute(e_int2c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     e_int2c2e_ip1_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
             out, dm, *envs, omega, lr_factor, sr_factor,
@@ -522,6 +601,7 @@ int e_int2c2e_ip1(double *out, double *dm, PBCIntEnvVars *envs,
         fprintf(stderr, "CUDA Error in int2c2e_ip1 kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

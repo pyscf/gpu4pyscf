@@ -30,8 +30,14 @@
 __global__ static
 void _pack_tril(double *a_tril, double *a, size_t n, int counts)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    size_t j = item.get_global_id(1);
+    size_t i = item.get_global_id(0);
+#else
     size_t j = blockIdx.x * blockDim.x + threadIdx.x;
     size_t i = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
 
     if (i >= n || j >= n || i < j) {
         return;
@@ -47,8 +53,14 @@ void _pack_tril(double *a_tril, double *a, size_t n, int counts)
 __global__ static
 void _unpack_tril(double *eri_tril, double *eri, size_t nao, int counts)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    size_t j = item.get_global_id(1);
+    size_t i = item.get_global_id(0);
+#else
     size_t j = blockIdx.x * blockDim.x + threadIdx.x;
     size_t i = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (i >= nao || j >= nao || i < j) {
         return;
     }
@@ -63,8 +75,14 @@ void _unpack_tril(double *eri_tril, double *eri, size_t nao, int counts)
 __global__ static
 void _dfill_triu(double *eri, size_t nao, int counts, int hermi)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int j = item.get_global_id(1);
+    int i = item.get_global_id(0);
+#else
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
@@ -82,8 +100,14 @@ void _dfill_triu(double *eri, size_t nao, int counts, int hermi)
 __global__ static
 void _zfill_triu(double *eri, size_t nao, int counts, int hermi)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int j = item.get_global_id(1);
+    int i = item.get_global_id(0);
+#else
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
@@ -107,9 +131,16 @@ void decompress_kernel(double *out, size_t out_stride,
                        double *cderi, int *pair_idx, int npairs, int nao,
                        size_t naux, int aux0, int aux1)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+    int threads = item.get_local_range(0);
+    int batch_id = item.get_group(0);
+#else
     int thread_id = threadIdx.x;
     int threads = blockDim.x;
     int batch_id = blockIdx.x;
+#endif
     int dcol = aux1 - aux0;
     int pair0 = batch_id * RBLKSIZE;
     int pair1 = min(pair0 + RBLKSIZE, npairs);
@@ -135,9 +166,16 @@ void d_t_kernel(double *out, size_t out_stride,
                 double *cderi, int *pair_idx, int npairs, int nao,
                 int aux0, int aux1, int fill_triu)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int bx = item.get_group(1);
+    int by = item.get_group(0);
+    int thread_id = item.get_local_id(1);
+#else
     int bx = blockIdx.x;
     int by = blockIdx.y;
     int thread_id = threadIdx.x;
+#endif
     int threads = STRIDE * CBLKSIZE;
     int tx = thread_id % CBLKSIZE;
     int ty = thread_id / CBLKSIZE;
@@ -147,7 +185,12 @@ void d_t_kernel(double *out, size_t out_stride,
     size_t Npairs = npairs;
     size_t Nao = nao;
 
+#ifdef USE_SYCL
+    using buf_t = double[RBLKSIZE][CBLKSIZE+1];
+    buf_t& buf = *sycl::ext::oneapi::group_local_memory_for_overwrite<buf_t>(item.get_group());
+#else
     __shared__ double buf[RBLKSIZE][CBLKSIZE+1];
+#endif
     if (pair_start+tx < npairs) {
         for (int k = ty; k < min(RBLKSIZE, daux-aux_start); k += STRIDE) {
             buf[k][tx] = cderi[(aux_start+k)*Npairs+pair_start+tx];
@@ -176,9 +219,16 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
                   double2 *cderi, int *pair_idx, int npairs, int nao,
                   int aux0, int aux1)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int bx = item.get_group(1);
+    int by = item.get_group(0);
+    int thread_id = item.get_local_id(1);
+#else
     int bx = blockIdx.x;
     int by = blockIdx.y;
     int thread_id = threadIdx.x;
+#endif
     int threads = STRIDE * CBLKSIZE;
     int tx = thread_id % CBLKSIZE;
     int ty = thread_id / CBLKSIZE;
@@ -188,7 +238,12 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
     size_t Npairs = npairs;
     size_t Nao = nao;
 
+#ifdef USE_SYCL
+    using zbuf_t = double2[RBLKSIZE][CBLKSIZE+1];
+    zbuf_t& buf = *sycl::ext::oneapi::group_local_memory_for_overwrite<zbuf_t>(item.get_group());
+#else
     __shared__ double2 buf[RBLKSIZE][CBLKSIZE+1];
+#endif
     if (pair_start+tx < npairs) {
         for (int k = ty; k < min(RBLKSIZE, daux-aux_start); k += STRIDE) {
             buf[k][tx] = cderi[(aux_start+k)*Npairs+pair_start+tx];
@@ -213,6 +268,17 @@ extern "C" {
 int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi,
               int dtype)
 {
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    int nx = (n + threads[1] - 1) / threads[1];
+    int ny = (n + threads[0] - 1) / threads[0];
+    sycl::range<2> blocks(ny, nx);
+    if (dtype == 1) { // float64
+      stream.parallel_for<class _dfill_triu_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _dfill_triu(a, n, counts, hermi); });
+    } else {
+      stream.parallel_for<class _zfill_triu_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _zfill_triu(a, n, counts, hermi); });
+    }
+#else
     dim3 threads(THREADS, THREADS);
     int nx = (n + threads.x - 1) / threads.x;
     int ny = (n + threads.y - 1) / threads.y;
@@ -227,11 +293,19 @@ int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi,
         fprintf(stderr, "fill_tril error %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
 int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
 {
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    int nx = (n + threads[1] - 1) / threads[1];
+    int ny = (n + threads[0] - 1) / threads[0];
+    sycl::range<2> blocks(ny, nx);
+    stream.parallel_for<class _pack_tril_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _pack_tril(a_tril, a, n, counts); });
+#else
     dim3 threads(THREADS, THREADS);
     int nx = (n + threads.x - 1) / threads.x;
     int ny = (n + threads.y - 1) / threads.y;
@@ -242,12 +316,21 @@ int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
         fprintf(stderr, "pack_tril error %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
 int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
                 int nao, int counts, int hermi)
 {
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    int nx = (nao + threads[1] - 1) / threads[1];
+    int ny = (nao + threads[0] - 1) / threads[0];
+    sycl::range<2> blocks(ny, nx);
+    stream.parallel_for<class _unpack_tril_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _unpack_tril(eri_tril, eri, nao, counts); });
+    stream.parallel_for<class _dfill_triu_sycl2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _dfill_triu(eri, nao, counts, hermi); });
+#else
     dim3 threads(THREADS, THREADS);
     int nx = (nao + threads.x - 1) / threads.x;
     int ny = (nao + threads.y - 1) / threads.y;
@@ -258,6 +341,7 @@ int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
     if (err != cudaSuccess) {
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -265,6 +349,13 @@ int decompress_and_fill(cudaStream_t stream, double *out, int out_stride,
                         double *cderi, int *pair_idx, int npairs, int nao,
                         int naux, int aux0, int aux1)
 {
+#ifdef USE_SYCL
+    sycl::range<1> threads(512);
+    sycl::range<1> blocks((npairs+RBLKSIZE-1)/RBLKSIZE);
+    stream.parallel_for<class _decompress_kernel_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      decompress_kernel(out, out_stride, cderi, pair_idx, npairs, nao, naux, aux0, aux1);
+    });
+#else
     dim3 blocks((npairs+RBLKSIZE-1)/RBLKSIZE);
     decompress_kernel<<<blocks, 512, 0, stream>>>(
             out, out_stride, cderi, pair_idx, npairs, nao, naux, aux0, aux1);
@@ -273,6 +364,7 @@ int decompress_and_fill(cudaStream_t stream, double *out, int out_stride,
         fprintf(stderr, "decompress_and_fill error %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -280,6 +372,15 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
                              double *cderi, int *pair_idx, int npairs, int nao,
                              int aux0, int aux1, int fill_triu, int on_host)
 {
+#ifdef USE_SYCL
+    // Host USM allocations are directly device-accessible; no address mapping.
+    double *eri_gpu = cderi;
+    sycl::range<2> threads(1, CBLKSIZE * STRIDE);
+    sycl::range<2> blocks((aux1-aux0+RBLKSIZE-1)/RBLKSIZE, (npairs+CBLKSIZE-1)/CBLKSIZE);
+    stream.parallel_for<class _d_t_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      d_t_kernel(out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1, fill_triu);
+    });
+#else
     double *eri_gpu = cderi;
     if (on_host) {
         cudaError_t err = cudaHostGetDevicePointer(&eri_gpu, cderi, 0);
@@ -297,6 +398,7 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -304,6 +406,15 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
                                double2 *cderi, int *pair_idx, int npairs, int nao,
                                int aux0, int aux1, int fill_triu, int on_host)
 {
+#ifdef USE_SYCL
+    // Host USM allocations are directly device-accessible; no address mapping.
+    double2 *eri_gpu = cderi;
+    sycl::range<2> threads(1, CBLKSIZE * STRIDE);
+    sycl::range<2> blocks((aux1-aux0+RBLKSIZE-1)/RBLKSIZE, (npairs+CBLKSIZE-1)/CBLKSIZE);
+    stream.parallel_for<class _z_d_t_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      z_d_t_kernel(out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1);
+    });
+#else
     double2 *eri_gpu = cderi;
     if (on_host) {
         cudaError_t err = cudaHostGetDevicePointer(&eri_gpu, cderi, 0);
@@ -321,6 +432,7 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

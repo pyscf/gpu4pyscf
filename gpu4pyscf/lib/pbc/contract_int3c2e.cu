@@ -25,7 +25,11 @@
 #include "int3c2e_create_tasks.cuh"
 
 #define NF_AUX_MAX      28
+#ifdef USE_SYCL
+#define GOUT_WIDTH      30
+#else
 #define GOUT_WIDTH      29
+#endif
 
 // lattice sum over j and k for (ij|k)
 __global__ static
@@ -35,15 +39,44 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, double omega, PBCIntEnv
                                 int *img_idx, uint32_t *sp_img_offsets,
                                 int *gout_stride_lookup, int nauxbas,
                                 float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                                int *head, int sp_blocks)
+                                int *head, int sp_blocks
+                                #ifdef USE_SYCL
+                                , sycl::nd_item<1> &item, std::byte *shm_mem
+                                #endif
+                                )
 {
-    int thread_id = threadIdx.x;
-    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
-    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
-    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
-    uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
-    extern __shared__ double shared_memory[];
+    #ifdef USE_SYCL
+    int blockIdx_x = item.get_group(0);
+    int threadIdx_x = item.get_local_id(0);
+
+    auto thread_block = item.get_group();
+    int &sp_block_id     = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh_cell0       = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair0       = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &shl_pair1       = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &li              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lk              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nroots          = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim           = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim           = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &kprim           = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nao             = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride     = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nst_per_block   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expk            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ck              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    int &num_ijk_tasks   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &num_sub_tasks   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &img_not_processed = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &img_tile_size   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double *>(shm_mem);
+    #else
+    int blockIdx_x = blockIdx.x;
+    int threadIdx_x = threadIdx.x;
+
     __shared__ int sp_block_id, ksh_cell0;
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int li, lj, lk, nroots;
@@ -51,8 +84,19 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, double omega, PBCIntEnv
     __shared__ int nao;
     __shared__ int gout_stride, nst_per_block;
     __shared__ int expk, ck;
+
+    extern __shared__ double shared_memory[];
+
     __shared__ int num_ijk_tasks;
     __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
+    #endif
+
+    int thread_id = threadIdx_x;
+    img_pool += blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
+    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
+    uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx_x * POOL_SIZE;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
@@ -292,15 +336,54 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, double omega, P
                                     int *img_idx, uint32_t *sp_img_offsets,
                                     int *gout_stride_lookup, int nauxbas,
                                     float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                                    int *head, int npairs_ij, int ksh_blocks)
+                                    int *head, int npairs_ij, int ksh_blocks
+                                    #ifdef USE_SYCL
+                                    , sycl::nd_item<1> &item, std::byte *shm_mem
+                                    #endif
+                                    )
 {
-    int thread_id = threadIdx.x;
-    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
-    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
-    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
-    uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
-    extern __shared__ double shared_memory[];
+    #ifdef USE_SYCL
+    int blockIdx_x = item.get_group(0);
+    int threadIdx_x = item.get_local_id(0);
+
+    auto thread_block = item.get_group();
+    int &pair_ij         = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh_block_id    = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh0_cell0      = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ksh1_cell0      = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ish             = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jsh             = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &li              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lk              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nroots          = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim           = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim           = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &kprim           = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride     = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nst_per_block   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expi            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &ci              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &cj              = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    double &xi           = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    double &yi           = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    double &zi           = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    double &xjxi         = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    double &yjyi         = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    double &zjzi         = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    double &fac          = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+
+    int &num_ijk_tasks   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &num_sub_tasks   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &img_not_processed = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &img_tile_size   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double *>(shm_mem);
+    #else
+    int blockIdx_x = blockIdx.x;
+    int threadIdx_x = threadIdx.x;
+
     __shared__ int pair_ij, ksh_block_id;
     __shared__ int ksh0_cell0, ksh1_cell0;
     __shared__ int ish, jsh, li, lj, lk, nroots;
@@ -308,8 +391,20 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, double omega, P
     __shared__ int gout_stride, nst_per_block;
     __shared__ int expi, expj, ci, cj;
     __shared__ double xi, yi, zi, xjxi, yjyi, zjzi;
+    __shared__ double fac;
+
     __shared__ int num_ijk_tasks;
     __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
+
+    extern __shared__ double shared_memory[];
+    #endif
+
+    int thread_id = threadIdx_x;
+    img_pool += blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
+    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
+    uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx_x * POOL_SIZE;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
@@ -355,15 +450,16 @@ while (1) {
         xjxi = rj[0] - xi;
         yjyi = rj[1] - yi;
         zjzi = rj[2] - zi;
+        int ish_cell0 = ish;
+        int jsh_cell0 = jsh % envs.nbas;
+        fac = PI_FAC;
+        if (ish_cell0 < jsh_cell0) {
+            fac = 0;
+        }
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
     }
     __syncthreads();
-    int ish_cell0 = ish;
-    int jsh_cell0 = jsh % envs.nbas;
-    if (ish_cell0 < jsh_cell0) {
-        continue;
-    }
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
 
@@ -461,7 +557,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                             double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                             double theta_ij = ai * aj_aij;
                             double Kab = theta_ij * rr_ij;
-                            double cicj = PI_FAC * env[ci+ip] * env[cj+jp];
+                            double cicj = fac * env[ci+ip] * env[cj+jp];
                             fac_ij = exp(-Kab) * cicj;
                         }
                         double xij = xjLxi * aj_aij + xi;
@@ -552,11 +648,25 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, double omega, PBCIntEnvVars 
                            int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
+#ifdef USE_SYCL
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class contract_int3c2e_dm_pbc_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
+        contract_int3c2e_dm_kernel(
+            out, dm, omega, dev_envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
+            img_idx, img_offsets, gout_stride_lookup, nauxbas,
+            diffuse_exps, diffuse_coefs, log_cutoff,
+            head, nbatches_shl_pair,
+            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+#else
+    cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     contract_int3c2e_dm_kernel<<<workers, THREADS, shm_size>>>(
             out, dm, omega, *envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
@@ -567,6 +677,7 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, double omega, PBCIntEnvVars 
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -577,11 +688,24 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, double omega, PBCInt
                                int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                                float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
+#ifdef USE_SYCL
+    auto dev_envs = *envs;
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for<class contract_int3c2e_auxvec_pbc_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
+        contract_int3c2e_auxvec_kernel(out, auxvec, omega, dev_envs, pool, task_pool, bas_ij_idx, ksh_offsets,
+                                       img_idx, img_offsets, gout_stride_lookup, nauxbas,
+                                       diffuse_exps, diffuse_coefs, log_cutoff,
+                                       head, npairs, nbatches_ksh,
+                                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+#else
+    cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     contract_int3c2e_auxvec_kernel<<<workers, THREADS, shm_size>>>(
             out, auxvec, omega, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
@@ -592,6 +716,7 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, double omega, PBCInt
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

@@ -21,8 +21,18 @@
 __global__
 static void _block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
 {
-    int r = blockIdx.x;
-
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int blockIdx_x = item.get_group(1);
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+#else
+    int blockIdx_x = blockIdx.x;
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+#endif
+    int r = blockIdx_x;
+    
     if (r >= ndiags){
         return;
     }
@@ -32,8 +42,8 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
     int row_offset = rows[r];
     int col_offset = cols[r];
     
-    for (int i = threadIdx.y; i < m0; i += THREADS){
-        for (int j = threadIdx.x; j < n0; j += THREADS){
+    for (int i = threadIdx_y; i < m0; i += THREADS){
+        for (int j = threadIdx_x; j < n0; j += THREADS){
             out[(i+row_offset)*n + (j+col_offset)] = diags[diag_offset + i*n0 + j];
         }
     }
@@ -42,6 +52,13 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
 extern "C" {
 int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
 {
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(1, ndiags);
+    stream.parallel_for<class _block_diag_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _block_diag(out, m, n, diags, ndiags, offsets, rows, cols);
+    });
+#else //USE_SYCL
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ndiags);
     _block_diag<<<blocks, threads, 0, stream>>>(out, m, n, diags, ndiags, offsets, rows, cols);
@@ -50,6 +67,7 @@ int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, in
         fprintf(stderr, "CUDA Error in block_diag: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

@@ -21,6 +21,7 @@
 #include <assert.h>
 #include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
+#include "nr_eval_gto.cuh"
 
 #define THREADSX        32
 #define THREADSY        4
@@ -28,15 +29,63 @@
 #define THREADSYY       (THREADSY * THREADSY)
 #define DIVXY           (THREADSX / THREADSY)
 
+#ifdef USE_SYCL
+#define LAUNCH_KERNEL_3D(TAG, KERNEL, ...)                                  \
+    sycl_get_queue()->parallel_for<class TAG>(                              \
+        sycl::nd_range<3>(blocks * threads, threads),                       \
+        [=](auto item) [[intel::kernel_args_restrict]] { KERNEL(__VA_ARGS__); });
+
+#define KERNEL_PROLOGUE_3D_DM()                                       \
+    auto item       = syclex::this_work_item::get_nd_item<3>();       \
+    sycl::group thread_block = item.get_group();                      \
+    int tx         = item.get_local_id(2);                            \
+    int ty         = item.get_local_id(1);                            \
+    int grid_blk   = thread_block.get_group_id(2);                    \
+    int shell_blk  = thread_block.get_group_id(1);                    \
+    int blockIdx_z = thread_block.get_group_id(0);
+
+#define KERNEL_PROLOGUE_3D_AOW()                                      \
+    auto item       = syclex::this_work_item::get_nd_item<3>();       \
+    sycl::group thread_block = item.get_group();                      \
+    const int tx   = item.get_local_id(2);                            \
+    const int ty   = item.get_local_id(1);                            \
+    const int tz   = item.get_local_id(0);                            \
+    const int task_ij    = thread_block.get_group_id(2);              \
+    const int blockIdx_y = thread_block.get_group_id(1);              \
+    const int blockIdx_z = thread_block.get_group_id(0);              \
+    const int gridDim_y  = item.get_group_range(1);                   \
+    const int gridDim_z  = item.get_group_range(0);
+#else
+#define LAUNCH_KERNEL_3D(TAG, KERNEL, ...)                                  \
+    KERNEL<<<blocks, threads>>>(__VA_ARGS__);
+
+#define KERNEL_PROLOGUE_3D_DM()                                       \
+    int tx         = threadIdx.x;                                     \
+    int ty         = threadIdx.y;                                     \
+    int grid_blk   = blockIdx.x;                                      \
+    int shell_blk  = blockIdx.y;                                      \
+    int blockIdx_z = blockIdx.z;
+
+#define KERNEL_PROLOGUE_3D_AOW()                                      \
+    int task_ij    = blockIdx.x;                                      \
+    int tx         = threadIdx.x;                                     \
+    int ty         = threadIdx.y;                                     \
+    int tz         = threadIdx.z;                                     \
+    int blockIdx_y = blockIdx.y;                                      \
+    int blockIdx_z = blockIdx.z;                                      \
+    int gridDim_y  = gridDim.y;                                      \
+    int gridDim_z  = gridDim.z;
+#endif
+
 __global__
 static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
                        int ngrids, int nbas, int nbins, int nsegs, int *bas_segs,
                        uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int grid_blk = blockIdx.x;
-    int shell_blk = blockIdx.y;
+    KERNEL_PROLOGUE_3D_DM();
+    SHARED_ARRAY(double, s_ao, THREADSX*THREADSY);
+    SHARED_ARRAY(double, s_dm, THREADSX*THREADSY);
+
     int jsh = jsh0 + shell_blk * THREADSY + ty;
     if (jsh >= jsh1) {
         return;
@@ -57,15 +106,12 @@ static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
     }
 
     int grid_id = grid_blk * THREADSX + tx;
-    int jp = blockIdx.z;
+    int jp = blockIdx_z;
     int j = ao_loc[jsh] + jp;
     int ishp, ip, k, i, seg;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
-
-    __shared__ double s_ao[THREADSX*THREADSY];
-    __shared__ double s_dm[THREADSX*THREADSY];
 
     for (seg = 0; seg < nsegs; seg++) {
         int ish0 = bas_segs[seg];
@@ -107,10 +153,10 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm, int jsh0, int jsh1,
                         int ngrids, int nbas, int nbins, int nsegs, int *bas_segs,
                         uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int grid_blk = blockIdx.x;
-    int shell_blk = blockIdx.y;
+    KERNEL_PROLOGUE_3D_DM();
+    SHARED_ARRAY(double, s_ao, THREADSX*THREADSY);
+    SHARED_ARRAY(double, s_dm, THREADSX*THREADSY);
+
     int jsh = jsh0 + shell_blk * THREADSY + ty;
     if (jsh >= jsh1) {
         return;
@@ -131,15 +177,12 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm, int jsh0, int jsh1,
     }
 
     int grid_id = grid_blk * THREADSX + tx;
-    int jp = blockIdx.z;
+    int jp = blockIdx_z;
     int j = ao_loc[jsh] + jp;
     int ishp, ip, k, i, seg;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
-
-    __shared__ double s_ao[THREADSX*THREADSY];
-    __shared__ double s_dm[THREADSX*THREADSY];
 
     for (seg = 0; seg < nsegs; seg++) {
         int ish0 = bas_segs[seg];
@@ -181,10 +224,10 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
                         int ngrids, int nbas, int nbins, uint8_t *screen_index,
                         int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
-    int task_ij = blockIdx.x;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int tz = threadIdx.z;
+    KERNEL_PROLOGUE_3D_AOW();
+    SHARED_ARRAY(double, s_bra, THREADSXY);
+    SHARED_ARRAY(double, s_ket, THREADSXY);
+
     int txy = ty * DIVXY + tx;
     int tyz = tz * THREADSY + ty;
     int ish0 = bas_pair2bra[task_ij];
@@ -193,18 +236,15 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
     int j0 = ao_loc[jsh0];
     int ish4 = ish0 / THREADSY;
     int jsh4 = jsh0 / THREADSY;
-    int degen_i = gridDim.y;
-    int degen_j = gridDim.z;
-    int ip = blockIdx.y;
-    int jp = blockIdx.z;
+    int degen_i = gridDim_y;
+    int degen_j = gridDim_z;
+    int ip = blockIdx_y;
+    int jp = blockIdx_z;
 
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
-
-    __shared__ double s_bra[THREADSXY];
-    __shared__ double s_ket[THREADSXY];
 
     int grid_blk;
     for (grid_blk = 0; grid_blk < ngrids/THREADSX; grid_blk++) {
@@ -223,7 +263,11 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
                 double s2 = ket[j*Ngrids+grid_id];
                 double s = abs(s1 * s2);
                 if (s > 1e-3 && si+sj < nbins){
+                    // #ifdef USE_SYCL
+                    // sycl::ext::oneapi::experimental::printf("%f %f %f %d %d %d %d %d %d %d %d\n", s, s1, s2, si, sj, si+sj, grid_id, ish0, jsh0, i, j);
+                    // #else
                     printf("%f %f %f %d %d %d %d %d %d %d %d\n", s, s1, s2, si, sj, si+sj, grid_id, ish0, jsh0, i, j);
+                    // #endif
                 }
             }
             __syncthreads();
@@ -274,10 +318,10 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
                        int ngrids, int nbas, int nbins, uint8_t *screen_index,
                        int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
-    int task_ij = blockIdx.x;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int tz = threadIdx.z;
+    KERNEL_PROLOGUE_3D_AOW();
+    SHARED_ARRAY(double, s_bra, THREADSXY);
+    SHARED_ARRAY(double, s_ket, THREADSXY);
+
     int txy = ty * DIVXY + tx;
     int tyz = tz * THREADSY + ty;
     int ish0 = bas_pair2bra[task_ij];
@@ -286,18 +330,15 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
     int j0 = ao_loc[jsh0];
     int ish4 = ish0 / THREADSY;
     int jsh4 = jsh0 / THREADSY;
-    int degen_i = gridDim.y;
-    int degen_j = gridDim.z;
-    int ip = blockIdx.y;
-    int jp = blockIdx.z;
+    int degen_i = gridDim_y;
+    int degen_j = gridDim_z;
+    int ip = blockIdx_y;
+    int jp = blockIdx_z;
 
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
-
-    __shared__ double s_bra[THREADSXY];
-    __shared__ double s_ket[THREADSXY];
 
     int grid_blk;
     for (grid_blk = 0; grid_blk < ngrids/THREADSX; grid_blk++) {
@@ -433,16 +474,18 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
         assert(ish1 % THREADSY == 0);
         int degen = ao_loc[ish0+1] - ao_loc[ish0];
         int nsh = ish1 - ish0;
-        dim3 threads(THREADSX, THREADSY);
-        dim3 blocks((ngrids+THREADSX-1)/THREADSX, (nsh+THREADSY-1)/THREADSY, degen);
+        auto threads = MAKE_RANGE_3D(THREADSX, THREADSY, 1);
+        auto blocks  = MAKE_RANGE_3D(grid_blocks, (nsh+THREADSY-1)/THREADSY, degen);
         if (trans_dm) {
-            _dot_ao_dmT<<<blocks, threads>>>(out, ao, dm, ish0, ish1, ngrids, nbas,
-                                             nbins, nsegs, d_seg_loc, d_sindex,
-                                             d_pair_mask, d_ao_loc);
+            LAUNCH_KERNEL_3D(_dot_ao_dmT_sycl, _dot_ao_dmT,
+                             out, ao, dm, ish0, ish1, ngrids, nbas,
+                             nbins, nsegs, d_seg_loc, d_sindex,
+                             d_pair_mask, d_ao_loc);
         } else {
-            _dot_ao_dm<<<blocks, threads>>>(out, ao, dm, ish0, ish1, ngrids, nbas,
-                                            nbins, nsegs, d_seg_loc, d_sindex,
-                                            d_pair_mask, d_ao_loc);
+            LAUNCH_KERNEL_3D(_dot_ao_dm_sycl, _dot_ao_dm,
+                             out, ao, dm, ish0, ish1, ngrids, nbas,
+                             nbins, nsegs, d_seg_loc, d_sindex,
+                             d_pair_mask, d_ao_loc);
         }
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -488,10 +531,11 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
         assert(jsh0 % THREADSY == 0);
         int degen_i = ao_loc[ish0+1] - ao_loc[ish0];
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
-        dim3 threads(DIVXY, THREADSY, THREADSY);
-        dim3 blocks(ntasks, degen_i, degen_j);
-        _dot_aow_ao<<<blocks, threads>>>(out, bra, ket, wv, ngrids, nbas, nbins, d_sindex,
-                                         d_pair2bra+task0, d_pair2ket+task0, d_ao_loc);
+        auto threads = MAKE_RANGE_3D(DIVXY, THREADSY, THREADSY);
+        auto blocks  = MAKE_RANGE_3D(ntasks, degen_i, degen_j);
+        LAUNCH_KERNEL_3D(_dot_aow_ao_sycl, _dot_aow_ao,
+                         out, bra, ket, wv, ngrids, nbas, nbins, d_sindex,
+                         d_pair2bra+task0, d_pair2ket+task0, d_ao_loc);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTdot_aow_ao_sparse: %s\n",
@@ -535,10 +579,11 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
         assert(jsh0 % THREADSY == 0);
         int degen_i = ao_loc[ish0+1] - ao_loc[ish0];
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
-        dim3 threads(DIVXY, THREADSY, THREADSY);
-        dim3 blocks(ntasks, degen_i, degen_j);
-        _dot_ao_ao<<<blocks, threads>>>(out, bra, ket, ngrids, nbas, nbins, d_sindex,
-                                        d_pair2bra+task0, d_pair2ket+task0, d_ao_loc);
+        auto threads = MAKE_RANGE_3D(DIVXY, THREADSY, THREADSY);
+        auto blocks  = MAKE_RANGE_3D(ntasks, degen_i, degen_j);
+        LAUNCH_KERNEL_3D(_dot_ao_sycl, _dot_ao_ao,
+                         out, bra, ket, ngrids, nbas, nbins, d_sindex,
+                         d_pair2bra+task0, d_pair2ket+task0, d_ao_loc);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTdot_ao_ao_sparse: %s\n",
@@ -554,3 +599,7 @@ cleanup:
     return err_code;
 }
 }
+
+#undef KERNEL_PROLOGUE_3D_DM
+#undef KERNEL_PROLOGUE_3D_AOW
+#undef LAUNCH_KERNEL_3D

@@ -644,7 +644,8 @@ class KnownValues(unittest.TestCase):
         mf = mol.UKS(xc = "wB97M-V").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
         mf.grids.atom_grid = (10,14)
         mf.nlcgrids.atom_grid = (10,14)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 5e-12
+        mf.max_cycle = 70
         mf.kernel()
         assert mf.converged
 

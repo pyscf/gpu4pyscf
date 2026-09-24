@@ -14,7 +14,7 @@
 
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v -maxrregcount=128")
 
-add_library(gvhf SHARED
+set(GPU_SRCS
   constant.cu
   #nr_jk_driver.cu
   #nr_jk_driver_int3c2e_ip1.cu
@@ -25,15 +25,24 @@ add_library(gvhf SHARED
   #get_veff_driver_ip1.cu
   #rys_roots_dat.cu
 )
-
-#option(BUILD_SHARED_LIBS "build shared libraries" 1)
-#option(ENABLE_STATIC "Enforce static library build" 0)
-#if(ENABLE_STATIC)
-#  set(BUILD_SHARED_LIBS 0)
-#endif()
+add_library(gvhf SHARED ${GPU_SRCS})
 
 set_target_properties(gvhf PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-  CUDA_SEPARABLE_COMPILATION ON)
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-target_link_libraries(gvhf gint)
+if (USE_SYCL)
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  target_compile_options(gvhf PRIVATE -x c++ -nocudainc -nocudalib)
+  # gvhf/constant.cuh declares its bpcache as s_gvhf_bpcache rather than
+  # gint's s_bpcache. Both are default-visibility device_global objects, and
+  # libgint.so and libgvhf.so are co-resident with no DT_NEEDED link between
+  # them, so identical names would alias to whichever definition the dynamic
+  # linker resolved first and let one library's host-side memcpy land in the
+  # other's device image. The rename keeps them distinct; this define maps
+  # any inlined gint source that still spells s_bpcache onto gvhf's copy.
+  target_compile_definitions(gvhf PRIVATE s_bpcache=s_gvhf_bpcache)
+  target_link_libraries(gvhf PRIVATE sycl_compat gsycl gint)
+else (USE_SYCL)
+  set_target_properties(gvhf PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+  target_link_libraries(gvhf PRIVATE gint)
+endif (USE_SYCL)
