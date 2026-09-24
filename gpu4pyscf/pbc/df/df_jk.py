@@ -140,7 +140,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     assert kpts_band is None or kpts_band is kpts
     assert mydf.has_kpts(kpts)
     if mydf._cderi is None:
-        mydf.build(kpts_band=kpts_band)
+        mydf.build(j_only=False, kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_k_kpts', *t0)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
@@ -200,6 +200,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
         # ki_idx is already sorted
         k_adapt_dic[kp] = kp_conj, kj_idx
+
+    assert len(mydf._cderi) == len(k_adapt_dic), \
+            'cderi should be initialized with j_only=False'
 
     if (is_zero(kpts) and is_zero(kpts_band) and
         not np.iscomplexobj(dm_kpts)):
@@ -277,7 +280,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         raise NotImplementedError(f'get_jk for single k-point {kpt}')
 
     if mydf._cderi is None:
-        mydf.build()
+        mydf.build(j_only=not with_k)
 
     if dm.dtype == np.float64:
         return df_jk_real.get_jk(mydf, dm, hermi, with_j, with_k, exxdiv)

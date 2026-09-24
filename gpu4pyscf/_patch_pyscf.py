@@ -61,9 +61,6 @@ if pyscf_version <= 10:
         scaled_atom_coords = cell.get_scaled_atom_coords()
         atom_boundary_max = scaled_atom_coords[:,:dimension].max(axis=0)
         atom_boundary_min = scaled_atom_coords[:,:dimension].min(axis=0)
-        if (np.any(atom_boundary_max > 1) or np.any(atom_boundary_min < -1)):
-            atom_boundary_max[atom_boundary_max > 1] = 1
-            atom_boundary_min[atom_boundary_min <-1] = -1
         ovlp_penalty = atom_boundary_max - atom_boundary_min
         dR = ovlp_penalty.dot(a[:dimension])
         dR_basis = np.diag(dR)

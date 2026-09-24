@@ -91,14 +91,13 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         cell.natm, cell.nbas, cell._atm, cell._bas, _env, ao_loc)
     ngrids = len(Gv)
     assert ngrids < np.iinfo(np.int32).max, "possible int32 overflow"
-    GvT = (asarray(Gv).T + asarray(kpt[:,None])).ravel()
+    GvT = (asarray(Gv.T) + asarray(kpt[:,None])).ravel()
     nao = ao_loc[-1]
     out = ndarray((nao, ngrids), dtype=np.complex128, buffer=out)
     err = libpbc.build_ft_ao(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(ngrids),
-        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(cell.nbas))
+        ctypes.cast(GvT.data.ptr, ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('build_ft_ao failed')
     if sort_output or not cell_sorted:

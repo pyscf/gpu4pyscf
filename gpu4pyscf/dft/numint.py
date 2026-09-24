@@ -1073,7 +1073,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
 
     ao_deriv = 0
     ngrids = grids.weights.size
-    rho = cupy.empty(ngrids)
+    rho = cupy.zeros(ngrids)
 
     t1 = t0 = log.init_timer()
     p0 = p1 = 0
@@ -1086,6 +1086,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
             mo_coeff_mask = mo_coeff[idx,:]
             rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'LDA')
         t1 = log.timer_debug2('eval rho slice', *t1)
+    assert p1 == ngrids
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
@@ -1121,6 +1122,7 @@ def get_rho_naive(mol, dm, grids):
         ao = ni.eval_ao(mol, grids_coords[g0:g1, :], deriv = 0)
         for i_dm in range(nset):
             rho_tot[i_dm, g0:g1] = np.einsum("gi,gj,ij->g", ao, ao, dm[i_dm])
+    assert g1 == ngrids
 
     rho_tot = np.sum(rho_tot, axis = 0)
     return rho_tot
@@ -1168,7 +1170,7 @@ def get_rho_with_derivatives(ni, mol, dm, grids, xc = "r2scan", max_memory=2000,
         rho_dim = 5
 
     ngrids = grids.coords.shape[0]
-    rho_tot = cupy.empty([nset, rho_dim, ngrids])
+    rho_tot = cupy.zeros([nset, rho_dim, ngrids])
 
     t1 = t0 = log.init_timer()
     p0 = p1 = 0
@@ -1183,6 +1185,7 @@ def get_rho_with_derivatives(ni, mol, dm, grids, xc = "r2scan", max_memory=2000,
                 rho_tot[i_dm, :, p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ[i_dm], None, xctype)
 
         t1 = log.timer_debug2('eval rho slice', *t1)
+    assert p1 == ngrids
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
@@ -1222,7 +1225,7 @@ def get_rho_with_derivatives_naive(mol, dm, grids, xc = "r2scan"):
         rho_dim = 4
     else:
         rho_dim = 5
-    rho_tot = np.empty([nset, rho_dim, ngrids])
+    rho_tot = np.zeros([nset, rho_dim, ngrids])
 
     ngrids_per_batch = 4096
     for g0 in range(0, ngrids, ngrids_per_batch):
@@ -1231,6 +1234,7 @@ def get_rho_with_derivatives_naive(mol, dm, grids, xc = "r2scan"):
         for i_dm in range(nset):
             rho = ni.eval_rho(mol, ao, dm[i_dm], xctype = xctype, hermi = 1, with_lapl = False)
             rho_tot[i_dm, :, g0:g1] = rho
+    assert g1 == ngrids
 
     return rho_tot
 
@@ -1988,7 +1992,7 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
     return pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
-                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None, strict_grid_order=False):
+                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None):
     '''
     Generator loops over grids block-by-block.
     Kwargs:
@@ -1998,7 +2002,6 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         blksize: if not given, it will be estimated with avail GPU memory.
         buf: dummy argument for compatibility with PySCF
         grid_range: loop [grid_start, grid_end] in grids only. Both values has to be multiple of MIN_BLK_SIZE.
-        strict_grid_order: if True, no grids will be skipped, even if ao dimension is zero.
     '''
     log = logger.new_logger(mol)
     if grids.coords is None:
@@ -2051,11 +2054,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         coords = cupy.asarray(grids.coords[ip0:ip1])
         weight = cupy.asarray(grids.weights[ip0:ip1])
 
-        if nao_sub == 0:
-            if strict_grid_order:
-                zero_sized_ao = cupy.ndarray((comp,nao_sub,ip1-ip0), memptr=buf.data)
-                yield zero_sized_ao, idx, weight, coords
-            continue
+        # Note: do NOT skip when nao_sub == 0, it'll mess up the grid order!
 
         ao_mask = eval_ao(
             _sorted_mol, coords, deriv,
@@ -2261,7 +2260,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
         ngrids = rho.shape[-1]
         if work is None:
-            blksize = int(MEMPOOL_THRESHOLD / 8 / nvar)
+            blksize = int(MEMPOOL_THRESHOLD // 8 // nvar)
             blksize = min(ngrids, blksize // 64 * 64)
             work = cupy.empty((nvar, blksize))
         else:
@@ -2454,6 +2453,8 @@ def _scale_ao(ao, wv, out=None):
     nvar, nao, ngrids = ao.shape
     assert wv.shape == (nvar, ngrids)
     out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
+    if ao.size == 0:
+        return out
     if not ao.flags.c_contiguous:
         return contract('nip,np->ip', ao, wv, out=out)
 
