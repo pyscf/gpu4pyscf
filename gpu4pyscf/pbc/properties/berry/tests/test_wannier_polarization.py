@@ -275,6 +275,88 @@ class KnownValues(unittest.TestCase):
                 np.sort(np.mod(w90_centers_fractional[:, direction], 1.)),
                 atol=2e-7)
 
+    @unittest.skipUnless(HAS_LIBWANNIER90, 'requires libwannier90')
+    def test_mmn_vs_pyscf(self):
+        from pyscf.pbc.tools import pywannier90
+
+        cell = gto.Cell(
+            atom='H .4 .7 1.1; H 1.7 1.4 .8',
+            a=np.eye(3) * 5.,
+            unit='Bohr',
+            basis={'H': [[0, (1.1, 1.)]]},
+            precision=1e-10,
+            verbose=0,
+        )
+        cell.build()
+        kmesh = np.asarray([2, 2, 2])
+        kpts = cell.make_kpts(kmesh)
+
+        rng = np.random.default_rng(27)
+        coeff = (
+            rng.standard_normal((len(kpts), cell.nao, cell.nao)) +
+            1j * rng.standard_normal((len(kpts), cell.nao, cell.nao)))
+        kmf = SimpleNamespace(
+            kpts=kpts,
+            mo_energy_kpts=[
+                np.arange(cell.nao, dtype=float) for _ in kpts],
+            mo_coeff_kpts=list(coeff),
+        )
+        w90 = pywannier90.W90(
+            kmf, cell, kmesh, num_wann=cell.nao)
+        w90.use_bloch_phases = True
+
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                os.chdir(tmpdir)
+                w90.make_win()
+                w90.setup()
+                reference = w90.get_M_mat()
+            finally:
+                os.chdir(cwd)
+
+        topology = berry.KPointMesh(cell, kpts, kmesh)
+        coeff_gpu = cp.asarray(coeff)
+        positive_links = [
+            cp.asnumpy(berry.build_mmn(
+                cell, coeff_gpu, kpts, kmesh, direction,
+                topology=topology))
+            for direction in range(3)
+        ]
+        scaled_kpts = cell.get_scaled_kpts(kpts)
+        gpu_mmn = np.empty_like(reference)
+
+        for k in range(len(kpts)):
+            for nn in range(w90.nntot_loc):
+                neighbor = int(w90.nn_list[nn, k, 0]) - 1
+                shift = np.asarray(w90.nn_list[nn, k, 1:4], dtype=int)
+                step = np.rint(
+                    (scaled_kpts[neighbor] + shift - scaled_kpts[k])
+                    * kmesh).astype(int)
+                axes = np.flatnonzero(step)
+
+                if len(axes) == 1 and abs(step[axes[0]]) == 1:
+                    direction = int(axes[0])
+                    if step[direction] > 0:
+                        gpu_mmn[k, nn] = positive_links[direction][k]
+                    else:
+                        gpu_mmn[k, nn] = (
+                            positive_links[direction][neighbor].conj().T)
+                else:
+                    neighbor_image = cell.get_abs_kpts(
+                        scaled_kpts[neighbor] + shift)
+                    s_ao = berry.periodic_ao_overlap(
+                        cell, kpts[k], neighbor_image)
+                    gpu_mmn[k, nn] = cp.asnumpy(
+                        coeff_gpu[k].conj().T
+                        @ s_ao
+                        @ coeff_gpu[neighbor])
+
+        # pywannier90 stores the two band axes transposed for Fortran I/O.
+        np.testing.assert_allclose(
+            gpu_mmn.swapaxes(-1, -2), reference,
+            atol=2e-9, rtol=2e-9)
+
     def test_atomic_limit_centers_and_total_polarization(self):
         lattice = np.diag([7., 8., 9.])
         atom_fractional = np.asarray([.23, .31, .17])

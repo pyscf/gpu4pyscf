@@ -113,6 +113,9 @@ def hybrid_wannier_centers(overlaps, strings, singular_tol=1e-10):
     eigenvalues = _unitary_eigenvalues(loops)
     eigenphases = cp.angle(eigenvalues)
     centers = cp.mod(-eigenphases / TWO_PI, 1.)
+    # * Different strings may have different orders of bands, sort them
+    #   to ensure the centers are in the same order. It does not mean
+    #   the centers in the same places are for the same band!
     centers.sort(axis=1) # (nstring, noccupied)
     return centers, phases
 
