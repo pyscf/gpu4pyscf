@@ -100,13 +100,6 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
 
     assert kpts.ndim == 2
     assert dm_kpts.ndim == 3
-    if not cell.cart:
-        c2s = asarray(cell.cart2sph_coeff())
-        dm_kpts = sandwich_dot(dm_kpts, c2s.T)
-        # Ensure all AOs are evaluated in the Cartesian GTOs as ao_ks strain
-        # derivatives currently supports Cartesian format only
-        cell = cell.copy()
-        cell.cart = True
     nkpts, nao = dm_kpts.shape[:2]
     assert nkpts == len(kpts)
 
