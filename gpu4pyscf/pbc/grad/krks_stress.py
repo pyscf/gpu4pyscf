@@ -303,8 +303,8 @@ def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
     coords = cp.asarray(coords.T, order='C')
     bvk_ncells = opt.bvk_ncells
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
-    nao = cell.nao_nr(cart=True)
-    cart = 1
+    nao = cell.nao_nr()
+    cart = cell.cart
     out = cp.empty((3, 3, comp, bvk_ncells, nao, ngrids))
 
     drv = libpbc.PBCeval_gto_strain_tensor

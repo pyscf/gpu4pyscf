@@ -115,6 +115,7 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
         else:
             assert rho.ndim == 1
         dweight_dA = get_becke_weight_derivative(grids, natm, (g0,g1))
+        dweight_dA = dweight_dA[:-3]
         de_grid_response_weight += cp.einsum("Adg->Ad", dweight_dA * (rho * exc))
         del dweight_dA, rho, exc
     assert g1 == ngrids

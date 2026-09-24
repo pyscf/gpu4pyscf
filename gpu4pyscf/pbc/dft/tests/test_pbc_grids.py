@@ -27,6 +27,7 @@ from gpu4pyscf.pbc.grad.krks import get_vxc_full_response, get_vxc
 from gpu4pyscf.pbc.grad.kuks import get_vxc_full_response as unrestricted_get_vxc_full_response
 from gpu4pyscf.pbc.grad.kuks import get_vxc as unrestricted_get_vxc
 from gpu4pyscf.dft.tests.test_grids import find_matching_index_between_two_grids
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 
 def numerical_gradient_exc_becke(cell, xc, kpts, auxbasis, atom_grid, dm, unrestricted=False):
     def get_energy(cell):
@@ -191,7 +192,7 @@ class KnownValues(unittest.TestCase):
         test_dw_truncated = get_becke_weight_derivative(grids, cell.natm, truncation_range)
 
         dx = 1e-5
-        reference_dw = cp.empty([cell.natm, 3, grids.coords.shape[0]])
+        reference_dw = cp.empty([cell.natm + 3, 3, grids.coords.shape[0]])
         cell_copy = cell.copy()
         for i_atom in range(cell.natm):
             for i_xyz in range(3):
@@ -213,10 +214,26 @@ class KnownValues(unittest.TestCase):
 
                 reference_dw[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
 
+        for i_xyz in range(3):
+            for j_xyz in range(3):
+                cell_p, cell_m = _finite_diff_cells(cell, i_xyz, j_xyz, disp = dx)
+                grids.reset(cell_p)
+                grids.build()
+                w_p = grids.weights.copy()
+
+                grids.reset(cell_m)
+                grids.build()
+                w_m = grids.weights.copy()
+
+                reference_dw[cell.natm + i_xyz, j_xyz] = (w_p - w_m) / (2 * dx)
+
         reference_dw_truncated = reference_dw[:, :, truncation_range[0] : truncation_range[1]]
 
-        assert cp.max(cp.abs(test_dw - reference_dw)) < 2e-9
-        assert cp.max(cp.abs(test_dw_truncated - reference_dw_truncated)) < 2e-9
+        assert cp.max(cp.abs(test_dw[:-3] - reference_dw[:-3])) < 2e-9
+        assert cp.max(cp.abs(test_dw_truncated[:-3] - reference_dw_truncated[:-3])) < 2e-9
+
+        assert cp.max(cp.abs(test_dw[-3:] - reference_dw[-3:])) < 5e-9
+        assert cp.max(cp.abs(test_dw_truncated[-3:] - reference_dw_truncated[-3:])) < 5e-9
 
     def test_xc_gradient_lda_with_response(self):
         cell = pyscf.M(
