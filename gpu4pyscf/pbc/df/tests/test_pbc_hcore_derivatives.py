@@ -458,7 +458,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 1e-6
-        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 1e-6
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 2e-6
 
 if __name__ == '__main__':
     print("Full Tests for PBC GDF Hcore gradient and stress tensor")

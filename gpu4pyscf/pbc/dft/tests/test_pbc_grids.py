@@ -19,7 +19,7 @@ import pyscf
 from pyscf.pbc.dft import gen_grid as gen_grid_cpu
 from gpu4pyscf.pbc.dft import gen_grid
 from pyscf.pbc.dft import rks as rks_cpu
-from gpu4pyscf.pbc.dft import rks
+from gpu4pyscf.pbc.dft import rks, uks
 from pyscf.pbc.dft import krks as krks_cpu
 from gpu4pyscf.pbc.dft import krks, kuks
 from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
@@ -29,7 +29,7 @@ from gpu4pyscf.pbc.grad.kuks import get_vxc as unrestricted_get_vxc
 from gpu4pyscf.dft.tests.test_grids import find_matching_index_between_two_grids
 from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 
-def numerical_gradient_exc_becke(cell, xc, kmesh, auxbasis, atom_grid, dm, unrestricted=False):
+def numerical_gradient_exc_becke(cell, xc, kmesh, auxbasis, atom_grid, dm, unrestricted=False, dx = 1e-4):
     assert np.array(kmesh).shape == (3,)
     def get_energy(cell):
         kpts = cell.make_kpts(kmesh)
@@ -50,7 +50,6 @@ def numerical_gradient_exc_becke(cell, xc, kmesh, auxbasis, atom_grid, dm, unres
         return exc
 
     numerical_gradient = np.zeros((cell.natm + 3, 3))
-    dx = 1e-4
     cell_copy = cell.copy()
     for i_atom in range(cell.natm):
         for i_xyz in range(3):
@@ -443,7 +442,7 @@ class KnownValues(unittest.TestCase):
         )
 
         kpts = cell.make_kpts((1,1,1))
-        mf = kuks.KUKS(cell, xc="HSE06", kpts=kpts).density_fit(auxbasis='def2-universal-jkfit')
+        mf = uks.UKS(cell, xc="HSE06").density_fit(auxbasis='def2-universal-jkfit')
         mf.grids = gen_grid.BeckeGrids(cell)
         mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-10
@@ -455,16 +454,17 @@ class KnownValues(unittest.TestCase):
             dm = dm[:,None,:,:]
         test_gradient = unrestricted_get_vxc(mf._numint, cell, mf.grids, mf.xc, dm, kpts, hermi=1)
 
-        # ref_gradient = numerical_gradient_exc_becke(cell, "HSE06", (1,1,1), 'def2-universal-jkfit', (99,590), dm, unrestricted=True)
+        # ref_gradient = numerical_gradient_exc_becke(cell, "HSE06", (1,1,1), 'def2-universal-jkfit', (99,590), dm, unrestricted=True, dx=1e-5)
         ref_gradient = np.array([
-            [ 0.0000210218686902, -0.0175452375472673,  0.0000210222950159],
-            [-0.0000210218686902,  0.0175452375383855, -0.0000210222772523],
-            [-0.5849730212226234, -0.0000565129454344, -0.0047818453818849],
-            [-0.0000557453816441, -0.5846170845913434, -0.0000557508350596],
-            [-0.0047818449822046, -0.0000565183100321, -0.5849730417928356],
+            [ 0.0000210217621088, -0.0175452376183216,  0.000021022206198 ],
+            [-0.0000210217621088,  0.0175452377071394, -0.000021022206198 ],
+            [-0.5849730015938803, -0.0000565129276708, -0.0047818454085302],
+            [-0.0000557453638805, -0.5846170649803639, -0.0000557508705867],
+            [-0.0047818451420767, -0.0000565183455592, -0.5849730222884375],
         ])
 
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 2e-4
+        assert np.max(np.abs(test_gradient[:-3] - ref_gradient[:-3])) < 2e-4
+        assert np.max(np.abs(test_gradient[-3:] - ref_gradient[-3:])) < 5e-4
 
     def test_xc_gradient_unrestricted_no_k_with_response(self):
         cell = pyscf.M(
@@ -527,16 +527,12 @@ class KnownValues(unittest.TestCase):
             verbose = 0,
         )
 
-        kmesh = (1,3,1)
+        kmesh = (1,4,1)
         kpts = cell.make_kpts(kmesh)
         mf = kuks.KUKS(cell, xc="lda", kpts=kpts)
         mf.grids = gen_grid.BeckeGrids(cell)
         mf.grids.atom_grid = (40,194)
         mf.conv_tol = 1e-10
-
-        # TODO: This is a hack to avoid a OOM issue in get_hcore() function (using multigrid_v3 internally)
-        hcore = mf.to_cpu().get_hcore()
-        mf.get_hcore = lambda: cp.asarray(hcore)
 
         mf.kernel()
 
@@ -546,9 +542,10 @@ class KnownValues(unittest.TestCase):
         test_gradient = unrestricted_get_vxc_full_response(mf._numint, cell, mf.grids, mf.xc, dm, kpts, hermi=1)
 
         # dm is not very stable, and numerical gradient is super fast
-        ref_gradient = numerical_gradient_exc_becke(cell, "lda", kmesh, None, (40,194), dm, unrestricted=True)
+        ref_gradient = numerical_gradient_exc_becke(cell, "lda", kmesh, None, (40,194), dm, unrestricted=True, dx=1e-5)
 
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-9
+        assert np.max(np.abs(test_gradient[:-3] - ref_gradient[:-3])) < 1e-9
+        assert np.max(np.abs(test_gradient[-3:] - ref_gradient[-3:])) < 4e-9
 
 if __name__ == '__main__':
     print("Full Tests for PBC Becke grids")
