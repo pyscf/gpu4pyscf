@@ -40,7 +40,8 @@ from gpu4pyscf.scf.jk import SHM_SIZE
 from gpu4pyscf.df.int3c2e_bdiv import (
     get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern, libvhf_rys,
     int3c2e_scheme as mol_int3c2e_scheme)
-from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, FTOpt
+from gpu4pyscf.pbc.df.ft_ao import (
+    libpbc, most_diffuse_pgto, FTOpt, ft_ao_scheme)
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
@@ -228,7 +229,6 @@ class SRInt3c2eOpt:
         self.rcut = None
         self._mesh = None
         self._int3c2e_envs = None
-        self.bas_ij_cache = None
         self.bvkcell = None
         self.bvkmesh_Ls = None
         self.bvk_auxcell = None
@@ -246,11 +246,8 @@ class SRInt3c2eOpt:
         auxcell = self.auxcell = SortedCell.from_cell(self.auxcell)
         assert auxcell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
 
-        memory_size = get_avail_mem(exclude_memory_pool=True)
-        naux = auxcell.nao_nr(cart=True)
-        group_size = int((.1*memory_size/(naux*8))**.5)
         cell = self.cell = SortedCell.from_cell(
-            self.cell, group_size=group_size, decontract=True, diffuse_cutoff=0.25)
+            self.cell, decontract=True, diffuse_cutoff=0.25)
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
 
         omega = self.omega
@@ -471,33 +468,35 @@ class SRInt3c2eOpt:
                    for (i, j), pairs in self.bas_ij_cache.items())
 
     def _split_bas_ij_idx(self, batch_size, pair_per_block):
-        '''Combine consecutive cache entries into Cartesian AO-pair batches.
-
-        Cache entries are indivisible. batch_size limits Cartesian AO pairs;
-        None combines all entries. Returns (bas_ij_idx, shl_pair_offsets)
-        tuples with uint32 pair indices and int32 block offsets. Blocks
-        contain at most pair_per_block shell pairs and never cross a cache
-        entry, keeping each i/j (l, nprim) pattern homogeneous.
+        '''Split consecutive shell pairs into Cartesian AO-pair batches.
+        batch_size is the target number of Cartesian AO pairs per batch.
         '''
         cell = self.cell
-        items = [(key, pairs) for key, pairs in self.bas_ij_cache.items() if len(pairs)]
-        if not items:
-            return []
-        l = cell.uniq_l_ctr[:,0]
-        nf = (l + 1) * (l + 2) // 2
-        pair_sizes = np.asarray([len(pairs)*nf[i]*nf[j] for (i, j), pairs in items])
         if batch_size is None:
-            splits = [0, len(items)]
-        else:
-            if pair_sizes.max() > batch_size:
-                raise ValueError(f'batch_size must be at least {int(pair_sizes.max())}')
-            splits = splits_by_blocksize(_counts_to_offsets(pair_sizes), batch_size)
+            return [cell.aggregate_shl_pairs(self.bas_ij_cache, pair_per_block)]
 
+        # If int3c2e nsp_per_block is smaller than ft_aopair nsp_per_block,
+        # multiple int3c2e batches can correspond to one ft_aopair batch.
+        # An int3c2e batch boundary may cut through an ft_aopair batch,
+        # causing SR and LR batch misaligned.
+        nsp_per_block = ft_ao_scheme(cache_cart_idx=True)[0]
+        nsp_per_block = np.maximum(pair_per_block, nsp_per_block)
+        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+            self.bas_ij_cache, nsp_per_block)
+
+        ao_pair_loc = get_ao_pair_loc(
+            cell.uniq_l_ctr[:,0], self.bas_ij_cache, cart=True)
+        ao_pair_size_offsets = ao_pair_loc[shl_pair_offsets].get()
+        splits = splits_by_blocksize(ao_pair_size_offsets, batch_size)
+        batch_splits = shl_pair_offsets[splits].get()
+
+        nbatches = len(splits) - 1
         batches = []
-        for p0, p1 in zip(splits[:-1], splits[1:]):
-            bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
-                dict(items[p0:p1]), pair_per_block)
-            batches.append((cp.asarray(bas_ij_idx, dtype=np.uint32), shl_pair_offsets))
+        for n in range(nbatches):
+            p0, p1 = batch_splits[n:n+2]
+            assert p0 != p1
+            s0, s1 = splits[n:n+2]
+            batches.append((bas_ij_idx[p0:p1], shl_pair_offsets[s0:s1+1]-p0))
         return batches
 
     def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None,

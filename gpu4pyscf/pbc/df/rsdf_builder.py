@@ -598,15 +598,19 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     diag = np.empty(0, dtype=np.int32)
     cderi_idx = cp.asarray(pair_addresses, dtype=np.int32), cp.asarray(diag, dtype=np.int32)
     nao_pairs = len(pair_addresses)
-    log.debug('nao_pairs = %d, n_compact_pairs = %d', nao_pairs, n_compact_pairs)
     ao_pair_counts = int3c2e._count_ao_pairs(cell, bas_ij_batches, cart, bvk_ncells)
+    max_pair_size = int(ao_pair_counts.max(initial=0))
+    log.debug('nao_pairs = %d, n_compact_pairs = %d, max_pair_size = %d',
+              nao_pairs, n_compact_pairs, max_pair_size)
 
+    naux_max = max(x.shape[1] for x in cd_j2c_cache)
+    log.debug('Required %.6g GB mapped memory on host',
+              len(cd_j2c_cache)*naux_max*nao_pairs*16e-9)
     cderi = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
         naux = cd_j2c_cache[j2c_idx].shape[1]
         cderi[kp] = empty_mapped((naux,nao_pairs), dtype=np.complex128)
         cderi[kp].fill(0.)
-    max_pair_size = int(ao_pair_counts.max(initial=0))
 
     tasks = iter(range(len(ao_pair_counts)))
     def proc():
