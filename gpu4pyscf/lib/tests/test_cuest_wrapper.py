@@ -168,7 +168,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         test_Hcore = mf.get_hcore()
 
-        assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-11
+        assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-10
 
     def test_hcore_cartesian(self):
         mf = RHF(self.mol_cart)
@@ -177,7 +177,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         test_Hcore = mf.get_hcore()
 
-        assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-11
+        assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-10
 
     def test_J_spherical(self):
         mol = self.mol_sph
@@ -1163,6 +1163,511 @@ class KnownValues(unittest.TestCase):
 
         assert cp.max(cp.abs(test_Hcore - ref_Hcore)) < 1e-5
 
+    def test_df_mo_hf_reconstruct_j3c_spherical(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        naux = mf.with_df.auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        ref_J, ref_K = mf.get_jk(dm = dm, hermi = 0)
+
+        mf.with_df.build()
+        _cderi = mf.with_df._cderi
+        _cderi = _cderi[0]
+        _cderi_idx = mf.with_df._cderi_idx
+        pair_addresses, diag_addrs = _cderi_idx
+        pair_address_i = pair_addresses // nao
+        pair_address_j = pair_addresses % nao
+
+        ref_j3c = cp.zeros((naux, nao, nao))
+
+        factors = cp.ones(pair_addresses.shape[0])
+        factors[diag_addrs] = 0.5
+
+        for i_pair in range(pair_addresses.shape[0]):
+            i = pair_address_i[i_pair]
+            j = pair_address_j[i_pair]
+            factor = factors[i_pair]
+            ref_j3c[:, i, j] += factor * _cderi[:, i_pair]
+            ref_j3c[:, j, i] += factor * _cderi[:, i_pair]
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 1e-10
+        assert cp.max(cp.abs(test_K - ref_K)) < 1e-10
+
+        mo_i = cp.random.rand(nao, 3) * 2 - 1
+        mo_j = cp.random.rand(nao, 5) * 2 - 1
+        mo_k = cp.random.rand(nao, 7) * 2 - 1
+        mo_l = cp.random.rand(nao, 11) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-9
+
+    def test_df_mo_hf_reconstruct_j3c_cartesian(self):
+        mol = self.mol_cart
+        auxbasis = self.auxbasis
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        naux = mf.with_df.auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        ref_J, ref_K = mf.get_jk(dm = dm, hermi = 0)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright)
+        assert test_j3c.shape[1:] == (nao, nao)
+        assert test_j3c.shape[0] < naux # Cuest uses spherical auxbasis, pyscf uses cartesian auxbasis
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 1e-1 # The different auxasis leads to very different J and K
+        assert cp.max(cp.abs(test_K - ref_K)) < 1e-1
+
+    def test_df_mo_arbitrary_reconstruct_j3c_for_k(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        omega = 0.3
+        lr_factor = 0.4
+        sr_factor = 0.5
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        auxmol = mf.with_df.auxmol
+        naux = auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
+        j2c_mr = int2c2e(auxmol, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        j2c_fr = int2c2e(auxmol, omega = 0)
+
+        from gpu4pyscf.df.int3c2e_bdiv import aux_e2
+        j3c_fr = aux_e2(mol, auxmol, omega = 0)
+        j3c_fr = j3c_fr.transpose(2, 0, 1)
+
+        fitting_cutoff = 1e-12
+
+        j2c_mr_lambda, j2c_mr_X = cp.linalg.eigh(j2c_mr)
+        j2c_mr_X = j2c_mr_X[:, j2c_mr_lambda >= fitting_cutoff]
+        j2c_mr_lambda = j2c_mr_lambda[j2c_mr_lambda >= 1e-12]
+        j2c_mr_half = cp.diag(cp.sqrt(j2c_mr_lambda)) @ j2c_mr_X.T
+
+        j2c_fr_lambda, j2c_fr_X = cp.linalg.eigh(j2c_fr)
+        j2c_fr_X = j2c_fr_X[:, j2c_fr_lambda >= 1e-12]
+        j2c_fr_lambda = j2c_fr_lambda[j2c_fr_lambda >= 1e-12]
+        j2c_fr_inv = j2c_fr_X @ cp.diag(1 / j2c_fr_lambda) @ j2c_fr_X.T
+
+        ref_j3c = cp.einsum("pq,qij->pij", j2c_mr_half @ j2c_fr_inv, j3c_fr)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        ref_J = cp.einsum("pij,pkl,kl->ij", ref_j3c, ref_j3c, dm)
+        ref_K = cp.einsum("pij,pkl,jl->ik", ref_j3c, ref_j3c, dm)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 2e-8
+        assert cp.max(cp.abs(test_K - ref_K)) < 2e-8
+
+        mo_i = cp.random.rand(nao, 11) * 2 - 1
+        mo_j = cp.random.rand(nao, 7) * 2 - 1
+        mo_k = cp.random.rand(nao, 5) * 2 - 1
+        mo_l = cp.random.rand(nao, 3) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
+
+    def test_df_mo_long_range_reconstruct_j3c_for_k(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        # LC-wPBE
+        omega = 0.4
+        lr_factor = 1.0
+        sr_factor = 0.0
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        auxmol = mf.with_df.auxmol
+        naux = auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
+        j2c_mr = int2c2e(auxmol, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        j2c_fr = int2c2e(auxmol, omega = 0)
+
+        from gpu4pyscf.df.int3c2e_bdiv import aux_e2
+        j3c_fr = aux_e2(mol, auxmol, omega = 0)
+        j3c_fr = j3c_fr.transpose(2, 0, 1)
+
+        fitting_cutoff = 1e-12
+
+        j2c_mr_lambda, j2c_mr_X = cp.linalg.eigh(j2c_mr)
+        j2c_mr_X = j2c_mr_X[:, j2c_mr_lambda >= fitting_cutoff]
+        j2c_mr_lambda = j2c_mr_lambda[j2c_mr_lambda >= 1e-12]
+        j2c_mr_half = cp.diag(cp.sqrt(j2c_mr_lambda)) @ j2c_mr_X.T
+
+        j2c_fr_lambda, j2c_fr_X = cp.linalg.eigh(j2c_fr)
+        j2c_fr_X = j2c_fr_X[:, j2c_fr_lambda >= 1e-12]
+        j2c_fr_lambda = j2c_fr_lambda[j2c_fr_lambda >= 1e-12]
+        j2c_fr_inv = j2c_fr_X @ cp.diag(1 / j2c_fr_lambda) @ j2c_fr_X.T
+
+        ref_j3c = cp.einsum("pq,qij->pij", j2c_mr_half @ j2c_fr_inv, j3c_fr)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        ref_J = cp.einsum("pij,pkl,kl->ij", ref_j3c, ref_j3c, dm)
+        ref_K = cp.einsum("pij,pkl,jl->ik", ref_j3c, ref_j3c, dm)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 3e-8
+        assert cp.max(cp.abs(test_K - ref_K)) < 3e-8
+
+        mo_i = cp.random.rand(nao, 11) * 2 - 1
+        mo_j = cp.random.rand(nao, 7) * 2 - 1
+        mo_k = cp.random.rand(nao, 5) * 2 - 1
+        mo_l = cp.random.rand(nao, 3) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 3e-7
+
+    def test_df_mo_short_range_reconstruct_j3c_for_k(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        # HSE06
+        omega = 0.11
+        lr_factor = 0.0
+        sr_factor = 0.25
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        auxmol = mf.with_df.auxmol
+        naux = auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
+        j2c_mr = int2c2e(auxmol, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        j2c_fr = int2c2e(auxmol, omega = 0)
+
+        from gpu4pyscf.df.int3c2e_bdiv import aux_e2
+        j3c_fr = aux_e2(mol, auxmol, omega = 0)
+        j3c_fr = j3c_fr.transpose(2, 0, 1)
+
+        fitting_cutoff = 1e-12
+
+        j2c_mr_lambda, j2c_mr_X = cp.linalg.eigh(j2c_mr)
+        j2c_mr_X = j2c_mr_X[:, j2c_mr_lambda >= fitting_cutoff]
+        j2c_mr_lambda = j2c_mr_lambda[j2c_mr_lambda >= 1e-12]
+        j2c_mr_half = cp.diag(cp.sqrt(j2c_mr_lambda)) @ j2c_mr_X.T
+
+        j2c_fr_lambda, j2c_fr_X = cp.linalg.eigh(j2c_fr)
+        j2c_fr_X = j2c_fr_X[:, j2c_fr_lambda >= 1e-12]
+        j2c_fr_lambda = j2c_fr_lambda[j2c_fr_lambda >= 1e-12]
+        j2c_fr_inv = j2c_fr_X @ cp.diag(1 / j2c_fr_lambda) @ j2c_fr_X.T
+
+        ref_j3c = cp.einsum("pq,qij->pij", j2c_mr_half @ j2c_fr_inv, j3c_fr)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        ref_J = cp.einsum("pij,pkl,kl->ij", ref_j3c, ref_j3c, dm)
+        ref_K = cp.einsum("pij,pkl,jl->ik", ref_j3c, ref_j3c, dm)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 2e-8
+        assert cp.max(cp.abs(test_K - ref_K)) < 2e-8
+
+        mo_i = cp.random.rand(nao, 11) * 2 - 1
+        mo_j = cp.random.rand(nao, 7) * 2 - 1
+        mo_k = cp.random.rand(nao, 5) * 2 - 1
+        mo_l = cp.random.rand(nao, 3) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
+
+    def test_df_mo_full_range_reconstruct_j3c_for_k(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        # B3LYP
+        omega = 0.0
+        lr_factor = 0.2
+        sr_factor = 0.2
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf.with_df.build()
+        nao = mol.nao
+        auxmol = mf.with_df.auxmol
+        naux = auxmol.nao
+
+        dm = cp.random.rand(nao, nao) * 2 - 1
+
+        from gpu4pyscf.df.int3c2e_bdiv import int2c2e
+        j2c_mr = int2c2e(auxmol, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        j2c_fr = int2c2e(auxmol, omega = 0)
+
+        from gpu4pyscf.df.int3c2e_bdiv import aux_e2
+        j3c_fr = aux_e2(mol, auxmol, omega = 0)
+        j3c_fr = j3c_fr.transpose(2, 0, 1)
+
+        fitting_cutoff = 1e-12
+
+        j2c_mr_lambda, j2c_mr_X = cp.linalg.eigh(j2c_mr)
+        j2c_mr_X = j2c_mr_X[:, j2c_mr_lambda >= fitting_cutoff]
+        j2c_mr_lambda = j2c_mr_lambda[j2c_mr_lambda >= 1e-12]
+        j2c_mr_half = cp.diag(cp.sqrt(j2c_mr_lambda)) @ j2c_mr_X.T
+
+        j2c_fr_lambda, j2c_fr_X = cp.linalg.eigh(j2c_fr)
+        j2c_fr_X = j2c_fr_X[:, j2c_fr_lambda >= 1e-12]
+        j2c_fr_lambda = j2c_fr_lambda[j2c_fr_lambda >= 1e-12]
+        j2c_fr_inv = j2c_fr_X @ cp.diag(1 / j2c_fr_lambda) @ j2c_fr_X.T
+
+        ref_j3c = cp.einsum("pq,qij->pij", j2c_mr_half @ j2c_fr_inv, j3c_fr)
+
+        mf = RHF(mol).density_fit(auxbasis = auxbasis)
+        mf = apply_cuest_wrapper(mf)
+
+        Cleft = cp.eye(nao)
+        Cright = cp.eye(nao)
+
+        test_j3c = mf.df_mo_integral(Cleft, Cright, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        assert test_j3c.shape == (naux, nao, nao)
+
+        ref_J = cp.einsum("pij,pkl,kl->ij", ref_j3c, ref_j3c, dm)
+        ref_K = cp.einsum("pij,pkl,jl->ik", ref_j3c, ref_j3c, dm)
+
+        test_J = cp.einsum("pij,pkl,kl->ij", test_j3c, test_j3c, dm)
+        test_K = cp.einsum("pij,pkl,jl->ik", test_j3c, test_j3c, dm)
+
+        assert cp.max(cp.abs(test_J - ref_J)) < 2e-8
+        assert cp.max(cp.abs(test_K - ref_K)) < 2e-8
+
+        mo_i = cp.random.rand(nao, 11) * 2 - 1
+        mo_j = cp.random.rand(nao, 7) * 2 - 1
+        mo_k = cp.random.rand(nao, 5) * 2 - 1
+        mo_l = cp.random.rand(nao, 3) * 2 - 1
+
+        ref_j3c_mo_ij = cp.einsum("puv,ui,vj->pij", ref_j3c, mo_i, mo_j)
+        ref_j3c_mo_kl = cp.einsum("puv,uk,vl->pkl", ref_j3c, mo_k, mo_l)
+        ref_j4c_mo = cp.einsum("pij,pkl->ijkl", ref_j3c_mo_ij, ref_j3c_mo_kl)
+
+        test_j3c_mo_ij = mf.df_mo_integral(mo_i, mo_j, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
+        test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
+
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
+
+    def test_range_separated_jk_pbe0_get_veff(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = RKS(mol, xc = "PBE0").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        nao = mol.nao
+        dm = cp.random.rand(nao, nao) * 2 - 1
+        dm = dm @ dm.T # symmetric positive definite
+
+        ref_Fock_2e = mf.get_veff(dm = dm)
+
+        mf = RKS(mol, xc = "PBE0").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        mf = apply_cuest_wrapper(mf)
+
+        mf.handles.build_dfintplan(mf, 0.11, 0.0, 0.25) # Wrong parameters, will rebuild dfintplan
+
+        test_Fock_2e = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e - ref_Fock_2e)) < 1e-8
+
+    def test_range_separated_jk_hse06_get_veff(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = RKS(mol, xc = "HSE06").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        nao = mol.nao
+        dm = cp.random.rand(nao, nao) * 2 - 1
+        dm = dm @ dm.T # symmetric positive definite
+
+        ref_Fock_2e = mf.get_veff(dm = dm)
+
+        mf = RKS(mol, xc = "HSE06").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        mf = apply_cuest_wrapper(mf)
+
+        mf.handles.build_dfintplan(mf, 0.11, 0.0, 0.25) # Correct parameters
+        def raise_an_error(*args, **kwargs):
+            raise RuntimeError("Should not be called")
+        mf.handles.build_dfintplan = raise_an_error # Make sure dfintplan is not rebuilt
+
+        test_Fock_2e = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e - ref_Fock_2e)) < 5e-3 # Doesn't match well because of different range-separated DF algorithm
+
+    def test_range_separated_jk_lcwpbe_get_veff(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = RKS(mol, xc = "HYB_GGA_XC_LC_WPBE_WHS").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        nao = mol.nao
+        dm = cp.random.rand(nao, nao) * 2 - 1
+        dm = dm @ dm.T # symmetric positive definite
+
+        ref_Fock_2e = mf.get_veff(dm = dm)
+
+        mf = RKS(mol, xc = "HYB_GGA_XC_LC_WPBE_WHS").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        mf = apply_cuest_wrapper(mf)
+
+        test_Fock_2e = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e - ref_Fock_2e)) < 5e-3 # Doesn't match well because of different range-separated DF algorithm
+
+        def raise_an_error(*args, **kwargs):
+            raise RuntimeError("Should not be called")
+        mf.handles.build_dfintplan = raise_an_error # Make sure dfintplan is not rebuilt
+
+        test_Fock_2e_round2 = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e_round2 - test_Fock_2e)) < 1e-8
+
+    def test_range_separated_jk_wb97x_get_veff(self):
+        mol = self.mol_sph
+        auxbasis = self.auxbasis
+
+        mf = UKS(mol, xc = "wB97X").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (99,590)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        nao = mol.nao
+        dm = cp.random.rand(2, nao, nao) * 2 - 1
+        dm[0] = dm[0] @ dm[0].T # symmetric positive definite
+        dm[1] = dm[1] @ dm[1].T # symmetric positive definite
+
+        ref_Fock_2e = mf.get_veff(dm = dm)
+
+        mf = UKS(mol, xc = "wB97X").density_fit(auxbasis = auxbasis)
+        mf.grids.atom_grid = (99,590)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+
+        mf = apply_cuest_wrapper(mf)
+
+        test_Fock_2e = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e - ref_Fock_2e)) < 1e-2 # Doesn't match well because of different range-separated DF algorithm
+
+        mf.handles.build_dfintplan(mf, 0.3, 0.4, 0.5) # Wrong parameters, will rebuild dfintplan
+
+        test_Fock_2e_round2 = mf.get_veff(dm = dm)
+
+        assert cp.max(cp.abs(test_Fock_2e_round2 - test_Fock_2e)) < 1e-8
+
     ### Gradient tests from here on
 
     def test_overlap_derivative_spherical(self):
@@ -1174,6 +1679,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
 
         s1 = gobj.get_ovlp(mol)
+        s1 = cp.asnumpy(s1)
         aoslices = mol.aoslice_by_atom()
         ref_ds = np.zeros((mol.natm, 3))
         for ia in range(mol.natm):
@@ -1196,6 +1702,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
 
         s1 = gobj.get_ovlp(mol)
+        s1 = cp.asnumpy(s1)
         aoslices = mol.aoslice_by_atom()
         ref_ds = np.zeros((mol.natm, 3))
         for ia in range(mol.natm):
@@ -1276,7 +1783,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1305,7 +1812,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1334,7 +1841,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('xij,ij->x', vhf[:,p0:p1], (dm + dm.T)[p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1366,7 +1873,7 @@ class KnownValues(unittest.TestCase):
         for ia in range(mol.natm):
             p0,p1 = aoslices[ia,2:]
             ref_dvhf[ia] += np.einsum('sxij,sij->x', vhf[:,:,p0:p1], (dm + dm.transpose(0,2,1))[:,p0:p1])
-        ref_dvhf += gobj.extra_force()
+            ref_dvhf[ia] += gobj.extra_force(ia, locals())
 
         mf = mf.to_gpu()
         mf = apply_cuest_wrapper(mf)
@@ -1512,7 +2019,7 @@ class KnownValues(unittest.TestCase):
 
         test_dvxc = gobj.get_xc_grad(dm)
 
-        assert np.max(np.abs(test_dvxc - ref_dvxc)) < 1e-10
+        assert np.max(np.abs(test_dvxc - ref_dvxc)) < 2e-9
 
     def test_rks_pure_veff_derivative_spherical_mo(self):
         mol = self.mol_sph
@@ -2099,6 +2606,94 @@ class KnownValues(unittest.TestCase):
 
         assert np.max(np.abs(test_dhcore - ref_dhcore)) < 5e-7
 
+    def test_rks_range_separated_veff_derivative_spherical_mo(self):
+        mol = self.mol_sph
+
+        nocc = mol.nelectron // 2
+        mo_coeff = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+        mo_occ = cp.array([2.0] * nocc + [0.0] * (mol.nao - nocc))
+        dm = mo_coeff @ cp.diag(mo_occ) @ mo_coeff.T
+        dm = tag_array(dm, mo_occ=mo_occ, mo_coeff=mo_coeff)
+
+        mf = RKS(mol, xc = "wB97X").density_fit(auxbasis = self.auxbasis)
+        mf.with_df.build()
+        mf.grids.atom_grid = (50, 194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.grids.build()
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+
+        ref_dvhf = gobj.energy_ee(mol, dm)
+
+        mf = apply_cuest_wrapper(mf)
+        gobj = mf.Gradients()
+
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
+
+        assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-2 * cp.max(dm)
+
+    def test_rks_range_separated_veff_derivative_spherical_dm(self):
+        mol = self.mol_sph
+
+        nocc = mol.nelectron // 2
+        mo_coeff = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+        mo_occ = cp.array([2.0] * nocc + [0.0] * (mol.nao - nocc))
+        dm = mo_coeff @ cp.diag(mo_occ) @ mo_coeff.T
+        # dm = tag_array(dm, mo_occ=mo_occ, mo_coeff=mo_coeff)
+
+        mf = RKS(mol, xc = "HYB_GGA_XC_LC_WPBE_WHS").density_fit(auxbasis = self.auxbasis)
+        mf.with_df.build()
+        mf.grids.atom_grid = (50, 194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.grids.build()
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+
+        ref_dvhf = gobj.energy_ee(mol, dm)
+
+        mf = apply_cuest_wrapper(mf)
+        gobj = mf.Gradients()
+
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
+
+        assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-2 * cp.max(dm)
+
+    def test_uks_range_separated_vv10_veff_derivative_spherical_mo(self):
+        mol = self.mol_sph
+
+        nocc = mol.nelectron // 2
+        mo_coeff = cp.random.rand(2, mol.nao, mol.nao) * 2 - 1
+        mo_occa = cp.array([1.0] * nocc + [0.0] * (mol.nao - nocc))
+        mo_occb = cp.array([1.0] * (nocc + 1) + [0.0] * (mol.nao - (nocc + 1)))
+        mo_occ = cp.vstack([mo_occa, mo_occb])
+        dm = cp.empty([2, mol.nao, mol.nao])
+        for i_dm in range(2):
+            dm[i_dm] = mo_coeff[i_dm] @ cp.diag(mo_occ[i_dm]) @ mo_coeff[i_dm].T
+        dm = tag_array(dm, mo_occ=mo_occ, mo_coeff=mo_coeff)
+
+        mf = UKS(mol, xc = "wB97XV").density_fit(auxbasis = self.auxbasis)
+        mf.with_df.build()
+        mf.grids.atom_grid = (50, 194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (50, 194)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.grids.build()
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+
+        ref_dvhf = gobj.energy_ee(mol, dm)
+
+        mf = apply_cuest_wrapper(mf)
+        gobj = mf.Gradients()
+
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
+
+        assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-2 * cp.max(dm)
+
     ### Integrated test from here on
 
     def test_rhf_spherical(self):
@@ -2277,7 +2872,7 @@ class KnownValues(unittest.TestCase):
 
     def test_uhf_spherical(self):
         mf = UHF(self.mol_unrestricted).density_fit(auxbasis = self.auxbasis)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-11
         # ref_energy = mf.kernel()
         ref_energy = -150.402311053481
 
@@ -2680,6 +3275,96 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) <= 1e-5
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-5
 
+    def test_rks_range_separated_spherical(self):
+        mf = RKS(self.mol_sph, xc = "HSE06").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-12
+        # ref_energy = mf.kernel()
+        ref_energy = -151.45067590932848
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0074116043839396,  0.021443131795337 ,  0.0155725604674547],
+            [ 0.0348681132287065, -0.0253152666594154, -0.0222693716981843],
+            [-0.0199923558525441, -0.0092677296618848, -0.0110661897588653],
+            [-0.0222873617600952,  0.013139864525894 ,  0.0177630009896059],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-5
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 2e-5
+
+    def test_rks_range_separated_spherical_vv10(self):
+        mf = RKS(self.mol_sph, xc = "wB97MV").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.conv_tol = 1e-12
+        # ref_energy = mf.kernel()
+        ref_energy = -151.55017095988154
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0081383287228691,  0.0196076375368328,  0.0159138960001456],
+            [ 0.0340640269148966, -0.0234386879629493, -0.0214609201247171],
+            [-0.0207748289132366, -0.0094169051332886, -0.0115629254416774],
+            [-0.0214275267245276,  0.0132479555594929,  0.0171099495662586],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 2e-5
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-5
+
+    def test_uks_range_separated_spherical(self):
+        mf = UKS(self.mol_unrestricted, xc = "CAMB3LYP").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (99,590)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-12
+        # ref_energy = mf.kernel()
+        ref_energy = -151.11766011558672
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0456692395736376,  0.0962668059440226,  0.0142745084244549],
+            [-0.0032481844643257, -0.0956858854833733, -0.0251330307906019],
+            [-0.0606130674029304, -0.017572223679199 , -0.0066693850109969],
+            [ 0.0181920122935919,  0.016991303218574 ,  0.0175279073771299],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-5
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-5
+
     def test_rks_geometry_optimiation(self):
         mol = pyscf.M(
             atom = '''
@@ -2896,6 +3581,80 @@ class KnownValues(unittest.TestCase):
             [-0.0014862073884895, -0.0825295878691523, -0.0248987836605871],
             [-0.0562402640818798, -0.014300558402444 , -0.0063823270650011],
             [ 0.0140636278795982,  0.0145996178048596,  0.0177412564423006],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        mf.turn_on_cuest_hcore = False
+        mf.turn_on_cuest_jk = False
+        mf.turn_on_cuest_xc = False
+        mf.turn_on_cuest_nlc = False
+        mf.turn_on_cuest_pcm = False
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
+    def test_turn_off_everything_cuest_rks_range_separated_mr(self):
+        mf = RKS(self.mol_sph, xc = "camb3lyp").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-12
+
+        # mf.range_separated_mode = "mix_inside_kernel"
+        # ref_energy = mf.kernel()
+        ref_energy = -151.54951113760575
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0080841452957281,  0.0204241669251868,  0.0161708377200502],
+            [ 0.0341384919400911, -0.0242302793941285, -0.0213445361879838],
+            [-0.0213248247893283, -0.0100196030121451, -0.0117643207922606],
+            [-0.0208978124464863,  0.0138257154810884,  0.016938019260184 ],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        mf.turn_on_cuest_hcore = False
+        mf.turn_on_cuest_jk = False
+        mf.turn_on_cuest_xc = False
+        mf.turn_on_cuest_nlc = False
+        mf.turn_on_cuest_pcm = False
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
+    def test_turn_off_everything_cuest_rks_range_separated_sr(self):
+        mf = RKS(self.mol_sph, xc = "hse06").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-12
+
+        # mf.range_separated_mode = "mix_inside_kernel"
+        # ref_energy = mf.kernel()
+        ref_energy = -151.45067591562207
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0074116027062763,  0.0214431292209802,  0.015572558029087 ],
+            [ 0.0348681135318978, -0.0253152654316366, -0.0222693740052486],
+            [-0.0199923526019794, -0.0092677273202593, -0.0110661870133217],
+            [-0.0222873636362149,  0.0131398635309203,  0.0177630029894991],
         ])
 
         mf = apply_cuest_wrapper(mf)

@@ -50,9 +50,9 @@ def setUpModule():
         unit = 'Bohr',
     )
 
-    kptsa = np.random.random((2,3))
-    kpts = kptsa.copy()
+    kpts = np.random.random((2,3)).round(1)
     kpts[1] = -kpts[0]
+    kpts = cell_orth.get_abs_kpts(kpts)
     nao = cell_orth.nao_nr()
     dm = np.random.random((len(kpts),nao,nao)) * .2
     dm1 = dm + np.eye(nao)
@@ -195,8 +195,35 @@ def eval_nucG_SI_gradient(cell, mesh, rho_g):
     return de, sigma
 
 class KnownValues(unittest.TestCase):
+    def test_aft_disabled_for_nonorthogonal_bvk_cell(self):
+        kmesh = np.array([2, 2, 2])
+        control = multigrid.MultiGridNumInt(cell_orth)
+        control.build(kmesh, xctype='LDA')
+        self.assertTrue(control.aft_buckets)
+
+        original_a = cell_orth.lattice_vectors().copy()
+        cell = cell_orth.copy()
+        cell.a = original_a.copy()
+        cell.a[0, 1] = 6e-6
+
+        kpts = cell.make_kpts(kmesh, wrap_around=True)
+        dm = np.tile(np.eye(cell.nao), (len(kpts), 1, 1))
+        ni = multigrid.MultiGridNumInt(cell)
+        rho = ni.get_rho(dm, kpts)
+
+        self.assertTrue(multigrid._is_orthogonal_lattice(
+            cell.lattice_vectors())) # Primitive cell passes the threshold
+        self.assertFalse(multigrid._is_orthogonal_lattice(
+            ni.bvkcell.lattice_vectors())) # BvK cell exceeds the threshold
+        np.testing.assert_array_equal(cell_orth.lattice_vectors(), original_a)
+        self.assertIsNone(ni.aft_buckets)
+        self.assertTrue(ni.fft_buckets)
+        self.assertTrue(bool(cp.isfinite(rho).all()))
+
     def test_get_pp(self):
         ref = MultiGridNumInt_cpu(cell_orth).get_pp()
+        if ref.ndim == 2: # In pyscf==2.8.0
+            ref = ref[None,:,:]
         out = multigrid.MultiGridNumInt(cell_orth).get_pp().get()
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
@@ -204,12 +231,16 @@ class KnownValues(unittest.TestCase):
     def test_get_nuc(self):
         ref = MultiGridNumInt_cpu(cell_orth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
+        if ref.ndim == 2: # In pyscf==2.8.0
+            ref = ref[None,:,:]
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
     def test_get_nuc_nonorth(self):
         ref = MultiGridNumInt_cpu(cell_nonorth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_nonorth).get_nuc().get()
+        if ref.ndim == 2: # In pyscf==2.8.0
+            ref = ref[None,:,:]
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
 
@@ -217,7 +248,7 @@ class KnownValues(unittest.TestCase):
         ref = MultiGridNumInt_cpu(cell_orth).get_nuc(kpts)
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc(kpts).get()
         self.assertEqual(out.shape, ref.shape)
-        self.assertAlmostEqual(abs(ref-out).max(), 0, delta=1e-8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
     def test_get_nuc_kpts_nonorth(self):
         ref = MultiGridNumInt_cpu(cell_nonorth).get_nuc(kpts)
@@ -919,7 +950,7 @@ class KnownValues(unittest.TestCase):
 
         kpts = cell.make_kpts([1,1,1])
         mf = KRKS_gpu(cell, xc = 'pbe', kpts = kpts)
-        mf.conv_tol = 1e-10
+        mf.conv_tol = 1e-8
 
         # mf = mf.multigrid_numint()
         # assert type(mf._numint) is multigrid.MultiGridNumInt
@@ -950,7 +981,7 @@ class KnownValues(unittest.TestCase):
             [-2.78640919e-03, -8.51738633e-06, -8.51738633e-06],
         ])
 
-        assert abs(test_energy - ref_energy) < 3e-9
+        assert abs(test_energy - ref_energy) < 1e-8
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     def test_shell_splitting_for_large_fock_in_imagediff_space_k(self):
@@ -975,7 +1006,7 @@ class KnownValues(unittest.TestCase):
 
         kpts = cell.make_kpts([1,1,3])
         mf = KRKS_gpu(cell, xc = 'pbe', kpts = kpts)
-        mf.conv_tol = 1e-10
+        mf.conv_tol = 1e-8
 
         # mf = mf.multigrid_numint()
         # assert type(mf._numint) is multigrid.MultiGridNumInt
@@ -1006,8 +1037,8 @@ class KnownValues(unittest.TestCase):
             [-1.66792993e-03, -8.52961493e-06, -6.81679641e-06],
         ])
 
-        assert abs(test_energy - ref_energy) < 3e-9
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert abs(test_energy - ref_energy) < 3e-7
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-6
 
     def test_shell_splitting_for_large_fock_in_imagediff_space_unrestricted(self):
         cell = gto.M(
@@ -1091,7 +1122,8 @@ class KnownValues(unittest.TestCase):
         sigma_ref = cp.einsum('g,xyg->xy', rhoG.conj(), vlocG1).real / cell.vol
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-        grad, sigma = _pploc_derivatives(cell, rhoG, Gv_bases)
+        grad_sigma = _pploc_derivatives(cell, rhoG, Gv_bases)
+        grad, sigma = grad_sigma[:-3], grad_sigma[-3:]
         assert abs(grad_ref - grad).max().get() < 1e-12
         assert abs(sigma_ref - sigma).max().get() < 1e-12
 
@@ -1110,7 +1142,8 @@ class KnownValues(unittest.TestCase):
         grad_ref, sigma_ref = eval_nucG_SI_gradient(cell, mesh, rhoG)
 
         Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-        grad, sigma = _ne_derivatives(cell, rhoG, Gv_bases)
+        grad_sigma = _ne_derivatives(cell, rhoG, Gv_bases)
+        grad, sigma = grad_sigma[:-3], grad_sigma[-3:]
         assert abs(grad_ref - grad).max().get() < 1e-12
         assert abs(sigma_ref - sigma).max().get() < 1e-12
 

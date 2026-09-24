@@ -296,7 +296,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     rho = cupy.empty([2, ncomp, ngrids])
     g1 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv):
         g0, g1 = g1, g1 + weight.size
         dma_masked = take_last2d(dms[0], idx, out=dm_mask_buf)
         rho[0, :, g0:g1] = numint.eval_rho(_sorted_mol, ao, dma_masked, xctype = xctype, hermi = 1)
@@ -334,7 +334,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     del exc
 
     g0 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1):
         g1 = g0 + weight.shape[0]
 
         ao = ao[:, :, nonzero_weight_mask[g0:g1]]

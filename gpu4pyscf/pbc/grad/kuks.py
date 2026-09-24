@@ -24,46 +24,12 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.grad import krks as krks_grad
+from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3, BeckeGrids
+from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
 
 __all__ = ['Gradients']
-
-def energy_ee(ks_grad, dm, kpts):
-    mf = ks_grad.base
-    cell = ks_grad.cell
-    log = logger.new_logger(ks_grad)
-    t0 = log.init_timer()
-
-    if ks_grad.grid_response:
-        raise NotImplementedError
-
-    if isinstance(mf.grids, BeckeGrids):
-        raise NotImplementedError('gradients for BeckeGrids not supported')
-
-    ni = mf._numint
-    omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
-    j_factor = 1
-
-    if isinstance(ni, multigrid.MultiGridNumIntBase):
-        exc = ni.energy_nuclear_gradient(
-            mf.xc, dm, kpts=kpts, spin=1, with_j=True, with_nuc=True)
-        j_factor = 0
-    else:
-        if ks_grad.grids is not None:
-            grids = ks_grad.grids
-        else:
-            grids = mf.grids
-        if grids.coords is None:
-            grids.build()
-        exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts) * 2
-        t0 = log.timer('vxc', *t0)
-
-    if j_factor != 0 or k_sr != 0 or k_lr != 0:
-        exc += kuhf_grad.jk_energy_per_atom(
-            mf, dm, kpts, j_factor, lr_factor=k_lr, sr_factor=k_sr, omega=omega,
-            exxdiv=mf.exxdiv)
-    return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     assert dm_kpts.ndim == 4
@@ -125,23 +91,177 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
         raise NotImplementedError(xc_code)
 
     exc = krhf_grad.contract_h1e_dm(cell, vmat, dm_kpts, hermi=1)
-    exc *= -.5 / nkpts
+    exc *= -1.0 / nkpts
+    return exc
+
+def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
+    ''' dExc/dR for Becke grids, where grid response is included '''
+    # TODO: apply sparsity in ao_ks, remove zero-weight grids
+    assert isinstance(grids, BeckeGrids)
+    assert dm_kpts.ndim == 4
+    assert dm_kpts.shape[0] == 2
+    assert hermi == 1, "Only hermitian dm_kpts is supported, otherwise grid density is not real, and we're not able to evaluate xc functional."
+    xctype = ni._xc_type(xc_code)
+    nao = cell.nao
+    natm = cell.natm
+    nkpts = len(kpts)
+    ngrids = grids.coords.shape[0]
+
+    if xctype == 'LDA':
+        ao_deriv = 0
+    elif xctype == 'GGA':
+        ao_deriv = 1
+    elif xctype == 'MGGA':
+        ao_deriv = 1
+    else:
+        raise NotImplementedError(f"Unrecognized xctype = {xctype}")
+
+    de_grid_response_weight = cp.zeros((natm, 3), dtype=cp.float64)
+    g1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        g0, g1 = g1, g1 + weight.size
+        rho_a = ni.eval_rho(cell, ao_ks, dm_kpts[0], xctype=xctype, hermi=hermi)
+        rho_b = ni.eval_rho(cell, ao_ks, dm_kpts[1], xctype=xctype, hermi=hermi)
+        rho = cp.stack([rho_a, rho_b], axis=0)
+        del rho_a, rho_b
+        exc = ni.eval_xc_eff(xc_code, rho, deriv=0, xctype=xctype, spin=1)[0]
+        rho = rho[0] + rho[1]
+        if rho.ndim == 2:
+            rho = rho[0]
+        else:
+            assert rho.ndim == 1
+        dweight_dA = get_becke_weight_derivative(grids, natm, (g0,g1))
+        de_grid_response_weight += cp.einsum("Adg->Ad", dweight_dA * (rho * exc))
+        del dweight_dA, rho, exc
+    assert g1 == ngrids
+
+    dvmat_orbital_response = cp.zeros((2,nkpts,3,nao,nao), dtype=dm_kpts.dtype)
+    de_grid_response_rho = cp.zeros((natm, 3), dtype=dm_kpts.dtype)
+
+    g1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv + 1, kpts):
+        g0, g1 = g1, g1 + weight.size
+
+        i_atom = int(grids.supatm_to_atm_idx[grids.supatm_idx[g0]])
+        assert cp.max(cp.abs(grids.supatm_to_atm_idx[grids.supatm_idx[g0:g1]] - i_atom)) == 0 # Guaranteed by get_becke_grids()
+
+        if xctype == 'LDA':
+            rho_a = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[0], xctype=xctype, hermi=hermi)
+            rho_b = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[1], xctype=xctype, hermi=hermi)
+            rho = cp.stack([rho_a, rho_b], axis=0)
+            del rho_a, rho_b
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
+            wv = weight * vxc[:,0]
+            aowa = cp.einsum('kpi,p->kpi', ao_ks[:,0], wv[0])
+            aowb = cp.einsum('kpi,p->kpi', ao_ks[:,0], wv[1])
+            for kn in range(nkpts):
+                vtmp_a = krks_grad._d1_dot_(ao_ks[kn,1:4], aowa[kn])
+                dvmat_orbital_response[0,kn] += vtmp_a
+                de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_a, dm_kpts[0,kn]) * 2
+                vtmp_b = krks_grad._d1_dot_(ao_ks[kn,1:4], aowb[kn])
+                dvmat_orbital_response[1,kn] += vtmp_b
+                de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_b, dm_kpts[1,kn]) * 2
+                del vtmp_a, vtmp_b
+            del wv, rho, aowa, aowb, vxc
+
+        elif xctype == 'GGA':
+            rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
+            rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
+            rho = cp.stack([rho_a, rho_b], axis=0)
+            del rho_a, rho_b
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
+            wv = weight * vxc
+            wv[:,0] *= .5
+            for kn in range(nkpts):
+                vtmp_a = krks_grad._gga_grad_sum_(ao_ks[kn], wv[0])
+                dvmat_orbital_response[0,kn] += vtmp_a
+                de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_a, dm_kpts[0,kn]) * 2
+                vtmp_b = krks_grad._gga_grad_sum_(ao_ks[kn], wv[1])
+                dvmat_orbital_response[1,kn] += vtmp_b
+                de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_b, dm_kpts[1,kn]) * 2
+                del vtmp_a, vtmp_b
+            del wv, rho, vxc
+
+        elif xctype == 'MGGA':
+            rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
+            rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
+            rho = cp.stack([rho_a, rho_b], axis=0)
+            del rho_a, rho_b
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
+            wv = weight * vxc
+            wv[:,0] *= .5
+            wv[:,4] *= .5  # for the factor 1/2 in tau
+            for kn in range(nkpts):
+                vtmp_a = krks_grad._gga_grad_sum_(ao_ks[kn], wv[0,:4]) + krks_grad._tau_grad_dot_(ao_ks[kn], wv[0,4])
+                dvmat_orbital_response[0,kn] += vtmp_a
+                de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_a, dm_kpts[0,kn]) * 2
+                vtmp_b = krks_grad._gga_grad_sum_(ao_ks[kn], wv[1,:4]) + krks_grad._tau_grad_dot_(ao_ks[kn], wv[1,4])
+                dvmat_orbital_response[1,kn] += vtmp_b
+                de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_b, dm_kpts[1,kn]) * 2
+                del vtmp_a, vtmp_b
+            del wv, rho, vxc
+
+        else:
+            raise NotImplementedError(f"Unrecognized xctype = {xctype}")
+    assert g1 == ngrids
+
+    exc = de_grid_response_rho.get().real
+    exc -= krhf_grad.contract_h1e_dm(cell, dvmat_orbital_response, dm_kpts, hermi=1)
+    exc *= 1.0 / nkpts
+    exc += de_grid_response_weight.get()
     return exc
 
 class Gradients(kuhf_grad.Gradients):
     '''Non-relativistic restricted Hartree-Fock gradients'''
-    _keys = {'grid_response', 'grids'}
-
-    def __init__(self, mf):
-        kuhf_grad.Gradients.__init__(self, mf)
-        self.grids = None
-        self.grid_response = False
 
     reset = krks_grad.Gradients.reset
     dump_flags = krks_grad.Gradients.dump_flags
 
-    energy_ee = energy_ee
+    def energy_ee(self, dm, kpts):
+        mf = self.base
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
 
-    def get_stress(self):
-        from gpu4pyscf.pbc.grad import kuks_stress
-        return kuks_stress.kernel(self)
+        ni = mf._numint
+        xc = getattr(mf, 'xc', 'HF')
+        if xc.upper() == 'HF':
+            omega, k_lr, k_sr = 0, 1, 1
+        else:
+            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+        j_factor = 1
+
+        # TODO: handle all-electron+GGA and pseudo+GGA differently
+        # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
+        de = np.zeros([self.cell.natm+3, 3])
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
+            de = ni.energy_derivatives(
+                xc, dm, kpts=kpts, spin=1, with_j=True, with_nuc=True)
+            j_factor = 0
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            raise NotImplementedError(f'derivatives for {ni}')
+        else:
+            if self.grids is not None:
+                grids = self.grids
+            else:
+                grids = mf.grids
+            if grids.coords is None:
+                grids.build()
+            if self.grid_response:
+                assert isinstance(grids, BeckeGrids), "Only Becke grid requires grid response"
+                fn = get_vxc_full_response
+            else:
+                fn = get_vxc
+            cell = self.cell
+            de[:-3] = fn(ni, cell, grids, xc, dm, kpts)
+            if isinstance(grids, BeckeGrids):
+                de[-3:] = np.nan
+            else:
+                de[-3:] = multigrid_v3.MultiGridNumInt(cell).energy_strain_gradient(
+                    xc, dm, kpts=kpts, spin=1, with_j=False, with_nuc=False)
+        t0 = log.timer_debug1('vxc', *t0)
+
+        if j_factor != 0 or k_sr != 0 or k_lr != 0:
+            de += krhf_grad._get_ejk_derivatives(
+                mf, dm, kpts, j_factor, omega, k_lr, k_sr)
+            t0 = log.timer_debug1('JK', *t0)
+        return de

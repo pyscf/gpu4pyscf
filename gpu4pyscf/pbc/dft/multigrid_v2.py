@@ -84,7 +84,7 @@ def ifft_in_place(x):
 def unique_with_sort(x):
     # This function does the same thing as cp.unique(x, return_inverse=True).
     # It's not super optimized, but for whatever reason, cp.unique is very slow, so this one is better.
-    assert isinstance(x, cp.ndarray) and (x.dtype == cp.int32 or x.dtype == cp.int64) and x.ndim == 1
+    assert type(x) is cp.ndarray and (x.dtype == cp.int32 or x.dtype == cp.int64) and x.ndim == 1
     n = x.shape[0]
     if n <= 1:
         return x, cp.zeros(n)
@@ -1162,12 +1162,15 @@ def convert_xc_on_g_mesh_to_fock(
     xc_on_g_mesh = xc_on_g_mesh.reshape(n_channels, density_slices, *mydf.mesh)
 
     if kpts is None:
-        n_k_points = 1
-        at_gamma_point = True
-    else:
-        assert kpts.ndim == 2
-        n_k_points = len(kpts)
-        at_gamma_point = multigrid.gamma_point(kpts)
+        kpts = np.zeros((1,3))
+    elif isinstance(kpts, KPoints):
+        kpts = kpts.kpts
+    is_single_kpt = kpts.ndim == 1
+    if is_single_kpt:
+        kpts = kpts.reshape(1, 3)
+    assert kpts.ndim == 2
+    n_k_points = len(kpts)
+    at_gamma_point = multigrid.gamma_point(kpts)
 
     if hermi != 1:
         raise NotImplementedError
@@ -1870,10 +1873,9 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
         with_nuc : Whether to include the electron-nuclear Coulomb interactions
     '''
     from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-    from gpu4pyscf.pbc.grad.rks_stress import (
-        _finite_diff_cells,
-        _get_weight_strain_derivatives)
-    from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.krks_stress import (
+        _get_weight_strain_derivatives, _contract_coulomb_and_nuc)
 
     cell = ni.cell
     if kpts is None:
@@ -1933,10 +1935,9 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
         with_nuc : Whether to include the electron-nuclear Coulomb interactions
     '''
     from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
-    from gpu4pyscf.pbc.grad.rks_stress import (
-        _finite_diff_cells,
-        _get_weight_strain_derivatives)
-    from gpu4pyscf.pbc.grad.krks_stress import _contract_coulomb_and_nuc
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+    from gpu4pyscf.pbc.grad.krks_stress import (
+        _get_weight_strain_derivatives, _contract_coulomb_and_nuc)
 
     cell = ni.cell
     if kpts is None:
@@ -2030,6 +2031,9 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         elif isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
 
+        is_single_kpt = kpts.ndim == 1
+        if is_single_kpt:
+            kpts = kpts.reshape(1, 3)
         assert kpts.ndim == 2
         assert dms.ndim == 4
         nset, nkpts, nao = dms.shape[:3]
@@ -2094,6 +2098,9 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         elif isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
 
+        is_single_kpt = kpts.ndim == 1
+        if is_single_kpt:
+            kpts = kpts.reshape(1, 3)
         assert kpts.ndim == 2
         assert dms.ndim == 5
         nset, nkpts, nao = dms.shape[1:4]

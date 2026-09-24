@@ -61,6 +61,31 @@ class KnownValues(unittest.TestCase):
         a = cupy.ones((3, 3))
         assert contract('ij,ji->', a[0,:,None], a[0,None,:]) == 3
 
+    def test_einsum_fallback_contiguous(self):
+        from gpu4pyscf.lib.cutensor import _contract_einsum
+        from gpu4pyscf.lib.cupy_helper import hermi_triu, transpose_sum
+        ncells, nkpts, nao, comp = 8, 4, 6, 1
+        expLkz = cupy.random.rand(ncells, nkpts, 2)
+        mat = cupy.random.rand(ncells, comp, nao, nao)
+        out = _contract_einsum('lkz,lxpq->kxpqz', expLkz, mat, 1., 0.)
+        assert out.flags.c_contiguous
+        ref = cupy.einsum('lkz,lxpq->kxpqz', expLkz, mat)
+        assert cupy.linalg.norm(out - ref) < 1e-12
+        v = out.view(numpy.complex128)[:,:,:,:,0].reshape(nkpts*comp, nao, nao)
+        hermi_triu(v, 1, inplace=True)
+
+        veff = cupy.random.rand(ncells, nao, nao)
+        out = _contract_einsum('Lpq,Lkz->kpqz', veff, expLkz, 1., 0.)
+        assert out.flags.c_contiguous
+        ref = cupy.einsum('Lpq,Lkz->kpqz', veff, expLkz)
+        assert cupy.linalg.norm(out - ref) < 1e-12
+        v = out.view(numpy.complex128)[:,:,:,0]
+        transpose_sum(v)
+
+        out2 = _contract_einsum('Lpq,Lkz->kpqz', veff, expLkz, 2., 0.)
+        assert out2.flags.c_contiguous
+        assert cupy.linalg.norm(out2 - 2*ref) < 1e-12
+
 if __name__ == "__main__":
     print("Full tests for cutensor module")
     unittest.main()

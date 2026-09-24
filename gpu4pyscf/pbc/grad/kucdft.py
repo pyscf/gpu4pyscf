@@ -134,5 +134,6 @@ class Gradients(kuks_grad.Gradients):
         _dE_constraint = self._get_constraint_force_kpts(dm, kpts)
 
         dE = super().energy_ee(dm, kpts)
-        dE += _dE_constraint
+        dE[:-3] += _dE_constraint
+        dE[-3:] = np.nan
         return dE

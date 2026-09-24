@@ -58,7 +58,7 @@ class KnownValues(unittest.TestCase):
         U_val = [5]
         mf = krkspu.KRKSpU(cell, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao)
         mf.__dict__.update(cell.KRKS(kpts=kpts).to_gpu().run(max_cycle=1).__dict__)
-        de = krkspu_grad._hubbard_U_deriv1(mf)
+        de = krkspu_grad._hubbard_U_derivatives(mf)[:-3]
 
         mf.cell.set_geom_('C 0 0 0 0; O 0.5 0.801 1.1')
         e1 = mf.get_veff().E_U.real
