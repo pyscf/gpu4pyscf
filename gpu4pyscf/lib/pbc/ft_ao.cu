@@ -20,25 +20,11 @@
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
+#include "ft_ao.cuh"
 
-// WARP_SIZE: compile-time constant used for shared-memory sizing.
-// `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
-// so we keep a literal here. Guarded so the build can override
-// it (e.g. -DWARP_SIZE=64) for future wider-wavefront targets.
-#ifndef WARP_SIZE
-#define WARP_SIZE       32
-#endif
-#define WARPS           8
 #define THREADS         256
-#define NG_PER_BLOCK    WARP_SIZE
-#define FT_AO_THREADS   (WARP_SIZE*4)
 #define GOUT_WIDTH      30
-// pi^1.5
-#define OVERLAP_FAC     5.56832799683170787
-#define OF_COMPLEX      2
 #define POOL_SIZE       65536
-#define AUXL            6
-#define AUXNF           ((AUXL+1)*(AUXL+2)/2)
 
 __global__ static
 void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
@@ -49,15 +35,16 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     int sh_id_in_block = threadIdx.y;
     int Gv_id_in_block = threadIdx.x;
     int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
-    int valid = sh_id < envs.nbas;
-    int sh_id_clamped = valid ? sh_id : envs.nbas - 1;
+    if (sh_id >= envs.nbas) {
+        return;
+    }
 
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
-    int li = bas[sh_id_clamped*BAS_SLOTS+ANG_OF];
+    int li = bas[sh_id*BAS_SLOTS+ANG_OF];
     int nfi = c_nf[li];
-    int iprim = bas[sh_id_clamped*BAS_SLOTS+NPRIM_OF];
+    int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
     double kx = 0;
     double ky = 0;
@@ -71,7 +58,6 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 
     int gx_len = (AUXL+1) * FT_AO_THREADS;
     __shared__ double g[(AUXL+1)*FT_AO_THREADS * 6];
-    __shared__ int block_iprim[FT_AO_THREADS/NG_PER_BLOCK];
     double *gxR = g + (AUXL+1) * NG_PER_BLOCK * sh_id_in_block + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
@@ -80,11 +66,10 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double *gzI = gxR + gx_len*5;
     int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
 
-    constexpr int aux_nf = (AUXL+1)*(AUXL+2)/2;
-    double goutR[aux_nf];
-    double goutI[aux_nf];
+    double goutR[AUXNF];
+    double goutI[AUXNF];
 #pragma unroll
-    for (int n = 0; n < aux_nf; ++n) {
+    for (int n = 0; n < AUXNF; ++n) {
         goutR[n] = 0.;
         goutI[n] = 0.;
     }
@@ -95,29 +80,12 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double s0zR, s1zR, s2zR;
     double s0zI, s1zI, s2zI;
 
-    int ia = bas[sh_id_clamped*BAS_SLOTS+ATOM_OF];
-    double *expi = env + bas[sh_id_clamped*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[sh_id_clamped*BAS_SLOTS+PTR_COEFF];
+    int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
+    double *expi = env + bas[sh_id*BAS_SLOTS+PTR_EXP];
+    double *ci = env + bas[sh_id*BAS_SLOTS+PTR_COEFF];
     double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
-    // The primitive loop below calls __syncthreads() every iteration, so its
-    // trip count must be uniform across the whole block. SortedGTO groups
-    // shells by (l, nprim) but does not align those groups to
-    // nsh_per_block boundaries, so a block routinely spans two groups with
-    // different nprim. Loop to the block-wide max instead of this lane's
-    // own iprim, and guard the per-iteration work so a lane with fewer
-    // primitives simply does nothing on the extra iterations.
-    if (Gv_id_in_block == 0) {
-        block_iprim[sh_id_in_block] = iprim;
-    }
-    __syncthreads();
-    int max_iprim = 0;
-#pragma unroll
-    for (int i = 0; i < FT_AO_THREADS/NG_PER_BLOCK; ++i) {
-        max_iprim = max(max_iprim, block_iprim[i]);
-    }
-    for (int ip = 0; ip < max_iprim; ++ip) {
+    for (int ip = 0; ip < iprim; ++ip) {
         __syncthreads();
-        if (ip < iprim) {
         double ai = expi[ip];
         double xi = ri[0];
         double yi = ri[1];
@@ -184,11 +152,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
                 s1zI = s2zI;
             }
         }
-        }
         __syncthreads();
-        if (ip < iprim) {
 #pragma unroll
-        for (int n = 0; n < aux_nf; ++n) {
+        for (int n = 0; n < AUXNF; ++n) {
             if (n >= nfi) break;
             int addrx = idx[n*3+0] * NG_PER_BLOCK;
             int addry = idx[n*3+1] * NG_PER_BLOCK;
@@ -204,14 +170,13 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
             goutR[n] += xyR * zR - xyI * zI;
             goutI[n] += xyR * zI + xyI * zR;
         }
-        }
     }
 
-    if (valid && Gv_id < nGv) {
+    if (Gv_id < nGv) {
         size_t stride = (size_t)nGv * OF_COMPLEX;
-        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id_clamped] * nGv + Gv_id) * OF_COMPLEX;
+        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
-        for (int n = 0; n < aux_nf; ++n) {
+        for (int n = 0; n < AUXNF; ++n) {
             if (n >= nfi) break;
             aft_tensor[n*stride  ] = goutR[n];
             aft_tensor[n*stride+1] = goutI[n];
@@ -1172,12 +1137,12 @@ while (1) {
 }
 
 extern "C" {
-int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int nbas)
+int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
     dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
-    int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
+    int nbatches_shls = (envs->nbas + nsh_per_block - 1) / nsh_per_block;
     dim3 blocks(nbatches_grids, nbatches_shls);
     ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
     cudaError_t err = cudaGetLastError();
