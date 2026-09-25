@@ -421,7 +421,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     ao_pair_counts = int3c2e._count_ao_pairs(cell, bas_ij_batches, cart, bvk_ncells)
     max_pair_size = int(max(ao_pair_counts, default=0))
 
-    log.info('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
+    log.info('Requires %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
     cderi = empty_mapped((naux, nao_pairs))
     cderi.fill(0.)
 
@@ -608,7 +608,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
               nao_pairs, n_compact_pairs, max_pair_size)
 
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
-    log.info('Required %.6g GB mapped memory on host',
+    log.info('Requires %.6g GB mapped memory on host',
              len(cd_j2c_cache)*naux_max*nao_pairs*16e-9)
     cderi = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):

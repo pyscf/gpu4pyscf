@@ -112,8 +112,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free
     mem_avail -= naux*nocc**2 * 8  # j3c_oo
-    batch_size = max(1, min(naux, int(mem_avail*.5/(max(1, n_compact_pairs)*8*bvk_ncells))))
-    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*8))//8*8))
+    batch_size = max(1, min(naux, int(mem_avail*.6/(max(1, n_compact_pairs)*8*bvk_ncells))))
+    blksize = max(1, min(naux, int(mem_avail*.3/(nao**2*8))//8*8))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
