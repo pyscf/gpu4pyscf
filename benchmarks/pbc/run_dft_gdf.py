@@ -87,26 +87,16 @@ configs = yaml.safe_load(
     - [8,8,8]
     - [10,10,10]
 - filename:
-  - MoS2.cif
+  - MgO_primitive.cif
   method:
-  - xc:
-    - PBE0
-    kmesh:
-    - [6,6,1]
-    - [7,7,1]
-    - [8,8,1]
-    - [10,10,1]
-    smearing:
-      sigma: 0.005
-- filename:
-  - MgO.cif
-  method:
-  - xc: PBE0
+  - xc: HSE06
     supercell: [2,2,2]
-  - xc: PBE0
+  - xc: HSE06
     supercell: [3,3,3]
-  - xc: PBE0
+  - xc: HSE06
     supercell: [4,4,4]
+  - xc: HSE06
+    supercell: [5,5,5]
 - filename:
   - Al2Mg3O12Si3_ICSD_80847.cif
   method:
@@ -168,6 +158,7 @@ for conf in configs:
                         mf = mf.smearing(**method['smearing'])
                     try:
                         mf.run()
+                        mf.Gradients()
                     except Exception as e:
                         import traceback
                         traceback.print_stack()

@@ -80,20 +80,6 @@ configs = yaml.safe_load(
     - [10,10,10]
     - [12,12,12]
 - filename:
-  - MoS2.cif
-  method:
-  - xc:
-    - PBE
-    - R2SCAN
-    kmesh:
-    - [6,6,1]
-    - [7,7,1]
-    - [8,8,1]
-    - [10,10,1]
-    - [12,12,1]
-    smearing:
-      sigma: 0.005
-- filename:
   - Mg4O4_cubic.cif
   method:
   - xc:
@@ -184,6 +170,7 @@ for conf in configs:
                         mf = mf.smearing(**method['smearing'])
                     try:
                         mf.run()
+                        mf.Gradients()
                     except Exception as e:
                         import traceback
                         traceback.print_stack()
