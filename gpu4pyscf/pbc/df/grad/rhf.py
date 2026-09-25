@@ -119,7 +119,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
 
     def sr_int3c2e():
         eval_j3c, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-            aux_batch_size=batch_size, cart=True)
+            aux_batch_size=None if batch_size >= naux else batch_size, cart=True)
         aux_batches = len(aux_offsets) - 1
 
         i_addr, j_addr = divmod(compact_idx, nao)
