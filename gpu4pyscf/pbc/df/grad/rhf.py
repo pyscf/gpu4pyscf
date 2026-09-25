@@ -143,11 +143,11 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
         return j3c_oo
 
-    if n_compact_pairs == 0:
-        j3c_oo = cp.zeros((naux, nocc, nocc))
-    else:
+    if n_compact_pairs > 0:
         j3c_oo = sr_int3c2e()
-        t0 = log.timer_debug1('contract dm', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e dm', *t0)
+    else:
+        j3c_oo = cp.zeros((naux, nocc, nocc))
 
     # Adjust the rcut because the default cell.rcut is estimated based on
     # overlap integrals.
@@ -238,7 +238,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             contract('rG,ijG->rij', auxG, ijG, beta=1, out=j3c_oo)
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
-    t0 = log.timer_debug1('contract dm', *t0)
+    t0 = log.timer_debug1('contract lr_int3c2e dm', *t0)
 
     ################################
     # (d/dX P|Q) contributions

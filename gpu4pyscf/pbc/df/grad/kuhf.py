@@ -184,7 +184,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
 
     if n_compact_pairs > 0:
         j3c_oo = sr_int3c2e()
-        t0 = log.timer_debug1('contract dm', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e dm', *t0)
     else:
         j3c_oo = cp.zeros((2, naux, nkpts*nkpts, nocc, nocc), dtype=np.complex128)
 
@@ -313,7 +313,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                         _add_j3c_oo(j3c_oo[spin], result[spin], kj_idx*nkpts+ki_idx)
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
-    t0 = log.timer_debug1('contract dm', *t0)
+    t0 = log.timer_debug1('contract lr_int3c2e dm', *t0)
 
     ################################
     # (d/dX P|Q) contributions
