@@ -100,13 +100,6 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
 
     assert kpts.ndim == 2
     assert dm_kpts.ndim == 3
-    if not cell.cart:
-        c2s = asarray(cell.cart2sph_coeff())
-        dm_kpts = sandwich_dot(dm_kpts, c2s.T)
-        # Ensure all AOs are evaluated in the Cartesian GTOs as ao_ks strain
-        # derivatives currently supports Cartesian format only
-        cell = cell.copy()
-        cell.cart = True
     nkpts, nao = dm_kpts.shape[:2]
     assert nkpts == len(kpts)
 
@@ -303,8 +296,8 @@ def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
     coords = cp.asarray(coords.T, order='C')
     bvk_ncells = opt.bvk_ncells
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
-    nao = cell.nao_nr(cart=True)
-    cart = 1
+    nao = cell.nao_nr()
+    cart = cell.cart
     out = cp.empty((3, 3, comp, bvk_ncells, nao, ngrids))
 
     drv = libpbc.PBCeval_gto_strain_tensor
