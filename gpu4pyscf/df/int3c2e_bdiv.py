@@ -733,8 +733,7 @@ def _create_pair_recontractor(mol, int3c2e_context):
         ao_pair_counts.append(count)
         contracted_ao_pair_counts.append(cderi_npairs)
         recontraction_params.append(
-            (asarray(inp_idx[:count]), asarray(out_idx[:count]),
-             asarray(coef[:count])))
+            (inp_idx[:count].copy(), out_idx[:count].copy(), coef[:count].copy()))
         offset += cderi_npairs
     pair_addresses = pair_addresses[:offset]
 
@@ -746,6 +745,9 @@ def _create_pair_recontractor(mol, int3c2e_context):
             return out
         out[:] = 0.
         inp_idx, out_idx, coef = recontraction_params[batch_id]
+        inp_idx = asarray(inp_idx)
+        out_idx = asarray(out_idx)
+        coef = asarray(coef)
         count = len(inp_idx)
         err = libvhf_rys.recontract_ao_pair(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),

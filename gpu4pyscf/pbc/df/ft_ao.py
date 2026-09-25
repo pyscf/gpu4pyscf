@@ -249,7 +249,7 @@ class FTOpt:
             self.cell = cell
         self._aft_envs = None
         self.bvkcell = None
-        self.bas_ij_cache = {}
+        self.bas_ij_cache = None
         return self
 
     @property
@@ -455,11 +455,8 @@ class FTOpt:
         '''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cart = None
-        if transform_ao:
-            nao = self.cell.cell.nao_nr()
-        else:
+        if not transform_ao:
             cart = True
-            nao = self.cell.nao_nr(cart=True)
         eval_ft = self.ft_evaluator(compressing=False, cart=cart,
                                     original_ao_order=transform_ao)[0]
         kpts_cached = kpts
@@ -476,6 +473,7 @@ class FTOpt:
             conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
 
         cell = self.cell.cell
+        nao = nao_nr(cart=cart)
         # tril_idx in the reference cell associated to the pair_address.
         # Note indices within this array does not guarantee i>=j. It only indicates
         # the unique pairs for each unit cell.

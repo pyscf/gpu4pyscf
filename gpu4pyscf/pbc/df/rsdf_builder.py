@@ -463,7 +463,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         write_buf1 = empty_mapped(naux*max_pair_size)
         future = None
         for iteration, batch_id in enumerate(tasks):
-            log.debug1('batch %d/%d', batch_id, shl_pair_batches)
+            log.debug1('batch %d/%d', batch_id+1, shl_pair_batches)
             j3c = eval_j3c(shl_pair_batch_id=batch_id, out=buf1)
             if j3c.size == 0:
                 continue
@@ -660,7 +660,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         write_buf1 = empty_mapped(max_pair_size*naux_max, dtype=np.complex128)
         future = None
         for batch_id in tasks:
-            log.debug1('batch %d/%d', batch_id, shl_pair_batches)
+            log.debug1('batch %d/%d', batch_id+1, shl_pair_batches)
             j3c = eval_j3c(shl_pair_batch_id=batch_id, out=buf1)
             if j3c.size == 0:
                 continue
