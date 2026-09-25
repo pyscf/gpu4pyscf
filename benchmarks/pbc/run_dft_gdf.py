@@ -158,7 +158,7 @@ for conf in configs:
                         mf = mf.smearing(**method['smearing'])
                     try:
                         mf.run()
-                        mf.Gradients()
+                        mf.Gradients().run()
                     except Exception as e:
                         import traceback
                         traceback.print_stack()
