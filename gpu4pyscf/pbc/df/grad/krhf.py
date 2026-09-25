@@ -329,6 +329,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             auxG = auxGw = None
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
+    t0 = log.timer_debug1('contract dm', *t0)
 
     ################################
     # (d/dX P|Q) contributions
@@ -534,7 +535,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         return ejk_sigma_lr
 
     ejk_sigma += lr_3c2e_response()
-    log.timer_debug1('LR coulomb', *t0)
+    t0 = log.timer_debug1('lr_int3c2e_deriv', *t0)
     ft_opt = eval_compact = eval_dd = None
     dm_aux = None
 
@@ -649,7 +650,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             if err != 0:
                 raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
         ejk_sigma += ejk_sigma_sr * 2
-        t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e_ejk_deriv', *t0)
 
     ejk_sigma = ejk_sigma.get()
 
@@ -805,7 +806,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
         auxvec_LR += auxvec_FR
     auxvec += auxcell.apply_CT_dot(auxvec_LR)
     auxvec_LR = None
-    t0 = log.timer_debug1('lr_int2c2e via aft', *t0)
+    t0 = log.timer_debug1('contract dm', *t0)
 
     ################################
     # (d/dX P|Q) contributions
@@ -922,7 +923,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
         return ej_sigma_lr
 
     ej_sigma += lr_3c2e_response()
-    t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
+    t0 = log.timer_debug1('lr_int3c2e_deriv', *t0)
     ft_opt = None
 
     ################################
@@ -987,7 +988,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
         ej_sigma += ej_sigma_sr * 2
-        t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e_ejk_deriv', *t0)
     return ej_sigma.get()
 
 def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
@@ -1169,17 +1170,18 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
-    l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
+    l_ctr_aux_offsets = _counts_to_offsets(auxcell.l_ctr_counts)
+    # Split auxbasis in the unit cell. A large aux_batch can overflow the POOL_SIZE
+    aux_batch_size = POOL_SIZE // bvk_ncells // 8
     l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
-        l_ctr_aux_offsets, auxcell.uniq_l_ctr, POOL_SIZE)
+        l_ctr_aux_offsets, auxcell.uniq_l_ctr, aux_batch_size)
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
     nksh_per_batch = ksh_offsets_cpu[1:] - ksh_offsets_cpu[:-1]
-    shl_pair_batch_size = rhf._get_shl_pair_batch_size(
-        nksh_per_batch, bvk_ncells)
+    pair_per_block = _get_shl_pair_per_block(nksh_per_batch, bvk_ncells)
     bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
-        int3c2e_opt.bas_ij_cache, nsp_per_block=shl_pair_batch_size)
+        int3c2e_opt.bas_ij_cache, nsp_per_block=pair_per_block)
 
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)

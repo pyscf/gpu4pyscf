@@ -541,7 +541,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         return ejk_sigma_lr
 
     ejk_sigma += lr_3c2e_response()
-    log.timer_debug1('LR coulomb', *t0)
+    t0 = log.timer_debug1('lr_int3c2e_deriv', *t0)
     ft_opt = eval_compact = eval_dd = None
     dm_aux = None
 
@@ -661,7 +661,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             if err != 0:
                 raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
         ejk_sigma += ejk_sigma_sr * 2
-        t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e_ejk_deriv', *t0)
 
     ejk_sigma = ejk_sigma.get()
 

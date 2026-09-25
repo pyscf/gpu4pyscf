@@ -238,6 +238,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             contract('rG,ijG->rij', auxG, ijG, beta=1, out=j3c_oo)
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
+    t0 = log.timer_debug1('contract dm', *t0)
 
     ################################
     # (d/dX P|Q) contributions
@@ -452,7 +453,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         return ejk_sigma_lr
 
     ejk_sigma += lr_3c2e_response()
-    log.timer_debug1('LR coulomb', *t0)
+    t0 = log.timer_debug1('lr_int3c2e_deriv', *t0)
     ft_opt = eval_compact = eval_dd = None
     dm_aux = None
 
@@ -552,7 +553,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         if hermi == 1:
             ejk_sigma_sr *= 2.
         ejk_sigma += ejk_sigma_sr
-        t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e_ejk_deriv', *t0)
 
     ejk_sigma = ejk_sigma.get()
 
@@ -597,7 +598,6 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         auxvec = int3c2e_opt.contract_dm(dm, hermi=1)
     else:
         auxvec = cp.zeros(auxcell.cell.nao)
-    t0 = log.timer_debug1('contract dm', *t0)
 
     aux_loc = auxcell.ao_loc
     naux = int(aux_loc[-1])
@@ -691,7 +691,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         auxvec_LR += auxvec_FR
 
     auxvec += auxcell.apply_CT_dot(auxvec_LR)
-    t0 = log.timer_debug1('lr_int3c2e via aft', *t0)
+    t0 = log.timer_debug1('contract dm', *t0)
 
     ################################
     # (d/dX P|Q) contributions
@@ -819,7 +819,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         return ej_sigma_lr
 
     ej_sigma += lr_3c2e_response()
-    t0 = log.timer_debug1('lr_int3c2e_deriv via aft', *t0)
+    t0 = log.timer_debug1('lr_int3c2e_deriv', *t0)
 
     ################################
     # SR int3c2e response
@@ -884,7 +884,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
         ej_sigma += ej_sigma_sr * 2
-        t0 = log.timer_debug1('contract int3c2e_ejk_deriv', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e_ejk_deriv', *t0)
     return ej_sigma.get()
 
 
