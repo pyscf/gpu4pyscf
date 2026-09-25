@@ -561,7 +561,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         buf = cp.empty(nkpts*n_compact_pairs*max_aux_batch, dtype=np.complex128)
         buf1 = cp.empty(max(nkpts*nocc*nao*blksize*2,
                             bvk_ncells*nao**2*blksize*2,
-                            compren_compact_pairs*bvk_ncells*max_aux_batch))
+                            n_compact_pairs*bvk_ncells*max_aux_batch))
         buf2 = cp.empty(nkpts*nao**2*blksize, dtype=np.complex128)
         for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
             aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
