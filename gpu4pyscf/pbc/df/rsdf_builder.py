@@ -265,7 +265,7 @@ def _guess_omega(cell, kmesh=None):
     '''Guess optimal omega parameter for int3c2e'''
     #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
     #omega = cell_exps.min()**.5
-    omega = 0.5
+    omega = 0.4
     # SR cost ~= nkpts * naux * npairs * sparsity_factor
     # LR cost ~= nkpts * naux*nGv*npairs
     # sparsity_factor depends on nkpts and omega, reduced omega leads to
@@ -357,7 +357,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     else:
         omega = abs(omega)
     if int3c2e_opt is None:
-        rsdf_omega = max(omega, _guess_omega(cell))
+        rsdf_omega = max(omega, _guess_omega(cell, kmesh))
         int3c2e_opt = SRInt3c2eOpt(
             cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build(separate_dd=True)
 
@@ -380,6 +380,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     else:
         assert cell.dimension == 3
         mesh = [1] * 3
+    log.debug('mesh = %s', mesh)
     coulG = _weighted_coulG_kpts(auxcell, mesh, omega, rsdf_omega)
     Gv = cell.get_Gv(mesh)
     ngrids = len(Gv)
@@ -420,7 +421,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     ao_pair_counts = int3c2e._count_ao_pairs(cell, bas_ij_batches, cart, bvk_ncells)
     max_pair_size = int(max(ao_pair_counts, default=0))
 
-    log.debug('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
+    log.info('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
     cderi = empty_mapped((naux, nao_pairs))
     cderi.fill(0.)
 
@@ -541,7 +542,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     else:
         omega = abs(omega)
     if int3c2e_opt is None:
-        rsdf_omega = max(omega, _guess_omega(cell))
+        rsdf_omega = max(omega, _guess_omega(cell, kmesh))
         int3c2e_opt = SRInt3c2eOpt(
             cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build(separate_dd=True)
 
@@ -564,6 +565,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     else:
         assert cell.dimension == 3
         mesh = [1] * 3
+    log.debug('mesh = %s', mesh)
     coulG = _weighted_coulG_kpts(auxcell, mesh, omega, rsdf_omega, uniq_kpts)
     Gv = cell.get_Gv(mesh)
     ngrids = len(Gv)
@@ -604,8 +606,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
               nao_pairs, n_compact_pairs, max_pair_size)
 
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
-    log.debug('Required %.6g GB mapped memory on host',
-              len(cd_j2c_cache)*naux_max*nao_pairs*16e-9)
+    log.info('Required %.6g GB mapped memory on host',
+             len(cd_j2c_cache)*naux_max*nao_pairs*16e-9)
     cderi = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
         naux = cd_j2c_cache[j2c_idx].shape[1]
@@ -698,8 +700,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
             multi_gpu.run(proc, non_blocking=True)
             multi_gpu.synchronize()
     if with_dd:
+        t1 = log.timer_debug1('compact part of GDF tensor', *t0)
         _append_dd_cderi(int3c2e_opt, cderi, cd_j2c_cache, omega,
                          recontract, uniq_kpts)
+        t1 = log.timer_debug1('diffuse part of GDF tensor', *t1)
     cderip = None
     if negative_metric_size:
         cderip = {}
@@ -770,7 +774,7 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
             Compressed cderi tensor, with shape [naux, npair], where the
             orbital-pair is compressed.
         cderi_idx :
-            (pari_addresses, and diag_addresses) for the compressed orbital pairs.
+            (pair_addresses, and diag_addresses) for the compressed orbital pairs.
         k_idx (int):
             The index of the k-point = kpt_j - kpt_i
         kk_conserv (ndarray):

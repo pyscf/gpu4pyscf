@@ -1063,7 +1063,7 @@ class SortedMole(Mole, SortedGTO):
                 batch_size = nsp_per_block[l[i], l[j]]
             shl_pair_offsets.append(cp.arange(
                 sp0, sp1, batch_size, dtype=np.int32))
-        bas_ij_idx = cp.asarray(cp.hstack(bas_ij_idx), dtype=np.int32)
+        bas_ij_idx = cp.asarray(cp.hstack(bas_ij_idx), dtype=np.uint32)
         shl_pair_offsets.append(np.int32(sp1))
         shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
         return bas_ij_idx, shl_pair_offsets

@@ -146,7 +146,7 @@ while (1) {
     while (img_not_processed > 0) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
                         rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
-        if (num_sub_tasks == 0) continue;
+        if (num_sub_tasks > 0) {
         if (!int3c2e_unrolled(out, omega, envs, img_pool, sub_task_idx, num_sub_tasks,
                               img_tile_size, ijk_tasks_info, c2s_pool,
                               shm_size, iprim, jprim, kprim, li, lj, lk,
@@ -954,7 +954,7 @@ while (1) {
                     }
                 }
             }
-        }
+        } }
     } // while (img_not_processed > 0)
     _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info,
                       (int *)shared_memory);

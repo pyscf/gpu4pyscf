@@ -26,7 +26,6 @@ from pyscf.gto import (
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -427,6 +426,7 @@ class SRInt3c2eOpt:
 
     @property
     def mesh(self):
+        from gpu4pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
         if self._mesh is not None:
             return self._mesh
         cell = self.cell
@@ -476,9 +476,9 @@ class SRInt3c2eOpt:
             return [cell.aggregate_shl_pairs(self.bas_ij_cache, pair_per_block)]
 
         # If int3c2e nsp_per_block is smaller than ft_aopair nsp_per_block,
-        # multiple int3c2e batches can correspond to one ft_aopair batch.
-        # An int3c2e batch boundary may cut through an ft_aopair batch,
-        # causing SR and LR batch misaligned.
+        # multiple int3c2e blocks can correspond to one ft_aopair block.
+        # An int3c2e batch boundary may cut through an ft_aopair block,
+        # causing SR and LR batches to be misaligned.
         nsp_per_block = ft_ao_scheme(cache_cart_idx=True)[0]
         nsp_per_block = np.maximum(pair_per_block, nsp_per_block)
         bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
@@ -488,15 +488,22 @@ class SRInt3c2eOpt:
             cell.uniq_l_ctr[:,0], self.bas_ij_cache, cart=True)
         ao_pair_size_offsets = ao_pair_loc[shl_pair_offsets].get()
         splits = splits_by_blocksize(ao_pair_size_offsets, batch_size)
-        batch_splits = shl_pair_offsets[splits].get()
+        block_offsets = shl_pair_offsets.get()
 
-        nbatches = len(splits) - 1
         batches = []
-        for n in range(nbatches):
-            p0, p1 = batch_splits[n:n+2]
+        for s0, s1 in zip(splits[:-1], splits[1:]):
+            p0, p1 = block_offsets[s0], block_offsets[s1]
             assert p0 != p1
-            s0, s1 = splits[n:n+2]
-            batches.append((bas_ij_idx[p0:p1], shl_pair_offsets[s0:s1+1]-p0))
+            # block sliced by shl_pair_offsets must be <= pair_per_block due to
+            # the limit of POOL_SIZE. Generate new offsets:
+            # [np.arange(b0, b1, pair_per_block)
+            #  for b0, b1 in zip(block_offsets[s0:s1], block_offsets[s0+1:s1+1])]
+            counts = np.diff(block_offsets[s0:s1+1])
+            repeats = (counts + pair_per_block - 1) // pair_per_block
+            sizes = np.full(repeats.sum(), pair_per_block, dtype=np.int32)
+            sizes[np.cumsum(repeats)-1] = (counts-1) % pair_per_block + 1
+            offsets = np.append(0, np.cumsum(sizes))
+            batches.append((bas_ij_idx[p0:p1], cp.asarray(offsets, dtype=np.int32)))
         return batches
 
     def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None,
@@ -523,11 +530,10 @@ class SRInt3c2eOpt:
 
         uniq_l_ctr_aux = auxcell.uniq_l_ctr
         l_ctr_aux_offsets = _counts_to_offsets(auxcell.l_ctr_counts)
-        # Split auxbasis in the unit cell
-        if aux_batch_size is None:
-            _aux_batch_size = POOL_SIZE // bvk_ncells
-        else:
-            _aux_batch_size = aux_batch_size
+        # Split auxbasis in the unit cell. A large aux_batch can overflow the POOL_SIZE
+        _aux_batch_size = POOL_SIZE // bvk_ncells // 8
+        if aux_batch_size is not None:
+            assert aux_batch_size >= _aux_batch_size
         l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
             l_ctr_aux_offsets, uniq_l_ctr_aux, _aux_batch_size)
 
@@ -641,6 +647,13 @@ class SRInt3c2eOpt:
 
         cell = self.cell
         auxcell = self.auxcell
+        bvk_ncells = np.prod(self.bvk_kmesh)
+
+        l_ctr_aux_offsets = _counts_to_offsets(auxcell.l_ctr_counts)
+        # Split auxbasis in the unit cell. A large aux_batch can overflow the POOL_SIZE
+        aux_batch_size = POOL_SIZE // bvk_ncells // 8
+        l_ctr_aux_offsets, _ = _split_l_ctr_pattern(
+            l_ctr_aux_offsets, auxcell.uniq_l_ctr, aux_batch_size)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
             cache_cart_idx=True, gout_width=28, gout_ndim='k')
@@ -648,7 +661,7 @@ class SRInt3c2eOpt:
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
         bvk_ncells = len(self.bvkmesh_Ls)
-        pair_per_block = _get_shl_pair_per_block(auxcell.l_ctr_counts, bvk_ncells)
+        pair_per_block = _get_shl_pair_per_block(np.diff(l_ctr_aux_offsets), bvk_ncells)
         bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
             self.bas_ij_cache, pair_per_block)
 
@@ -705,12 +718,18 @@ class SRInt3c2eOpt:
         auxcell = self.auxcell
         bvk_ncells = len(self.bvkmesh_Ls)
 
+        l_ctr_aux_offsets = _counts_to_offsets(auxcell.l_ctr_counts)
+        # Split auxbasis in the unit cell. A large aux_batch can overflow the POOL_SIZE
+        aux_batch_size = POOL_SIZE // bvk_ncells // 8
+        l_ctr_aux_offsets, _ = _split_l_ctr_pattern(
+            l_ctr_aux_offsets, auxcell.uniq_l_ctr, aux_batch_size)
+
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
             cache_cart_idx=True, gout_width=29, gout_ndim='ij')
         lmax = cell.uniq_l_ctr[:,0].max()
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-        pair_per_block = _get_shl_pair_per_block(auxcell.l_ctr_counts, bvk_ncells)
+        pair_per_block = _get_shl_pair_per_block(np.diff(l_ctr_aux_offsets), bvk_ncells)
         bas_ij_idx = cell.aggregate_shl_pairs(self.bas_ij_cache, pair_per_block)[0]
 
         l_ctr_aux_offsets = _counts_to_offsets(auxcell.l_ctr_counts)
