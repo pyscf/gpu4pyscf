@@ -258,6 +258,7 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
     hermi = 1
 
     with_df = mf.with_df
+    with_df.reset() # release memory
     cell = with_df.cell
     auxcell = with_df.auxcell
     if auxcell is None:

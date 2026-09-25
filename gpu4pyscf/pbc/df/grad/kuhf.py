@@ -125,8 +125,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         block_bytes = nao**2*bvk_ncells*nkpts * 16  # j3c_full
         block_bytes += nao**2*bvk_ncells**2 * 16  # buf1: j3c_ij
         block_bytes += nao**2*bvk_ncells**2 * 16  # buf2: j3c_tmp / tmp
-        batch_size = min(naux, POOL_SIZE//bvk_ncells,
-                         int(mem_avail*.2/batch_bytes))
+        batch_size = min(naux, int(mem_avail*.2/batch_bytes))
         blksize = min(batch_size, int(mem_avail*.6/block_bytes))
         if batch_size < int(np.diff(aux_loc).max()) or blksize < 1:
             raise RuntimeError('Insufficient GPU memory for GDF gradient buffers')

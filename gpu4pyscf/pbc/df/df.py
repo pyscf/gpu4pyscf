@@ -96,6 +96,7 @@ class GDF(lib.StreamObject):
             if isinstance(self._kpts, KPoints):
                 self.kpts = reset_kpts(self.kpts, cell)
             self.cell = cell
+            self.auxcell = None
         self._cderi = self._cderip = self._cderi_idx = None
         self._rsh_df = {}
         return self
