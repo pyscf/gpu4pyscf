@@ -111,7 +111,10 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     expLk_conj = expLk.conj()
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
 
-    kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
+    kpt_iters = kk_adapted_iter(int3c2e_opt.bvk_kmesh)
+    kpt_iters = [(kp, kp_conj, cp.asarray(ki_idx, dtype=np.int32),
+                  cp.asarray(kj_idx, dtype=np.int32))
+                 for kp, kp_conj, ki_idx, kj_idx in kpt_iters]
     uniq_kpts_idx = np.array([x[0] for x in kpt_iters])
     uniq_kpts = kpts[uniq_kpts_idx]
     nkpts_uniq = len(uniq_kpts)
@@ -252,7 +255,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     def lr_3c2e(j3c_oo):
         mem_free = get_avail_mem()
         word_avail = mem_free // 8
-        word_avail -= naux*nkpts*nocc**2 * 2 * 2 # result
+        word_avail -= naux*nkpts*nocc**2 * 2 # result; accumulation needs no copy
         aux_size = naux*nkpts_uniq
         ao_size = nkpts*nao**2
         unpack_size = nao_pair + bvk_ncells*nao**2
@@ -294,14 +297,16 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                 contract('kpqG,kpi->kiqG', pqG, dm_factor_r, out=kiqG)
                 contract('kiqG,kqj->kijG', kiqG, dm_factor_l[kj_idx], out=kijG)
                 contract('rG,kijG->rkij', auxG_k, kijG, out=result)
-                j3c_oo[:,ki_idx,kj_idx] += result
+                #:j3c_oo[:,ki_idx,kj_idx] += result
+                _add_j3c_oo(j3c_oo, result, ki_idx, kj_idx)
                 if kp != kp_conj:
                     pqG.imag *= -1 # pqG.conj() inplace
                     contract('kqpG,kpi->kiqG', pqG, dm_factor_r[kj_idx], out=kiqG)
                     contract('kiqG,kqj->kijG', kiqG, dm_factor_l, out=kijG)
                     cp.take(auxG, j2c_idx, axis=1, out=auxG_k)
                     contract('rG,kijG->rkij', auxG_k, kijG, out=result)
-                    j3c_oo[:,kj_idx,ki_idx] += result
+                    #:j3c_oo[:,kj_idx,ki_idx] += result
+                    _add_j3c_oo(j3c_oo, result, kj_idx, ki_idx)
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
     t0 = log.timer_debug1('contract dm', *t0)
@@ -989,6 +994,42 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
 def _allocate(shape, buf):
     a = ndarray(shape, buffer=buf)
     return a, buf[a.size:]
+
+_add_j3c_oo_kernel = cp.RawKernel(r'''
+extern "C" __global__
+void add_j3c_oo(double2* out, const double2* values,
+                const int* ki, const int* kj,
+                unsigned long long nkpts, unsigned long long npairs,
+                unsigned long long noo)
+{
+    unsigned long long pair = blockIdx.x % npairs;
+    unsigned long long aux = blockIdx.x / npairs;
+    unsigned long long src = (unsigned long long)blockIdx.x * noo;
+    unsigned long long dest = ((aux * nkpts + ki[pair]) * nkpts + kj[pair]) * noo;
+    for (unsigned long long ij = threadIdx.x; ij < noo; ij += blockDim.x) {
+        double2 a = out[dest + ij];
+        double2 b = values[src + ij];
+        out[dest + ij] = make_double2(a.x + b.x, a.y + b.y);
+    }
+}
+''', 'add_j3c_oo')
+
+def _add_j3c_oo(j3c_oo, values, ki_idx, kj_idx):
+    '''Add [aux, pair, occ, occ] values to unique k-point pairs in place.
+    j3c_oo[:,ki_idx,kj_idx] += values
+    '''
+    assert j3c_oo.dtype == values.dtype == np.complex128
+    assert j3c_oo.flags.c_contiguous and values.flags.c_contiguous
+    assert j3c_oo.ndim == 5 and values.ndim == 4
+    assert j3c_oo.shape[0] == values.shape[0] and j3c_oo.shape[3:] == values.shape[2:]
+    assert len(ki_idx) == len(kj_idx) == values.shape[1]
+    ki_idx = cp.asarray(ki_idx, dtype=np.int32, order='C')
+    kj_idx = cp.asarray(kj_idx, dtype=np.int32, order='C')
+    _add_j3c_oo_kernel(
+        (values.shape[0]*len(ki_idx),), (512,),
+        (j3c_oo, values, ki_idx, kj_idx,
+         np.uint64(j3c_oo.shape[1]), np.uint64(values.shape[1]),
+         np.uint64(values.shape[2]*values.shape[3])))
 
 def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
                         exxdiv=None, omega=None, verbose=None,
