@@ -473,7 +473,7 @@ class FTOpt:
             conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
 
         cell = self.cell.cell
-        nao = nao_nr(cart=cart)
+        nao = cell.nao_nr(cart=cart)
         # tril_idx in the reference cell associated to the pair_address.
         # Note indices within this array does not guarantee i>=j. It only indicates
         # the unique pairs for each unit cell.
