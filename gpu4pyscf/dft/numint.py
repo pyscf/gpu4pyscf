@@ -1799,7 +1799,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
             spin = 1
         else:
             spin = 0
-    xcfuns = ni._init_xcfuns(xc_code, spin)
+    xcfuns = ni._init_xcfuns(xc_code, spin, omega)
 
     if len(xcfuns) == 0: # HF
         ngrids = rho.shape[-1]
@@ -1814,7 +1814,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     # Fall back to the libxc library provided by PySCF, evaluate xc on CPUs
     if not all(x.on_gpu for x, w in xcfuns):
         ni_cpu = ni.to_cpu()
-        ret = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)
+        ret = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, omega=omega, xctype=xctype)
         for i in range(deriv+1):
             ret[i] = cupy.asarray(ret[i])
         return ret
@@ -1904,17 +1904,21 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     return exc, vxc, fxc, kxc
 
 @lru_cache(10)
-def _init_xcfuns(xc_code, spin):
+def _init_xcfuns(xc_code, spin, omega=None):
     xc_upper = xc_code.upper()
     # Note: libxc_cpu.parse_xc relies on pyscf.scf.dispersion.parse_dft. It does NOT use gpu4pyscf.scf.dispersion.parse_dft.
-    xc_ids = libxc_cpu.parse_xc(xc_upper)[1]
+    hyb, xc_ids = libxc_cpu.parse_xc(xc_upper)
+    # As in pyscf.dft.libxc.XCFunctionalCache: an explicit omega overrides the
+    # one declared in xc_code, and zero leaves libxc's default in place.
+    if omega is None:
+        omega = hyb[2]
     if spin:
         spin_polarized = 'polarized'
     else:
         spin_polarized = 'unpolarized'
     xcfuns = []
     for xc, w in xc_ids:
-        xcfun = libxc.XCfun(xc, spin_polarized)
+        xcfun = libxc.XCfun(xc, spin_polarized, omega)
         xcfuns.append((xcfun,w))
         if libxc_cpu.needs_laplacian(xcfun.func_id):
             raise NotImplementedError()
@@ -2215,10 +2219,13 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
     def to_cpu(self):
         ni = numint.NumInt()
+        ni.omega = self.omega
         return ni
 
-    def _init_xcfuns(self, xc_code, spin=0):
-        return _init_xcfuns(xc_code, spin)
+    def _init_xcfuns(self, xc_code, spin=0, omega=None):
+        if omega is None:
+            omega = self.omega
+        return _init_xcfuns(xc_code, spin, omega)
 
     def reset(self):
         self.gdftopt      = None
@@ -2287,7 +2294,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
             rho_sub = cupy.asarray(rho[...,p0:p1], order='C')
-            res = eval_xc_eff(self, xc_code, rho_sub, deriv=deriv,
+            res = eval_xc_eff(self, xc_code, rho_sub, deriv=deriv, omega=omega,
                               xctype=xctype, spin=spin, work=work)
             for i in range(deriv+1):
                 out[i][...,p0:p1] = res[i]

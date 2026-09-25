@@ -547,8 +547,10 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
         raise NotImplementedError('non-collinear fxc')
     get_fxc = nr_gks_fxc = nr_fxc
     
-    def _init_xcfuns(self, xc_code, spin=0):
-        return numint._init_xcfuns(xc_code, spin)
+    def _init_xcfuns(self, xc_code, spin=0, omega=None):
+        if omega is None:
+            omega = self.omega
+        return numint._init_xcfuns(xc_code, spin, omega)
     eval_xc_eff = numint.eval_xc_eff
     mcfun_eval_xc_adapter = mcfun_eval_xc_adapter
 
@@ -561,6 +563,7 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     
     def to_cpu(self):
         ni = numint2c.NumInt2C()
+        ni.omega = self.omega
         return ni
     
 

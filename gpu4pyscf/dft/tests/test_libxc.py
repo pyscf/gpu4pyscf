@@ -52,9 +52,10 @@ def _diff(dat, ref):
     return np.min((abs(d/(ref+1e-300)), abs(d)), axis=0)
 
 class KnownValues(unittest.TestCase):
-    def _check_xc(self, xc, spin=0, deriv=2, fxc_tol=1e-10, kxc_tol=1e-10):
+    def _check_xc(self, xc, spin=0, deriv=2, fxc_tol=1e-10, kxc_tol=1e-10, omega=None):
         ni_cpu = numint_cpu()
         ni_gpu = numint_gpu()
+        ni_cpu.omega = ni_gpu.omega = omega
         xctype = ni_cpu._xc_type(xc)
 
         if xctype == 'LDA':
@@ -126,6 +127,26 @@ class KnownValues(unittest.TestCase):
 
     def test_xc_on_cpu(self):
         self._check_xc('th1', spin=0)
+
+    def test_rsh_omega_in_xc_code(self):
+        # libxc's default for ITYH is omega=0.2
+        self._check_xc('LR_HF(0.3)+ITYH,LYP', deriv=1)
+        self._check_xc('LR_HF(0.3)+ITYH,LYP', spin=1, deriv=1)
+
+    def test_rsh_omega_override(self):
+        # LRC_WPBEH rather than LC_WPBE: LC_WPBE's vxc differs from pyscf by
+        # ~2e-9 even at its default omega
+        self._check_xc('HYB_GGA_XC_LRC_WPBEH', deriv=1, omega=0.1)
+        self._check_xc('HYB_GGA_XC_LRC_WPBEH', spin=1, deriv=1, omega=0.1)
+        self._check_xc('CAM_B3LYP', deriv=1, omega=0.2)
+        self._check_xc('LR_HF(0.3)+ITYH,LYP', deriv=1, omega=0.175)
+        # functionals are cached; the override must not leak into the next call
+        self._check_xc('HYB_GGA_XC_LRC_WPBEH', deriv=1)
+
+    def test_to_cpu_keeps_omega(self):
+        ni = numint_gpu()
+        ni.omega = 0.175
+        assert ni.to_cpu().omega == 0.175
 
 if __name__ == "__main__":
     print("Full Tests for xc fun")
