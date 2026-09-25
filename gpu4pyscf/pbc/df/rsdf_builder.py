@@ -265,7 +265,7 @@ def _guess_omega(cell, kmesh=None):
     '''Guess optimal omega parameter for int3c2e'''
     #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
     #omega = cell_exps.min()**.5
-    omega = 0.3
+    omega = 0.4
     # SR cost ~= nkpts * naux * npairs * sparsity_factor
     # LR cost ~= nkpts * naux*nGv*npairs
     # sparsity_factor depends on nkpts and omega, reduced omega leads to
@@ -987,7 +987,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
     # Guess range-separation parameter based on system size
-    omega = 0.3
+    omega = 0.4
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
     mesh = cell.cutoff_to_mesh(ke_cutoff)
     nGv = np.prod(mesh)

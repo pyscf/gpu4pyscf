@@ -1067,7 +1067,7 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
     # Guess range-separation parameter based on system size
-    omega = 0.3
+    omega = 0.4
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
     mesh = cell.cutoff_to_mesh(ke_cutoff)
     nGv = np.prod(mesh)
