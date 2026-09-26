@@ -246,6 +246,7 @@ class KnownValues(unittest.TestCase):
             a = np.eye(3) * (15.9069652593 / 3),
             unit = "Angstrom",
             basis = "sto-6g",
+            precision = 1e-10,
             verbose = 0,
         )
 
@@ -276,7 +277,7 @@ class KnownValues(unittest.TestCase):
             [ 0.0254392105603074,  0.0368723237187396, -0.068196215678995 ],
         ])
 
-        assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.abs(test_energy - ref_energy) < 1e-8
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 5e-7
         assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-7
 

@@ -157,6 +157,9 @@ def splits_by_blocksize(cum, block_size):
     Returns:
         splits: split points in cum, starting with 0 and ending with len(cum)-1.
     '''
+    if len(cum) == 1:
+        return [0]
+
     bound = block_size
     tot = cum[-1]
     splits = [0]
@@ -165,7 +168,8 @@ def splits_by_blocksize(cum, block_size):
         i += max(numpy.searchsorted(cum[i:], bound, side='right') - 1, 1)
         splits.append(i)
         bound = cum[i] + block_size
-    splits.append(len(cum) - 1)
+    if splits[-1] != len(cum) - 1:
+        splits.append(len(cum) - 1)
     return splits
 
 def nearest_power2(n, return_leq=True):

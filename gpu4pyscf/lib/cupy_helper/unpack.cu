@@ -209,9 +209,32 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
     }
 }
 
+__global__ static
+void copy_symmetric_kernel(double *a, int *i_addr, int *j_addr, int N1, int N2)
+{
+    int k = blockIdx.x;
+    size_t i = i_addr[k];
+    size_t j = j_addr[k];
+    size_t ij = (i * N1 + j) * N2;
+    size_t ji = (j * N1 + i) * N2;
+    for (int z = threadIdx.x; z < N2; z += blockDim.x) {
+        a[ji + z] = a[ij + z];
+    }
+}
+
+__global__ static
+void scatter_add_kernel(double *a, double *b, int *idx, double alpha, int ncol)
+{
+    int i = blockIdx.x;
+    long long dst_base = (long long)idx[i] * ncol;
+    long long src_base = (long long)i      * ncol;
+    for (int j = threadIdx.x; j < ncol; j += blockDim.x) {
+        a[dst_base + j] += b[src_base + j] * alpha;
+    }
+}
+
 extern "C" {
-int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi,
-              int dtype)
+int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi, int dtype)
 {
     dim3 threads(THREADS, THREADS);
     int nx = (n + threads.x - 1) / threads.x;
@@ -319,6 +342,30 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int copy_symmetric(cudaStream_t stream, double *a, int *i_addr, int *j_addr,
+                   int npairs, int N1, int N2)
+{
+    copy_symmetric_kernel<<<npairs, 1024, 0, stream>>>(a, i_addr, j_addr, N1, N2);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "copy_symmetric error %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int scatter_add(cudaStream_t stream, double *a, double *b, int *idx,
+                double alpha, int nrow, int ncol)
+{
+    scatter_add_kernel<<<nrow, 1024, 0, stream>>>(a, b, idx, alpha, ncol);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "scatter_add_kernel error %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

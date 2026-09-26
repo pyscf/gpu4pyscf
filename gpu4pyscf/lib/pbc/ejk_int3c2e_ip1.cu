@@ -141,6 +141,7 @@ while (1) {
     while (img_not_processed > 0) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
                         rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
+        if (num_sub_tasks > 0) {
         for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
@@ -415,7 +416,7 @@ while (1) {
                 atomicAdd(ejk+ja*3+2, reduce[8*THREADS]);
             }
             __syncthreads();
-        }
+        } }
     } // while (img_not_processed > 0)
     _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info,
                       (int *)shared_memory);
@@ -442,6 +443,9 @@ int PBCsr_ejk_int3c2e_deriv(double *ejk, double *sigma, double *dm, double *dm_a
                             int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
                             float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
+    if (nbatches_shl_pair == 0 || nbatches_ksh == 0) {
+        return 0;
+    }
     cudaFuncSetAttribute(ejk_int3c2e_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);

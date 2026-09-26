@@ -137,7 +137,9 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         vj_packed = [j for j, k in results]
         vj_packed = multi_gpu.array_reduce(vj_packed, inplace=True)
         vj = cp.zeros_like(dms)
-        vj[:,cols,rows] = vj[:,rows,cols] = vj_packed
+        # Ordered columns hold partial sums in either orientation.
+        vj[:,rows,cols] = vj_packed
+        vj = vj + vj.transpose(0, 2, 1)
         vj = vj.reshape(out_shape)
 
     if with_k:
