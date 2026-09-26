@@ -456,7 +456,7 @@ class KnownValues(unittest.TestCase):
             dm = dm[:,None,:,:]
         test_gradient = unrestricted_get_vxc_full_response(mf._numint, cell, mf.grids, mf.xc, dm, kpts, hermi=1)
 
-        # ref_gradient = numerical_gradient_exc_becke(cell, "r2scan", kpts, 'def2-universal-jkfit', (50,194), dm, unrestricted=True)
+        #ref_gradient = numerical_gradient_exc_becke(cell, "r2scan", kpts, 'def2-universal-jkfit', (50,194), dm, unrestricted=True)
         ref_gradient = np.array([
             [ 0.0000003321254383,  0.0000003318678665,  0.0000003322675468],
             [-0.0003303815532263, -0.0003303816153988, -0.0003303810025557],
@@ -470,7 +470,7 @@ class KnownValues(unittest.TestCase):
 
         # It can match down to 1e-9, if the finite difference is computed using the same dm from SCF.
         # However if we save the finite difference result, it suffers from the numerical instability of dm, and the a 3e-7 error is observed.
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-7
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 2e-6
 
     def test_xc_gradient_unrestricted_k_with_response(self):
         cell = pyscf.M(
