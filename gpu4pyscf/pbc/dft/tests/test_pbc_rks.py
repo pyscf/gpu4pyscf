@@ -133,7 +133,9 @@ class KnownValues(unittest.TestCase):
         i, j = divmod(ij, nao)
         naux = auxcell.nao
         out = cp.zeros((naux,nao,nao))
-        out[:,j,i] = out[:,i,j] = with_df._cderi[0]
+        cderi = cp.asarray(with_df._cderi[0])
+        out[:,i,j] = cderi
+        out[:,j,i] += cderi
         with _load3c(mf_ref.with_df._cderi, 'j3c', np.zeros((2,3))) as cderi:
             ref = unpack_tril(cderi[:])
         assert abs(out.get() - ref).max() < 1e-8

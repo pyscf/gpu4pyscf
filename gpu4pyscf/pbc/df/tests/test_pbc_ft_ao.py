@@ -174,7 +174,7 @@ class KnownValues(unittest.TestCase):
         dm = cp.random.rand(nao,nao)
         dm = dm.dot(dm.T)
         Gv = cell.get_Gv(mesh=[9,11,3])
-        ft_opt = ft_ao_gpu.FTOpt(cell)
+        ft_opt = ft_ao_gpu.FTOpt(cell).build()
         rhoG = ft_opt.contract_dm(ft_opt.cell.apply_C_mat_CT(dm), Gv).get()
 
         ref = cp.einsum('Gpq,qp->G', ft_aopair(cell, Gv), dm).get()
@@ -187,7 +187,7 @@ class KnownValues(unittest.TestCase):
         dm = dm + dm.T
         mesh = [9,11,3]
         Gv = cell.get_Gv(mesh=mesh)
-        ft_opt = ft_ao_gpu.FTOpt(cell)
+        ft_opt = ft_ao_gpu.FTOpt(cell).build()
         rhoG = ft_opt.contract_dm(ft_opt.cell.apply_C_mat_CT(dm), Gv)
         coulG = rhoG * cp.array(get_coulG(cell, Gv=Gv)) / cell.vol
         vj = ft_opt.contract_rhoG(coulG, -Gv, sort_output=True)

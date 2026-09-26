@@ -1134,7 +1134,8 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
     ej_sigma_lr = cp.zeros([cell.natm+3, 3])
     vG_conj = rho_nucG.conj() * wcoulG_LR0
     vG_conj[0] += pp_G0_term
-    bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+    bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+        aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     err = libpbc.PBC_ft_aopair_ej_deriv(
         ctypes.cast(ej_sigma_lr[:-3].data.ptr, ctypes.c_void_p),

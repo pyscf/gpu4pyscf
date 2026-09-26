@@ -533,7 +533,7 @@ class SRInt3c2eOpt:
         # Split auxbasis in the unit cell. A large aux_batch can overflow the POOL_SIZE
         _aux_batch_size = POOL_SIZE // bvk_ncells // 8
         if aux_batch_size is not None:
-            assert aux_batch_size >= _aux_batch_size
+            _aux_batch_size = min(aux_batch_size, _aux_batch_size)
         l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
             l_ctr_aux_offsets, uniq_l_ctr_aux, _aux_batch_size)
 

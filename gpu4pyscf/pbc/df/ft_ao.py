@@ -472,8 +472,17 @@ class FTOpt:
             conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
             conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
 
-        cell = self.cell.cell
-        nao = cell.nao_nr(cart=cart)
+        cell = self.cell
+        if transform_ao:
+            # Current ft_aopair_kernel does not support general contraction
+            # transforming the decontracted basis set to original set can cause
+            # race condition
+            assert all(cell.recontract_bas[:,NPRIM_OF] == 1), \
+                    'ft_aopair_kernel does not support general contraction'
+            # The original basis set
+            nao = cell.cell.nao_nr(cart=cart)
+        else:
+            nao = cell.nao_nr(cart=cart)
         # tril_idx in the reference cell associated to the pair_address.
         # Note indices within this array does not guarantee i>=j. It only indicates
         # the unique pairs for each unit cell.
