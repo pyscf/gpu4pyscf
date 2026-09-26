@@ -246,7 +246,10 @@ def get_becke_weight_derivative(grids, natm, grid_range = None):
     dweight_dA_unitcell = cp.zeros([natm, 3, ngrids])
     cp.add.at(dweight_dA_unitcell, grids_supatm_to_atm_idx, dweight_dA_supercell)
 
-    return dweight_dA_unitcell
+    weight_stress = cp.einsum("Axg,Ay->xyg", dweight_dA_supercell, grids_supatm_coords)
+
+    dweight_gradient_stress = cp.vstack((dweight_dA_unitcell, weight_stress))
+    return dweight_gradient_stress
 
 class UniformGrids(lib.StreamObject):
     '''Uniform Grid class.'''

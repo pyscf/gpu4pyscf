@@ -60,13 +60,7 @@ class Gradients(uhf.Gradients):
                 fn = get_vxc
             cell = self.cell
             # UKS densities use (spin, k-point, AO, AO) ordering.
-            de[:-3] = fn(ni, cell, grids, xc, dm[:,None], np.zeros((1, 3)))
-            if isinstance(grids, BeckeGrids):
-                # Atomic grid response is supported; Becke-grid stress is not.
-                de[-3:] = np.nan
-            else:
-                de[-3:] = multigrid_v3.MultiGridNumInt(cell).energy_strain_gradient(
-                    xc, dm, spin=1, with_j=False, with_nuc=False)
+            de = fn(ni, cell, grids, xc, dm[:,None], np.zeros((1, 3)))
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:
             de += rhf._get_ejk_derivatives(mf, dm, None, j_factor, omega, k_lr, k_sr)
