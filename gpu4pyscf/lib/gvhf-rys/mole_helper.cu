@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 
 #define THREADS         256
@@ -32,72 +33,35 @@
 // Macros to abstract CUDA/SYCL thread-indexing and kernel launch differences.
 // Each pattern appears 4 times in this file, so macros are warranted.
 
-#ifdef USE_SYCL
 #define SETUP_BRA_KERNEL() \
-    auto item = syclex::this_work_item::get_nd_item<3>(); \
-    int thread_id = item.get_local_id(2); \
-    int col0      = item.get_group(2) * COL_BLKSIZE; \
-    int c_bas_id  = item.get_group(1); \
-    int count     = item.get_group(0); \
-    int (&p_ao_offsets)[NPRIM_MAX] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX]>(item.get_group());
-#else
-#define SETUP_BRA_KERNEL() \
-    int thread_id = threadIdx.x; \
-    int col0      = blockIdx.x * COL_BLKSIZE; \
-    int c_bas_id  = blockIdx.y; \
-    int count     = blockIdx.z; \
-    __shared__ int p_ao_offsets[NPRIM_MAX];
-#endif
+    setup_context(); \
+    int thread_id = threadIdx_x; \
+    int col0      = blockIdx_x * COL_BLKSIZE; \
+    int c_bas_id  = blockIdx_y; \
+    int count     = blockIdx_z; \
+    SHARED_ARRAY(int, p_ao_offsets, [NPRIM_MAX]);
 
-#ifdef USE_SYCL
 #define SETUP_KET_KERNEL() \
-    auto item = syclex::this_work_item::get_nd_item<2>(); \
-    int tx       = item.get_local_id(1); \
-    int ty       = item.get_local_id(0); \
-    int row0     = item.get_group(1) * ROW_BLKSIZE; \
-    int c_bas_id = item.get_group(0) * TILE_X + tx; \
-    int (&p_ao_offsets)[NPRIM_MAX*TILE_X] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NPRIM_MAX*TILE_X]>(item.get_group());
-#else
-#define SETUP_KET_KERNEL() \
-    int tx       = threadIdx.x; \
-    int ty       = threadIdx.y; \
-    int row0     = blockIdx.x * ROW_BLKSIZE; \
-    int c_bas_id = blockIdx.y * TILE_X + tx; \
-    __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
-#endif
+    setup_context(); \
+    int tx       = threadIdx_x; \
+    int ty       = threadIdx_y; \
+    int row0     = blockIdx_y * ROW_BLKSIZE; \
+    int c_bas_id = blockIdx_x * TILE_X + tx; \
+    SHARED_ARRAY(int, p_ao_offsets, [NPRIM_MAX*TILE_X]);
 
-#ifdef USE_SYCL
 #define LAUNCH_BRA_KERNEL(KERNEL, counts_, nbas_, nbatch_col_, ...) { \
-    sycl::range<3> _threads(1, 1, THREADS); \
-    sycl::range<3> _blocks(counts_, nbas_, nbatch_col_); \
-    sycl_get_queue()->parallel_for<class KERNEL##_sycl>( \
-        sycl::nd_range<3>(_blocks * _threads, _threads), [=](auto item) { \
-        KERNEL(__VA_ARGS__); \
-    }); \
+    auto _blocks = make_grid(nbatch_col_, nbas_, counts_); \
+    auto _threads = make_block(THREADS); \
+    LAUNCH_KERNEL_Q(sycl_get_queue(), KERNEL, _blocks, _threads, 0, __VA_ARGS__); \
 }
-#else
-#define LAUNCH_BRA_KERNEL(KERNEL, counts_, nbas_, nbatch_col_, ...) { \
-    dim3 _blocks(nbatch_col_, nbas_, counts_); \
-    KERNEL<<<_blocks, THREADS>>>(__VA_ARGS__); \
-}
-#endif
 
-#ifdef USE_SYCL
+// NOTE: launch geometry is x = nbas tiles, y = nrow tiles. The old CUDA
+// launch had them swapped (x = nrow, y = nbas); see SETUP_KET_KERNEL.
 #define LAUNCH_KET_KERNEL(KERNEL, nbas_, nrow_, ...) { \
-    sycl::range<2> _threads(TILE_Y, TILE_X); \
-    sycl::range<2> _blocks((nbas_+TILE_X-1)/TILE_X, (nrow_+ROW_BLKSIZE-1)/ROW_BLKSIZE); \
-    sycl_get_queue()->parallel_for<class KERNEL##_sycl>( \
-        sycl::nd_range<2>(_blocks * _threads, _threads), [=](auto item) { \
-        KERNEL(__VA_ARGS__); \
-    }); \
+    auto _blocks = make_grid((nbas_+TILE_X-1)/TILE_X, (nrow_+ROW_BLKSIZE-1)/ROW_BLKSIZE); \
+    auto _threads = make_block(TILE_X, TILE_Y); \
+    LAUNCH_KERNEL_Q(sycl_get_queue(), KERNEL, _blocks, _threads, 0, __VA_ARGS__); \
 }
-#else
-#define LAUNCH_KET_KERNEL(KERNEL, nbas_, nrow_, ...) { \
-    dim3 _threads(TILE_X, TILE_Y); \
-    dim3 _blocks((nrow_+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas_+TILE_X-1)/TILE_X); \
-    KERNEL<<<_blocks, _threads>>>(__VA_ARGS__); \
-}
-#endif
 
 static __global__
 void bra_sorted2cart_kernel(double *out, double *input, double *recontract_coef,

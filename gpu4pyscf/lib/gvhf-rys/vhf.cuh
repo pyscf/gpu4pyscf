@@ -7,6 +7,11 @@
 #elif defined(__CUDACC__)
 #include <cuda_runtime.h>
 #endif
+// Backend-agnostic kernel macros (setup_context, SHARED_ARRAY,
+// DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*). Included here so every TU that
+// includes vhf.cuh (kernels, drivers, and shared .cuh helpers like
+// rys_contract_k.cuh) gets them regardless of include order.
+#include "gsycl/gpu_compat.h"
 
 #define PTR_RANGE_OMEGA 8
 // slots of atm

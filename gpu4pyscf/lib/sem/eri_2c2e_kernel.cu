@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #define INV_SQRT(x) (1.0 / sqrt(x))
 #define SQR(x) ((x) * (x))
@@ -804,12 +805,8 @@ __global__ void multipole_eval_kernel(
     const double* __restrict__ add_vec, // (n_pairs,)
     double* __restrict__ out_vec        // (n_pairs,)
 ) {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= n_pairs) return;
 
     out_vec[idx] = charg_kernel_device(
@@ -831,12 +828,8 @@ __global__ void solve_poij_kernel(
     double* __restrict__ rho_vec,      // (N,) Output
     const double hartree2ev            // Constant passed from Python
 ) {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= n_atoms) return;
 
     int l = l_vec[idx];
@@ -923,12 +916,8 @@ __global__ void test_rijkl_kernel(
     const double* __restrict__ ch,
     double* __restrict__ out_val
 ) {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= n_tasks) return;
 
     out_val[idx] = rijkl_device(
@@ -980,16 +969,8 @@ __global__ void calc_local_rep_core_kernel(
     double* __restrict__ core_out,  // (n_pairs, 10, 2)
     double* __restrict__ gab_out    // (n_pairs)
 ) {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int p_idx = item.get_group(0);
-    int threadIdx_x = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(0);
-#else
-    int p_idx = blockIdx.x;
-    int threadIdx_x = threadIdx.x;
-    int blockDim_x = blockDim.x;
-#endif
+    setup_context();
+    int p_idx = blockIdx_x;
     if (p_idx >= n_pairs) return;
 
     int ni = pair_i_vec[p_idx]; // Atom index
@@ -999,18 +980,10 @@ __global__ void calc_local_rep_core_kernel(
     int e_i = ele_id[ni]; // Element index
     int e_j = ele_id[nj]; // Element index
 
-#ifdef USE_SYCL
-    auto thread_block = item.get_group();
-    double (&s_ri)[22] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[22]>(thread_block);
-    double (&s_rep)[491] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[491]>(thread_block);
-    double (&s_core)[20] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[20]>(thread_block);
-    double &s_gab = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
-#else
-    __shared__ double s_ri[22];     // sp parts
-    __shared__ double s_rep[491];   // spd parts
-    __shared__ double s_core[20];   // 10 rows, 2 cols
-    __shared__ double s_gab;
-#endif
+    SHARED_ARRAY(double, s_ri, [22]);
+    SHARED_ARRAY(double, s_rep, [491]);
+    SHARED_ARRAY(double, s_core, [20]);
+    SHARED_ARRAY(double, s_gab);
 
     int tid = threadIdx_x;
 
@@ -1088,13 +1061,9 @@ __global__ void calc_local_rep_core_kernel(
 
 // HARDCODED MAPPINGS
 // Dense 1D index (0..44) to 2D orbital index (i)
-#ifdef USE_SYCL
-// SYCL has no cross-TU __device__ linkage for read-only tables;
-// `static constexpr` gives the same device-side constant data.
+// `static constexpr` serves both backends: same device-side constant data
+// in CUDA and SYCL, with no cross-TU linkage issues.
 static constexpr int DENSE_TO_I[45] = {
-#else
-__device__ const int DENSE_TO_I[45] = {
-#endif
     0,
     1, 1,
     2, 2, 2,
@@ -1107,11 +1076,7 @@ __device__ const int DENSE_TO_I[45] = {
 };
 
 // Dense 1D index (0..44) to 2D orbital index (j)
-#ifdef USE_SYCL
 static constexpr int DENSE_TO_J[45] = {
-#else
-__device__ const int DENSE_TO_J[45] = {
-#endif
     0,
     0, 1,
     0, 1, 2,
@@ -1124,11 +1089,7 @@ __device__ const int DENSE_TO_J[45] = {
 };
 
 // It is indexd in the mopac
-#ifdef USE_SYCL
 static constexpr int MOPAC_INDEXD[9][9] = {
-#else
-__device__ const int MOPAC_INDEXD[9][9] = {
-#endif
     { 0,  1,  2,  3,  4,  5,  6,  7,  8},
     { 1,  9, 10, 11, 12, 13, 14, 15, 16},
     { 2, 10, 17, 18, 19, 20, 21, 22, 23},
@@ -1162,16 +1123,9 @@ __global__ void global_transform_kernel(
     double* __restrict__ e2a_out,      
     double* __restrict__ enuc_out
 ) {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int p_idx = item.get_group(0);
-    int tid = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(0);
-#else
-    int p_idx = blockIdx.x;
-    int tid = threadIdx.x;
-    int blockDim_x = blockDim.x;
-#endif
+    setup_context();
+    int p_idx = blockIdx_x;
+    int tid = threadIdx_x;
     if (p_idx >= n_pairs) return;
 
     int ni = pair_i_vec[p_idx];
@@ -1184,18 +1138,10 @@ __global__ void global_transform_kernel(
     int limij = ii * (ii + 1) / 2;
     int limkl = kk * (kk + 1) / 2;
 
-#ifdef USE_SYCL
-    auto thread_block = item.get_group();
-    double (&s_R)[45][45] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[45][45]>(thread_block);
-    double (&s_V)[45][45] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[45][45]>(thread_block);
-    double (&s_L_A)[45] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[45]>(thread_block);
-    double (&s_L_B)[45] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[45]>(thread_block);
-#else
-    __shared__ double s_R[45][45];
-    __shared__ double s_V[45][45];
-    __shared__ double s_L_A[45];
-    __shared__ double s_L_B[45];
-#endif
+    SHARED_ARRAY(double, s_R, [45][45]);
+    SHARED_ARRAY(double, s_V, [45][45]);
+    SHARED_ARRAY(double, s_L_A, [45]);
+    SHARED_ARRAY(double, s_L_B, [45]);
 
     if (tid == 0) {
         double xi = coords[ni * 3 + 0], yi = coords[ni * 3 + 1], zi = coords[ni * 3 + 2];
@@ -1323,20 +1269,14 @@ int launch_multipole_eval_kernel_c(
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-#ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class multipole_eval_sycl>(sycl::nd_range<1>(blocks_per_grid * threads_per_block, threads_per_block), [=](auto item) [[intel::kernel_args_restrict]] {
-        multipole_eval_kernel(n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec);
-    });
-#else
-    multipole_eval_kernel<<<blocks_per_grid, threads_per_block>>>(
-        n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec
-    );
-
+    auto block = make_block(threads_per_block);
+    auto grid = make_grid(blocks_per_grid);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), multipole_eval_kernel, grid, block, 0,
+        n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-#endif
     return 0;
 }
 
@@ -1351,20 +1291,14 @@ int launch_solve_poij_kernel_c(
     int threads_per_block = 128;
     int blocks_per_grid = (n_atoms + threads_per_block - 1) / threads_per_block;
 
-#ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class solve_poij_sycl>(sycl::nd_range<1>(blocks_per_grid * threads_per_block, threads_per_block), [=](auto item) [[intel::kernel_args_restrict]] {
-        solve_poij_kernel(n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev);
-    });
-#else
-    solve_poij_kernel<<<blocks_per_grid, threads_per_block>>>(
-        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev
-    );
-
+    auto block = make_block(threads_per_block);
+    auto grid = make_grid(blocks_per_grid);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), solve_poij_kernel, grid, block, 0,
+        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-#endif
     return 0;
 }
 
@@ -1382,30 +1316,19 @@ int launch_test_rijkl_kernel_c(
     int threads = 128;
     int blocks = (n_tasks + threads - 1) / threads;
     
-#ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class test_rijkl_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-        test_rijkl_kernel(n_tasks, n_atom,
-                          ni_vec, nj_vec, ij_vec, kl_vec,
-                          li_vec, lj_vec, lk_vec, ll_vec,
-                          ic_vec, r_vec,
-                          po_tensor, ddp_tensor, core_rho, ch,
-                          out_val);
-    });
-#else
-    test_rijkl_kernel<<<blocks, threads>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), test_rijkl_kernel, grid, block, 0,
         n_tasks, n_atom,
         ni_vec, nj_vec, ij_vec, kl_vec,
         li_vec, lj_vec, lk_vec, ll_vec,
         ic_vec, r_vec,
         po_tensor, ddp_tensor, core_rho, ch,
-        out_val
-    );
-    
+        out_val);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-#endif
     return 0;
 }
 
@@ -1427,19 +1350,9 @@ int launch_calc_local_rep_core_kernel_c(
     int threads = 128;
     int blocks = n_pairs; 
     
-#ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class calc_local_rep_core_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-        calc_local_rep_core_kernel(n_pairs, pair_i_vec, pair_j_vec, ele_id, r_vec, n_atom,
-                                   am, ad, aq, dd, qq,
-                                   po_tensor, ddp_tensor, core_rho, ch,
-                                   tore, natorb, dorbs,
-                                   task_action, task_target, task_ij, task_kl,
-                                   task_li, task_lj, task_lk, task_ll,
-                                   HATREE2EV,
-                                   rep_out, core_out, gab_out);
-    });
-#else
-    calc_local_rep_core_kernel<<<blocks, threads>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), calc_local_rep_core_kernel, grid, block, 0,
         n_pairs, pair_i_vec, pair_j_vec, ele_id, r_vec, n_atom,
         am, ad, aq, dd, qq,
         po_tensor, ddp_tensor, core_rho, ch,
@@ -1447,14 +1360,11 @@ int launch_calc_local_rep_core_kernel_c(
         task_action, task_target, task_ij, task_kl,
         task_li, task_lj, task_lk, task_ll,
         HATREE2EV,
-        rep_out, core_out, gab_out
-    );
-    
+        rep_out, core_out, gab_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-#endif
     return 0;
 }
 
@@ -1471,26 +1381,17 @@ int launch_global_transform_kernel_c(
     int threads = 128;
     int blocks = n_pairs; 
     
-#ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class global_transform_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-        global_transform_kernel(n_pairs, pair_i_vec, pair_j_vec, ele_id, coords,
-                                rep_in, core_in, gab_in, ind2_arr, natorb, kr_offsets,
-                                tore, xfac, alpb, guess1, guess2, guess3, v_par6, BOHR,
-                                w_out, e1b_out, e2a_out, enuc_out);
-    });
-#else
-    global_transform_kernel<<<blocks, threads>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), global_transform_kernel, grid, block, 0,
         n_pairs, pair_i_vec, pair_j_vec, ele_id, coords,
         rep_in, core_in, gab_in, ind2_arr, natorb, kr_offsets,
         tore, xfac, alpb, guess1, guess2, guess3, v_par6, BOHR,
-        w_out, e1b_out, e2a_out, enuc_out
-    );
-    
+        w_out, e1b_out, e2a_out, enuc_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-#endif
     return 0;
 }
 

@@ -2,64 +2,36 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
-#ifdef USE_SYCL
-
 #define KERNEL_ARGS \
     RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
-    float *q_cond_ij, float *q_cond_kl, int dm_size, \
-    sycl::nd_item<2> &item, double *vj_kl_cache
+    float *q_cond_ij, float *q_cond_kl, int dm_size, void *shm_mem
 
 #define KERNEL_SETUP() \
-    const md_j_index2 blockIdx {(int)item.get_group(1), (int)item.get_group(0)}; \
-    const md_j_index2 threadIdx {(int)item.get_local_id(1), (int)item.get_local_id(0)}; \
-    int tx = threadIdx.x; \
-    int ty = threadIdx.y; \
-    int block_x = blockIdx.x; \
-    int block_y = blockIdx.y;
-
-#define LAUNCH_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
-    auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds; \
-    sycl::range<2> threads(16, 16); \
-    sycl::range<2> blocks((npairs_kl + (BLOCKS_KL) - 1) / (BLOCKS_KL), \
-                          (npairs_ij + (BLOCKS_IJ) - 1) / (BLOCKS_IJ)); \
-    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-        sycl::local_accessor<double, 1> local_acc(sycl::range<1>((SHM)+addition_buf), cgh); \
-        cgh.parallel_for<class KERNEL##_sycl>(sycl::nd_range<2>(blocks * threads, threads), \
-            [=](sycl::nd_item<2> item) { \
-                KERNEL(dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_size, \
-                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
-            }); \
-    }); \
-}
-
-#else // USE_SYCL
-
-#define KERNEL_ARGS \
-    RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
-    float *q_cond_ij, float *q_cond_kl, int dm_size
-
-#define KERNEL_SETUP() \
+    setup_context(); \
+    const md_j_index2 blockIdx {(int)blockIdx_x, (int)blockIdx_y}; \
+    const md_j_index2 threadIdx {(int)threadIdx_x, (int)threadIdx_y}; \
     int tx = threadIdx.x; \
     int ty = threadIdx.y; \
     int block_x = blockIdx.x; \
     int block_y = blockIdx.y; \
-    extern __shared__ double vj_kl_cache[];
+    DYNAMIC_SHARED_PTR(double, vj_kl_cache, shm_mem);
 
-#define LAUNCH_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
-    dim3 threads(16, 16); \
-    dim3 blocks((npairs_ij + (BLOCKS_IJ) - 1) / (BLOCKS_IJ), \
-                (npairs_kl + (BLOCKS_KL) - 1) / (BLOCKS_KL), 1); \
+#define LAUNCH_MD_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
+    auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds; \
+    auto _blocks = make_grid((npairs_ij + (BLOCKS_IJ) - 1) / (BLOCKS_IJ), \
+                             (npairs_kl + (BLOCKS_KL) - 1) / (BLOCKS_KL)); \
+    auto _threads = make_block(16, 16); \
     cudaFuncSetAttribute(KERNEL, cudaFuncAttributeMaxDynamicSharedMemorySize, \
                          ((SHM)+addition_buf)*sizeof(double)); \
-    KERNEL<<<blocks, threads, ((SHM)+addition_buf)*sizeof(double)>>>( \
-        *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_size); \
+    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), KERNEL, _blocks, _threads, \
+        ((SHM)+addition_buf)*sizeof(double), \
+        dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl, dm_size); \
 }
-
-#endif // USE_SYCL
 
 
 // TILEX=21, TILEY=21
@@ -11049,27 +11021,27 @@ int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
     }
     switch (ijkl) {
     case 0:  // lij=0, lkl=0, tilex=21, tiley=21
-        LAUNCH_KERNEL(md_j_4dm_0_0, 6080, 336, 336) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_0_0, 6080, 336, 336) break;
     case 9:  // lij=1, lkl=0, tilex=48, tiley=21
-        LAUNCH_KERNEL(md_j_4dm_1_0, 6080, 768, 336) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_1_0, 6080, 768, 336) break;
     case 10: // lij=1, lkl=1, tilex=6, tiley=6
-        LAUNCH_KERNEL(md_j_4dm_1_1, 5568,  96,  96) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_1_1, 5568,  96,  96) break;
     case 18: // lij=2, lkl=0, tilex=48, tiley=16
-        LAUNCH_KERNEL(md_j_4dm_2_0, 5952, 768, 256) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_2_0, 5952, 768, 256) break;
     case 19: // lij=2, lkl=1, tilex=48, tiley=10
-        LAUNCH_KERNEL(md_j_4dm_2_1, 5952, 768, 160) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_2_1, 5952, 768, 160) break;
     case 20: // lij=2, lkl=2, tilex=4, tiley=4
-        LAUNCH_KERNEL(md_j_4dm_2_2, 6080,  64,  64) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_2_2, 6080,  64,  64) break;
     case 27: // lij=3, lkl=0, tilex=48, tiley=21
-        LAUNCH_KERNEL(md_j_4dm_3_0, 6080, 768, 336) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_3_0, 6080, 768, 336) break;
     case 28: // lij=3, lkl=1, tilex=48, tiley=6
-        LAUNCH_KERNEL(md_j_4dm_3_1, 5824, 768,  96) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_3_1, 5824, 768,  96) break;
     case 36: // lij=4, lkl=0, tilex=48, tiley=24
-        LAUNCH_KERNEL(md_j_4dm_4_0, 6048, 768, 384) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_4_0, 6048, 768, 384) break;
     case 37: // lij=4, lkl=1, tilex=48, tiley=9
-        LAUNCH_KERNEL(md_j_4dm_4_1, 5984, 768, 144) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_4_1, 5984, 768, 144) break;
     case 45: // lij=5, lkl=0, tilex=48, tiley=12
-        LAUNCH_KERNEL(md_j_4dm_5_0, 6080, 768, 192) break;
+        LAUNCH_MD_KERNEL(md_j_4dm_5_0, 6080, 768, 192) break;
     default: return 0;
     }
     return 1;

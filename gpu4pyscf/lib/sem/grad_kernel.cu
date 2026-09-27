@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 
 __global__ void calc_pair_e2e_kernel(
@@ -31,12 +32,8 @@ __global__ void calc_pair_e2e_kernel(
     double* __restrict__ E_2e_out,     // (n_pairs,)
     int n_pairs
 ) {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int p = item.get_global_id(0);
-#else
-    int p = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int p = global_x;
     if (p >= n_pairs) return;
     
     int A = pair_i[p];
@@ -94,19 +91,13 @@ int launch_calc_pair_e2e_c(
 ) {
     int threads = 256;
     int blocks = (n_pairs + threads - 1) / threads;
-#ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class calc_pair_e2e_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-        calc_pair_e2e_kernel(w_1d, P_AA, P_BB, P_AB,
-                             pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs);
-    });
-#else
-    calc_pair_e2e_kernel<<<blocks, threads>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), calc_pair_e2e_kernel, grid, block, 0,
         w_1d, P_AA, P_BB, P_AB,
-        pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs
-    );
+        pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) return 1;
-#endif
     return 0;
 }
 

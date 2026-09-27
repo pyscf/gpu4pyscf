@@ -21,23 +21,16 @@ void type2_cart_ipipv(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env
-#ifdef USE_SYCL
-                , sycl::nd_item<1> &item, double* smem
-#endif
-                      )
+                const int *atm, const int *bas, const double *env,
+                void *shm_mem)
 {
     constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
     constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
 
-#ifdef USE_SYCL
-    const int task_id = item.get_group(0);
-    double (&buf1)[nfi2_max*nfj_max] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi2_max*nfj_max]>(item.get_group());
-#else // USE_SYCL
-    const int task_id = blockIdx.x;
-    __shared__ double buf1[nfi2_max*nfj_max];
-    extern __shared__ double smem[];
-#endif // USE_SYCL
+    setup_context();
+    const int task_id = blockIdx_x;
+    SHARED_ARRAY(double, buf1, [nfi2_max*nfj_max]);
+    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }
@@ -103,23 +96,16 @@ void type2_cart_ipvip(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env
-#ifdef USE_SYCL
-                , sycl::nd_item<1> &item, double* smem
-#endif
-                      )
+                const int *atm, const int *bas, const double *env,
+                void *shm_mem)
 {
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
 
-#ifdef USE_SYCL
-    const int task_id = item.get_group(0);
-    double (&buf1)[nfi1_max*nfj1_max] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi1_max*nfj1_max]>(item.get_group());
-#else // USE_SYCL
-    const int task_id = blockIdx.x;
-    __shared__ double buf1[nfi1_max*nfj1_max];
-    extern __shared__ double smem[];
-#endif // USE_SYCL
+    setup_context();
+    const int task_id = blockIdx_x;
+    SHARED_ARRAY(double, buf1, [nfi1_max*nfj1_max]);
+    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }

@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 
 #define PTR_PBAS_IDX    4
@@ -27,16 +28,10 @@ static __global__
 void recontract_kernel(double *out, double *input, int *out_idx, int *inp_idx,
                        double *coef, int naux)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    int threads = item.get_local_range(0);
-    int row_id = item.get_group(0);
-#else
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x;
-    int row_id = blockIdx.x;
-#endif
+    setup_context();
+    int thread_id = threadIdx_x;
+    int threads = blockDim_x;
+    int row_id = blockIdx_x;
     size_t Naux = naux;
     out = out + out_idx[row_id] * Naux;
     input = input + inp_idx[row_id] * Naux;
@@ -50,21 +45,15 @@ extern "C" {
 int recontract_ao_pair(double *out, double *input, int *out_idx, int *inp_idx,
                        double *coef, int naux, int count)
 {
-#ifdef USE_SYCL
-    sycl::range<1> threads(256);
-    sycl::range<1> blocks(count);
-    sycl_get_queue()->parallel_for<class recontract_kernel_sycl>(
-        sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
-      recontract_kernel(out, input, out_idx, inp_idx, coef, naux);
-    });
-#else
-    recontract_kernel<<<count, 256>>>(out, input, out_idx, inp_idx, coef, naux);
+    auto blocks = make_grid(count);
+    auto threads = make_block(256);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), recontract_kernel, blocks, threads, 0,
+                    out, input, out_idx, inp_idx, coef, naux);
     cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "recontract_ao_pair error %s\n", cudaGetErrorString(err));
         return 1;
     }
-#endif
     return 0;
 }
 

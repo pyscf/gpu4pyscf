@@ -23,6 +23,7 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
+#include "gsycl/gpu_compat.h"
 
 #define RT2_MAX 9
 #define IJ_SIZE 11
@@ -40,9 +41,7 @@ __device__
 inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
                       int nsq_per_block, int gout_id, int gout_stride)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    #endif
+    setup_context();
     int nf2 = (l + 1) * (l + 2) / 2;
     int nf3 = nf2 * (l + 3) / 3;
     int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
@@ -75,29 +74,12 @@ __global__
 void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley,
-                     const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
-                     #ifdef USE_SYCL
-                     , sycl::nd_item<2> &item, std::byte *shm_mem
-                     #endif
-                     )
+                     int rt2_off, int efg_off, void *shm_mem)
 {
-#ifdef USE_SYCL
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    double *vj_kl_cache = reinterpret_cast<double*>(shm_mem);
-#else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    extern __shared__ double vj_kl_cache[];
-#endif
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, vj_kl_cache, shm_mem);
+    const uint16_t *pRt2_kl_ij = Rt2_kl_ij + rt2_off;
+    const int8_t *efg_phase = c_Rt2_efg_phase + efg_off;
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
@@ -425,29 +407,12 @@ __global__
 void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley, int dm_size,
-                     const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
-                     #ifdef USE_SYCL
-                     , sycl::nd_item<2> &item, std::byte *shm_mem
-                     #endif
-                     )
+                     int rt2_off, int efg_off, void *shm_mem)
 {
-#ifdef USE_SYCL
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    double *vj_kl_cache = reinterpret_cast<double*>(shm_mem);
-#else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    extern __shared__ double vj_kl_cache[];
-#endif
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, vj_kl_cache, shm_mem);
+    const uint16_t *pRt2_kl_ij = Rt2_kl_ij + rt2_off;
+    const int8_t *efg_phase = c_Rt2_efg_phase + efg_off;
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
@@ -1017,26 +982,13 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     int nsq_per_block = threads_ij * threads_kl;
     int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
     int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
-    #ifdef USE_SYCL
-    sycl::range<2> threads(gout_stride, nsq_per_block);
-    sycl::range<2> blocks(blocks_kl, blocks_ij);
-    // IMP: SYCL doesnt treat the Rt2_kl_ij, c_Rt2_efg_phase
-    // pointer arithmetic on host and the obtained pointers are
-    // not valid on the device. Hence just compute the offset on host
-    // but obtain the pointer `pRt2_kl_ij` & `efg_phase` in the kernel launch
-    const int Rt2_kl_ij_syclonly_offset = offset_for_Rt2_idx(lij, lkl);
-    const int efg_phase_syclonly_offset = offset_for_Rt2_idx(0, lkl);
+    auto threads = make_block(nsq_per_block, gout_stride);
+    auto blocks = make_grid(blocks_ij, blocks_kl);
+    // Table pointers cannot be formed on the host (device-only addresses),
+    // so the host passes offsets and each kernel derives its own pointers.
+    const int rt2_off = offset_for_Rt2_idx(lij, lkl);
+    const int efg_off = offset_for_Rt2_idx(0, lkl);
     auto dev_envs = *envs;
-    #else
-    dim3 threads(nsq_per_block, gout_stride);
-    dim3 blocks(blocks_ij, blocks_kl);
-    uint16_t *pRt2_kl_ij = nullptr;
-    int8_t *efg_phase = nullptr;
-    cudaGetSymbolAddress((void**)&pRt2_kl_ij, Rt2_kl_ij);
-    cudaGetSymbolAddress((void**)&efg_phase, c_Rt2_efg_phase);
-    pRt2_kl_ij += offset_for_Rt2_idx(lij, lkl);
-    efg_phase += offset_for_Rt2_idx(0, lkl);
-    #endif
     if (n_dm == 1) {
         if (!md_j_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega)) {
             cudaFuncSetAttribute(md_j_1dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
@@ -1048,23 +1000,10 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
             }
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
-            #ifdef USE_SYCL
-            sycl_get_queue()->submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<std::byte, 1> local_acc(buflen, cgh);
-              cgh.parallel_for<class md_j_1dm_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-                const uint16_t *pRt2_kl_ij = Rt2_kl_ij + Rt2_kl_ij_syclonly_offset;
-                const int8_t *efg_phase = c_Rt2_efg_phase + efg_phase_syclonly_offset;
-                md_j_1dm_kernel(dev_envs, jk, bounds, q_cond_ij, q_cond_kl,
+            LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), md_j_1dm_kernel, blocks, threads, buflen,
+                                dev_envs, jk, bounds, q_cond_ij, q_cond_kl,
                                 threads_ij, threads_kl, tilex, tiley,
-                                pRt2_kl_ij, efg_phase,
-                                item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-              });
-            });
-            #else
-            md_j_1dm_kernel<<<blocks, threads, buflen>>>(
-                *envs, jk, bounds, q_cond_ij, q_cond_kl,
-                threads_ij, threads_kl, tilex, tiley, pRt2_kl_ij, efg_phase);
-            #endif
+                                rt2_off, efg_off);
         }
     } else {
         if (!md_j_4dm_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, dm_size)) {
@@ -1081,23 +1020,10 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 jk.vj = vj + dm_offset * dm_size;
                 jk.dm = dm + dm_offset * dm_size;
                 jk.n_dm = n_dm - dm_offset;
-                #ifdef USE_SYCL
-                sycl_get_queue()->submit([&](sycl::handler &cgh) {
-                  sycl::local_accessor<std::byte, 1> local_acc(buflen, cgh);
-                  cgh.parallel_for<class md_j_4dm_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-                    const uint16_t *pRt2_kl_ij = Rt2_kl_ij + Rt2_kl_ij_syclonly_offset;
-                    const int8_t *efg_phase = c_Rt2_efg_phase + efg_phase_syclonly_offset;
-                    md_j_4dm_kernel(dev_envs, jk, bounds, q_cond_ij, q_cond_kl,
+                LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), md_j_4dm_kernel, blocks, threads, buflen,
+                                    dev_envs, jk, bounds, q_cond_ij, q_cond_kl,
                                     threads_ij, threads_kl, tilex, tiley, dm_size,
-                                    pRt2_kl_ij, efg_phase,
-                                    item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-                  });
-                });
-                #else
-                md_j_4dm_kernel<<<blocks, threads, buflen>>>(
-                    *envs, jk, bounds, q_cond_ij, q_cond_kl,
-                    threads_ij, threads_kl, tilex, tiley, dm_size, pRt2_kl_ij, efg_phase);
-                #endif
+                                    rt2_off, efg_off);
             }
         }
     }

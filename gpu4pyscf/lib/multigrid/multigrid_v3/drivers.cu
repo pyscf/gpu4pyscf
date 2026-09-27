@@ -15,13 +15,13 @@
  */
 
 #include <stdio.h>
-#ifndef USE_SYCL
-#include <cuda.h>
 #include <cuda_runtime.h>
+#ifndef USE_SYCL
 #include <cuComplex.h>
 #include <gvhf-rys/rys_constant.cu>
 #endif
 #include "constant_objects.cuh"
+#include "gsycl/gpu_compat.h"
 
 #ifdef USE_SYCL
 SYCL_EXTERNAL sycl_device_global<double[9]> s_c_lattice_vectors;
@@ -63,18 +63,11 @@ __global__ static
 void fft_take_kernel(double2* __restrict__ out, double2* __restrict__ in,
                      int mx, int my, int mz, int nx, int ny, int nz, int nc)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int x = item.get_group(0);
-    int y = item.get_group(1) * item.get_local_range(1) + item.get_local_id(1);
-    int tx = item.get_local_id(0);
-    int threadsx = item.get_local_range(0);
-#else
-    int x = blockIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int tx = threadIdx.x;
-    int threadsx = blockDim.x;
-#endif
+    setup_context();
+    int x = blockIdx_x;
+    int y = global_y;
+    int tx = threadIdx_x;
+    int threadsx = blockDim_x;
     if (x >= mx || y >= my) return;
 
     int sx = x;
@@ -99,18 +92,11 @@ __global__ static
 void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
                         int mx, int my, int mz, int nx, int ny, int nz, int nc)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int x = item.get_group(0);
-    int y = item.get_group(1) * item.get_local_range(1) + item.get_local_id(1);
-    int tx = item.get_local_id(0);
-    int threadsx = item.get_local_range(0);
-#else
-    int x = blockIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int tx = threadIdx.x;
-    int threadsx = blockDim.x;
-#endif
+    setup_context();
+    int x = blockIdx_x;
+    int y = global_y;
+    int tx = threadIdx_x;
+    int threadsx = blockDim_x;
     if (x >= mx || y >= my) return;
 
     int sx = x;
@@ -140,19 +126,19 @@ void update_lattice_vectors(double *lattice_vectors,
                             double *reciprocal_lattice_vectors)
 {
 #ifdef USE_SYCL
-    sycl_get_queue()->memcpy(s_c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
-    sycl_get_queue()->memcpy(s_c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double)).wait();
+    CONSTANT_MEMCPY(s_c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
+    CONSTANT_MEMCPY(s_c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
 #else
-    cudaMemcpyToSymbol(c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
-    cudaMemcpyToSymbol(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
+    CONSTANT_MEMCPY(c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
+    CONSTANT_MEMCPY(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
 #endif
 }
 
 void update_dxyz_dabc(double *dxyz_dabc) {
 #ifdef USE_SYCL
-    sycl_get_queue()->memcpy(s_c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double)).wait();
+    CONSTANT_MEMCPY(s_c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
 #else
-    cudaMemcpyToSymbol(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
+    CONSTANT_MEMCPY(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
 #endif
 }
 
@@ -161,20 +147,12 @@ int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int count
     int mx = out_shape[0];
     int my = out_shape[1];
     int mz = out_shape[2];
-#ifdef USE_SYCL
     int nx = in_shape[0], ny = in_shape[1], nz = in_shape[2];
-    sycl::range<2> threads(32, 16);
-    sycl::range<2> grids(mx, (my+15)/16);
-    sycl_get_queue()->parallel_for<class fft_take_kernel_sycl>
-        (sycl::nd_range<2>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            fft_take_kernel(out, in, mx, my, mz, nx, ny, nz, counts);
-        }).wait();
-#else
-    dim3 threads(32, 16);
-    dim3 grids(mx, (my+15)/16);
-    fft_take_kernel<<<grids, threads>>>(
-        out, in, mx, my, mz, in_shape[0], in_shape[1], in_shape[2], counts);
-#endif
+    auto threads = make_block(32, 16);
+    auto grids = make_grid(mx, (my+15)/16);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), fft_take_kernel, grids, threads, 0,
+                    out, in, mx, my, mz, nx, ny, nz, counts);
+    cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_take kernel: %s\n", cudaGetErrorString(err));
@@ -188,20 +166,12 @@ int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int co
     int mx = in_shape[0];
     int my = in_shape[1];
     int mz = in_shape[2];
-#ifdef USE_SYCL
     int nx = out_shape[0], ny = out_shape[1], nz = out_shape[2];
-    sycl::range<2> threads(32, 16);
-    sycl::range<2> grids(mx, (my+15)/16);
-    sycl_get_queue()->parallel_for<class fft_takebak_kernel_sycl>
-        (sycl::nd_range<2>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            fft_takebak_kernel(out, in, mx, my, mz, nx, ny, nz, counts);
-        }).wait();
-#else
-    dim3 threads(32, 16);
-    dim3 grids(mx, (my+15)/16);
-    fft_takebak_kernel<<<grids, threads>>>(
-        out, in, mx, my, mz, out_shape[0], out_shape[1], out_shape[2], counts);
-#endif
+    auto threads = make_block(32, 16);
+    auto grids = make_grid(mx, (my+15)/16);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), fft_takebak_kernel, grids, threads, 0,
+                    out, in, mx, my, mz, nx, ny, nz, counts);
+    cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_takebak kernel: %s\n", cudaGetErrorString(err));

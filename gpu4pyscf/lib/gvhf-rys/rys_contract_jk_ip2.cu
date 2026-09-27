@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
@@ -34,45 +35,21 @@ __global__ static
 void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                               uint32_t *pool, double *dd_pool, int *head, int nf
-                               #ifdef USE_SYCL
-                               , sycl::nd_item<2> &item, double *shared_memory
-                               #endif
-                               )
+                               uint32_t *pool, double *dd_pool, int *head, int nf,
+                               void *shm_mem)
 {
-    #ifdef USE_SYCL
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    int blockIdx_x = item.get_group(1);
-
-    auto thread_block = item.get_group();
-    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
-    double (&aij_cache)[4] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[4]>(thread_block);
-    int &ri = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    int blockIdx_x = blockIdx.x;
-
-    extern __shared__ double shared_memory[];
-
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[4];
-    __shared__ int ri, expi, expj;
-    #endif
+    setup_context();
+    SHARED_SCALAR(int, ntasks);
+    SHARED_SCALAR(int, pair_ij);
+    SHARED_SCALAR(int, pair_kl0);
+    SHARED_SCALAR(int, ish);
+    SHARED_SCALAR(int, jsh);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [4]);
+    SHARED_SCALAR(int, ri);
+    SHARED_SCALAR(int, expi);
+    SHARED_SCALAR(int, expj);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -658,45 +635,21 @@ __global__ static
 void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                               float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                               float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                              uint32_t *pool, double *dd_pool, int *head, int nf
-                              #ifdef USE_SYCL
-                              , sycl::nd_item<2> &item, double *shared_memory
-                              #endif
-                              )
+                              uint32_t *pool, double *dd_pool, int *head, int nf,
+                              void *shm_mem)
 {
-    #ifdef USE_SYCL
-    int threadIdx_x = item.get_local_id(1);
-    int threadIdx_y = item.get_local_id(0);
-    int blockDim_x = item.get_local_range(1);
-    int blockDim_y = item.get_local_range(0);
-    int blockIdx_x = item.get_group(1);
-
-    auto thread_block = item.get_group();
-    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
-    double (&aij_cache)[4] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[4]>(thread_block);
-    int &ri = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int threadIdx_y = threadIdx.y;
-    int blockDim_x = blockDim.x;
-    int blockDim_y = blockDim.y;
-    int blockIdx_x = blockIdx.x;
-
-    extern __shared__ double shared_memory[];
-
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[4];
-    __shared__ int ri, expi, expj;
-    #endif
+    setup_context();
+    SHARED_SCALAR(int, ntasks);
+    SHARED_SCALAR(int, pair_ij);
+    SHARED_SCALAR(int, pair_kl0);
+    SHARED_SCALAR(int, ish);
+    SHARED_SCALAR(int, jsh);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [4]);
+    SHARED_SCALAR(int, ri);
+    SHARED_SCALAR(int, expi);
+    SHARED_SCALAR(int, expj);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -1331,34 +1284,20 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block + ij_prims;
 
-        #ifdef USE_SYCL
-        sycl::range<2> blocks(1, workers);
-        sycl::range<2> threads(gout_stride, quartets_per_block);
-        sycl_get_queue()->submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
-          cgh.parallel_for<class rys_ejk_ip2_type12_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-            rys_ejk_ip2_type12_kernel(envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                                      s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf,
-                                      item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-          });
-        });
-        #else
-        dim3 threads(quartets_per_block, gout_stride);
+        auto blocks = make_grid(workers, 1);
+        auto threads = make_block(quartets_per_block, gout_stride);
         int shm_bytes = buflen * sizeof(double);
         if (shm_bytes > 48000) {
-            cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
-            cudaError_t err = cudaGetLastError();
+            cudaError_t err = cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
             if (err != cudaSuccess) {
                 fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_bytes,
                         cudaGetErrorString(err));
                 return 1;
             }
         }
-
-        rys_ejk_ip2_type12_kernel<<<workers, threads, shm_bytes>>>(
-                envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
-        #endif
+        LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_ejk_ip2_type12_kernel, blocks, threads, shm_bytes,
+            envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1437,34 +1376,20 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block + ij_prims;
         buflen = max(buflen, 9*gout_stride*quartets_per_block);
 
-        #ifdef USE_SYCL
-        sycl::range<2> blocks(1, workers);
-        sycl::range<2> threads(gout_stride, quartets_per_block);
-        sycl_get_queue()->submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
-          cgh.parallel_for<class rys_ejk_ip2_type3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-            rys_ejk_ip2_type3_kernel(envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                                     s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf,
-                                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-          });
-        });
-        #else
-        dim3 threads(quartets_per_block, gout_stride);
+        auto blocks = make_grid(workers, 1);
+        auto threads = make_block(quartets_per_block, gout_stride);
         int shm_bytes = buflen * sizeof(double);
         if (shm_bytes > 48000) {
-            cudaFuncSetAttribute(rys_ejk_ip2_type3_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
-            cudaError_t err = cudaGetLastError();
+            cudaError_t err = cudaFuncSetAttribute(rys_ejk_ip2_type3_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
             if (err != cudaSuccess) {
                 fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_bytes,
                         cudaGetErrorString(err));
                 return 1;
             }
         }
-
-        rys_ejk_ip2_type3_kernel<<<workers, threads, shm_bytes>>>(
-                envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
-        #endif
+        LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_ejk_ip2_type3_kernel, blocks, threads, shm_bytes,
+            envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

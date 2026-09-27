@@ -17,12 +17,7 @@
 template <int order> __device__
 void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
                     const double *ci, const double *ai){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    #endif
+    setup_context();
 
     double root = 0.0;
     if (threadIdx_x < NGAUSS){
@@ -59,14 +54,7 @@ void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
 
 __device__
 void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, double *r){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -130,14 +118,7 @@ void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, do
 
 template <int LI, int LC> __device__
 void type2_facs_omega(double* __restrict__ omega, double *r){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -201,14 +182,7 @@ void type2_facs_omega(double* __restrict__ omega, double *r){
 
 __device__
 void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *rca, double *omega){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
 
     const int LI1 = LI+1;
     const int nfi = LI1*(LI1+1)/2;
@@ -260,14 +234,7 @@ void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *r
 
 template <int LI, int LC> __device__
 void type2_ang(double * __restrict__ facs, double *rca, double *omega){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     constexpr int LI1 = LI+1;
     constexpr int nfi = LI1*(LI1+1)/2;
     constexpr int LCC1 = (2*LC+1);
@@ -334,32 +301,13 @@ void type2_cart(double * __restrict__ gctr,
 
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-
-    auto thread_block = item.get_group();
-    const int task_id = thread_block.get_group_id(0);
-    using tile_t1 = double[LI1*(LI1+1)*(LI1+2)/6 * BLKI];
-    tile_t1& omegai = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t1>(thread_block);
-    using tile_t2 = double[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
-    tile_t2& omegaj = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t2>(thread_block);
-    using tile_t3 = double[(LI+LJ+1) * LIC1 * LJC1];
-    tile_t3& rad_all = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t3>(thread_block);
-    double (&angi)[LI1*nfi*LIC1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LI1*nfi*LIC1]>(thread_block);
-    double (&angj)[LJ1*nfj*LJC1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LJ1*nfj*LJC1]>(thread_block);
-#else // USE_SYCL
-    const int task_id = blockIdx.x;
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-
-    __shared__ double omegai[LI1*(LI1+1)*(LI1+2)/6 * BLKI]; // up to 12600 Bytes
-    __shared__ double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
-    __shared__ double rad_all[(LI+LJ+1) * LIC1 * LJC1];
-    __shared__ double angi[LI1*nfi*LIC1];
-    __shared__ double angj[LJ1*nfj*LJC1];
-#endif // USE_SYCL
+    setup_context();
+    const int task_id = blockIdx_x;
+    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]); // up to 12600 Bytes
+    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
+    SHARED_ARRAY(double, rad_all, [(LI+LJ+1) * LIC1 * LJC1]);
+    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
+    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
     if (task_id >= ntasks){
         return;
     }
@@ -479,22 +427,12 @@ void type2_cart(double * __restrict__ gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env
-#ifdef USE_SYCL
-                , sycl::nd_item<1> &item, double* smem
-#endif
-                )
+                const int *atm, const int *bas, const double *env,
+                void *shm_mem)
 {
-    #ifdef USE_SYCL
-    const int task_id = item.get_group(0);
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int task_id = blockIdx.x;
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    extern __shared__ double smem[];
-    #endif
+    setup_context();
+    const int task_id = blockIdx_x;
+    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }

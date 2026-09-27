@@ -17,15 +17,15 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#ifndef USE_SYCL
-#include <cuda.h>
 #include <cuda_runtime.h>
+#ifndef USE_SYCL
 #include <cuComplex.h>
 #endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
 #include "utils.cuh"
+#include "gsycl/gpu_compat.h"
 #include "aft_recursion.cuh"
 
 #ifdef USE_SYCL
@@ -51,46 +51,30 @@ struct alignas(16) cuDoubleComplex { double x, y; };
 __global__ static
 void orth_mgga_mat_kernel(double *out, cuDoubleComplex *vrhoG,
                           cuDoubleComplex *vtauG,
-                          PBCIntEnvVars envs, int64_t *bas_ij_idx,
+                          int64_t *bas_ij_idx,
                           double *G_bases, double *L_bases,
                           int *mesh_cum, int *nimgs_cum,
-                          int npair, int ntiles_x, int ntiles_y, int ntiles_z)
+                          int npair, int ntiles_x, int ntiles_y, int ntiles_z,
+                          PBCIntEnvVars envs)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    int pair_id = item.get_group(0) % npair;
-#else
-    int thread_id = threadIdx.x;
-    int pair_id = blockIdx.x % npair;
-#endif
+    setup_context();
+    int thread_id = threadIdx_x;
+    int pair_id = blockIdx_x % npair;
     int x_id = thread_id / NGV_PER_BLOCK;
     int Gv_id = thread_id % NGV_PER_BLOCK;
-#ifdef USE_SYCL
-    auto &tile_batch = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+    SHARED_ARRAY(int, tile_batch);
     if (thread_id == 0) {
-        tile_batch = item.get_group(0) / npair;
+        tile_batch = blockIdx_x / npair;
     }
-    auto &gx = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NGV_PER_BLOCK*3*2*(LMAX1+1)*(LMAX1+1)]>(item.get_group());
-    auto &mesh_start = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[3]>(item.get_group());
-    auto &vjR = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NCART_MAX*NCART_MAX * WARPS]>(item.get_group());
-    auto &ri = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
-    auto &rj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
-    auto &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
-    auto &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
-    auto &ai = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
-    auto &aj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(item.get_group());
-#else
-    __shared__ int tile_batch;
-    if (thread_id == 0) {
-        tile_batch = blockIdx.x / npair;
-    }
-    __shared__ double gx[NGV_PER_BLOCK*3*2*(LMAX1+1)*(LMAX1+1)];
-    __shared__ int mesh_start[3];
-    __shared__ double vjR[NCART_MAX*NCART_MAX * WARPS];
-    __shared__ int ri, rj, li, lj;
-    __shared__ double ai, aj;
-#endif
+    SHARED_ARRAY(double, gx, [NGV_PER_BLOCK*3*2*(LMAX1+1)*(LMAX1+1)]);
+    SHARED_ARRAY(int, mesh_start, [3]);
+    SHARED_ARRAY(double, vjR, [NCART_MAX*NCART_MAX * WARPS]);
+    SHARED_ARRAY(int, ri);
+    SHARED_ARRAY(int, rj);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(double, ai);
+    SHARED_ARRAY(double, aj);
 
     int mesh_x = mesh_cum[1] - mesh_cum[0];
     int mesh_y = mesh_cum[2] - mesh_cum[1];
@@ -331,21 +315,13 @@ int orth_aft_mgga_mat(double *out, cuDoubleComplex *vrhoG, cuDoubleComplex *vtau
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
-#ifdef USE_SYCL
-    sycl::range<1> threads(THREADS);
-    sycl::range<1> grids(ntile_batch*npair);
+    auto threads = make_block(THREADS);
+    auto grids = make_grid(ntile_batch*npair);
     auto dev_envs = *envs;
-    sycl_get_queue()->parallel_for<class orth_mgga_mat_kernel_mgv3_sycl>
-        (sycl::nd_range<1>(grids * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
-            orth_mgga_mat_kernel(
-                out, vrhoG, vtauG, dev_envs, bas_ij_idx, G_bases, L_bases,
-                mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
-        }).wait();
-#else
-    orth_mgga_mat_kernel<<<ntile_batch*npair, THREADS>>>(
-        out, vrhoG, vtauG, *envs, bas_ij_idx, G_bases, L_bases,
-        mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
-#endif
+    LAUNCH_KERNEL_LAST_Q(orth_mgga_mat_kernel, dev_envs, sycl_get_queue(), grids, threads, 0,
+                         out, vrhoG, vtauG, bas_ij_idx, G_bases, L_bases,
+                         mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
+    cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_mgga_mat_kernel: %s\n", cudaGetErrorString(err));

@@ -36,9 +36,7 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
                      double omega, double lr_factor, double sr_factor,
                      int block_size, int stride, int rt_id)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-#endif
+    setup_context();
     double theta_rr = theta * rr;
     if (omega == 0) {
         rys_roots(nroots, theta_rr, rw, block_size, rt_id, stride);
@@ -78,16 +76,10 @@ static __device__ __forceinline__
 void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
                      double omega, double lr_factor, double sr_factor)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int block_size = item.get_local_range(1);
-    int stride = item.get_local_range(0);
-    int rt_id = item.get_local_id(0);
-#else
-    int block_size = blockDim.x;
-    int stride = blockDim.y;
-    int rt_id = threadIdx.y;
-#endif
+    setup_context();
+    int block_size = blockDim_x;
+    int stride = blockDim_y;
+    int rt_id = threadIdx_y;
     rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
                     block_size, stride, rt_id);
 }

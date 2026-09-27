@@ -21,6 +21,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
+#include "gsycl/gpu_compat.h"
 
 #define THREADS         256
 #define DM_BLOCK        8
@@ -29,16 +30,12 @@
 #define Ez_at(i,j,t)    Ez[(i)*5+(j)+(t)*25]
 
 __global__ static
-void dm_to_Rt_kernel(double *out, double *dm, int n_dm, RysIntEnvVars envs,
+void dm_to_Rt_kernel(double *out, double *dm, int n_dm,
                      uint32_t *bas_ij_idx, int *pair_loc, int npairs,
-                     int *ao_loc)
+                      int *ao_loc, RysIntEnvVars envs)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int pair_ij = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
-#else
-    int pair_ij = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int pair_ij = global_x;
     if (pair_ij >= npairs) {
         return;
     }
@@ -176,16 +173,12 @@ void dm_to_Rt_kernel(double *out, double *dm, int n_dm, RysIntEnvVars envs,
 }
 
 __global__ static
-void Rt_to_dm_kernel(double *dm, double *Rt, int n_dm, RysIntEnvVars envs,
+void Rt_to_dm_kernel(double *dm, double *Rt, int n_dm,
                      uint32_t *bas_ij_idx, int *pair_loc, int npairs,
-                     int *ao_loc)
+                      int *ao_loc, RysIntEnvVars envs)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int pair_ij = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
-#else
-    int pair_ij = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int pair_ij = global_x;
     if (pair_ij >= npairs) {
         return;
     }
@@ -323,15 +316,12 @@ void Rt_to_dm_kernel(double *dm, double *Rt, int n_dm, RysIntEnvVars envs,
 }
 
 __global__ static
-void aux_to_Rt_kernel(double *out, double *aux, RysIntEnvVars envs,
-                      int *aux_loc, int *aux_xyz_loc, int nbas_aux)
+void aux_to_Rt_kernel(double *out, double *aux,
+                       int *aux_loc, int *aux_xyz_loc, int nbas_aux,
+                       RysIntEnvVars envs)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int ksh = item.get_group(0) * item.get_local_range(0) + item.get_local_id(0);
-#else
-    int ksh = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int ksh = global_x;
     if (ksh >= nbas_aux) {
         return;
     }
@@ -502,19 +492,15 @@ int dm_to_Rt(double *out, double *dm, int n_dm, RysIntEnvVars *envs,
              uint32_t *bas_ij_idx, int *pair_loc, int npairs, int *ao_loc)
 {
     int blocks = (npairs + THREADS - 1) / THREADS;
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->parallel_for<class dm_to_Rt_kernel_sycl>(sycl::nd_range<1>(blocks * THREADS, THREADS), [=](auto item) {
-        dm_to_Rt_kernel(out, dm, n_dm, dev_envs, bas_ij_idx, pair_loc, npairs, ao_loc);
-    });
-    #else
-    dm_to_Rt_kernel<<<blocks, THREADS>>>(out, dm, n_dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc);
+    auto threads = make_block(THREADS);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL_LAST_Q(dm_to_Rt_kernel, *envs, sycl_get_queue(), grid, threads, 0,
+                         out, dm, n_dm, bas_ij_idx, pair_loc, npairs, ao_loc);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in dm_to_Rt_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -522,39 +508,31 @@ int Rt_to_dm(double *dm, double *Rt, int n_dm, RysIntEnvVars *envs,
              uint32_t *bas_ij_idx, int *pair_loc, int npairs, int *ao_loc)
 {
     int blocks = (npairs + THREADS - 1) / THREADS;
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->parallel_for<class Rt_to_dm_kernel_sycl>(sycl::nd_range<1>(blocks * THREADS, THREADS), [=](auto item) {
-        Rt_to_dm_kernel(dm, Rt, n_dm, dev_envs, bas_ij_idx, pair_loc, npairs, ao_loc);
-    });
-    #else
-    Rt_to_dm_kernel<<<blocks, THREADS>>>(dm, Rt, n_dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc);
+    auto threads = make_block(THREADS);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL_LAST_Q(Rt_to_dm_kernel, *envs, sycl_get_queue(), grid, threads, 0,
+                         dm, Rt, n_dm, bas_ij_idx, pair_loc, npairs, ao_loc);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in Rt_to_dm_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
 int aux_to_Rt(double *out, double *aux, RysIntEnvVars *envs,
-              int *aux_loc, int *aux_xyz_loc, int nbas_aux)
+               int *aux_loc, int *aux_xyz_loc, int nbas_aux)
 {
     int blocks = (nbas_aux + THREADS - 1) / THREADS;
-    #ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->parallel_for<class aux_to_Rt_kernel_sycl>(sycl::nd_range<1>(blocks * THREADS, THREADS), [=](auto item) {
-        aux_to_Rt_kernel(out, aux, dev_envs, aux_loc, aux_xyz_loc, nbas_aux);
-    });
-    #else
-    aux_to_Rt_kernel<<<blocks, THREADS>>>(out, aux, *envs, aux_loc, aux_xyz_loc, nbas_aux);
+    auto threads = make_block(THREADS);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL_LAST_Q(aux_to_Rt_kernel, *envs, sycl_get_queue(), grid, threads, 0,
+                         out, aux, aux_loc, aux_xyz_loc, nbas_aux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in aux_to_Rt_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 }

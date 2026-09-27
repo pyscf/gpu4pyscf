@@ -16,22 +16,17 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "gsycl/gpu_compat.h"
 #define THREADS        32
 #define COUNT_BLOCK     80
 
 __global__
 static void _take_last2d(double *a, const double *b, int *indices, int na, int nb)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<3>();
-    size_t i = item.get_group(0);
-    int j = item.get_global_id(2);
-    int k = item.get_global_id(1);
-#else
-    size_t i = blockIdx.z;
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int k = blockIdx.y * blockDim.y + threadIdx.y;
-#endif
+    setup_context();
+    size_t i = blockIdx_z;
+    int j = global_x;
+    int k = global_y;
     if (j >= na || k >= na) {
         return;
     }
@@ -47,14 +42,9 @@ __global__
 static void _takebak(double *out, double *a, int *indices,
                      int count, int n_o, int n_a)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int i0 = item.get_group(0) * COUNT_BLOCK;
-    int j = item.get_global_id(1);
-#else
-    int i0 = blockIdx.y * COUNT_BLOCK;
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int i0 = blockIdx_y * COUNT_BLOCK;
+    int j = global_x;
     if (j >= n_a) {
         return;
     }
@@ -76,21 +66,14 @@ int take_last2d(cudaStream_t stream, double *a, const double *b, int *indices,
 {
     // reorder j and k in a[i,j,k] with indicies
     int ntile = (na + THREADS - 1) / THREADS;
-    #ifdef USE_SYCL
-    sycl::range<3> threads(1, THREADS, THREADS);
-    sycl::range<3> blocks(blk_size, ntile, ntile);
-    stream.parallel_for<class _take_last2d_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
-      _take_last2d(a, b, indices, na, nb);
-    });
-    #else
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntile, ntile, blk_size);
-    _take_last2d<<<blocks, threads, 0, stream>>>(a, b, indices, na, nb);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntile, ntile, blk_size);
+    LAUNCH_KERNEL(_take_last2d, blocks, threads, 0, stream,
+                  a, b, indices, na, nb);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -101,28 +84,19 @@ int takebak(cudaStream_t stream, double *out, double *a_h, int *indices,
     int ntile = (n_a + THREADS*THREADS - 1) / (THREADS*THREADS);
     int ncount = (count + COUNT_BLOCK - 1) / COUNT_BLOCK;
 
-    #ifdef USE_SYCL
-    *(void **)&a_d = (double *)a_h;
-    sycl::range<2> threads(1, THREADS*THREADS);
-    sycl::range<2> blocks(ncount, ntile);
-    stream.parallel_for<class _takebak_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      _takebak(out, a_d, indices, count, n_o, n_a);
-    });
-    #else
-    cudaError_t err;
-    err = cudaHostGetDevicePointer(&a_d, a_h, 0); // zero-copy check
+    cudaError_t err = cudaHostGetDevicePointer((void **)&a_d, (void *)a_h, 0); // zero-copy check
     if (err != cudaSuccess) {
         return 1;
     }
 
-    dim3 threads(THREADS*THREADS);
-    dim3 blocks(ntile, ncount);
-    _takebak<<<blocks, threads, 0, stream>>>(out, a_d, indices, count, n_o, n_a);
+    auto threads = make_block(THREADS*THREADS);
+    auto blocks = make_grid(ntile, ncount);
+    LAUNCH_KERNEL(_takebak, blocks, threads, 0, stream,
+                  out, a_d, indices, count, n_o, n_a);
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-    #endif
     return 0;
 }
 }
