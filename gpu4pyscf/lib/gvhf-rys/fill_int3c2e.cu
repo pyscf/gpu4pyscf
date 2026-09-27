@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -48,52 +49,30 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int ao_pair_offset, int aux_offset, int naux,
                     int reorder_aux, int to_sph,
-                    int *head, int nbatches_shl_pair, int nbatches_ksh
-                    #ifdef USE_SYCL
-                    , sycl::nd_item<2> &item, char *shm_mem
-                    #endif
-                    )
+                    int *head, int nbatches_shl_pair, int nbatches_ksh,
+                    void *shm_mem)
 {
-    #ifdef USE_SYCL
-    int threadIdx_x = item.get_local_id(1);
-    int blockIdx_x = item.get_group(1);
-
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nksp = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &ksh0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &ksh1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &lk = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nroots = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &kprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nf = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &aux_start = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &g_size = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nst_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &sp_block_id = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &ksh_block_id = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    double *shared_memory = reinterpret_cast<double*>(shm_mem);
-    #else
-    int threadIdx_x = threadIdx.x;
-    int blockIdx_x = blockIdx.x;
-
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1, nksp;
-    __shared__ int ksh0, ksh1;
-    __shared__ int li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int nf, aux_start;
-    __shared__ int g_size;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int sp_block_id, ksh_block_id;
-    #endif
+    setup_context();
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, nksp);
+    SHARED_SCALAR(int, ksh0);
+    SHARED_SCALAR(int, ksh1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, lk);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, kprim);
+    SHARED_SCALAR(int, nf);
+    SHARED_SCALAR(int, aux_start);
+    SHARED_SCALAR(int, g_size);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nst_per_block);
+    SHARED_SCALAR(int, sp_block_id);
+    SHARED_SCALAR(int, ksh_block_id);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
 
     int thread_id = threadIdx_x;
     int worker_id = blockIdx_x;
@@ -960,16 +939,10 @@ void cart2sph_kernel(double *out, double *input, PBCIntEnvVars envs,
                      int naux, int nbas, int nao_sph, int pair_compressed)
 
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int pair_ij = item.get_group(1);
-    int thread_id = item.get_local_id(1);
-    int aux_id = item.get_group(0) * item.get_local_range(1) + thread_id;
-    #else
-    int pair_ij = blockIdx.x;
-    int thread_id = threadIdx.x;
-    int aux_id = blockIdx.y * blockDim.x + thread_id;
-    #endif
+    setup_context();
+    int pair_ij = blockIdx_x;
+    int thread_id = threadIdx_x;
+    int aux_id = blockIdx_y * blockDim_x + thread_id;
 
     if (aux_id >= naux) {
         return;
@@ -1637,44 +1610,29 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
                  int ao_pair_offset, int aux_offset, int naux, int reorder_aux,
                  int to_sph)
 {
-    #ifdef USE_SYCL
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int workers = prop.multiProcessorCount;
-    int *head = (int *)(pool + workers * POOL_SIZE);
-    cudaMemset(head, 0, sizeof(int));
-    sycl::range<2> threads(1, THREADS);
-    sycl::range<2> blocks(1, workers);
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int3c2e_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-        int3c2e_kernel(
-            out, dev_envs, pool, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-            reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh,
-            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
-    cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int workers = prop.multiProcessorCount;
-    int *head = (int *)(pool + workers * POOL_SIZE);
-    cudaMemset(head, 0, sizeof(int));
-    int3c2e_kernel<<<workers, THREADS, shm_size>>>(
-            out, *envs, pool, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-            reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
-    cudaError_t err = cudaGetLastError();
+    cudaError_t err = cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    int *head = (int *)(pool + workers * POOL_SIZE);
+    cudaMemset(head, 0, sizeof(int));
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    auto dev_envs = *envs;
+    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), int3c2e_kernel, blocks, threads, shm_size,
+        out, dev_envs, pool, omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, ksh_offsets,
+        gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
+        reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
     return 0;
 }
 
@@ -1685,24 +1643,17 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
 {
     constexpr int threads = 256;
     int aux_batches = (naux + threads - 1) / threads;
-    #ifdef USE_SYCL
-    sycl::range<2> thread(1, threads);
-    sycl::range<2> blocks(aux_batches, nshl_pair);
+    auto blocks = make_grid(nshl_pair, aux_batches);
+    auto thread_block = make_block(threads);
     auto dev_envs = *envs;
-    sycl_get_queue()->parallel_for<class cart2sph_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
-      cart2sph_kernel(out, input, dev_envs, bas_ij_idx, out_offsets, input_offsets, naux, nbas, nao_sph, pair_compressed);
-    });
-    #else
-    dim3 blocks(nshl_pair, aux_batches);
-    cart2sph_kernel<<<blocks, threads>>>(
-            out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
-            naux, nbas, nao_sph, pair_compressed);
+    LAUNCH_KERNEL_Q(sycl_get_queue(), cart2sph_kernel, blocks, thread_block, 0,
+        out, input, dev_envs, bas_ij_idx, out_offsets, input_offsets,
+        naux, nbas, nao_sph, pair_compressed);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_cart2sph kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 }

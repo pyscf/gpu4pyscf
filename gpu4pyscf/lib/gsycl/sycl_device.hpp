@@ -220,3 +220,46 @@ static inline void cudaFree(void* ptr) {
 static inline void cudaMemset(void* ptr, int val, size_t size) {
   sycl_get_queue()->memset(ptr, static_cast<unsigned char>(val), size).wait();
 }
+
+// --- CUDA-compat 2D memcpy + zero-copy helpers ---
+// Same names and signatures as the CUDA runtime, so .cu files call the
+// plain CUDA API with no ifdefs and no invented wrapper names.
+
+enum cudaMemcpyKind {
+  cudaMemcpyHostToHost = 0,
+  cudaMemcpyHostToDevice = 1,
+  cudaMemcpyDeviceToHost = 2,
+  cudaMemcpyDeviceToDevice = 3,
+  cudaMemcpyDefault = 4
+};
+
+static inline cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch,
+                                            const void *src, size_t spitch,
+                                            size_t width, size_t height,
+                                            cudaMemcpyKind kind,
+                                            cudaStream_t stream) {
+  (void)kind; // ext_oneapi_memcpy2d is direction-agnostic for USM pointers
+  stream.ext_oneapi_memcpy2d(dst, dpitch, src, spitch, width, height);
+  return cudaSuccess;
+}
+
+// Mirror the CUDA headers, where the async copy defaults to stream 0.
+static inline cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch,
+                                            const void *src, size_t spitch,
+                                            size_t width, size_t height,
+                                            cudaMemcpyKind kind) {
+  return cudaMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind,
+                           *sycl_get_queue());
+}
+
+static inline cudaError_t cudaHostGetDevicePointer(void **pDevice, void *hHost,
+                                                   unsigned int /*flags*/) {
+  // Host USM allocations are directly device-accessible; no mapping needed.
+  *pDevice = hHost;
+  return cudaSuccess;
+}
+
+static inline cudaError_t cudaDeviceSynchronize() {
+  sycl_get_queue()->wait();
+  return cudaSuccess;
+}

@@ -15,6 +15,8 @@
  */
 
 #include <stdio.h>
+#include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "ecp.h"
 #include "bessel.cu"
 #include "cart2sph.cu"
@@ -62,12 +64,12 @@
         cgh.parallel_for<class TAG>( \
             sycl::nd_range<1>(blocks * threads, threads), \
             [=](auto item) [[intel::kernel_args_restrict]] { \
-                KFUNC(__VA_ARGS__, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
+                KFUNC(__VA_ARGS__, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
             }); \
     })
 #else
 #define ECP_LAUNCH_SMEM(TAG, SMEM, KFUNC, ...) \
-    KFUNC<<<blocks, threads, (SMEM)*sizeof(double)>>>(__VA_ARGS__)
+    KFUNC<<<blocks, threads, (SMEM)*sizeof(double)>>>(__VA_ARGS__, nullptr)
 #endif
 
 #ifdef USE_SYCL
@@ -77,7 +79,7 @@
         cgh.parallel_for<class TAG>( \
             sycl::nd_range<1>(blocks * threads, threads), \
             [=](auto item) [[intel::kernel_args_restrict]] { \
-                KFUNC(__VA_ARGS__, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
+                KFUNC(__VA_ARGS__, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
             }); \
     })
 #else
@@ -89,7 +91,7 @@
                 __func__, cudaGetErrorString(_e)); \
         return 1; \
     } \
-    KFUNC<<<blocks, threads, (SMEM)*sizeof(double)>>>(__VA_ARGS__); \
+    KFUNC<<<blocks, threads, (SMEM)*sizeof(double)>>>(__VA_ARGS__, nullptr); \
 } while(0)
 #endif
 

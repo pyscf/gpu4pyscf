@@ -16,18 +16,15 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "gsycl/gpu_compat.h"
 
 #define THREADS 128
 
 // (n,ncart,stride) -> (n,nsph,stride), count = n*stride
 __global__
 static void _cart2sph_ang2(double *cart, double *sph, int stride, int count){
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= count){
         return;
     }
@@ -51,12 +48,8 @@ static void _cart2sph_ang2(double *cart, double *sph, int stride, int count){
 
 __global__
 static void _cart2sph_ang3(double *cart, double *sph, int stride, int count){
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= count){
         return;
     }
@@ -86,12 +79,8 @@ static void _cart2sph_ang3(double *cart, double *sph, int stride, int count){
 
 __global__
 static void _cart2sph_ang4(double *cart, double *sph, int stride, int count){
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= count){
         return;
     }
@@ -128,12 +117,8 @@ static void _cart2sph_ang4(double *cart, double *sph, int stride, int count){
 
 __global__
 static void _cart2sph_ang5(double *cart, double *sph, int stride, int count){
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= count){
         return;
     }
@@ -177,12 +162,8 @@ static void _cart2sph_ang5(double *cart, double *sph, int stride, int count){
 
 __global__
 static void _cart2sph_ang6(double *cart, double *sph, int stride, int count){
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= count){
         return;
     }
@@ -235,12 +216,8 @@ static void _cart2sph_ang6(double *cart, double *sph, int stride, int count){
 
 __global__
 static void _cart2sph_ang7(double *cart, double *sph, int stride, int count){
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int idx = item.get_global_id(0);
-#else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-#endif
+    setup_context();
+    int idx = global_x;
     if (idx >= count){
         return;
     }
@@ -305,34 +282,17 @@ extern "C" {
 __host__
 int cart2sph(cudaStream_t stream, double *cart_gto, double *sph_gto, int stride, int count, int ang)
 {
-#ifdef USE_SYCL
-    sycl::range<1> threads(THREADS);
-    sycl::range<1> blocks((count + THREADS - 1)/THREADS);
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid((count + THREADS - 1)/THREADS);
     switch (ang) {
         case 0: break;
         case 1: break;
-        case 2: stream.parallel_for<class _cart2sph_ang2_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang2 (cart_gto, sph_gto, stride, count); }); break;
-        case 3: stream.parallel_for<class _cart2sph_ang3_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang3 (cart_gto, sph_gto, stride, count); }); break;
-        case 4: stream.parallel_for<class _cart2sph_ang4_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang4 (cart_gto, sph_gto, stride, count); }); break;
-        case 5: stream.parallel_for<class _cart2sph_ang5_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang5 (cart_gto, sph_gto, stride, count); }); break;
-        case 6: stream.parallel_for<class _cart2sph_ang6_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang6 (cart_gto, sph_gto, stride, count); }); break;
-        case 7: stream.parallel_for<class _cart2sph_ang7_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang7 (cart_gto, sph_gto, stride, count); }); break;
-        default:
-            fprintf(stderr, "Ang > 7 is not supported!\n");
-            return 1;
-    }
-#else // USE_SYCL
-    dim3 threads(THREADS);
-    dim3 blocks((count + THREADS - 1)/THREADS);
-    switch (ang) {
-        case 0: break;
-        case 1: break;
-        case 2: _cart2sph_ang2 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 3: _cart2sph_ang3 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 4: _cart2sph_ang4 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 5: _cart2sph_ang5 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 6: _cart2sph_ang6 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
-        case 7: _cart2sph_ang7 <<<blocks, threads, 0, stream>>> (cart_gto, sph_gto, stride, count); break;
+        case 2: LAUNCH_KERNEL(_cart2sph_ang2, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 3: LAUNCH_KERNEL(_cart2sph_ang3, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 4: LAUNCH_KERNEL(_cart2sph_ang4, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 5: LAUNCH_KERNEL(_cart2sph_ang5, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 6: LAUNCH_KERNEL(_cart2sph_ang6, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 7: LAUNCH_KERNEL(_cart2sph_ang7, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
         default:
             fprintf(stderr, "Ang > 7 is not supported!\n");
             return 1;
@@ -342,7 +302,6 @@ int cart2sph(cudaStream_t stream, double *cart_gto, double *sph_gto, int stride,
     if (err != cudaSuccess) {
         return 1;
     }
-#endif // USE_SYCL
     return 0;
 }
 }

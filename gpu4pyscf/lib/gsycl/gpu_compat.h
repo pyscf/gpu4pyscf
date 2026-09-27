@@ -15,6 +15,10 @@
  */
 
 // Backend definitions and abstractions
+// Single header wrapping the most commonly used CUDA constructs so that
+// .cu files contain no USE_SYCL ifdefs. Include <cuda_runtime.h> first,
+// then this header. The <cuda_runtime.h> shim resolves to the SYCL compat
+// layer when USE_SYCL is active, or the real CUDA headers otherwise.
 
 #pragma once
 
@@ -42,6 +46,10 @@
 #define gridDim_y       item.get_group_range(1)
 #define gridDim_z       item.get_group_range(0)
 
+#define global_x        item.get_global_id(2)
+#define global_y        item.get_global_id(1)
+#define global_z        item.get_global_id(0)
+
 #else
 
 #define setup_context()
@@ -62,8 +70,62 @@
 #define gridDim_y       gridDim.y
 #define gridDim_z       gridDim.z
 
+#define global_x        (blockIdx_x * blockDim_x + threadIdx_x)
+#define global_y        (blockIdx_y * blockDim_y + threadIdx_y)
+#define global_z        (blockIdx_z * blockDim_z + threadIdx_z)
+
 #endif
 
+
+// Shared / local memory declaration.
+// Usage: SHARED_ARRAY(double, tile, [16][16]);
+// CUDA: __shared__ double tile[16][16];
+// SYCL: group local memory reference bound to `item` from setup_context().
+#ifdef USE_SYCL
+#define SHARED_ARRAY(type, name, ...) \
+    using _smt_##name##_t = type __VA_ARGS__; \
+    _smt_##name##_t& name = *sycl::ext::oneapi::group_local_memory_for_overwrite<_smt_##name##_t>(item.get_group())
+#else
+#define SHARED_ARRAY(type, name, ...) __shared__ type name __VA_ARGS__
+#endif
+
+// Dynamically-sized shared / local memory, following the established
+// submit+local_accessor pattern. The kernel takes a trailing `void *shm_mem`
+// argument in BOTH backends (see LAUNCH_KERNEL_DYN), so kernel signatures
+// stay identical. Inside the kernel, after setup_context():
+//   DYNAMIC_SHARED_PTR(double, buf, shm_mem);
+#ifdef USE_SYCL
+#define DYNAMIC_SHARED_PTR(type, name, shm_mem) \
+    type *name = static_cast<type *>(shm_mem)
+#else
+#define DYNAMIC_SHARED_PTR(type, name, shm_mem) \
+    extern __shared__ type name[]; \
+    (void)(shm_mem)
+#endif
+
+// Scalar shared / local variable (one value per work-group, e.g. a block
+// counter). Usage: SHARED_SCALAR(int, ntasks); then use `ntasks` as an int.
+// CUDA: __shared__ int ntasks;
+// SYCL: int-sized group-local slot bound to `item` from setup_context().
+#ifdef USE_SYCL
+#define SHARED_SCALAR(type, name) \
+    using _sms_##name##_t = type[1]; \
+    _sms_##name##_t& _sms_##name##_arr = *sycl::ext::oneapi::group_local_memory_for_overwrite<_sms_##name##_t>(item.get_group()); \
+    type &name = _sms_##name##_arr[0]
+#else
+#define SHARED_SCALAR(type, name) __shared__ type name
+#endif
+
+// Host-to-constant-memory copy. Usage:
+//   CONSTANT_MEMCPY(c_table, h_table, N*sizeof(Entry));
+// CUDA: cudaMemcpyToSymbol. SYCL: queue memcpy into the device_global.
+#ifdef USE_SYCL
+#define CONSTANT_MEMCPY(dst, src, bytes) \
+    sycl_get_queue()->memcpy(dst, src, bytes).wait()
+#else
+#define CONSTANT_MEMCPY(dst, src, bytes) \
+    cudaMemcpyToSymbol(dst, src, bytes)
+#endif
 
 #ifdef USE_SYCL
 inline sycl::range<3> make_grid(
@@ -85,7 +147,72 @@ inline sycl::range<3> make_block(
             [=](sycl::nd_item<3>) { kernel(__VA_ARGS__); }); \
     }
 
+#define LAUNCH_KERNEL_Q(queue_ptr, kernel, grid, block, shm_size, ...) \
+    { \
+        (queue_ptr)->parallel_for( \
+            sycl::nd_range<3>(grid * block, block), \
+            [=](sycl::nd_item<3>) { kernel(__VA_ARGS__); }); \
+    }
+
+// Launch where one trailing argument must be materialized on the host
+// (e.g. dereferencing a host-side struct pointer whose pointee holds device
+// pointers). HOSTARG is evaluated in host code in both backends: captured by
+// value in the SYCL lambda, passed directly in CUDA.
+#define LAUNCH_KERNEL_LAST(KERNEL, HOSTARG, grid, block, shm_size, stream, ...) \
+    { \
+        auto _hostarg = (HOSTARG); \
+        (stream).parallel_for( \
+            sycl::nd_range<3>(grid * block, block), \
+            [=](sycl::nd_item<3>) { KERNEL(__VA_ARGS__, _hostarg); }); \
+    }
+
+// Dynamic-shared variant: allocates shm_size bytes of local memory and
+// forwards its pointer as a trailing `void *shm_mem` kernel argument in
+// BOTH backends (CUDA passes nullptr; the kernel uses `extern __shared__`
+// via DYNAMIC_SHARED_PTR instead).
+#define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, stream, ...) \
+    { \
+        (stream).submit([&](sycl::handler &cgh) { \
+            sycl::local_accessor<char, 1> _dynshm( \
+                sycl::range<1>(shm_size), cgh); \
+            cgh.parallel_for( \
+                sycl::nd_range<3>(grid * block, block), \
+                [=](sycl::nd_item<3>) { \
+                    kernel(__VA_ARGS__, \
+                           GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(_dynshm)); \
+                }); \
+        }); \
+    }
+
+#define LAUNCH_KERNEL_DYN_Q(queue_ptr, kernel, grid, block, shm_size, ...) \
+    { \
+        (queue_ptr)->submit([&](sycl::handler &cgh) { \
+            sycl::local_accessor<char, 1> _dynshm( \
+                sycl::range<1>(shm_size), cgh); \
+            cgh.parallel_for( \
+                sycl::nd_range<3>(grid * block, block), \
+                [=](sycl::nd_item<3>) { \
+                    kernel(__VA_ARGS__, \
+                           GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(_dynshm)); \
+                }); \
+        }); \
+    }
+
+// Queue-launch form of LAUNCH_KERNEL_LAST (no stream; e.g. queue-owned
+// default launches). HOSTARG is materialized on the host in both backends.
+#define LAUNCH_KERNEL_LAST_Q(KERNEL, HOSTARG, queue_ptr, grid, block, shm_size, ...) \
+    { \
+        auto _hostarg = (HOSTARG); \
+        (queue_ptr)->parallel_for( \
+            sycl::nd_range<3>(grid * block, block), \
+            [=](sycl::nd_item<3>) { KERNEL(__VA_ARGS__, _hostarg); }); \
+    }
+
 #else
+// Dummy so queue-based launch sites compile in CUDA builds.
+// The CUDA LAUNCH_KERNEL_Q macro discards this argument.
+static inline void *sycl_get_queue() { return nullptr; }
+
 inline dim3 make_grid(
     unsigned int x, unsigned int y = 1, unsigned int z = 1)
 {
@@ -101,5 +228,40 @@ inline dim3 make_block(
 #define LAUNCH_KERNEL(kernel, grid, block, shm_size, stream, ...) \
     { \
         kernel<<<grid, block, shm_size, stream>>>(__VA_ARGS__); \
+    }
+
+#define LAUNCH_KERNEL_Q(queue_ptr, kernel, grid, block, shm_size, ...) \
+    { \
+        (void)(queue_ptr); \
+        kernel<<<grid, block>>>(__VA_ARGS__); \
+    }
+
+// Launch where one trailing argument must be materialized on the host
+// (e.g. dereferencing a host-side struct pointer whose pointee holds device
+// pointers). HOSTARG is evaluated in host code in both backends.
+#define LAUNCH_KERNEL_LAST(KERNEL, HOSTARG, grid, block, shm_size, stream, ...) \
+    { \
+        KERNEL<<<grid, block, shm_size, stream>>>(__VA_ARGS__, HOSTARG); \
+    }
+
+// Dynamic-shared variant: forwards shm_size as a trailing `void *shm_mem`
+// kernel argument in BOTH backends, matching DYNAMIC_SHARED_PTR.
+#define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, stream, ...) \
+    { \
+        kernel<<<grid, block, shm_size, stream>>>(__VA_ARGS__, nullptr); \
+    }
+
+#define LAUNCH_KERNEL_DYN_Q(queue_ptr, kernel, grid, block, shm_size, ...) \
+    { \
+        (void)(queue_ptr); \
+        kernel<<<grid, block, shm_size>>>(__VA_ARGS__, nullptr); \
+    }
+
+// Queue-launch form of LAUNCH_KERNEL_LAST (no stream; e.g. queue-owned
+// default launches). HOSTARG is materialized on the host in both backends.
+#define LAUNCH_KERNEL_LAST_Q(KERNEL, HOSTARG, queue_ptr, grid, block, shm_size, ...) \
+    { \
+        (void)(queue_ptr); \
+        KERNEL<<<grid, block>>>(__VA_ARGS__, HOSTARG); \
     }
 #endif

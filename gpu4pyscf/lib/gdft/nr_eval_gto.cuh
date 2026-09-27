@@ -16,27 +16,21 @@
 
 #pragma once
 
+#include "gsycl/gpu_compat.h"
+
 // Kernel-side & launch-config macros to unify CUDA and SYCL in gdft.
-// All variants in ONE ifdef block - single pair of #ifdef / #else.
+// Indexing, launch and shared-memory come from gsycl/gpu_compat.h; only the
+// blocks.y mutator below still needs a backend branch (sycl::range and dim3
+// share no common accessor), kept here in this header, not in .cu files.
+#define MAKE_RANGE_2D(X, Y)  make_block((X), (Y))
+#define MAKE_RANGE_3D(X, Y, Z)  make_block((X), (Y), (Z))
+
 #ifdef USE_SYCL
-
-#define SHARED_ARRAY(T, name, SIZE)                                   \
-    using name##_tile_t = T[SIZE];                                    \
-    name##_tile_t& name = *sycl::ext::oneapi::                        \
-        group_local_memory_for_overwrite<name##_tile_t>(item.get_group());
-
-#define MAKE_RANGE_2D(X, Y)  sycl::range<2>((Y), (X))
-#define MAKE_RANGE_3D(X, Y, Z)  sycl::range<3>((Z), (Y), (X))
 
 #define BLOCKS_SET_Y(val)  (blocks[0] = (val))
 #define BLOCKS_GET_Y()     (blocks[0])
 
 #else
-
-#define SHARED_ARRAY(T, name, SIZE)  __shared__ T name[SIZE];
-
-#define MAKE_RANGE_2D(X, Y)  dim3((X), (Y))
-#define MAKE_RANGE_3D(X, Y, Z)  dim3((X), (Y), (Z))
 
 #define BLOCKS_SET_Y(val)  (blocks.y = (val))
 #define BLOCKS_GET_Y()     (blocks.y)

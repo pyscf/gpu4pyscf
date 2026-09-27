@@ -44,12 +44,7 @@ Cartesian<(l+1)*(l+2)/2> ang_nuc_l(double rx, double ry, double rz){
 
 __device__
 double rad_part(const int ish, const int *ecpbas, const double *env){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    #endif
+    setup_context();
     const int npk = ecpbas[ish*BAS_SLOTS+NPRIM_OF];
     const int r_order = ecpbas[ish*BAS_SLOTS+RADI_POWER];
     const int exp_ptr = ecpbas[ish*BAS_SLOTS+PTR_EXP];
@@ -124,14 +119,9 @@ void cache_fac(double *fx, double *ri){
 
 __device__
 void block_reduce(double val, double *d_out) {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    double (&sdata)[THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS]>(item.get_group());
-    const unsigned int tid = item.get_local_id(0);
-#else // USE_SYCL
-    __shared__ double sdata[THREADS];
-    const unsigned int tid = threadIdx.x;
-#endif
+    setup_context();
+    SHARED_ARRAY(double, sdata, [THREADS]);
+    const unsigned int tid = threadIdx_x;
 
     sdata[tid] = val;
     __syncthreads();
@@ -162,14 +152,7 @@ void block_reduce(double val, double *d_out) {
 
 __device__ __forceinline__
 void set_shared_memory(double *smem, const int size) {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     for (int i = threadIdx_x; i < size; i += blockDim_x) {
         smem[i] = 0.0;
     }
@@ -178,14 +161,7 @@ void set_shared_memory(double *smem, const int size) {
 
 __device__
 void _li_up(double *out, double *buf, const int li, const int lj){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi = (li+1) * (li+2) / 2;
     const int nfi0 = li * (li+1) / 2;
@@ -208,14 +184,7 @@ void _li_up(double *out, double *buf, const int li, const int lj){
 
 __device__
 void _li_up_and_write(double *out, double *buf, const int li, const int lj, const int nao){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     const int nfi0 = li * (li+1) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     double *outxx = out ;
@@ -253,14 +222,7 @@ void _li_up_and_write(double *out, double *buf, const int li, const int lj, cons
 
 __device__
 void _li_down(double *out, double *buf, const int li, const int lj){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi1= (li+2) * (li+3) / 2;
@@ -280,14 +242,7 @@ void _li_down(double *out, double *buf, const int li, const int lj){
 
 __device__
 void _li_down_and_write(double *out, double *buf, const int li, const int lj, const int nao){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi1= (li+2) * (li+3) / 2;
@@ -324,14 +279,7 @@ void _li_down_and_write(double *out, double *buf, const int li, const int lj, co
 
 __device__
 void _lj_up_and_write(double *out, double *buf, const int li, const int lj, const int nao){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     const int nfi = (li+1)*(li+2)/2;
     const int nfj0 = lj * (lj+1) / 2;
     double *outxx = out;
@@ -368,14 +316,7 @@ void _lj_up_and_write(double *out, double *buf, const int li, const int lj, cons
 
 __device__
 void _lj_down_and_write(double *out, double *buf, const int li, const int lj, const int nao){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfj1 = (lj+2) * (lj+3) / 2;

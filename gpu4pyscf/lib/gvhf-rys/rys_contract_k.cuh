@@ -21,18 +21,13 @@
 #include "gvhf-rys/vhf.cuh"
 
 // Abstracts 2D-kernel gout thread-index setup. Used 4x in this header.
-#ifdef USE_SYCL
+// Indices resolve via gsycl/gpu_compat.h in both backends. setup_context()
+// also provides `item` for the __syncthreads() calls below.
 #define SETUP_GOUT_KERNEL() \
-    auto item = syclex::this_work_item::get_nd_item<2>(); \
-    int nsq_per_block = item.get_local_range(1); \
-    int gout_id       = item.get_local_id(0); \
-    int gout_stride   = item.get_local_range(0);
-#else
-#define SETUP_GOUT_KERNEL() \
-    int nsq_per_block = blockDim.x; \
-    int gout_id       = threadIdx.y; \
-    int gout_stride   = blockDim.y;
-#endif
+    setup_context(); \
+    int nsq_per_block = blockDim_x; \
+    int gout_id = threadIdx_y; \
+    int gout_stride = blockDim_y;
 
 #ifdef USE_SYCL
 

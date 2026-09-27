@@ -16,6 +16,7 @@
 
 #include <stdio.h>
 #include "gint/cuda_alloc.cuh"
+#include "gsycl/gpu_compat.h"
 #define THREADS        32
 
 typedef struct {
@@ -35,14 +36,9 @@ typedef struct {
 
 __global__
 void _unpack(CDERI_BLOCK block, int nao, int offset, double *out){
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int ij = item.get_global_id(1);
-    int k = item.get_global_id(0);
-#else
-    int ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int k = blockIdx.y * blockDim.y + threadIdx.y;
-#endif
+    setup_context();
+    int ij = global_x;
+    int k = global_y;
     int nij = block.nij;
 
     int idx_aux = k + offset;
@@ -101,24 +97,15 @@ int unpack_block(CDERI_BLOCK *block, int p1, int p2, int nao, double *buf){
     int nij = block->nij;
     int blockx = (nij + THREADS - 1) / THREADS;
     int blocky = (p2 - p1 + THREADS - 1) / THREADS;
-#ifdef USE_SYCL
-    sycl::range<2> threads(THREADS, THREADS);
-    sycl::range<2> blocks(blocky, blockx);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(blockx, blocky);
     CDERI_BLOCK dev_block = *block;
-    sycl_get_queue()->parallel_for<class _unpack_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      _unpack(dev_block, nao, p1, buf);
-    });
-#else //USE_SYCL
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(blockx, blocky);
-
-    _unpack<<<blocks, threads>>>(*block, nao, p1, buf);
-
+    LAUNCH_KERNEL_Q(sycl_get_queue(), _unpack, blocks, threads, 0,
+                    dev_block, nao, p1, buf);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-#endif
     return 0;
 }
 

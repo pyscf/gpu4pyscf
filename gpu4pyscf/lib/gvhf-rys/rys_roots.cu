@@ -95,9 +95,7 @@ __device__ __forceinline__ static
 void rys_roots_rs(int nroots, double theta, double rr, double omega,
                   double *rw, int block_size, int rt_id, int stride)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    #endif
+    setup_context();
     double theta_rr = theta * rr;
     if (omega == 0) {
         rys_roots(nroots, theta_rr, rw, block_size, rt_id, stride);

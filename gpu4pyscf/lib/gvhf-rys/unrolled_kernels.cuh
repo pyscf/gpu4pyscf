@@ -42,77 +42,66 @@
     RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, \
     float *q_cond_ij, float *q_cond_kl, float dm_penalty, \
     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
-    uint32_t *pool, int *head, \
-    sycl::nd_item<2> &item, double *shared_memory
+    uint32_t *pool, int *head, void *shm_mem
 
 #define JKMATRIX_KERNEL_SETUP() \
-    int sq_id = item.get_local_id(1); \
-    int gout_id = item.get_local_id(0); \
-    int _nsq_per_block = item.get_local_range(1); \
-    uint32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH; \
-    auto _rys_grp = item.get_group(); \
-    int &ntasks   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &pair_ij  = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &ish      = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &jsh      = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    double (&ri)[3]   = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(_rys_grp); \
-    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(_rys_grp); \
-    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp);
+    setup_context(); \
+    int sq_id = threadIdx_x; \
+    int gout_id = threadIdx_y; \
+    int _nsq_per_block = blockDim_x; \
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH; \
+    SHARED_SCALAR(int, ntasks); \
+    SHARED_SCALAR(int, pair_ij); \
+    SHARED_SCALAR(int, pair_kl0); \
+    SHARED_SCALAR(int, ish); \
+    SHARED_SCALAR(int, jsh); \
+    SHARED_ARRAY(double, ri, [3]); \
+    SHARED_ARRAY(double, rjri, [3]); \
+    SHARED_SCALAR(int, expi); \
+    SHARED_SCALAR(int, expj); \
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
 
 #define LAUNCH_JKMATRIX_KERNEL(KERNEL) { \
     auto _rys_envs = *envs; auto _rys_jk = *jk; auto _rys_bounds = *bounds; \
-    sycl::range<2> _rys_blocks(1, workers); \
-    sycl::range<2> _rys_threads(gout_stride, nsq_per_block); \
-    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-        sycl::local_accessor<double, 1> _rys_lmem(sycl::range<1>(buflen), cgh); \
-        cgh.parallel_for<class RYS_KERNEL_TAG(KERNEL)>( \
-            sycl::nd_range<2>(_rys_blocks * _rys_threads, _rys_threads), \
-            [=](sycl::nd_item<2> item) { \
-                KERNEL(_rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
-                       dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, \
-                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(_rys_lmem)); \
-            }); \
-    }); \
+    auto _rys_blocks = make_grid(workers, 1); \
+    auto _rys_threads = make_block(nsq_per_block, gout_stride); \
+    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), KERNEL, _rys_blocks, _rys_threads, \
+        (buflen)*sizeof(double), \
+        _rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
+        dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); \
   }
 
 #define JKENERGY_KERNEL_ARGS \
     RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds, \
     float *q_cond_ij, float *q_cond_kl, float dm_penalty, \
     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
-    uint32_t *pool, double *dd_pool, int *head, \
-    sycl::nd_item<2> &item, double *shared_memory
+    uint32_t *pool, double *dd_pool, int *head, void *shm_mem
 
 #define JKENERGY_KERNEL_SETUP() \
-    int sq_id = item.get_local_id(1); \
-    int gout_id = item.get_local_id(0); \
-    int worker_id = item.get_group(1); \
-    auto _rys_grp = item.get_group(); \
-    int &ntasks   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &pair_ij  = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &ish      = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &jsh      = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    double (&ri)[3]   = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(_rys_grp); \
-    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(_rys_grp); \
-    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp); \
-    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(_rys_grp);
+    setup_context(); \
+    int sq_id = threadIdx_x; \
+    int gout_id = threadIdx_y; \
+    int worker_id = blockIdx_x; \
+    SHARED_SCALAR(int, ntasks); \
+    SHARED_SCALAR(int, pair_ij); \
+    SHARED_SCALAR(int, pair_kl0); \
+    SHARED_SCALAR(int, ish); \
+    SHARED_SCALAR(int, jsh); \
+    SHARED_ARRAY(double, ri, [3]); \
+    SHARED_ARRAY(double, rjri, [3]); \
+    SHARED_SCALAR(int, expi); \
+    SHARED_SCALAR(int, expj); \
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
 
 #define LAUNCH_JKENERGY_KERNEL(KERNEL) { \
     auto _rys_envs = *envs; auto _rys_jk = *jk; auto _rys_bounds = *bounds; \
-    sycl::range<2> _rys_blocks(1, workers); \
-    sycl::range<2> _rys_threads(gout_stride, nsq_per_block); \
-    sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-        sycl::local_accessor<double, 1> _rys_lmem(sycl::range<1>(buflen), cgh); \
-        cgh.parallel_for<class RYS_KERNEL_TAG(KERNEL)>( \
-            sycl::nd_range<2>(_rys_blocks * _rys_threads, _rys_threads), \
-            [=](sycl::nd_item<2> item) { \
-                KERNEL(_rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
-                       dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, \
-                       dd_pool, head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(_rys_lmem)); \
-            }); \
-    }); \
+    auto _rys_blocks = make_grid(workers, 1); \
+    auto _rys_threads = make_block(nsq_per_block, gout_stride); \
+    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), KERNEL, _rys_blocks, _rys_threads, \
+        (buflen)*sizeof(double), \
+        _rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
+        dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, \
+        dd_pool, head); \
   }
 
 #else  // !USE_SYCL  -- byte-identical to upstream/master

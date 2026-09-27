@@ -23,19 +23,8 @@ void type1_cart_unrolled_kernel(double *gctr,
     constexpr int LIJ1 = LI+LJ+1;
     constexpr int LIJ3 = LIJ1*LIJ1*LIJ1;
 
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-
-    auto thread_block = item.get_group();
-    double (&rad_ang)[LIJ3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ3]>(thread_block);
-#else // USE_SYCL
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-
-    __shared__ double rad_ang[LIJ3];
-#endif // USE_SYCL
+    setup_context();
+    SHARED_ARRAY(double, rad_ang, [LIJ3]);
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
@@ -78,11 +67,7 @@ void type1_cart_unrolled_kernel(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai_prim + aj_prim;
 
-            #ifdef USE_SYCL
-            double (&rad_all)[LIJ1*LIJ1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ1*LIJ1]>(thread_block);
-            #else
-            __shared__ double rad_all[LIJ1*LIJ1];
-            #endif
+            SHARED_ARRAY(double, rad_all, [LIJ1*LIJ1]);
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
             __syncthreads();
 
@@ -152,14 +137,7 @@ void type1_cart_kernel(double *smem, double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-#else // USE_SYCL
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-#endif // USE_SYCL
+    setup_context();
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
@@ -277,20 +255,10 @@ void type1_cart_ip1(double *gctr,
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
     constexpr int nfi1 = (LI+2)*(LI+3)/2;
 
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int task_id = item.get_group(0);
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    double (&gctr_smem)[nfi*nfj*3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi*nfj*3]>(item.get_group());
-    double (&buf)[nfi1*nfj] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi1*nfj]>(item.get_group());
-#else // USE_SYCL
-    const int task_id = blockIdx.x;
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    __shared__ double gctr_smem[nfi*nfj*3];
-    __shared__ double buf[nfi1*nfj];
-#endif // USE_SYCL
+    setup_context();
+    const int task_id = blockIdx_x;
+    SHARED_ARRAY(double, gctr_smem, [nfi*nfj*3]);
+    SHARED_ARRAY(double, buf, [nfi1*nfj]);
     if (task_id >= ntasks){
         return;
     }
@@ -345,29 +313,17 @@ void type1_cart_ip1_general(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env
-#ifdef USE_SYCL
-                , sycl::nd_item<1> &item, double* smem
-#endif
-                            )
+                const int *atm, const int *bas, const double *env,
+                void *shm_mem)
 {
     constexpr int nfi_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
 
-#ifdef USE_SYCL
-    const int task_id = item.get_group(0);
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    double (&gctr_smem)[NF_MAX*NF_MAX*3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NF_MAX*NF_MAX*3]>(item.get_group());
-    double (&buf)[nfi_max*nfj_max] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[nfi_max*nfj_max]>(item.get_group());
-#else // USE_SYCL
-    const int task_id = blockIdx.x;
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
-    __shared__ double buf[nfi_max*nfj_max];
-    extern __shared__ double smem[];
-#endif // USE_SYCL
+    setup_context();
+    const int task_id = blockIdx_x;
+    SHARED_ARRAY(double, gctr_smem, [NF_MAX*NF_MAX*3]);
+    SHARED_ARRAY(double, buf, [nfi_max*nfj_max]);
+    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }

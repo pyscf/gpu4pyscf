@@ -17,14 +17,7 @@
 __device__
 void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, double aij, double ur)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     const double kaij = k / (2*aij);
     const double fac = kaij * kaij * aij;
     double r = 0.0;
@@ -101,14 +94,7 @@ double type1_ang_nuc_l(const int i, const int j, const int k, double *unitr){
 __device__
 void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, const double fac)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -166,14 +152,7 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
 template <int LIJ> __device__
 void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    #else
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    #endif
+    setup_context();
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -237,19 +216,9 @@ void type1_cart(double *gctr,
 {
     constexpr int LIJ1 = LI+LJ+1;
 
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    auto thread_block = item.get_group();
-    const int task_id = thread_block.get_group_id(0);
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-    double (&rad_ang)[LIJ1*LIJ1*LIJ1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ1*LIJ1*LIJ1]>(thread_block);
-#else // USE_SYCL
-    const int task_id = blockIdx.x;
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    __shared__ double rad_ang[LIJ1*LIJ1*LIJ1];
-#endif // USE_SYCL
+    setup_context();
+    const int task_id = blockIdx_x;
+    SHARED_ARRAY(double, rad_ang, [LIJ1*LIJ1*LIJ1]);
     if (task_id >= ntasks){
         return;
     }
@@ -297,11 +266,7 @@ void type1_cart(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai[ip] + aj[jp];
 
-            #ifdef USE_SYCL
-            double (&rad_all)[LIJ1*LIJ1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ1*LIJ1]>(thread_block);
-            #else
-            __shared__ double rad_all[LIJ1*LIJ1];
-            #endif
+            SHARED_ARRAY(double, rad_all, [LIJ1*LIJ1]);
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
             __syncthreads();
 
@@ -371,22 +336,12 @@ void type1_cart(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env
-#ifdef USE_SYCL
-                , sycl::nd_item<1> &item, double* smem
-#endif
-                )
+                const int *atm, const int *bas, const double *env,
+                void *shm_mem)
 {
-#ifdef USE_SYCL
-    const int task_id = item.get_group(0);
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);
-#else
-    const int task_id = blockIdx.x;
-    const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    extern __shared__ double smem[];
-#endif
+    setup_context();
+    const int task_id = blockIdx_x;
+    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }
