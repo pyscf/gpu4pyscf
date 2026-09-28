@@ -272,7 +272,8 @@ H   1.7   -2.0   0.4''',
                     i1 = min(i0+numint.MIN_BLK_SIZE, ngrids)
                     ref = numint._sparse_index(
                         opt._sorted_mol, grids.coords[i0:i1], opt.l_ctr_offsets, ao_loc, opt)
-                    assert all(np.array_equal(r, x) for r, x in zip(ref[1:], dat[i][1:]))
+                    assert all(r.shape == x.shape and bool((r == x).all())
+                               for r, x in zip(ref[1:], dat[i][1:]))
 
     def test_scale_ao(self):
         ao = cupy.random.rand(1, 3, 256)

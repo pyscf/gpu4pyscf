@@ -128,7 +128,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         out = cp.empty((nkpts,nkpts,naux,nao,nao), dtype=np.complex128)
         kk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
         for k in range(nkpts):
-            ki_idx, kj_idx = np.where(kk_conserv == k)
+            ki_idx, kj_idx = cp.where(kk_conserv == k)
             out[k] = _unpack_cderi_v2(j3c[k], pair_address, kj_idx,
                                       conj_mapping, expLk, nao, axis)
         j3c = None
