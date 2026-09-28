@@ -28,6 +28,7 @@ from gpu4pyscf.pbc.grad.kuks import get_vxc_full_response as unrestricted_get_vx
 from gpu4pyscf.pbc.grad.kuks import get_vxc as unrestricted_get_vxc
 from gpu4pyscf.dft.tests.test_grids import find_matching_index_between_two_grids
 from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+import pytest
 
 def numerical_gradient_exc_becke(cell, xc, kmesh, auxbasis, atom_grid, dm, unrestricted=False, dx = 1e-4):
     assert np.array(kmesh).shape == (3,)
@@ -462,6 +463,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient[:-3] - ref_gradient[:-3])) < 2e-4
         assert np.max(np.abs(test_gradient[-3:] - ref_gradient[-3:])) < 5e-4
 
+    @pytest.mark.slow
     def test_xc_gradient_unrestricted_no_k_with_response(self):
         cell = pyscf.M(
             a = np.eye(3) * 3.5668,
@@ -477,7 +479,6 @@ class KnownValues(unittest.TestCase):
             ''',
             basis = 'gth-tzvp',
             pseudo = 'gth-pade',
-            precision = 1e-11,
             verbose = 0,
         )
 
@@ -495,24 +496,8 @@ class KnownValues(unittest.TestCase):
             dm = dm[:,None,:,:]
         test_gradient = unrestricted_get_vxc_full_response(mf._numint, cell, mf.grids, mf.xc, dm, kpts, hermi=1)
 
-        # ref_gradient = numerical_gradient_exc_becke(cell, "r2scan", (1,1,1), 'def2-universal-jkfit', (50,194), dm, unrestricted=True)
-        ref_gradient = np.array([
-            [ 0.000000331477068 ,  0.0000003322497832,  0.0000003327649267],
-            [-0.0003304407325544, -0.0003304415763239, -0.0003304411144711],
-            [-0.0000001969979735, -0.0000001975841712,  0.0000003919886638],
-            [ 0.0003303068574212,  0.0003303051521186, -0.0003305007467702],
-            [-0.0000001974953534,  0.0000003921751812, -0.0000001968025742],
-            [ 0.0003303066264948, -0.0003305007645338,  0.000330305631735 ],
-            [ 0.0000003910827218, -0.0000001970779095, -0.0000001967759289],
-            [-0.0003305006668342,  0.0003303075324368,  0.0003303051876458],
-            [10.485175710082117 , -0.0000000322586402, -0.0000000312638804],
-            [-0.0000000314681614, 10.48517571377694  , -0.0000000326494387],
-            [-0.000000033377745 , -0.0000000317967874, 10.485175704362248 ],
-        ])
-
-        # It can match down to 1e-9, if the finite difference is computed using the same dm from SCF.
-        # However if we save the finite difference result, it suffers from the numerical instability of dm, and the a 3e-7 error is observed.
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 2e-6
+        ref_gradient = numerical_gradient_exc_becke(cell, "r2scan", (1,1,1), 'def2-universal-jkfit', (50,194), dm, unrestricted=True)
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     def test_xc_gradient_unrestricted_k_with_response(self):
         cell = pyscf.M(
