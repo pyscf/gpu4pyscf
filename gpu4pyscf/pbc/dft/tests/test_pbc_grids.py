@@ -477,6 +477,7 @@ class KnownValues(unittest.TestCase):
             ''',
             basis = 'gth-tzvp',
             pseudo = 'gth-pade',
+            precision = 1e-11,
             verbose = 0,
         )
 

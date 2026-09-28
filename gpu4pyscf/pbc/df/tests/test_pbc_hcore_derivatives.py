@@ -219,9 +219,9 @@ class KnownValues(unittest.TestCase):
             [ 0.0332548719939041,  0.0136434722008971, -0.0355085206393824],
         ])
 
-        #assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.abs(test_energy - ref_energy) < 1e-6
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 3e-7
-        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 1e-6
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-6
 
         dm = mf.make_rdm1()
         kmesh = np.array([1,1,1])

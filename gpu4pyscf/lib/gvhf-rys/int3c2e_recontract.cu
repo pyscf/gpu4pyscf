@@ -55,7 +55,6 @@ void recontract_gather_kernel(double *out, double *input, int *inp_idx,
     unsigned mask = __activemask();
     for (size_t col = warp; col < naux; col += warps) {
         double real = 0.;
-        double imag = 0.;
         for (int k = start; k < stop; k += warpSize) {
             size_t address = inp_idx[k] * naux + col;
             double c = coef[k];
