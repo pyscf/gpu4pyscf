@@ -1598,6 +1598,8 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
         dm_sc = contract('nkpq,Lk->nLqp', dms, expLk)
         assert absmax(dm_sc.imag) < cell.precision*5e2
     dm_sc = cp.asarray(dm_sc.real, order='C')
+    # Density kernels divide by the BvK size; k-point weights are 1/Nk.
+    dm_sc *= bvk_ncells / nkpts
 
     dm_sc = cell.apply_C_mat_CT(dm_sc.reshape(-1,nao,nao), out=out)
 
@@ -1833,7 +1835,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _inverse_wannier_transform_fock(ni, veff, kpts)
     else:
         kpts_band = kpts_band.reshape(-1, 3)
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
+        kmesh = k2gamma.kpts_to_bvkmesh(cell, kpts_band)
         ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
@@ -1963,7 +1965,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     else:
         kpts_band = kpts_band.reshape(-1, 3)
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
+        kmesh = k2gamma.kpts_to_bvkmesh(cell, kpts_band)
         ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
@@ -2127,7 +2129,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         return self
 
     def _ensure_initialized(self, kpts, xctype):
-        kmesh = k2gamma.kpts_to_kmesh(self.cell, kpts)
+        kmesh = k2gamma.kpts_to_bvkmesh(self.cell, kpts)
         if (self.bvkcell is None or
             any(self.kmesh != kmesh) or
             # LDA and GGA share the same initialization parameters.

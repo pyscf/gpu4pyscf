@@ -20,6 +20,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.gto import ATOM_OF
 from pyscf.pbc.tools.k2gamma import double_translation_indices
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, unpack_tril, get_avail_mem, empty_aligned)
@@ -37,8 +38,7 @@ from gpu4pyscf.pbc.df.grad import rhf, uhf
 from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.lib.kpts_helper import (
-    fft_matrix, kk_adapted_iter, conj_images_in_bvk_cell)
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 
 
 def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
@@ -89,7 +89,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     assert nkpts == len(kpts)
     expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
     expLk_conj = expLk.conj()
-    expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
+    kmesh = kpts_to_kmesh(cell, kpts)
+    qpts = cell.make_kpts(kmesh)
+    expLq_conj = cp.exp(-1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(qpts.T)))
+    expLk_conjz = expLq_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
     buffer_size = mem_free // 4
@@ -103,9 +106,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
-    # k=ijk_conserv[i,j] provides: -i + j - k = 2n\pi
-    # therefore, i=ijk_conserv[k,j]
-    ijk_conserv = cp.asarray(double_translation_indices(int3c2e_opt.bvk_kmesh))
+    # q=ijk_conserv[i,j] labels kj-ki on the canonical Gamma grid.
+    ijk_conserv = cp.asarray(double_translation_indices(kmesh))
     #for ki in range(nkpts):
     #    for kj in range(nkpts):
     #        out[ki,kj] += j3c_tmp[ijk_conserv[ki,kj],ki]
@@ -155,8 +157,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     compressed = j3c = j3c_tmp = j3c_ij = tmp = None
     t0 = log.timer_debug1('contract dm', *t0)
 
-    kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
-    uniq_kpts = kpts[[x[0] for x in kpt_iters]]
+    kpt_iters = list(kk_adapted_iter(kmesh))
+    uniq_kpts = qpts[[x[0] for x in kpt_iters]]
     nkpts_uniq = len(uniq_kpts)
 
     precision = auxcell.precision * 1e-6
@@ -171,9 +173,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     # LR part 0th order
     mesh = int3c2e_opt.mesh
     log.debug('mesh for LR coulG %s', mesh)
-    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-    assert ft_opt.permutation_symmetry
-    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+    if bvk_ncells == nkpts:
+        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+    else:
+        ft_opt = ft_ao.FTOpt(cell, int3c2e_opt.bvk_kmesh)
+        ft_opt.permutation_symmetry = False
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     if omega is None:
         omega = 0
@@ -205,7 +210,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             contract('iKG,jKG->Kij', auxGw, auxG, beta=1, out=j2c)
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-                Gpq = ft_kern(Gv[p0:p1], kpts[kp], kpts, kj_idx)
+                Gpq = ft_kern(Gv[p0:p1], qpts[kp], kpts, kj_idx)
                 pqG, Gpq = Gpq.transpose(0,2,3,1)[kj_idx], None
                 tmp = contract('kpqG,skpi->skiqG', pqG, dm_factor_r)
                 ijG = contract('skiqG,skqj->skijG', tmp, dm_factor_l[:,kj_idx])
@@ -303,7 +308,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
 
             # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-                Gpq = ft_kern(Gv[p0:p1], kpts[kp], kpts, kj_idx)
+                Gpq = ft_kern(Gv[p0:p1], qpts[kp], kpts, kj_idx)
                 pqG, Gpq = Gpq.transpose(0,2,3,1)[kj_idx], None
 
                 beta = 0
@@ -362,7 +367,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                     LpqG *= 2
                 dm_vG = cp.asarray(LpqG, order='C')
 
-                GvT = cp.asarray((Gv[p0:p1]+kpts[kp]).T.ravel())
+                GvT = cp.asarray((Gv[p0:p1]+qpts[kp]).T.ravel())
                 err = kern(
                     ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
@@ -435,8 +440,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     kern = libpbc.PBCsr_ejk_int3c2e_ip1
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size*bvk_ncells))
-    buf1 = cp.empty((nkpts**2 * blksize*nao*nao), dtype=np.complex128)
-    buf2 = cp.empty((nkpts**2 * blksize*nao*nao), dtype=np.complex128)
+    buf1 = cp.empty((bvk_ncells**2 * blksize*nao*nao), dtype=np.complex128)
+    buf2 = cp.empty((bvk_ncells**2 * blksize*nao*nao), dtype=np.complex128)
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         naux_in_batch = aux_loc[ksh_offsets_cpu[kbatch+1]] - aux_ao_offset
@@ -457,7 +462,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 dm_tensor_swap[0] += j_factor * auxvec[aux0:aux1] * dm_sorted[:,:,:,None]
             tmp = ndarray((nkpts,nao,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf2)
             tmp1 = ndarray((nao,bvk_ncells,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf1)
-            dm_tensor = contract('KJpqr,LK->JpqLr', dm_tensor_swap, expLk_conj, out=tmp)
+            dm_tensor = contract('KJpqr,LK->JpqLr', dm_tensor_swap, expLq_conj, out=tmp)
             dm_tensor = contract('JpqLr,NJ->qNpLr', dm_tensor, expLk, out=tmp1)
             dm_tensor = dm_tensor.reshape(-1,bvk_ncells,dk).real
             #:compressed[:,:,k0:k1] = dm_tensor[cgto_pair_addresses]

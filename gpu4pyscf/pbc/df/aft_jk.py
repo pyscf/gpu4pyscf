@@ -28,7 +28,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero, group_by_conj_pairs, kk_adapted_iter
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import (
     _format_dms, _format_jks, _ewald_exxdiv_for_G0, _factorize_dm)
@@ -125,7 +125,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     mesh = mydf.mesh
     ngrids = np.prod(mesh)
 
-    bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
+    bvk_kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
@@ -408,7 +408,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
         kmesh = np.array([1, 1, 1])
     else:
         kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_bvkmesh(cell, kpts)
     is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
@@ -419,6 +419,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
         raise NotImplementedError
 
     ft_opt = FTOpt(cell, kmesh)
+    ft_opt.permutation_symmetry = np.prod(kmesh) == nkpts
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     cell = ft_opt.cell
@@ -496,18 +497,18 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
         kmesh = np.array([1, 1, 1])
     else:
         kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
+        kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     bvk_ncells = np.prod(kmesh)
     is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
     assert nkpts == len(kpts)
-    assert bvk_ncells == nkpts
     if n_dm > 2:
         raise NotImplementedError
 
     ft_opt = FTOpt(cell, kmesh)
-    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+    ft_opt.permutation_symmetry = np.prod(kmesh) == nkpts
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     cell = ft_opt.cell
     dms = cp.asarray(dms.reshape(-1,nao,nao))
@@ -537,11 +538,10 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
 
     kern = libpbc.PBC_ft_aopair_ek_ip1
     ek = cp.zeros((cell.natm, 3))
-    for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
-        kpt = kpts[kp]
+    for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kk_adapted_iter(cell, kpts)):
         wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, omega, kpts,
                                      lr_factor=lr_factor, sr_factor=sr_factor)
-        swap_2e = kp != kp_conj
+        swap_2e = not self_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
             #:pqG = ft_kern(Gv[p0:p1], kpt, kpts, kj_idx).transpose(0,2,3,1)
@@ -673,7 +673,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
         kmesh = np.array([1, 1, 1])
     else:
         kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_bvkmesh(cell, kpts)
     is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
@@ -684,6 +684,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
         raise NotImplementedError
 
     ft_opt = FTOpt(cell, kmesh)
+    ft_opt.permutation_symmetry = np.prod(kmesh) == nkpts
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     cell = ft_opt.cell
@@ -721,7 +722,8 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
 
     kern = libpbc.PBC_ft_aopair_ej_strain_deriv
     ej = cp.zeros((cell.natm, 3))
-    sigma = cp.zeros((3, 3))
+    sigma = cp.zeros((3, 3)) # weight contribution
+    sigma1 = cp.zeros((3, 3)) # rho contribution
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
@@ -729,7 +731,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
         Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         rhoG = contract('kji,kijg->g', dms, Gpq)
-        sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
+        sigma += .5*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
 
         vG = rhoG.conj()
         vG *= wcoulG_0[p0:p1]
@@ -737,7 +739,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
         Gpq = None
         err = kern(
             ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
             ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
             ctypes.cast(vG.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -756,8 +758,10 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
     ej = ej.get()
     if not is_gamma_point:
         ej /= nkpts**2
+    # Only the AO derivative kernel uses triangular shell-pair storage.
+    sigma += sigma1 * (2 if ft_opt.permutation_symmetry else 1)
     sigma = sigma.get()
-    sigma *= 2 / nkpts**2
+    sigma /= nkpts**2
     return sigma
 
 def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
@@ -772,7 +776,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
         kmesh = np.array([1, 1, 1])
     else:
         kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_bvkmesh(cell, kpts)
     is_gamma_point = is_zero(kpts)
     dm0 = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dm0.shape[:3]
@@ -781,6 +785,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
         raise NotImplementedError
 
     ft_opt = FTOpt(cell, kmesh)
+    ft_opt.permutation_symmetry = np.prod(kmesh) == nkpts
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
     cell = ft_opt.cell
     dms = cp.asarray(dm0.reshape(-1,nao,nao))
@@ -814,12 +819,11 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
     ek = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
     sigma1 = cp.zeros((3, 3))
-    for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
-        kpt = kpts[kp]
+    for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kk_adapted_iter(cell, kpts)):
         Gvk = Gv + kpt
         wcoulG_0, wcoulG_1 = get_wcoulG_deriv(cell, Gvk, omega=omega)
 
-        swap_2e = kp != kp_conj
+        swap_2e = not self_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
             Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx)
@@ -885,9 +889,9 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
     if not is_gamma_point:
         ek /= nkpts**2
     sigma *= 1. / nkpts**2
-    # First *2 due to i>=j symmetry in kernel;
-    # second *2 due to (d/dX ij|kl) + (ij|d/dX kl)
-    sigma1 *= 2 * 2 / nkpts**2
+    # Double triangular AO pairs only when permutation symmetry is used;
+    # the other factor 2 is for (d/dX ij|kl) + (ij|d/dX kl).
+    sigma1 *= (2 if ft_opt.permutation_symmetry else 1) * 2 / nkpts**2
     sigma += sigma1
     sigma = sigma.get()
 
@@ -973,7 +977,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
     if is_zero(kpt):
         bvk_kmesh = np.ones(3, dtype=int)
     else:
-        bvk_kmesh = kpts_to_kmesh(cell, kpt.reshape(1, 3))
+        bvk_kmesh = kpts_to_bvkmesh(cell, kpt.reshape(1, 3))
     ft_opt = FTOpt(cell, bvk_kmesh)
     ft_kern = ft_opt.gen_ft_kernel(verbose=log)
 

@@ -24,7 +24,7 @@ from pyscf import lib, gto
 from pyscf.scf import _vhf
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
-from pyscf.pbc.lib.kpts_helper import is_zero, member
+from pyscf.pbc.lib.kpts_helper import is_zero, member, group_by_conj_pairs, kk_adapted_iter
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
@@ -43,7 +43,7 @@ from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df.df_jk import _factorize_dm
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, double_translation_indices
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh, double_translation_indices
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb
@@ -246,7 +246,7 @@ class PBCJKMatrixOpt:
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         kpts, is_single_kpt = _check_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
         is_gamma_point = is_zero(kpts)
@@ -477,7 +477,7 @@ class PBCJKMatrixOpt:
         omega = abs(omega)
 
         kpts, is_single_kpt = _check_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
 
@@ -499,7 +499,9 @@ class PBCJKMatrixOpt:
                          for kp, kp_conj, ki_idx, kj_idx in bvk_kk_adapted_iter(kmesh))
             t_rev_pairs = conj_images_in_bvk_cell(kmesh, return_pair=True)
         else:
-            raise NotImplementedError
+            kpt_iters = kk_adapted_iter(cell, kpts)
+            t_rev_pairs = group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
+            t_rev_pairs = np.asarray(t_rev_pairs, dtype=np.int32, order='F')
         log.debug1('Num time-reversal pairs %d', len(t_rev_pairs))
 
         time_reversal_symmetry = self.time_reversal_symmetry
@@ -640,7 +642,7 @@ class PBCJKMatrixOpt:
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         kpts, is_single_kpt = _check_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
@@ -816,7 +818,7 @@ class PBCJKMatrixOpt:
             kmesh = [1] * 3
         else:
             kpts = kpts.reshape(-1, 3)
-            kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+            kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
 
@@ -899,7 +901,7 @@ class PBCJKMatrixOpt:
         dms *= .5
 
         kpts, is_single_kpt = _check_kpts(kpts, dm)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             if is_single_kpt:
@@ -1083,7 +1085,7 @@ class PBCJKMatrixOpt:
         omega = abs(omega)
 
         kpts, is_single_kpt = _check_kpts(kpts, dm)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
         is_gamma_point = is_zero(kpts)
@@ -1224,15 +1226,14 @@ class PBCJKMatrixOpt:
             aft_envs = ft_opt.aft_envs
             kern = libpbc.PBC_ft_aopair_ek_ip1
             ek = cp.zeros((cell.natm, 3))
-            for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
-                kpt = kpts[kp]
+            for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kk_adapted_iter(cell, kpts)):
                 wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
                     cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
                 wcoulG_SR *= -1
                 if not exclude_dd_block:
                     wcoulG += wcoulG_SR
 
-                swap_2e = kp != kp_conj
+                swap_2e = not self_conj
                 for p0, p1 in lib.prange(0, ngrids, blksize):
                     nGv = p1 - p0
                     Gpq = ft_kern(-Gv[p0:p1], -kpt, -kpts, kj_idx)
@@ -1530,7 +1531,7 @@ class PBCJKMatrixOpt:
         omega = abs(omega)
 
         kpts, is_single_kpt = _check_kpts(kpts, dm)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
         is_gamma_point = is_zero(kpts)
@@ -1679,8 +1680,7 @@ class PBCJKMatrixOpt:
             ek = cp.zeros((cell.natm, 3))
             sigma = cp.zeros((3, 3))
             sigma1 = cp.zeros((3, 3))
-            for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
-                kpt = kpts[kp]
+            for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kk_adapted_iter(cell, kpts)):
                 Gvk = Gv + cp.asarray(kpt)
                 remove_G0 = is_zero(kpt)
                 wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gvk, 0)
@@ -1714,7 +1714,7 @@ class PBCJKMatrixOpt:
                     wcoulG_0 += wcoulG_SR_0
                     wcoulG_1 += wcoulG_SR_1
 
-                swap_2e = kp != kp_conj
+                swap_2e = not self_conj
                 for p0, p1 in lib.prange(0, ngrids, blksize):
                     nGv = p1 - p0
                     Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx)

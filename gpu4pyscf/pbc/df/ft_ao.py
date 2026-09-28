@@ -32,7 +32,7 @@ from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -120,7 +120,7 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     if kpts is None:
         kmesh = None
     else:
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_bvkmesh(cell, kpts)
     opt = FTOpt(cell, kmesh)
     opt.permutation_symmetry = False
     return opt.gen_ft_kernel(verbose)

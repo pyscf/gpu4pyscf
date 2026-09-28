@@ -41,7 +41,7 @@ def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
     hl_dims = np.asarray([len(hl) for hl in hl_blocks])
 
     cell = SortedGTO.from_cell(cell, decontract=True)
-    bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
+    bvk_kmesh = k2gamma.kpts_to_bvkmesh(cell, kpts)
     pcell = fakecell.copy(deep=False)
 
     def int_ket(_bas_fake, intor_name):

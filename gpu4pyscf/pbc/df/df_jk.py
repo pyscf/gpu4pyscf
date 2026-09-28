@@ -75,7 +75,11 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # Alter the contraction order for
     # rho = einsum('piLj,LK,Kji->p', cderi, expLk, dm)
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
-    expLk = fft_matrix(mydf.kmesh)
+    if np.prod(mydf.bvk_kmesh) == nkpts: # non-shifted
+        expLk = fft_matrix(mydf.kmesh)
+    else:
+        Ls = k2gamma.translation_vectors_for_kmesh(mydf.cell, mydf.bvk_kmesh, True)
+        expLk = cp.exp(1j*cp.asarray(Ls).dot(cp.asarray(kpts).T))
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
@@ -109,7 +113,10 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     vj_packed = multi_gpu.array_reduce(results, inplace=True)
 
     kj_idx = np.arange(nkpts)
-    conj_mapping = conj_images_in_bvk_cell(mydf.kmesh)
+    if np.prod(mydf.bvk_kmesh) == nkpts: # non-shifted
+        conj_mapping = conj_images_in_bvk_cell(mydf.kmesh)
+    else:
+        conj_mapping = None
     # The ao-pair in vj_packed has the same storage order like the ao-pair in
     # cderi tensor. It can be unpacked using rsdf_builder.unpack_cderi. This
     # function returns a tensor sorted as [nkpt,naux,nao,nao]. vj for multiple
@@ -187,7 +194,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = int(mem_free * .8)
-    blksize = avail_mem // (nkpts*nao**2*3 * 16)
+    bvk_ncells = np.prod(mydf.bvk_kmesh)
+    blksize = avail_mem // (bvk_ncells*nao**2*3 * 16)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)
@@ -236,7 +244,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         if orbr is None:
             orbr = [None] * nset # to support indexing orbr[i] below
         vk = cp.zeros(dms.shape, dtype=dtype)
-        buf = cp.empty((3, nkpts*blksize*nao**2), dtype=dtype)
+        buf = cp.empty((3, bvk_ncells*blksize*nao**2), dtype=dtype)
         for kp, Lpq, sign in mydf.loop(blksize, kpts=kpts, aux_iter=aux_iter,
                                        buf=buf[1], out=buf[0]):
             kp_conj, kj = k_adapt_dic[kp]

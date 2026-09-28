@@ -41,7 +41,7 @@ from gpu4pyscf.pbc.df import aft, rsdf_builder, ft_ao, int3c2e
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.gto.mole import SortedGTO, extract_pgto_params
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, hermi_triu, empty_aligned)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
@@ -188,7 +188,7 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         else:
             is_single_kpt = kpts.ndim == 1
             kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvk_kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
         t = int1e.int1e_kin(xcell, kpts, bvk_kmesh, sort_output=False)
         s = int1e.int1e_ovlp(xcell, kpts, bvk_kmesh, sort_output=False)
@@ -238,7 +238,7 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         else:
             is_single_kpt = kpts.ndim == 1
             kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvk_kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
         x = []
         if 'ATOM' in self.approx.upper():
@@ -295,7 +295,7 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
         bvk_kmesh = np.ones(3, dtype=int)
         bvk_ncells = 1
     elif bvk_kmesh is None:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvk_kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
         bvk_ncells = np.prod(bvk_kmesh)
 
     ###############################################

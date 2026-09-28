@@ -34,7 +34,7 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.pbc.df.int3c2e import (
     fill_triu_bvk, L_AUX_MAX, THREADS
 )
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 
 __all__ = [
     'int1e_ovlp',
@@ -115,7 +115,7 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh=None, scale_precision=1):
     if bvk_kmesh is None:
         if kpts is not None:
             kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvk_kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
     rcut = cell.rcut
     precision = cell.precision * scale_precision

@@ -20,7 +20,7 @@ import cupy as cp
 from pyscf.pbc import gto as pgto
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from pyscf.pbc.lib.kpts_helper import kk_adapted_iter
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 from gpu4pyscf.pbc.df import ft_ao as ft_ao_gpu
 from gpu4pyscf.pbc.df.ft_ao import ft_aopair, ft_aopair_kpts
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
@@ -98,7 +98,7 @@ class KnownValues(unittest.TestCase):
         kpti, kptj = kpti_kptj = np.random.random((2,3))
         Gv = cell.get_Gv([3]*3)
         kpts = kptj.reshape(1,3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_bvkmesh(cell, kpts)
         ft_opt = ft_ao_gpu.FTOpt(cell, kmesh)
         ft_opt.permutation_symmetry = False
         ft_kern = ft_opt.gen_ft_kernel()

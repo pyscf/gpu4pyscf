@@ -23,12 +23,38 @@ from pyscf.pbc.tools.k2gamma import translation_map
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
 from gpu4pyscf.lib.cupy_helper import asarray
 
-def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
-    '''Search the minimal BvK mesh or Monkhorst-Pack k-point mesh
+def kpts_to_kmesh(cell, kpts, precision=None):
+    '''Return the dimensions of a full, uniform Monkhorst-Pack sampling mesh.
+
+    A common shift does not change the sampling mesh. For lattice sums with
+    periodic boundary conditions, use kpts_to_bvkmesh instead.
+    '''
+    if kpts is None:
+        return np.ones(3, dtype=int)
+    scaled = cell.get_scaled_kpts(np.asarray(kpts).reshape(-1, 3))
+    if precision is None:
+        precision = max(1e-6, cell.precision * 1e2)
+    scaled = (scaled - scaled[0]) % 1
+    scaled[abs(scaled - 1) < precision] = 0
+    kmesh = np.array([
+        1 + np.count_nonzero(np.diff(np.sort(x)) > precision)
+        for x in scaled.T])
+    indices = np.rint(scaled * kmesh).astype(int)
+    error = scaled - indices / kmesh
+    if (abs(error).max() > precision or np.prod(kmesh) != len(scaled)
+        or len(np.unique(indices % kmesh, axis=0)) != len(scaled)):
+        raise ValueError('kpts must form a full uniform Monkhorst-Pack mesh')
+    return kmesh
+
+def kpts_to_bvkmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
+    '''Search a phase-compatible, periodic BvK mesh for lattice sums.
+
+    Unlike the sampling mesh, this mesh includes the denominator of the
+    common k-point shift, so that exp(i k.L) = 1 across its boundaries.
 
     bound_by_supmol:
-        If True, the largest k-mesh is constrained within the supmol.
-        If False, the k-mesh must exactly reproduce the provided k-points.
+        If True, fall back to the cutoff-derived supercell when a commensurate
+        period cannot be found. If False, require an exact periodic mesh.
     '''
     if kpts is None:
         return np.ones(3, dtype=int)
@@ -50,7 +76,8 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
         floats = scaled_kpts[:,i]
         uniq_floats_idx = np.unique((floats/precision+.5).astype(int), return_index=True)[1]
         uniq_floats = floats[uniq_floats_idx]
-        fracs = [Fraction(x).limit_denominator(int(kmesh[i])+10) for x in uniq_floats]
+        max_denominator = max(int(kmesh[i])+10, 2*len(uniq_floats))
+        fracs = [Fraction(x).limit_denominator(max_denominator) for x in uniq_floats]
         denominators = np.unique([x.denominator for x in fracs])
         common_denominator = reduce(np.lcm, denominators)
         fs = [(x * common_denominator).numerator for x in fracs]
@@ -62,7 +89,7 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
         if abs(uniq_floats - np.rint(fs)/common_denominator).max() < precision:
             kmesh[i] = common_denominator
         elif not bound_by_supmol:
-            raise RuntimeError(f'Unable to find Monkhorst-Pack k-point mesh for {kpts}')
+            raise RuntimeError(f'Unable to find periodic BvK mesh for {kpts}')
     return kmesh
 
 def double_translation_indices(kmesh):

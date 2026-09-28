@@ -42,7 +42,7 @@ from gpu4pyscf.df.df import libvhf_rys
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, kpts_to_bvkmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e import libpbc, fill_triu_bvk, SRInt3c2eOpt
@@ -63,13 +63,16 @@ THREADS = 256
 
 def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
                 omega=None, linear_dep_threshold=LINEAR_DEP_THR,
-                compress=False):
+                compress=False, bvk_kmesh=None):
     '''
     Create density fitting integral tensor
     '''
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
 
+    if bvk_kmesh is None:
+        bvk_kmesh = kpts_to_bvkmesh(
+            cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     is_gamma_point = kpts is None or is_zero(kpts)
     if is_gamma_point:
         cderi, cderip, cderi_idx = compressed_cderi_gamma_point(
@@ -83,18 +86,15 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_j_only(
-            cell, auxcell, kmesh, omega, linear_dep_threshold)
+            cell, auxcell, bvk_kmesh, omega, linear_dep_threshold)
     else:
-        # Remote images may contribute to certain k-point mesh, contributing
-        # to the finite-size effects in HFX. For sufficiently large number of
-        # kpts, the truncation radius cell.rcut may cause finite-size errors.
-        # Use a large radius to generate MP kmesh.
         if kmesh is None:
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
+            kmesh = kpts_to_kmesh(cell, kpts)
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
-            cell, auxcell, kpts, kmesh, omega, linear_dep_threshold)
+            cell, auxcell, kpts, kmesh, omega, linear_dep_threshold,
+            bvk_kmesh=bvk_kmesh)
     if compress:
         return cderi, cderip, cderi_idx
 
@@ -103,8 +103,11 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         assert len(kpt_iters) == len(cderi)
 
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
-    conj_mapping = cp.asarray(conj_images_in_bvk_cell(kmesh), dtype=np.int32)
-    bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
+    if np.prod(bvk_kmesh) == len(kpts):
+        conj_mapping = conj_images_in_bvk_cell(kmesh)
+    else:
+        conj_mapping = None
+    bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, bvk_kmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
     nao = cell.nao
     for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
@@ -422,18 +425,22 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     return cderi, cderip, cderi_idx
 
 def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
-                        linear_dep_threshold=LINEAR_DEP_THR):
+                        linear_dep_threshold=LINEAR_DEP_THR, bvk_kmesh=None):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
 
     if kmesh is None:
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
+        kmesh = kpts_to_kmesh(cell, kpts)
     kpts = kpts.reshape(-1, 3)
-    bvk_ncells = np.prod(kmesh)
-    assert len(kpts) == bvk_ncells
+    assert len(kpts) == np.prod(kmesh)
+    if bvk_kmesh is None:
+        bvk_kmesh = kpts_to_bvkmesh(
+            cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
+    bvk_ncells = np.prod(bvk_kmesh)
     kpt_iters = list(kk_adapted_iter(kmesh))
-    # uniq_kpts corresponds to the k-conserved k_aux = -(kj-ki)
-    uniq_kpts = kpts[[x[0] for x in kpt_iters]]
+    # A common shift cancels in q = kj - ki.
+    qpts = cell.make_kpts(kmesh)
+    uniq_kpts = qpts[[x[0] for x in kpt_iters]]
     nkpts = len(uniq_kpts)
 
     if omega is None:
@@ -444,13 +451,13 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
     rsdf_omega = max(omega, rsdf_omega)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build()
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=rsdf_omega, bvk_kmesh=bvk_kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
 
     log.debug('Generate auxcell 2c2e integrals')
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
-        auxcell, kpts, omega, rsdf_omega, linear_dep_threshold, kmesh)
+        auxcell, qpts, omega, rsdf_omega, linear_dep_threshold, kmesh)
     naux_cart = cd_j2c_cache[0].shape[0]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
 
@@ -547,7 +554,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 for p0, p1 in lib.prange(0, ngrids, Gblksize):
                     auxG_c = auxG_conj[:,j2c_idx,p0:p1]
-                    pqG = eval_ft(Gv[p0:p1] + kpts[kp], batch_id, out=buf2)
+                    pqG = eval_ft(Gv[p0:p1] + qpts[kp], batch_id, out=buf2)
                     # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
                     # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
                     # are assumed to be real
@@ -652,8 +659,9 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
         k_idx (int):
             The index of the k-point = kpt_j - kpt_i
         kk_conserv (ndarray):
-            kk = kk_conserv[ki,kj] satisfies kpts[kk] = kpts[kj] - kpts[ki] + 2n\pi
-            This table can be created by k2gamma.double_translation_indices(kmesh)
+            kk = kk_conserv[ki,kj] satisfies qpts[kk] = kpts[kj] - kpts[ki] + 2n\pi,
+            where qpts is the canonical Gamma grid for the sampling mesh.
+            This table can be created by k2gamma.double_translation_indices(kmesh).
             (kk_conserv == k_idx) gives all the ki,kj pairs that can produce k_idx.
         axis (int):
             which index to apply the real-space to k-index transformation.
@@ -724,13 +732,12 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
             These indices are obtained from k-point conservation table
             kk_conserv = k2gamma.double_translation_indices(kmesh).
             This table encodes k-point relationships for (ij|k) 3c2e integrals.
-            kk = kk_conserv[ki,kj] satisfies kpts[kk] = kpts[kj] - kpts[ki] + 2n\pi
+            kk = kk_conserv[ki,kj] labels the canonical Gamma-grid point kj - ki.
             The indices can be extracted via
             ki_idx, kj_idx = np.where(kk_conserv == k_idx)
         conj_mapping (ndarray):
-            Given image index k in BvK cell, conj_mapping[k] shows the
-            associated (-k) image in BvK cell. This table can be created by
-            the pbc.lib.kpts_helper.conj_images_in_bvk_cell(kmesh) function.
+            Conjugated indices for a Gamma-centered mesh. None uses two
+            explicit transforms, as required by shifted meshes.
         axis (int):
             which index to apply the real-space to k-index transformation.
             If axis=0, transform i in (ij|k) with conj(exp(L*k)). If axis=1,
@@ -790,6 +797,23 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     if is_gamma_point:
         return cderi.transpose(1,3,0,2)
 
+    if conj_mapping is None:
+        # Without a -k partner, transform both orbital indices explicitly.
+        if axis == 0:
+            expLk_i, expLk_j = expLk.conj(), expLk[:,kj_idx]
+        else:
+            expLk_i = cp.empty_like(expLk)
+            expLk_i[:,kj_idx] = expLk.conj()
+            expLk_j = expLk
+        out = ndarray((nkpts,nao,nao,naux), dtype=np.complex128, buffer=out)
+        out = contract('iLjk,LK->Kijk', cderi, expLk_j, out=out)
+        upper = contract('jLik,LK->Kijk', cderi, expLk_i)
+        mask = cp.zeros(nao*nL*nao, dtype=bool)
+        mask[pair_address] = True
+        mask = cp.any(mask.reshape(nao, nL, nao), axis=1)
+        out[:,~mask] = upper[:,~mask]
+        return out.transpose(0,3,1,2)
+
     assert nkpts == len(conj_mapping)
     assert nkpts == len(kj_idx)
     assert expLk.dtype == np.complex128
@@ -848,7 +872,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     if is_gamma_point:
         bvk_kmesh = np.ones(3, dtype=int)
     else:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvk_kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
     # Guess range-separation parameter based on system size
     omega = 0.4

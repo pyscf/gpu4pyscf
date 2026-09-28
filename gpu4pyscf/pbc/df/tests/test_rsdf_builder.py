@@ -22,6 +22,7 @@ from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
 from gpu4pyscf.pbc.df import rsdf_builder
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 import pytest
 
 def test_gamma_point():
@@ -369,7 +370,6 @@ C  D
             print(ki, kj)
             assert abs(_ref - out[ki]).max() < 1e-11
 
-@pytest.mark.skip('Must include gamma point')
 def test_kpts_compressed2():
     from pyscf.pbc.df import df as df_cpu
     cell = pyscf.M(
@@ -386,11 +386,15 @@ def test_kpts_compressed2():
     dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts)
     ref = build_cderi(cell, auxcell, kpts)[0]
     kk_conserv = k2gamma.double_translation_indices(kmesh)
-    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(
+        cell, kpts_to_bvkmesh(cell, kpts, bound_by_supmol=False), True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
         out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
+        out_v2 = rsdf_builder._unpack_cderi_v2(
+            dat[kp], idx[0], kj_idx, None, expLk, nao)
+        np.testing.assert_allclose(out_v2.get(), out.get(), atol=1e-10, rtol=0)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
                 _ref = ref[ki, kj]

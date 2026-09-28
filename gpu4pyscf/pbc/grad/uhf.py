@@ -22,7 +22,7 @@ from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.gto.pseudo import pp_int
 import gpu4pyscf.grad.uhf as mol_uhf
 import gpu4pyscf.pbc.grad.rhf as rhf
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.df import GDF
@@ -147,7 +147,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
                 kmesh = None
             else:
                 assert dm.ndim == 4
-                kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut)
+                kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut)
             rsdf_omega = 0.3
             int3c2e_opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh).build()
             hermi = 1
@@ -191,7 +191,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
                 kmesh = None
             else:
                 assert dm.ndim == 4
-                kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+                kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
             int3c2e_opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh).build()
             hermi = 1
             return _jk_energy_per_atom(

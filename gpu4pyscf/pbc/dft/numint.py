@@ -29,7 +29,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, extract_pgto_params
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids, BeckeGrids
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff
 from gpu4pyscf.dft import numint
@@ -147,7 +147,7 @@ class _GTOvalOpt:
             if kpts is None:
                 bvk_kmesh = np.ones(3, dtype=np.int32)
             else:
-                bvk_kmesh = kpts_to_kmesh(cell, kpts)
+                bvk_kmesh = kpts_to_bvkmesh(cell, kpts)
             self.bvk_kmesh = bvk_kmesh
         bvk_ncells = np.prod(bvk_kmesh)
         if bvk_ncells == 1:

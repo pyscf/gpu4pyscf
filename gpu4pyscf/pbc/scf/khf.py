@@ -38,8 +38,7 @@ from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -388,7 +387,7 @@ class KSCF(pbchf.SCF):
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
         bvk_kmesh = None
         if kpts_in_bvkcell:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+            bvk_kmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
         return int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
 
     def get_hcore(self, cell=None, kpts=None):
@@ -420,7 +419,7 @@ class KSCF(pbchf.SCF):
 
         bvk_kmesh = None
         if kpts_in_bvkcell:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+            bvk_kmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
         hcore += int1e.int1e_kin(cell, kpts, bvk_kmesh)
         return hcore
 
@@ -505,11 +504,7 @@ class KSCF(pbchf.SCF):
         if not time_reversal_symmetry:
             return itertools.zip_longest(range(nkpts), ())
 
-        kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=False)
-        if nkpts == np.prod(kmesh):
-            return [x[:2] for x in kk_adapted_iter(kmesh, return_pair_index=False)]
-        else:
-            return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
+        return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
 
     def check_linear_dependency(self, s, verbose=None, time_reversal_symmetry=None):
         log = logger.new_logger(self, verbose)

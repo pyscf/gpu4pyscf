@@ -42,7 +42,7 @@ from gpu4pyscf.lib.memcpy import copy_array
 from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import _check_kpts, AFTDF
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, kpts_to_bvkmesh
 from gpu4pyscf.pbc.lib.kpts_helper import (
     reset_kpts, fft_matrix, conj_images_in_bvk_cell)
 from gpu4pyscf.__config__ import num_devices
@@ -56,7 +56,7 @@ class GDF(lib.StreamObject):
     blockdim = df_cpu.GDF.blockdim
     is_gamma_point = False
 
-    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'kmesh'})
+    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'kmesh', 'bvk_kmesh'})
 
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
@@ -138,12 +138,15 @@ class GDF(lib.StreamObject):
             assert kpts is None or is_zero(kpts)
             self.kmesh = [1] * 3
         else:
-            self.kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=not self._j_only)
+            self.kmesh = kpts_to_kmesh(cell, kpts)
 
+        self.bvk_kmesh = kpts_to_bvkmesh(
+            cell, kpts, bound_by_supmol=False)
         t1 = (logger.process_clock(), logger.perf_counter())
         self._cderi, self._cderip, self._cderi_idx = rsdf_builder.build_cderi(
             cell, auxcell, kpts, self.kmesh, j_only=self._j_only, omega=self._omega,
-            linear_dep_threshold=self.linear_dep_threshold, compress=True)
+            linear_dep_threshold=self.linear_dep_threshold, compress=True,
+            bvk_kmesh=self.bvk_kmesh)
         ao_pair_mapping, diag_idx = self._cderi_idx
         self._cderi_idx = asarray(ao_pair_mapping), asarray(diag_idx)
         logger.debug1(self, 'len(cderi)=%d len(ao_pair)=%d len(diag)=%d',
@@ -178,17 +181,23 @@ class GDF(lib.StreamObject):
         if self._cderi is None:
             self.build(j_only=self._j_only)
         nkpts = np.prod(self.kmesh)
-        if kpts is not None:
-            assert len(kpts) == nkpts
+        if kpts is None:
+            kpts = self.kpts
+        assert len(kpts) == nkpts
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
         pair_address = cp.asarray(self._cderi_idx[0], dtype=np.int32)
         if unpack:
-            expLk = fft_matrix(self.kmesh)
             nao = cell.nao
             kk_conserv = k2gamma.double_translation_indices(self.kmesh)
-            conj_mapping = cp.asarray(conj_images_in_bvk_cell(self.kmesh), dtype=np.int32)
+            if np.prod(self.bvk_kmesh) == nkpts: # non-shifted
+                expLk = fft_matrix(self.kmesh)
+                conj_mapping = conj_images_in_bvk_cell(self.kmesh)
+            else:
+                Ls = k2gamma.translation_vectors_for_kmesh(cell, self.bvk_kmesh, True)
+                expLk = cp.exp(1j*asarray(Ls).dot(asarray(kpts).T))
+                conj_mapping = None
             out_buf = out
 
         cderi_buf = out

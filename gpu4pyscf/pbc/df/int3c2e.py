@@ -25,7 +25,7 @@ from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, kpts_to_bvkmesh, double_translation_indices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, transpose_sum, ndarray, empty_aligned, hermi_triu)
@@ -40,7 +40,6 @@ from gpu4pyscf.df.int3c2e_bdiv import (
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, FTOpt
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
-from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -73,13 +72,13 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     if bvk_kmesh is None:
         if j_only:
             # Coulomb integrals can be converged within a smaller bvk cell.
-            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+            bvk_kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
         else:
             # Remote images may contribute to certain k-point mesh, contributing
             # to the finite-size effects in HFX. For sufficiently large number of
             # kpts, the truncation radius cell.rcut may cause finite-size errors.
             # Use a large radius to generate MP kmesh.
-            bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10,
+            bvk_kmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut*10,
                                       bound_by_supmol=False)
 
     nao = cell.nao
@@ -103,11 +102,11 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     elif j_only:
         j3c = j3c.sum(axis=1).dot(aux_coeff)
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
-        kpts = cp.asarray(kpts).reshape(-1, 3)
-        expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
-        conj_mapping = cp.asarray(
-            conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+        kpts = np.asarray(kpts).reshape(-1, 3)
+        expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
         nkpts = len(kpts)
+        conj_mapping = (conj_images_in_bvk_cell(bvk_kmesh)
+                        if bvk_ncells == nkpts else None)
         out = _unpack_cderi_v2(j3c.T, pair_address, np.arange(nkpts),
                                conj_mapping, expLk, nao, axis=1)
         out = out.transpose(0,2,3,1)
@@ -115,27 +114,29 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     else:
         j3c = contract('tLp,pq->tqL', j3c, aux_coeff)
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
-        kpts = cp.asarray(kpts).reshape(-1, 3)
-        expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
+        kpts = np.asarray(kpts).reshape(-1, 3)
+        expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
         nL, nkpts = expLk.shape
-        conj_mapping = cp.asarray(
-            conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+        conj_mapping = (conj_images_in_bvk_cell(bvk_kmesh)
+                        if bvk_ncells == nkpts else None)
 
         axis = 0 # Transform index i
-        expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
+        kmesh = kpts_to_kmesh(cell, kpts)
+        qpts = cell.make_kpts(kmesh)
+        expLq = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(qpts).T))
+        expLk_conjz = expLq.conj().view(np.float64).reshape(nL,nkpts,2)
         j3c = contract('tqL,LKz->Kqtz', j3c, expLk_conjz)
         j3c = j3c.view(np.complex128)[...,0]
         out = cp.empty((nkpts,nkpts,naux,nao,nao), dtype=np.complex128)
-        kk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
+        kk_conserv = double_translation_indices(kmesh)
         for k in range(nkpts):
             ki_idx, kj_idx = np.where(kk_conserv == k)
             out[k] = _unpack_cderi_v2(j3c[k], pair_address, kj_idx,
                                       conj_mapping, expLk, nao, axis)
         j3c = None
 
-        # k=ijk_conserv[i,j] provides: -i + j - k = 2n\pi
-        # therefore, i=ijk_conserv[k,j]
-        ijk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
+        # q=ijk_conserv[i,j] labels kj-ki on the canonical Gamma grid.
+        ijk_conserv = cp.asarray(kk_conserv)
         if axis == 0:
             #for ki in range(nkpts):
             #    for kj in range(nkpts):

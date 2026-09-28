@@ -23,7 +23,7 @@ from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_bvkmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, hermi_triu
 from gpu4pyscf.gto.mole import (
@@ -42,7 +42,7 @@ def int2c2e(auxcell, kpts=None, bvk_kmesh=None,
             omega=None, lr_factor=None, sr_factor=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     if bvk_kmesh is None:
-        bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
+        bvk_kmesh = kpts_to_bvkmesh(auxcell, kpts, bound_by_supmol=True)
     opt = Int2c2eOpt(auxcell, bvk_kmesh)
     return opt.int2c2e(kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
@@ -72,7 +72,7 @@ def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True,
     '''Derivatives of SR 2c2e Coulomb integrals for the first electronic
     coordinates'''
     if bvk_kmesh is None:
-        bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
+        bvk_kmesh = kpts_to_bvkmesh(auxcell, kpts, bound_by_supmol=True)
     opt = Int2c2eOpt(auxcell, bvk_kmesh)
     return opt.int2c2e_ip1(kpts, sort_output=sort_output,
                            omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
