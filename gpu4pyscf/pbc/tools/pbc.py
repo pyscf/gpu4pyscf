@@ -324,3 +324,30 @@ def madelung(cell, kpts=None, omega=None):
         else:
             e_fr = -2*ecell.ewald() # The full-range Coulomb
             return e_fr - e_lr
+
+def ke_to_mesh(a, cutoff):
+    '''
+    Based on pyscf.pbc.tools.pbc.cutoff_to_mesh
+    '''
+    b = 2 * np.pi * np.linalg.inv(a.T)
+    rx = np.linalg.qr(b[[1,2,0]].T)[1][2,2]
+    ry = np.linalg.qr(b[[2,0,1]].T)[1][2,2]
+    rz = np.linalg.qr(b.T)[1][2,2]
+
+    Gmax = (2*cutoff)**.5 / np.abs([rx, ry, rz])
+    mesh = np.ceil(Gmax * 2).astype(np.int32)
+    return mesh
+
+def mesh_to_ke(a, mesh):
+    '''
+    Based on pyscf.pbc.tools.pbc.mesh_to_cutoff
+    '''
+    b = 2 * np.pi * np.linalg.inv(a.T)
+    rx = np.linalg.qr(b[[1,2,0]].T)[1][2,2]
+    ry = np.linalg.qr(b[[2,0,1]].T)[1][2,2]
+    rz = np.linalg.qr(b.T)[1][2,2]
+
+    gs = np.asarray(mesh) / 2
+    Gmax = gs * np.array([rx, ry, rz])
+    ke_cutoff = Gmax**2 / 2
+    return ke_cutoff

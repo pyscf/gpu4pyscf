@@ -585,28 +585,48 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
         raise RuntimeError('hermi_triu kernel failed')
     return mat
 
-def cart2sph_cutensor(t, axis=0, ang=1, out=None):
-    '''
-    transform 'axis' of a tensor from cartesian basis into spherical basis with cutensor
-    '''
-    from gpu4pyscf.gto import mole
-    if(ang <= 1):
-        if(out is not None): out[:] = t
-        return t
-    size = list(t.shape)
-    c2s = mole.cart2sph_by_l(ang)
-    if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
-    li_size = c2s.shape
-    nli = size[axis] // li_size[0]
-    i0 = max(1, np.prod(size[:axis]))
-    i3 = max(1, np.prod(size[axis+1:]))
-    out_shape = size[:axis] + [nli*li_size[1]] + size[axis+1:]
+def copy_symmetric(a, i_addr, j_addr, stream=None):
+    '''a[j_addr,i_addr] = a[i_addr, j_addr]'''
+    assert a.ndim == 3
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    N1, N2 = a.shape[1:3]
+    npairs = len(i_addr)
+    if a.dtype == np.complex128:
+        N2 *= 2
+    i_addr = cupy.asarray(i_addr, dtype=np.int32)
+    j_addr = cupy.asarray(j_addr, dtype=np.int32)
+    err = libcupy_helper.copy_symmetric(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(i_addr.data.ptr, ctypes.c_void_p),
+        ctypes.cast(j_addr.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(npairs), ctypes.c_int(N1), ctypes.c_int(N2))
+    if err != 0:
+        raise RuntimeError('copy_symmetric kernel failed')
+    return a
 
-    t_cart = t.reshape([i0*nli, li_size[0], i3])
-    if(out is not None):
-        out = out.reshape([i0*nli, li_size[1], i3])
-    t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
-    return t_sph.reshape(out_shape)
+def scatter_add(a, idx, b, alpha=1, stream=None):
+    '''a[idx,:] += alpha * b'''
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    assert a.ndim == 2 and b.ndim == 2
+    assert a.dtype == b.dtype
+    nrow, ncol = b.shape
+    if b.dtype == np.complex128:
+        ncol *= 2
+    idx = cupy.asarray(idx, dtype=np.int32)
+    err = libcupy_helper.scatter_add(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(b.data.ptr, ctypes.c_void_p),
+        ctypes.cast(idx.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(alpha),
+        ctypes.c_int(nrow), ctypes.c_int(ncol))
+    if err != 0:
+        raise RuntimeError('scatter_add kernel failed')
+    return a
+
 
 def cart2sph(t, axis=0, ang=1, out=None, stream=None):
     '''

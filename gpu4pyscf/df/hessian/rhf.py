@@ -1311,11 +1311,14 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                 device_id = cp.cuda.device.get_device_id()
                 a = empty_mapped(dfobj._cderi[device_id].shape)
                 naux, nao_pair = a.shape
+                stream = cp.cuda.get_current_stream()
                 libvhf_rys.transpose_write(
+                    ctypes.cast(stream.ptr, ctypes.c_void_p),
                     a.ctypes,
                     ctypes.cast(dfobj._cderi[device_id].data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux), ctypes.c_int(nao_pair),
                     ctypes.c_int(0), ctypes.c_int(nao_pair))
+                stream.synchronize()
                 dfobj._cderi[device_id] = a
             multi_gpu.run(transfer_to_host, non_blocking=True)
 
