@@ -17,105 +17,21 @@
 Analytical nuclear gradients for RHF with kpoints sampling
 '''
 
-import numpy as np
-import cupy as cp
-from pyscf import lib
-from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
-from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
-from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
-from gpu4pyscf.pbc.dft import multigrid
-from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.grad.uhf import jk_energy_per_atom
 
 __all__ = ['Gradients']
 
-def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
-    mf = mf_grad.base
-    cell = mf_grad.cell
-    natm = cell.natm
-    kpts = mf.kpts
-    nkpts = len(kpts)
-    if mo_energy is None: mo_energy = mf.mo_energy
-    if mo_occ is None:    mo_occ = mf.mo_occ
-    if mo_coeff is None:  mo_coeff = mf.mo_coeff
-
-    if getattr(mf, 'disp', None):
-        raise NotImplementedError('dispersion correction')
-
-    if getattr(mf, 'with_x2c', None):
-        raise NotImplementedError('X2C gradients')
-
-    log = logger.new_logger(mf_grad)
-    t0 = log.init_timer()
-    log.debug('Computing Gradients of NR-UHF Coulomb repulsion')
-    s1 = mf_grad.get_ovlp(cell, kpts)
-    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    # derivatives of the two-electron contribution
-    e2_grad = mf_grad.energy_ee(dm0, kpts)
-    t1 = log.timer('gradients of 2e part', *t0)
-
-    dm0_sf = dm0[0] + dm0[1]
-    ni = mf._numint
-    if isinstance(ni, multigrid.MultiGridNumIntBase):
-        # Vne or pploc contribution is evaluated in energy_ee
-        dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        dh1e = -krhf_grad.contract_h1e_dm(cell, dh1e_kin, dm0_sf, hermi=1)
-    else:
-        hcore_deriv = mf_grad.hcore_generator(cell, kpts)
-        dh1e = cp.empty([natm, 3])
-        for ia in range(natm):
-            h1ao = hcore_deriv(ia)
-            dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0_sf).real
-        dh1e = dh1e.get()
-
-    if cell._pseudo:
-        dm0_sf_cpu = dm0_sf.get()
-        dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0_sf_cpu, kpts = kpts)
-        dh1e += dh1e_pp_nonlocal
-
-    log.timer('gradients of 1e part', *t1)
-
-    # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
-    dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
-    dme0_sf = dme0[0] + dme0[1]
-    ds = krhf_grad.contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
-    de = (dh1e - ds) / nkpts + e2_grad
-    de += cp.asnumpy(mf_grad.extra_force())
-
-    if log.verbose > logger.DEBUG:
-        log.debug('gradients of electronic part')
-        mf_grad._write(cell, de, atmlst)
-    return de
-
 class Gradients(krhf_grad.GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
+    grids = None
+    grid_response = False
+
+    _keys = {'grid_response', 'grids'}
 
     hcore_generator = krhf_grad.hcore_generator
 
-    def energy_ee(self, dm, kpts):
-        '''
-        The contribution of electron-electron interactions per cell to the
-        nuclear gradients.
-        '''
-        mf = self.base
-        ni = mf._numint
-        # When J is evaluated using mf.j_engine or mf.rsjk, it is identical to
-        # the J from MultiGridNumInt. The contribution from J matrix can be
-        # efficiently evaluated using the MultiGridNumInt integrator.
-        j_in_xc = ni is not None and isinstance(ni, multigrid.MultiGridNumIntBase)
-        if j_in_xc:
-            j_factor = 0
-            de = ni.energy_nuclear_gradient(
-                'HF', dm, kpts=kpts, spin=1, with_j=j_in_xc, with_nuc=True)
-        else:
-            j_factor = 1
-            de = 0
-
-        de += jk_energy_per_atom(
-            mf, dm, kpts, j_factor=j_factor, lr_factor=1, sr_factor=1,
-            exxdiv=mf.exxdiv)
-        return de
+    energy_ee = krhf_grad.Gradients.energy_ee
+    grad_elec = krhf_grad.Gradients.grad_elec
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''Energy weighted density matrix'''
@@ -124,13 +40,7 @@ class Gradients(krhf_grad.GradientsBase):
         if mo_occ is None: mo_occ = self.base.mo_occ
         dm1ea = krhf_grad.Gradients.make_rdm1e(self, mo_energy[0], mo_coeff[0], mo_occ[0])
         dm1eb = krhf_grad.Gradients.make_rdm1e(self, mo_energy[1], mo_coeff[1], mo_occ[1])
-        return cp.stack((dm1ea,dm1eb), axis=0)
+        return dm1ea + dm1eb
 
-    grad_elec = grad_elec
     as_scanner = krhf_grad.Gradients.as_scanner
     _finalize = krhf_grad.Gradients._finalize
-    kernel = krhf_grad.Gradients.kernel
-
-    def get_stress(self):
-        from gpu4pyscf.pbc.grad import kuhf_stress
-        return kuhf_stress.kernel(self)

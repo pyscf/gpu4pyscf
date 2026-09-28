@@ -853,8 +853,12 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     device = utils.device
 
     def to_cpu(self):
-        return numint_cpu.KNumInt()
+        ni = numint_cpu.KNumInt()
+        ni.omega = self.omega
+        return ni
 
 class NumInt(KNumInt):
     def to_cpu(self):
-        return numint_cpu.NumInt()
+        ni = numint_cpu.NumInt()
+        ni.omega = self.omega
+        return ni

@@ -190,14 +190,12 @@ void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
                        ShellTripletTaskInfo *ijk_tasks_info, int *swap)
 {
     int thread_id = threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
     int tot_tasks = num_ijk_tasks;
     __syncthreads();
     if (thread_id == 0) {
         num_ijk_tasks = 0;
     }
-    for (int base = 0; base < tot_tasks; base += THREADS) {
-        int task_id = base + thread_id;
+    for (int task_id = thread_id; task_id < tot_tasks+thread_id; task_id += THREADS) {
         register int ijk_id = 0;
         int keep = 0;
         if (task_id < tot_tasks) {
@@ -205,14 +203,15 @@ void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
             keep = ijk_tasks_info[ijk_id].remaining_imgs > 0;
         }
 
-        int offset = mask_to_index(keep, swap, threads, thread_id);
+        int offset = mask_to_index(keep, swap, THREADS, thread_id);
         if (keep) {
             rem_task_idx[num_ijk_tasks + offset] = ijk_id;
         }
         __syncthreads();
         if (thread_id == 0) {
-            num_ijk_tasks += swap[threads - 1];
+            num_ijk_tasks += swap[THREADS - 1];
         }
+        __syncthreads();
     }
     __syncthreads();
 }
@@ -224,7 +223,6 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
                      ShellTripletTaskInfo *ijk_tasks_info, int *swap)
 {
     int thread_id = threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
     __syncthreads();
     if (thread_id == 0) {
         num_sub_tasks = 0;
@@ -235,8 +233,7 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
     }
     __syncthreads();
 
-    for (int base = 0; base < num_ijk_tasks; base += THREADS) {
-        int task_id = base + thread_id;
+    for (int task_id = thread_id; task_id < num_ijk_tasks+thread_id; task_id += THREADS) {
         register int ijk_id = 0;
         int keep = 0;
         int img_count = 0;
@@ -246,15 +243,16 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
             keep = img_count >= img_tile_size;
         }
 
-        int offset = mask_to_index(keep, swap, threads, thread_id);
+        int offset = mask_to_index(keep, swap, THREADS, thread_id);
         if (keep) {
             sub_task_idx[num_sub_tasks + offset] = ijk_id;
             ijk_tasks_info[ijk_id].img_count = img_count - img_tile_size;
         }
         __syncthreads();
         if (thread_id == 0) {
-            num_sub_tasks += swap[threads - 1];
+            num_sub_tasks += swap[THREADS - 1];
         }
+        __syncthreads();
     }
     __syncthreads();
 }

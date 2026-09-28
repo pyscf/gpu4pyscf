@@ -77,3 +77,96 @@ def test_lattice_sums_and_jk(cell, mesh, gamma):
     np.testing.assert_allclose(vj.get(), ref[0], atol=2e-6, rtol=0)
     np.testing.assert_allclose(vk.get(), ref[1], atol=2e-6, rtol=0)
 
+
+def _check_derivatives(cell, kpts, grad_sigma, energy, atol=2e-6):
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+
+    assert grad_sigma.shape == (cell.natm + 3, 3)
+    scaled_kpts = cell.get_scaled_kpts(kpts)
+    disp = 1e-4
+    coords = cell.atom_coords()
+    coords[0, 0] += disp
+    cell1 = cell.set_geom_(coords, unit='Bohr', inplace=False)
+    coords[0, 0] -= 2 * disp
+    cell2 = cell.set_geom_(coords, unit='Bohr', inplace=False)
+    cases = [(0, 0, cell1, cell2)]
+    for i, j in [(0, 0), (0, 1)]:
+        cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
+        cases.append((cell.natm + i, j, cell1, cell2))
+    for row, col, cell1, cell2 in cases:
+        e1 = energy(cell1, cell1.get_abs_kpts(scaled_kpts))
+        e2 = energy(cell2, cell2.get_abs_kpts(scaled_kpts))
+        np.testing.assert_allclose(
+            grad_sigma[row, col], (e1 - e2) / (2 * disp), atol=atol, rtol=0)
+
+
+@pytest.mark.parametrize('method', ['aft', 'gdf', 'rsjk'])
+@pytest.mark.parametrize('unrestricted', [False, True])
+def test_shifted_jk_derivatives(cell, method, unrestricted):
+    from types import SimpleNamespace
+    from gpu4pyscf.pbc.grad.rhf import _gdf_ejk_derivatives
+    from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+
+    kpts = cell.make_kpts([2, 1, 1], with_gamma_point=False)
+    dm = density(cell, kpts)
+    if unrestricted:
+        dm = np.array([dm * .6, dm * .4])
+    dm_sf = dm.sum(axis=0) if unrestricted else dm
+    k_factor = 1 if unrestricted else .5
+    dm_gpu = cp.asarray(dm)
+    if method == 'aft':
+        mydf = AFTDF(cell, kpts)
+        grad_sigma = mydf.get_ej_derivatives(cp.asarray(dm_sf), kpts)
+        grad_sigma -= k_factor * mydf.get_ek_derivatives(dm_gpu, kpts, exxdiv=None)
+    elif method == 'gdf':
+        mydf = GDF(cell, kpts)
+        mydf.auxbasis = 'weigend'
+        mf = SimpleNamespace(with_df=mydf, exxdiv=None)
+        grad_sigma = _gdf_ejk_derivatives(mf, dm_gpu, kpts)
+    else:
+        opt = PBCJKMatrixOpt(cell).build()
+        grad_sigma = opt._get_ejk_derivatives(dm_gpu, kpts, exxdiv=None)
+
+    def energy(cell, kpts):
+        mydf = df.GDF(cell, kpts) if method == 'gdf' else df.AFTDF(cell, kpts)
+        if method == 'gdf':
+            mydf.auxbasis = 'weigend'
+        vj, _ = mydf.get_jk(dm_sf, kpts=kpts, with_k=False)
+        _, vk = mydf.get_jk(dm, kpts=kpts, with_j=False, exxdiv=None)
+        ej = np.einsum('kij,kji->', dm_sf, vj).real
+        ek = np.einsum('skij,skji->', dm.reshape(-1, len(kpts), cell.nao, cell.nao),
+                       vk.reshape(-1, len(kpts), cell.nao, cell.nao)).real
+        return .5 * (ej - k_factor * ek) / len(kpts)
+
+    _check_derivatives(cell, kpts, grad_sigma, energy)
+
+
+def test_shifted_nuclear_derivatives(cell):
+    from gpu4pyscf.pbc.df.grad.krhf import get_nuc
+
+    kpts = cell.make_kpts([2, 1, 1], with_gamma_point=False)
+    dm = density(cell, kpts)
+    grad_sigma = get_nuc(cell, cp.asarray(dm), kpts)
+
+    def energy(cell, kpts):
+        v = df.AFTDF(cell, kpts).get_nuc(kpts)
+        return np.einsum('kij,kji->', dm, v).real / len(kpts)
+
+    _check_derivatives(cell, kpts, grad_sigma, energy)
+
+
+def test_shifted_ppnl_derivatives():
+    from pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
+    from gpu4pyscf.pbc.grad.pp import ppnl_derivatives
+
+    cell = gto.M(a=np.eye(3)*6, unit='Bohr',
+                 atom='C 0 0 0; C 1.5 1.3 1.2',
+                 basis='gth-szv', pseudo='gth-pade', precision=1e-10, verbose=0)
+    kpts = cell.make_kpts([2, 1, 1], with_gamma_point=False)
+    dm = density(cell, kpts)
+    grad_sigma = ppnl_derivatives(cell, cp.asarray(dm), kpts)
+
+    def energy(cell, kpts):
+        return np.einsum('kij,kji->', dm, get_pp_nl(cell, kpts)).real / len(kpts)
+
+    _check_derivatives(cell, kpts, grad_sigma, energy)

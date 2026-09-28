@@ -16,22 +16,37 @@
 import unittest
 import numpy as np
 from pyscf.pbc import gto
-from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 
 def setUpModule():
     global cell
-    a = np.eye(3) * 5
+    a = np.eye(3) * 4
     np.random.seed(5)
-    a += np.random.rand(3, 3) - .5
-    cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
+    a -= np.random.rand(3, 3)
+    cell = gto.M(atom='H 1 1 1; H 3 2.5 2.4',
                  basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
-                 verbose=6, output='/dev/null',
-                 a=a, unit='Bohr')
+                 pseudo='''
+H GTH-PBE-q1 GTH-PBE
+1
+  0.20000000    2    -4.17890044     0.72446331
+0
+                 ''',
+                 precision=1e-9,
+                 verbose=6, output='/dev/null', a=a, unit='Bohr')
 
 def tearDownModule():
     global cell
     del cell
+
+def _check_vs_finite_diff(dat, mf_scanner, disp=1e-3, tol=1e-7):
+    cell = mf_scanner.cell
+    vol = cell.vol
+    for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+        cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
+        e1 = mf_scanner(cell1)
+        e2 = mf_scanner(cell2)
+        assert abs(dat[i,j] - (e1-e2)/2/disp/vol) < tol
 
 class KnownValues(unittest.TestCase):
     def test_kuhf_vs_finite_difference(self):
@@ -42,12 +57,7 @@ class KnownValues(unittest.TestCase):
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = cell.KUHF(kpts=cell.make_kpts(kmesh)).to_gpu().as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat, mf_scanner)
 
     def test_uhf_vs_finite_difference(self):
         mf = cell.UHF().to_gpu()
@@ -56,12 +66,22 @@ class KnownValues(unittest.TestCase):
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
         mf_scanner = cell.UHF().as_scanner()
-        vol = cell.vol
-        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
-            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = mf_scanner(cell1)
-            e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+        _check_vs_finite_diff(dat, mf_scanner, disp=.5e-3)
+
+    def test_gdf_uhf_vs_finite_difference(self):
+        mf = cell.UHF().to_gpu().density_fit().run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
+        _check_vs_finite_diff(dat, mf_scanner)
+
+    def test_gdf_kuhf_vs_finite_difference(self):
+        kmesh = [3, 1, 1]
+        mf = cell.KUHF(kpts=cell.make_kpts(kmesh)).to_gpu().density_fit().run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
+        _check_vs_finite_diff(dat, mf_scanner)
 
 if __name__ == "__main__":
     print("Full Tests for KUHF Stress tensor")

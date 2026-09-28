@@ -48,7 +48,8 @@ class KnownValues(unittest.TestCase):
         grids = Grids(mol)
         grids.atom_grid = (99,590)
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = mbis(mol, grids, dm)
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm)
 
         ### Reference ORCA input
         # ! HF DEF2-SVP TightSCF MBIS
@@ -109,12 +110,14 @@ class KnownValues(unittest.TestCase):
         ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
         ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
         ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+        ref_r3_moment = np.array([ 23.528681, 53.205098, 24.264910,  1.159630,  5.106663, 84.125575, ])
 
         assert abs(test_energy - ref_energy) < 3e-3
         assert np.max(np.abs(test_charges - ref_charges)) < 1e-4
         assert np.max(np.abs(test_dipoles - ref_dipoles)) < 1e-4
         assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 3e-4
         assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-4
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 2e-3
 
     def test_mbis_uhf(self):
         mol = pyscf.M(
@@ -143,7 +146,8 @@ class KnownValues(unittest.TestCase):
         grids = Grids(mol)
         grids.atom_grid = (99,590)
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = mbis(mol, grids, dm)
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm, initial_guess = "repo_guess")
 
         ### Reference ORCA input
         # ! UHF DEF2-SVP TightSCF MBIS
@@ -208,12 +212,14 @@ class KnownValues(unittest.TestCase):
         ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
         ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
         ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+        ref_r3_moment = np.array([ 34.333544,  3.336940,  2.556058, 35.225552,  3.058440,  2.936329,  3.037714, ])
 
         assert abs(test_energy - ref_energy) < 2e-5
         assert np.max(np.abs(test_charges - ref_charges)) < 5e-5
         assert np.max(np.abs(test_dipoles - ref_dipoles)) < 5e-5
         assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 2e-4
         assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-4
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 1e-3
 
     def test_mbis_rks(self):
         mol = pyscf.M(
@@ -239,7 +245,7 @@ class KnownValues(unittest.TestCase):
 
         grids = mf.grids
 
-        test_shell_populations, test_shell_widths, test_shell_atom_indices = mbis(mol, grids, dm, compute_multipoles = False)
+        test_shell_populations, test_shell_widths, test_shell_atom_indices = mbis(mol, grids, dm, compute_properties = False)
 
         ### Reference ORCA input
         # ! PBE def2-svp TightSCF DEFGRID3 MBIS
@@ -294,7 +300,8 @@ class KnownValues(unittest.TestCase):
 
         grids = mf.grids
 
-        test_charges, test_dipoles, test_quadrupoles, test_octupoles = mbis(mol, grids, dm)
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm)
 
         ### Reference ORCA input
         # ! wB97M-V 6-31G TightSCF DEFGRID3 MBIS
@@ -367,12 +374,207 @@ class KnownValues(unittest.TestCase):
         ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
         ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
         ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+        ref_r3_moment = np.array([   2.949209, 36.547898,  2.777550,  2.778054, 28.564182,  3.424751,  3.425067, 25.124448,  1.288743, ])
 
         assert abs(test_energy - ref_energy) < 1e-4
         assert np.max(np.abs(test_charges - ref_charges)) < 3e-3
         assert np.max(np.abs(test_dipoles - ref_dipoles)) < 3e-4
         assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 1e-2
         assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-2
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 1e-1
+
+    def test_mbis_ecp_I(self):
+        mol = pyscf.M(
+            atom = """
+                I -2.0 0.0 0.0
+                H 0 0 0
+                I  2.0 0.1 0.0
+            """,
+            basis = "def2-svp",
+            ecp = "def2-svp",
+            charge = -1,
+            verbose = 0,
+        )
+        mf = RKS(mol, xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99, 590)
+        mf.conv_tol = 1e-10
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+
+        grids = mf.grids
+
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm)
+
+        ### Reference ORCA input
+        # ! PBE0 def2-svp TightSCF DEFGRID3 MBIS
+
+        # *XYZ -1 1
+        # I -2.0 0.0 0.0
+        # H 0 0 0
+        # I  2.0 0.1 0.0
+        # *
+
+        # %method
+        # MBIS_LARGEPRINT TRUE
+        # end
+        ref_energy = -596.13570631596986
+        ref_charges = np.array([ -0.538668,  0.078969, -0.540302 ])
+        ref_dipoles = np.array([
+            [ 0.046821,  0.004997,  -0.000000],
+            [ 0.000171, -0.003007,   0.000000],
+            [-0.046702,  0.002658,  -0.000000],
+        ])
+        ref_quadrupoles_orca_shape = np.array([
+            [-21.009513,-21.964324, -21.964249, -0.009349, -0.000000,  0.000000],
+            [ -0.912617, -0.835838,  -0.835839, -0.001925,  0.000000, -0.000000],
+            [-21.021372,-21.966649, -21.969880,  0.056766, -0.000000, -0.000000],
+        ])
+        ref_quadrupoles = np.zeros((mol.natm, 3, 3))
+        ref_quadrupoles[:, 0, 0] = ref_quadrupoles_orca_shape[:, 0]
+        ref_quadrupoles[:, 1, 1] = ref_quadrupoles_orca_shape[:, 1]
+        ref_quadrupoles[:, 2, 2] = ref_quadrupoles_orca_shape[:, 2]
+        ref_quadrupoles[:, 0, 1] = ref_quadrupoles[:, 1, 0] = ref_quadrupoles_orca_shape[:, 3]
+        ref_quadrupoles[:, 0, 2] = ref_quadrupoles[:, 2, 0] = ref_quadrupoles_orca_shape[:, 4]
+        ref_quadrupoles[:, 1, 2] = ref_quadrupoles[:, 2, 1] = ref_quadrupoles_orca_shape[:, 5]
+        ref_octupoles_orca_shape = np.array([
+            [-1.988769,  0.023054,  -0.000000, -0.012919,  0.000000,  0.240698,  0.000000,  0.242010, -0.000000,  0.007699],
+            [-0.000337, -0.014498,   0.000000,  0.001570, -0.000000,  0.000545, -0.000000,  0.000224,  0.000000, -0.004838],
+            [ 1.980318, -0.012595,  -0.000000,  0.110068, -0.000000, -0.233815,  0.000000, -0.239820, -0.000000, -0.004308],
+        ])
+        ref_octupoles = np.zeros((mol.natm, 3, 3, 3))
+        ref_octupoles[:, 0, 0, 0] = ref_octupoles_orca_shape[:, 0]
+        ref_octupoles[:, 1, 1, 1] = ref_octupoles_orca_shape[:, 1]
+        ref_octupoles[:, 2, 2, 2] = ref_octupoles_orca_shape[:, 2]
+        ref_octupoles[:, 0, 0, 1] = ref_octupoles[:, 0, 1, 0] = ref_octupoles[:, 1, 0, 0] = ref_octupoles_orca_shape[:, 3]
+        ref_octupoles[:, 0, 0, 2] = ref_octupoles[:, 0, 2, 0] = ref_octupoles[:, 2, 0, 0] = ref_octupoles_orca_shape[:, 4]
+        ref_octupoles[:, 0, 1, 1] = ref_octupoles[:, 1, 0, 1] = ref_octupoles[:, 1, 1, 0] = ref_octupoles_orca_shape[:, 5]
+        ref_octupoles[:, 0, 1, 2] = ref_octupoles[:, 0, 2, 1] = ref_octupoles[:, 1, 0, 2] = ref_octupoles[:, 1, 2, 0] = ref_octupoles[:, 2, 0, 1] = ref_octupoles[:, 2, 1, 0] = ref_octupoles_orca_shape[:, 6]
+        ref_octupoles[:, 0, 2, 2] = ref_octupoles[:, 2, 0, 2] = ref_octupoles[:, 2, 2, 0] = ref_octupoles_orca_shape[:, 7]
+        ref_octupoles[:, 1, 1, 2] = ref_octupoles[:, 1, 2, 1] = ref_octupoles[:, 2, 1, 1] = ref_octupoles_orca_shape[:, 8]
+        ref_octupoles[:, 1, 2, 2] = ref_octupoles[:, 2, 1, 2] = ref_octupoles[:, 2, 2, 1] = ref_octupoles_orca_shape[:, 9]
+        ref_r3_moment = np.array([ 172.882242,  6.163151, 172.958552 ])
+
+        assert abs(test_energy - ref_energy) < 1e-4
+        assert np.max(np.abs(test_charges - ref_charges)) < 3e-5
+        assert np.max(np.abs(test_dipoles - ref_dipoles)) < 3e-4
+        assert np.max(np.abs(test_quadrupoles - ref_quadrupoles)) < 1e-3
+        assert np.max(np.abs(test_octupoles - ref_octupoles)) < 5e-3
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 1e-2
+
+    def test_mbis_negative_charged(self):
+        # For a highly negatively charged system, different MBIS initial guess will produce different results
+        mol = pyscf.M(
+            atom = """
+                K    0.00000000    0.00000000    0.00000000
+                B    1.60000000    1.55000000    1.58000000
+                H    2.06760000    2.42960000    2.28440000
+                H    2.47960000    1.08240000    0.87560000
+                H    0.72040000    2.01760000    0.87560000
+                H    1.13240000    0.67040000    2.28440000
+                B    1.62000000   -1.52000000   -1.63000000
+                H    2.58640000   -0.81560000   -1.38900000
+                H    1.86090000   -2.22440000   -2.59640000
+                H    0.65360000   -0.81560000   -1.87100000
+                H    1.37910000   -2.22440000   -0.66360000
+                B   -1.55000000    1.66000000   -1.58000000
+                H   -0.84560000    2.03320000   -0.65630000
+                H   -0.84560000    1.28680000   -2.50370000
+                H   -2.25440000    2.58370000   -1.95320000
+                H   -2.25440000    0.73630000   -1.20680000
+                # B   -1.68000000   -1.57000000    1.53000000
+                # H   -0.69350000   -1.43140000    2.23440000
+                # H   -1.54140000   -2.55650000    0.82560000
+                # H   -1.81860000   -0.58350000    0.82560000
+                # H   -2.66650000   -1.70860000    2.23440000
+            """,
+            basis = "6-31g",
+            charge = -2,
+            verbose = 0,
+        )
+        mf = RKS(mol, xc = "wB97X").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99, 590)
+        mf.conv_tol = 1e-10
+
+        mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+
+        grids = mf.grids
+
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm, initial_guess = "repo_guess")
+
+        # This is a consistency test
+        ref_charges = np.array([ 0.8909499921551003,
+                                -0.0921156654947133, -0.2258429337283929, -0.1893384029700311, -0.1877233061026962, -0.2674486150173099,
+                                -0.0910678184407452, -0.1899315547577647, -0.2263299478842682, -0.1973729769621559, -0.2597918760817628,
+                                -0.0902560198569784, -0.1892012698479042, -0.1904121602586875, -0.2276572877939158, -0.2664854783057549])
+        ref_dipoles = np.array([
+            [ 0.023419321455609 ,  0.0234477504819632, -0.0272592498631867],
+            [ 0.0197167992410572,  0.0126988156726076,  0.0232527532535311],
+            [ 0.0186525105252655,  0.0346483959924703,  0.0241409073251306],
+            [ 0.0480186139365017, -0.0171255916748207, -0.0327992773767285],
+            [-0.0417754530674809,  0.0129557142860823, -0.0438255433899712],
+            [-0.0077598749486747, -0.0227376671754191,  0.0299747248995671],
+            [ 0.0234663952467644, -0.0197228615217348, -0.012310775784914 ],
+            [ 0.0522828192427483,  0.0309195218505533,  0.0051087476880132],
+            [ 0.0111662638549762, -0.0243160830427069, -0.0385955154692152],
+            [-0.0430428859209466,  0.0445042819884445,  0.0068790048631962],
+            [ 0.0018884891463419, -0.0307615162631208,  0.0266321120421124],
+            [-0.0225187657963353,  0.0137013834417173, -0.0204206594318816],
+            [ 0.043899856573229 ,  0.0074899598111398,  0.0430884582780572],
+            [ 0.0328872695492637, -0.0118476630144499, -0.0505509410003933],
+            [-0.0241897930271487,  0.0363502308749354, -0.0154884487342735],
+            [-0.0296005797639728, -0.0247895655534034,  0.0043222828408922],
+        ])
+        ref_r3_moment = np.array([56.82302819572204  ,
+                                  46.51840101796637  ,  6.708120816726169 ,  6.279104759005428 ,  6.042560107135095 ,  7.638430994843543 ,
+                                  46.720074282005626 ,  6.281968995387113 ,  6.70264536240944  ,  6.09119674312146  ,  7.4889066162149565,
+                                  46.48891139636986  ,  6.057328075412309 ,  6.2841335390764845,  6.72476165030775  ,  7.602442196333006 ])
+
+        assert np.max(np.abs(test_charges - ref_charges)) < 1e-6
+        assert np.max(np.abs(test_dipoles - ref_dipoles)) < 1e-6
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 1e-6
+
+        test_charges, test_dipoles, test_quadrupoles, test_octupoles, test_r2_moment, test_r3_moment, test_r4_moment \
+            = mbis(mol, grids, dm, initial_guess = "paper_guess")
+
+        # This is a consistency test
+        ref_charges = np.array([ 0.89673853675923  ,
+                                -0.1322783947707027, -0.2167353814008159, -0.1797350780947937, -0.175459395741578 , -0.2602669259542929,
+                                -0.1366619875509816, -0.1802953794510391, -0.2163503230591712, -0.1806793028929277, -0.251395566521637 ,
+                                -0.1319057103676924, -0.1762132257326412, -0.181586548890543 , -0.2181520791537017, -0.25892635193223  ])
+        ref_dipoles = np.array([
+            [ 0.0096540615063273,  0.0039841279836268, -0.0097173157861106],
+            [ 0.0250033464550202,  0.0138327079189506,  0.0151821437099846],
+            [ 0.0180572329893498,  0.0331310461877771,  0.0233399754108119],
+            [ 0.0452140684019164, -0.0171112923737458, -0.0317603418023786],
+            [-0.0407799283121582,  0.0091667770426139, -0.0431897930354902],
+            [-0.0064354622281213, -0.0202897906439849,  0.026158125813849 ],
+            [ 0.0322363937183838, -0.0120010788154995, -0.0133415160496679],
+            [ 0.0499631953121447,  0.0293870194765333,  0.0051351621136582],
+            [ 0.0111142319109201, -0.0234036406944146, -0.0367309085464654],
+            [-0.0420364680997373,  0.0441860298772078,  0.0109435298737584],
+            [ 0.0026736699328282, -0.0271330534069336,  0.0239609701508522],
+            [-0.0150514614657867,  0.0158816557519964, -0.026427635727183 ],
+            [ 0.0432100445679517,  0.0037142704490381,  0.0418701794946069],
+            [ 0.0314891582506749, -0.0114303209855326, -0.0482954717255673],
+            [-0.0232969263045234,  0.0346755137540988, -0.0150926655983875],
+            [-0.0259015051466177, -0.0222276633185535,  0.0032883717977225],
+        ])
+        ref_r3_moment = np.array([41.78304210654531  ,
+                                  50.561849810729996 ,  6.581838424148762 ,  6.146577743748766 ,  5.874468470008853 ,  7.729219900307689 ,
+                                  51.00257932076755  ,  6.157194336907767 ,  6.567136836715232 ,  5.854806201497654 ,  7.52702746953835  ,
+                                  50.61052402050666  ,  5.8783740903796815,  6.173248070105693 ,  6.591809218745358 ,  7.677542000806872 ])
+
+        assert np.max(np.abs(test_charges - ref_charges)) < 1e-6
+        assert np.max(np.abs(test_dipoles - ref_dipoles)) < 1e-6
+        assert np.max(np.abs(test_r3_moment - ref_r3_moment)) < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for MBIS multipole")

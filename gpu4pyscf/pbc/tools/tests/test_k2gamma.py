@@ -23,4 +23,3 @@ def test_sampling_and_bvk_mesh(cell, mesh, gamma):
     if not gamma:
         expected *= np.where(expected % 2 == 0, 2, 1)
     np.testing.assert_array_equal(bvk, expected)
-

@@ -24,61 +24,43 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.grad import krks as krks_grad
+from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.pbc.dft import multigrid, BeckeGrids
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v3, BeckeGrids
 from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
+from gpu4pyscf.pbc.dft.numint import _GTOvalOpt
+from gpu4pyscf.pbc.grad.krks_stress import _eval_ao_strain_derivatives
+from gpu4pyscf.pbc.grad.krks import get_d2mu_dr2
 
 __all__ = ['Gradients']
-
-def energy_ee(ks_grad, dm, kpts):
-    mf = ks_grad.base
-    cell = ks_grad.cell
-    log = logger.new_logger(ks_grad)
-    t0 = log.init_timer()
-
-    ni = mf._numint
-    omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
-    j_factor = 1
-
-    if isinstance(ni, multigrid.MultiGridNumIntBase):
-        assert not ks_grad.grid_response
-        exc = ni.energy_nuclear_gradient(
-            mf.xc, dm, kpts=kpts, spin=1, with_j=True, with_nuc=True)
-        j_factor = 0
-    else:
-        if ks_grad.grids is not None:
-            grids = ks_grad.grids
-        else:
-            grids = mf.grids
-        if grids.coords is None:
-            grids.build()
-        if ks_grad.grid_response:
-            assert isinstance(grids, BeckeGrids), "Only Becke grid requires grid response"
-            exc = get_vxc_full_response(ni, cell, grids, mf.xc, dm, kpts)
-        else:
-            exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
-        t0 = log.timer('vxc', *t0)
-
-    if j_factor != 0 or k_sr != 0 or k_lr != 0:
-        exc += kuhf_grad.jk_energy_per_atom(
-            mf, dm, kpts, j_factor, lr_factor=k_lr, sr_factor=k_sr, omega=omega,
-            exxdiv=mf.exxdiv)
-    return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     assert dm_kpts.ndim == 4
     xctype = ni._xc_type(xc_code)
     nao = cell.nao
     nkpts = len(kpts)
-    vmat = cp.zeros((2,nkpts,3,nao,nao), dtype=dm_kpts.dtype)
+
     if xctype == 'LDA':
+        ao_deriv = 0
+    elif xctype == 'GGA':
         ao_deriv = 1
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
-                                                   sort_grids=True):
+    elif xctype == 'MGGA':
+        ao_deriv = 1
+    else:
+        raise NotImplementedError(f"Unrecognized xctype = {xctype}")
+    eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=ao_deriv)
+
+    vmat = cp.zeros((2,nkpts,3,nao,nao), dtype=dm_kpts.dtype)
+    de_stress_rho = cp.zeros((3,3))
+    exc_sum = 0
+
+    if xctype == 'LDA':
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv + 1, kpts, sort_grids=True):
             rho_a = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
+            del rho_a, rho_b
+            exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[:2]
             wv = weight * vxc[:,0]
             aowa = cp.einsum('xpi,p->xpi', ao_ks[:,0], wv[0])
             aowb = cp.einsum('xpi,p->xpi', ao_ks[:,0], wv[1])
@@ -86,28 +68,65 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
                 vmat[0,kn] += krks_grad._d1_dot_(ao_ks[kn,1:4], aowa[kn])
                 vmat[1,kn] += krks_grad._d1_dot_(ao_ks[kn,1:4], aowb[kn])
 
+            del aowa, aowb, vxc
+
+            exc_sum += cp.sum(weight * ((rho[0] + rho[1]) * exc))
+
+            del rho, exc
+
+            ao_ks_strain = _eval_ao_strain_derivatives(cell, coords, kpts, deriv=ao_deriv, opt=eval_gto_opt)
+            ao_ks_strain = ao_ks_strain[:,:,:,0]
+            ao_ks_strain += contract('kxgp,yg->kxypg', ao_ks[:,1:4], coords.T)
+            dm_nu = contract('ukpq,kgq->ukpg', dm_kpts, ao_ks[:,0].conj())
+            drho_stress = contract('kxypg,ukpg->uxyg', ao_ks_strain, dm_nu)
+            de_stress_rho += 2 * contract('uxyg,ug->xy', drho_stress, wv).real
+
+            del ao_ks_strain, dm_nu, drho_stress, wv
+
     elif xctype == 'GGA':
-        ao_deriv = 2
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
-                                                   sort_grids=True):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv + 1, kpts, sort_grids=True):
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
+            del rho_a, rho_b
+            exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[:2]
             wv = weight * vxc
             wv[:,0] *= .5
             for kn in range(nkpts):
                 vmat[0,kn] += krks_grad._gga_grad_sum_(ao_ks[kn], wv[0])
                 vmat[1,kn] += krks_grad._gga_grad_sum_(ao_ks[kn], wv[1])
 
+            del vxc
+
+            exc_sum += cp.sum(weight * ((rho[0,0] + rho[1,0]) * exc))
+
+            del rho, exc
+
+            ao_ks_strain = _eval_ao_strain_derivatives(cell, coords, kpts, deriv=ao_deriv, opt=eval_gto_opt)
+            ao_ks_strain[:,:,:,0] += contract('kxgp,yg->kxypg', ao_ks[:,1:4], coords.T)
+            d2ao = get_d2mu_dr2(ao_ks)
+            ao_ks_strain[:,:,:,1:4] += contract('kxdgp,yg->kxydpg', d2ao, coords.T)
+            del d2ao
+
+            wv[:,0] *= 2
+            dm_nu = contract('ukpq,kgq->ukpg', dm_kpts, ao_ks[:,0].conj())
+            dmu_stress = contract('kxydpg,ukpg->uxydg', ao_ks_strain, dm_nu)
+            de_stress_rho += 2 * contract('uxydg,udg->xy', dmu_stress, wv).real
+            del dmu_stress, dm_nu
+            dm_dmu = contract('ukpq,kdgp->ukdqg', dm_kpts, ao_ks[:,1:4])
+            dnu_stress = contract('kxyqg,ukdqg->uxydg', ao_ks_strain[:,:,:,0].conj(), dm_dmu)
+            de_stress_rho += 2 * contract('uxydg,udg->xy', dnu_stress, wv[:,1:4]).real
+            del dnu_stress, dm_dmu
+
+            del ao_ks_strain, wv
+
     elif xctype == 'MGGA':
-        ao_deriv = 2
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
-                                                   sort_grids=True):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv + 1, kpts, sort_grids=True):
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)
-            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[1]
+            del rho_a, rho_b
+            exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[:2]
             wv = weight * vxc
             wv[:,0] *= .5
             wv[:,4] *= .5  # for the factor 1/2 in tau
@@ -117,15 +136,47 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
                 vmat[0,kn] += krks_grad._tau_grad_dot_(ao_ks[kn], wv[0,4])
                 vmat[1,kn] += krks_grad._tau_grad_dot_(ao_ks[kn], wv[1,4])
 
+            del vxc
+
+            exc_sum += cp.sum(weight * ((rho[0,0] + rho[1,0]) * exc))
+
+            del rho, exc
+
+            ao_ks_strain = _eval_ao_strain_derivatives(cell, coords, kpts, deriv=ao_deriv, opt=eval_gto_opt)
+            ao_ks_strain[:,:,:,0] += contract('kxgp,yg->kxypg', ao_ks[:,1:4], coords.T)
+            d2ao = get_d2mu_dr2(ao_ks)
+            ao_ks_strain[:,:,:,1:4] += contract('kxdgp,yg->kxydpg', d2ao, coords.T)
+            del d2ao
+
+            wv[:,0] *= 2
+            dm_nu = contract('ukpq,kgq->ukpg', dm_kpts, ao_ks[:,0].conj())
+            dmu_stress = contract('kxydpg,ukpg->uxydg', ao_ks_strain, dm_nu)
+            de_stress_rho += 2 * contract('uxydg,udg->xy', dmu_stress, wv[:,0:4]).real
+            del dmu_stress, dm_nu
+            dm_dmu = contract('ukpq,kdgp->ukdqg', dm_kpts, ao_ks[:,1:4])
+            dnu_stress = contract('kxyqg,ukdqg->uxydg', ao_ks_strain[:,:,:,0].conj(), dm_dmu)
+            de_stress_rho += 2 * contract('uxydg,udg->xy', dnu_stress, wv[:,1:4]).real
+            del dnu_stress, dm_dmu
+            dm_dnu = contract('ukpq,kdgq->ukdpg', dm_kpts, ao_ks[:,1:4].conj())
+            tau_stress = contract('kxydpg,ukdpg->uxyg', ao_ks_strain[:,:,:,1:4], dm_dnu)
+            de_stress_rho += 2 * contract('uxyg,ug->xy', tau_stress, wv[:,4]).real
+            del tau_stress, dm_dnu
+
+            del ao_ks_strain, wv
+
     elif xctype == 'HF':
         pass
     elif xctype == 'NLC':
         raise NotImplementedError("NLC")
     else:
-        raise NotImplementedError(xc_code)
+        raise NotImplementedError(f"Unrecognized xctype = {xctype}")
 
-    exc = krhf_grad.contract_h1e_dm(cell, vmat, dm_kpts, hermi=1)
-    exc *= -1.0 / nkpts
+    de_stress_weight = exc_sum * cp.eye(3)
+
+    exc = np.zeros((cell.natm + 3, 3))
+    exc[:-3] = -krhf_grad.contract_h1e_dm(cell, vmat, dm_kpts, hermi=1)
+    exc[:-3] *= 1.0 / nkpts
+    exc[-3:] = (de_stress_rho / nkpts + de_stress_weight).get()
     return exc
 
 def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
@@ -149,8 +200,9 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
         ao_deriv = 1
     else:
         raise NotImplementedError(f"Unrecognized xctype = {xctype}")
+    eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=ao_deriv)
 
-    de_grid_response_weight = cp.zeros((natm, 3), dtype=cp.float64)
+    de_grid_response_weight = cp.zeros((natm + 3, 3), dtype=cp.float64)
     g1 = 0
     for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
         g0, g1 = g1, g1 + weight.size
@@ -171,6 +223,7 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
 
     dvmat_orbital_response = cp.zeros((2,nkpts,3,nao,nao), dtype=dm_kpts.dtype)
     de_grid_response_rho = cp.zeros((natm, 3), dtype=dm_kpts.dtype)
+    de_stress_rho = cp.zeros((3,3), dtype=cp.float64)
 
     g1 = 0
     for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv + 1, kpts):
@@ -196,7 +249,19 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
                 dvmat_orbital_response[1,kn] += vtmp_b
                 de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_b, dm_kpts[1,kn]) * 2
                 del vtmp_a, vtmp_b
-            del wv, rho, aowa, aowb, vxc
+            del rho, aowa, aowb, vxc
+
+            ao_ks_strain = _eval_ao_strain_derivatives(cell, coords, kpts, deriv=ao_deriv, opt=eval_gto_opt)
+            ao_ks_strain = ao_ks_strain[:,:,:,0]
+            associated_supatm_coords = grids.supatm_coords[grids.supatm_idx[g0:g1]]
+            ao_ks_strain += contract('kxgp,yg->kxypg', ao_ks[:,1:4], associated_supatm_coords.T)
+            del associated_supatm_coords
+
+            dm_nu = contract('ukpq,kgq->ukpg', dm_kpts, ao_ks[:,0].conj())
+            drho_stress = contract('kxypg,ukpg->uxyg', ao_ks_strain, dm_nu)
+            de_stress_rho += 2 * contract('uxyg,ug->xy', drho_stress, wv).real
+
+            del ao_ks_strain, dm_nu, drho_stress, wv
 
         elif xctype == 'GGA':
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
@@ -214,7 +279,26 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
                 dvmat_orbital_response[1,kn] += vtmp_b
                 de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_b, dm_kpts[1,kn]) * 2
                 del vtmp_a, vtmp_b
-            del wv, rho, vxc
+            del rho, vxc
+
+            ao_ks_strain = _eval_ao_strain_derivatives(cell, coords, kpts, deriv=ao_deriv, opt=eval_gto_opt)
+            associated_supatm_coords = grids.supatm_coords[grids.supatm_idx[g0:g1]]
+            ao_ks_strain[:,:,:,0] += contract('kxgp,yg->kxypg', ao_ks[:,1:4], associated_supatm_coords.T)
+            d2ao = get_d2mu_dr2(ao_ks)
+            ao_ks_strain[:,:,:,1:4] += contract('kxdgp,yg->kxydpg', d2ao, associated_supatm_coords.T)
+            del d2ao, associated_supatm_coords
+
+            wv[:,0] *= 2
+            dm_nu = contract('ukpq,kgq->ukpg', dm_kpts, ao_ks[:,0].conj())
+            dmu_stress = contract('kxydpg,ukpg->uxydg', ao_ks_strain, dm_nu)
+            de_stress_rho += 2 * contract('uxydg,udg->xy', dmu_stress, wv).real
+            del dmu_stress, dm_nu
+            dm_dmu = contract('ukpq,kdgp->ukdqg', dm_kpts, ao_ks[:,1:4])
+            dnu_stress = contract('kxyqg,ukdqg->uxydg', ao_ks_strain[:,:,:,0].conj(), dm_dmu)
+            de_stress_rho += 2 * contract('uxydg,udg->xy', dnu_stress, wv[:,1:4]).real
+            del dnu_stress, dm_dmu
+
+            del ao_ks_strain, wv
 
         elif xctype == 'MGGA':
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
@@ -233,32 +317,89 @@ def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
                 dvmat_orbital_response[1,kn] += vtmp_b
                 de_grid_response_rho[i_atom] += cp.einsum('xij,ji->x', vtmp_b, dm_kpts[1,kn]) * 2
                 del vtmp_a, vtmp_b
-            del wv, rho, vxc
+            del rho, vxc
+
+            ao_ks_strain = _eval_ao_strain_derivatives(cell, coords, kpts, deriv=ao_deriv, opt=eval_gto_opt)
+            associated_supatm_coords = grids.supatm_coords[grids.supatm_idx[g0:g1]]
+            ao_ks_strain[:,:,:,0] += contract('kxgp,yg->kxypg', ao_ks[:,1:4], associated_supatm_coords.T)
+            d2ao = get_d2mu_dr2(ao_ks)
+            ao_ks_strain[:,:,:,1:4] += contract('kxdgp,yg->kxydpg', d2ao, associated_supatm_coords.T)
+            del d2ao, associated_supatm_coords
+
+            wv[:,0] *= 2
+            dm_nu = contract('ukpq,kgq->ukpg', dm_kpts, ao_ks[:,0].conj())
+            dmu_stress = contract('kxydpg,ukpg->uxydg', ao_ks_strain, dm_nu)
+            de_stress_rho += 2 * contract('uxydg,udg->xy', dmu_stress, wv[:,0:4]).real
+            del dmu_stress, dm_nu
+            dm_dmu = contract('ukpq,kdgp->ukdqg', dm_kpts, ao_ks[:,1:4])
+            dnu_stress = contract('kxyqg,ukdqg->uxydg', ao_ks_strain[:,:,:,0].conj(), dm_dmu)
+            de_stress_rho += 2 * contract('uxydg,udg->xy', dnu_stress, wv[:,1:4]).real
+            del dnu_stress, dm_dmu
+            dm_dnu = contract('ukpq,kdgq->ukdpg', dm_kpts, ao_ks[:,1:4].conj())
+            tau_stress = contract('kxydpg,ukdpg->uxyg', ao_ks_strain[:,:,:,1:4], dm_dnu)
+            de_stress_rho += 2 * contract('uxyg,ug->xy', tau_stress, wv[:,4]).real
+            del tau_stress, dm_dnu
+
+            del ao_ks_strain, wv
 
         else:
             raise NotImplementedError(f"Unrecognized xctype = {xctype}")
     assert g1 == ngrids
 
-    exc = de_grid_response_rho.get().real
-    exc -= krhf_grad.contract_h1e_dm(cell, dvmat_orbital_response, dm_kpts, hermi=1)
+    exc = np.zeros((cell.natm + 3, 3), dtype=np.float64)
+    exc[:-3] = de_grid_response_rho.get().real
+    exc[:-3] -= krhf_grad.contract_h1e_dm(cell, dvmat_orbital_response, dm_kpts, hermi=1)
+    exc[-3:] = de_stress_rho.get()
     exc *= 1.0 / nkpts
     exc += de_grid_response_weight.get()
     return exc
 
 class Gradients(kuhf_grad.Gradients):
     '''Non-relativistic restricted Hartree-Fock gradients'''
-    _keys = {'grid_response', 'grids'}
-
-    def __init__(self, mf):
-        kuhf_grad.Gradients.__init__(self, mf)
-        self.grids = None
-        self.grid_response = False
 
     reset = krks_grad.Gradients.reset
     dump_flags = krks_grad.Gradients.dump_flags
 
-    energy_ee = energy_ee
+    def energy_ee(self, dm, kpts):
+        mf = self.base
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
 
-    def get_stress(self):
-        from gpu4pyscf.pbc.grad import kuks_stress
-        return kuks_stress.kernel(self)
+        ni = mf._numint
+        xc = getattr(mf, 'xc', 'HF')
+        if xc.upper() == 'HF':
+            omega, k_lr, k_sr = 0, 1, 1
+        else:
+            omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+        j_factor = 1
+
+        # TODO: handle all-electron+GGA and pseudo+GGA differently
+        # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
+        de = np.zeros([self.cell.natm+3, 3])
+        if isinstance(ni, multigrid_v3.MultiGridNumInt):
+            de = ni.energy_derivatives(
+                xc, dm, kpts=kpts, spin=1, with_j=True, with_nuc=True)
+            j_factor = 0
+        elif isinstance(ni, multigrid.MultiGridNumIntBase):
+            raise NotImplementedError(f'derivatives for {ni}')
+        else:
+            if self.grids is not None:
+                grids = self.grids
+            else:
+                grids = mf.grids
+            if grids.coords is None:
+                grids.build()
+            if self.grid_response:
+                assert isinstance(grids, BeckeGrids), "Only Becke grid requires grid response"
+                fn = get_vxc_full_response
+            else:
+                fn = get_vxc
+            cell = self.cell
+            de = fn(ni, cell, grids, xc, dm, kpts)
+        t0 = log.timer_debug1('vxc', *t0)
+
+        if j_factor != 0 or k_sr != 0 or k_lr != 0:
+            de += krhf_grad._get_ejk_derivatives(
+                mf, dm, kpts, j_factor, omega, k_lr, k_sr)
+            t0 = log.timer_debug1('JK', *t0)
+        return de

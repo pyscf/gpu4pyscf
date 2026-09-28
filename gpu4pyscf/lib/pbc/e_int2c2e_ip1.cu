@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The PySCF Developers. All Rights Reserved.
+ * Copyright 2026 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,10 +31,10 @@
 #define L_AUX1          (L_AUX+1)
 
 __global__ static
-void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
-                            double omega, double lr_factor, double sr_factor,
-                            int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                            int *gout_stride_lookup)
+void int2c2e_deriv_kernel(double *de, double *sigma, double *dm, PBCIntEnvVars envs,
+                          double omega, double lr_factor, double sr_factor,
+                          int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                          int *gout_stride_lookup)
 {
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
@@ -67,11 +67,12 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
     int nsp_per_block = THREADS / gout_stride;
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
-    int i_1 = nsp_per_block;
     int nfi = c_nf[li];
     int nfj = c_nf[lj];
     int nfij = nfi * nfj;
     int stride_j = li + 2;
+    int i_1 =          nsp_per_block;
+    //int j_1 = stride_j*nsp_per_block;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
     extern __shared__ double shared_memory[];
@@ -80,17 +81,21 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    double goutx[GOUT_IP_WIDTH];
-    double gouty[GOUT_IP_WIDTH];
-    double goutz[GOUT_IP_WIDTH];
+
+    double sigma_xx = 0;
+    double sigma_xy = 0;
+    double sigma_xz = 0;
+    double sigma_yx = 0;
+    double sigma_yy = 0;
+    double sigma_yz = 0;
+    double sigma_zx = 0;
+    double sigma_zy = 0;
+    double sigma_zz = 0;
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
-#pragma unroll
-        for (int n = 0; n < GOUT_IP_WIDTH; ++n) {
-            goutx[n] = 0.;
-            gouty[n] = 0.;
-            goutz[n] = 0.;
-        }
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
         __syncthreads();
         int bas_ij;
         if (pair_ij < shl_pair1) {
@@ -100,48 +105,54 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
+        int ish_cell0 = ish;
+        int jsh_cell0 = jsh % envs.nbas;
         if (gout_id == 0) {
             double fac = PI_FAC;
-            if (ish == jsh) {
+            if (ish_cell0 == jsh_cell0) {
                 fac *= .5;
-            } else if (ish < jsh) {
+            } else if (ish_cell0 < jsh_cell0) {
                 fac = 0;
             }
             gx[gx_len] = fac;
         }
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        int i0 = envs.ao_loc[ish];
+        int j0 = envs.ao_loc[jsh];
+        double *dm_local = dm + j0 * nao + i0;
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int img = 0; img < envs.nimgs; img++) {
             __syncthreads();
             if (gout_id == 0) {
-                double xjL = img_coords[img*3+0];
-                double yjL = img_coords[img*3+1];
-                double zjL = img_coords[img*3+2];
-                double xpq = ri[0] - (rj[0] + xjL);
-                double ypq = ri[1] - (rj[1] + yjL);
-                double zpq = ri[2] - (rj[2] + zjL);
+                double xpq = env[ri+0] - (env[rj+0] + img_coords[img*3+0]);
+                double ypq = env[ri+1] - (env[rj+1] + img_coords[img*3+1]);
+                double zpq = env[ri+2] - (env[rj+2] + img_coords[img*3+2]);
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 Rpq[0*nsp_per_block] = xpq;
                 Rpq[1*nsp_per_block] = ypq;
                 Rpq[2*nsp_per_block] = zpq;
                 Rpq[3*nsp_per_block] = rr;
             }
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
             int ijprim = iprim * jprim;
             for (int ijp = 0; ijp < ijprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp % iprim;
                 int jp = ijp / iprim;
-                double ai = expi[ip];
-                double aj = expj[jp];
-                double ai2 = ai * -2;
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
+                double ai2 = ai * 2;
+                //double aj2 = aj * 2;
                 double aij = ai + aj;
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
-                    double cicj = ci[ip] * cj[jp];
+                    double cicj = env[ci+ip] * env[cj+jp];
                     gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
@@ -157,9 +168,7 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
                     if (pair_ij < shl_pair1) {
                         float div_nfi = c_div_nf[li];
 #pragma unroll
-                        for (int n = 0; n < GOUT_IP_WIDTH; ++n) {
-                            uint32_t ij = gout_id + n * gout_stride;
-                            if (ij >= nfij) break;
+                        for (int ij = gout_id; ij < nfij; ij += gout_stride) {
                             uint32_t j = ij * div_nfi;
                             uint32_t i = ij - nfi * j;
                             int ix = idx_i[i*3+0];
@@ -169,63 +178,79 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
                             int jy = idx_j[j*3+1];
                             int jz = idx_j[j*3+2];
                             int addrx = (ix + jx*stride_j) * nsp_per_block;
-                            int addry = (iy + jy*stride_j) * nsp_per_block + gx_len;
-                            int addrz = (iz + jz*stride_j) * nsp_per_block + gx_len*2;
-                            double fx0 = gx[addrx];
-                            double fy0 = gx[addry];
-                            double fz0 = gx[addrz];
-                            double fx1 = ai2 * gx[addrx+i_1];
-                            double fy1 = ai2 * gx[addry+i_1];
-                            double fz1 = ai2 * gx[addrz+i_1];
-                            if (ix > 0) fx1 += ix * gx[addrx-i_1];
-                            if (iy > 0) fy1 += iy * gx[addry-i_1];
-                            if (iz > 0) fz1 += iz * gx[addrz-i_1];
-                            goutx[n] += fx1 * fy0 * fz0;
-                            gouty[n] += fx0 * fy1 * fz0;
-                            goutz[n] += fx0 * fy0 * fz1;
+                            int addry = (iy + jy*stride_j + g_size) * nsp_per_block;
+                            int addrz = (iz + jz*stride_j + g_size*2) * nsp_per_block;
+                            double Ix = gx[addrx];
+                            double Iy = gx[addry];
+                            double Iz = gx[addrz];
+                            double dm_ij = dm_local[j*nao+i];
+                            double prod_xy = Ix * Iy * dm_ij;
+                            double prod_xz = Ix * Iz * dm_ij;
+                            double prod_yz = Iy * Iz * dm_ij;
+                            double fix = ai2 * gx[addrx+i_1]; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
+                            double fiy = ai2 * gx[addry+i_1]; if (iy > 0) { fiy -= iy * gx[addry-i_1]; } v_iy += fiy * prod_xz;
+                            double fiz = ai2 * gx[addrz+i_1]; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; } v_iz += fiz * prod_xy;
+                            //double fjx = aj2 * gx[addrx+j_1]; if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
+                            //double fjy = aj2 * gx[addry+j_1]; if (jy > 0) { fjy -= jy * gx[addry-j_1]; } v_jy += fjy * prod_xz;
+                            //double fjz = aj2 * gx[addrz+j_1]; if (jz > 0) { fjz -= jz * gx[addrz-j_1]; } v_jz += fjz * prod_xy;
                         }
                     }
                 }
             }
+            double xixj = Rpq[0*nsp_per_block];
+            double yiyj = Rpq[1*nsp_per_block];
+            double zizj = Rpq[2*nsp_per_block];
+            sigma_xx += v_ix * xixj;
+            sigma_xy += v_ix * yiyj;
+            sigma_xz += v_ix * zizj;
+            sigma_yx += v_iy * xixj;
+            sigma_yy += v_iy * yiyj;
+            sigma_yz += v_iy * zizj;
+            sigma_zx += v_iz * xixj;
+            sigma_zy += v_iz * yiyj;
+            sigma_zz += v_iz * zizj;
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
         }
         if (pair_ij < shl_pair1) {
-            int *ao_loc = envs.ao_loc;
-            size_t nao2 = nao * nao;
-            int cell_id = jsh / envs.nbas;
-            int jsh_cell0 = jsh - cell_id * envs.nbas;
-            int i0 = ao_loc[ish];
-            int j0 = ao_loc[jsh_cell0];
-            double *outx = out + cell_id*nao2*3 + i0 * nao + j0;
-            double *outy = outx + nao2;
-            double *outz = outx + nao2 * 2;
-#pragma unroll
-            for (int n = 0; n < GOUT_IP_WIDTH; ++n) {
-                int ij = n*gout_stride+gout_id;
-                if (ij >= nfij) break;
-                int j = ij / nfi;
-                int i = ij - j * nfi;
-                int addr = i * nao + j;
-                outx[addr] = goutx[n];
-                outy[addr] = gouty[n];
-                outz[addr] = goutz[n];
-            }
+            int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
+            int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
+            double grad_jx = -grad_ix;
+            double grad_jy = -grad_iy;
+            double grad_jz = -grad_iz;
+            atomicAdd(de+ia*3+0, grad_ix);
+            atomicAdd(de+ia*3+1, grad_iy);
+            atomicAdd(de+ia*3+2, grad_iz);
+            atomicAdd(de+ja*3+0, grad_jx);
+            atomicAdd(de+ja*3+1, grad_jy);
+            atomicAdd(de+ja*3+2, grad_jz);
         }
     }
+    atomicAdd(sigma+0, sigma_xx);
+    atomicAdd(sigma+1, sigma_xy);
+    atomicAdd(sigma+2, sigma_xz);
+    atomicAdd(sigma+3, sigma_yx);
+    atomicAdd(sigma+4, sigma_yy);
+    atomicAdd(sigma+5, sigma_yz);
+    atomicAdd(sigma+6, sigma_zx);
+    atomicAdd(sigma+7, sigma_zy);
+    atomicAdd(sigma+8, sigma_zz);
 }
 
 extern "C" {
-int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs,
-                     double omega, double lr_factor, double sr_factor, int shm_size,
-                     int nbatches_shl_pair, int *shl_pair_offsets,
-                     uint32_t *bas_ij_idx, int *gout_stride_lookup)
+int int2c2e_deriv(double *grad, double *sigma, double *dm, PBCIntEnvVars *envs,
+                  double omega, double lr_factor, double sr_factor, int shm_size,
+                  int nbatches_shl_pair, int *shl_pair_offsets,
+                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
-    cudaFuncSetAttribute(pbc_int2c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    pbc_int2c2e_ip1_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            out, *envs, omega, lr_factor, sr_factor,
+    cudaFuncSetAttribute(int2c2e_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    int2c2e_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+            grad, sigma, dm, *envs, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int2c2e_ip1 kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in int2c2e_deriv kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

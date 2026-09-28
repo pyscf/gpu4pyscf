@@ -25,40 +25,11 @@
 #ifndef WARP_SIZE
 #define WARP_SIZE       32
 #endif
+#define WARPS           8
 #define FT_AO_THREADS   (WARP_SIZE*4)
 #define NG_PER_BLOCK    32
-
-typedef struct {
-    int li;
-    int lj;
-    int nfi;
-    int nfj;
-    int g_size;
-    int stride_i;
-    int stride_j;
-    int iprim;
-    int jprim;
-    int npairs_ij;
-    int ngrids;
-    int *bas_ij_idx;
-    double *grids;
-    int *img_offsets; // offset AFTIntEnvVars.img_idx for each shell-pair
-    int *img_idx; // indices of img_coords in each shell-pair
-} AFTBoundsInfo;
-
-typedef struct {
-    int ngrids;
-    // The effective basis pair Id = ish*nbas+jsh
-    int *bas_ij_idx;
-    // the bas_ij_idx offset for each blockIdx.x
-    int *shl_pair_offsets;
-    // the AO-pair offset (address) in the output tensor for each blockIdx.x
-    int *ao_pair_loc;
-    // offset AFTIntEnvVars.img_idx for each shell-pair
-    int *img_offsets;
-    // indices of img_coords in each shell-pair
-    int *img_idx;
-    // gout_stride for for each (li,lj) pattern
-    int *gout_stride_lookup;
-    double *grids;
-} BDivAFTBoundsInfo;
+#define AUXL            6
+#define AUXNF           ((AUXL+1)*(AUXL+2)/2)
+// pi^1.5
+#define OVERLAP_FAC     5.56832799683170787
+#define OF_COMPLEX      2

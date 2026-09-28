@@ -17,26 +17,25 @@ import numpy as np
 import cupy as cp
 from pyscf import gto, lib
 from pyscf.pbc.gto.cell import _estimate_rcut
-from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
+from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import most_diffuse_pgto, SortedGTO
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools import k2gamma
 
+kern_map = {
+    'int1e_ovlp':         ('PBCint1e_ovlp',         1, (0, 0)),
+    'int1e_r2_origi':     ('PBCint1e_r2_origi',     1, (2, 0)),
+    'int1e_r4_origi':     ('PBCint1e_r4_origi',     1, (4, 0)),
+    'int1e_ipovlp':       ('PBCint1e_ipovlp',       3, (1, 0)),
+    'int1e_r2_origi_ip2': ('PBCint1e_r2_origi_ip2', 3, (2, 1)),
+    'int1e_r4_origi_ip2': ('PBCint1e_r4_origi_ip2', 3, (4, 1)),
+}
 
 def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
     if intors is None:
         intors = ['int1e_ovlp', 'int1e_r2_origi', 'int1e_r4_origi']
-
-    kern_map = {
-        'int1e_ovlp':         ('PBCint1e_ovlp',         1, (0, 0)),
-        'int1e_r2_origi':     ('PBCint1e_r2_origi',     1, (0, 2)),
-        'int1e_r4_origi':     ('PBCint1e_r4_origi',     1, (0, 4)),
-        'int1e_ipovlp':       ('PBCint1e_ipovlp',       3, (1, 0)),
-        'int1e_r2_origi_ip2': ('PBCint1e_r2_origi_ip2', 3, (0, 3)),
-        'int1e_r4_origi_ip2': ('PBCint1e_r4_origi_ip2', 3, (0, 5)),
-    }
 
     hl_dims = np.asarray([len(hl) for hl in hl_blocks])
 
@@ -59,6 +58,9 @@ def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
 
 def _sorted_fake_cell_vnl(cell):
     fakecell, hl_blocks = fake_cell_vnl(cell)
+    # GTH projectors are spherical even when the AO basis is Cartesian.
+    fakecell.cart = False
+
     hl_dims = np.asarray([len(hl) for hl in hl_blocks])
     ls = fakecell._bas[:,gto.ANG_OF]
     # groupby [hl_dim, l]
@@ -83,8 +85,10 @@ def get_pp_nl_gpu(cell, kpts=None):
 
     ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
 
+    is_gamma_point = gamma_point(kpts_lst)
+    dtype = np.float64 if is_gamma_point else np.complex128
     nao = cell.nao
-    ppnl = cp.zeros((nkpts, nao, nao), dtype=cp.complex128)
+    ppnl = cp.zeros((nkpts, nao, nao), dtype=dtype)
 
     hl_offset = [0] * 3
     for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
@@ -93,17 +97,14 @@ def get_pp_nl_gpu(cell, kpts=None):
         hl_block = cp.asarray(np.stack(hl_blocks[i0:i1]))
         n_hl = len(hl_block)
 
-        ilp = cp.empty((nkpts, n_hl, hl_dim, nd, nao), dtype=cp.complex128)
+        ilp = cp.empty((hl_dim, nkpts, n_hl, nd, nao), dtype=dtype)
         for i in range(hl_dim):
             p0 = hl_offset[i]
             p1 = p0 + n_hl * nd
-            ilp[:,:,i] = ppnl_half[i][:,p0:p1].reshape(nkpts, n_hl, nd, nao)
+            ilp[i] = ppnl_half[i][:,p0:p1].reshape(nkpts, n_hl, nd, nao)
             hl_offset[i] = p1
 
-        tmp = contract('nij,knjlq->knilq', hl_block, ilp)
+        tmp = contract('nij,jknlq->iknlq', hl_block, ilp)
         ilp_conj = cp.conjugate(ilp, out=ilp)
-        contract('knilp,knilq->kpq', ilp_conj, tmp, beta=1, out=ppnl)
-
-    if kpts is None or gamma_point(kpts):
-        ppnl = ppnl.real
+        contract('iknlp,iknlq->kpq', ilp_conj, tmp, beta=1, out=ppnl)
     return ppnl
