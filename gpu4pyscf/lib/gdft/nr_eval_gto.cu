@@ -77,6 +77,11 @@ static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
 
     int8_t is_large = 0;
     for (int grid0 = grid_start; grid0 < grid_stop; grid0 += NG_PER_BLOCK) {
+        // Henry 20260928: This syncthreads is very necessary, since otherwise,
+        // the threads with is_large==true will continue go to the next loop and write to caches,
+        // while the threads with is_large==false will read the same caches, and that's a race condition.
+        // Thanks to issue 919.
+        __syncthreads();
         if (grid0 + thread_id < ngrids) {
             gridx_cache[thread_id] = coords[         grid0+thread_id];
             gridy_cache[thread_id] = coords[ngrids  +grid0+thread_id];
