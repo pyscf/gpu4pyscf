@@ -41,9 +41,10 @@ jobs:
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
+          -e OMP_NUM_THREADS=2 \
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.14 \
           /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && pip3 install MCFun pytest-xdist && \
                         pip3 install pyscf==${{ github.event.inputs.pyscf_version }} cupy-cuda12x==${{ github.event.inputs.cupy_version }} cutensor-cu12==${{ github.event.inputs.cutensor_version }} gpu4pyscf-libxc-cuda12x==${{ github.event.inputs.libxc_version }} pyscf-dispersion==${{ github.event.inputs.dispersion_version }} && \
-                        source build.sh && pytest -n 2 --dist loadfile -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
+                        source build.sh && pytest -n 4 --dist loadfile -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
