@@ -334,7 +334,7 @@ def _append_dd_cderi(opt, cderi, cd_j2c_cache, omega, recontract, kpts=None):
                 contract('pG,rG->pr', pqG, auxG, beta=1., out=j3c)
 
         host_j3c = write_buf[:n_dd_pairs*naux].reshape(n_dd_pairs, naux)
-        j3c.get(out=host_j3c, stream=stream, blocking=False)
+        j3c.get(out=host_j3c, stream=stream)
         stream.synchronize()
         recontract(-1, target, host_j3c)
 
@@ -428,6 +428,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     tasks = iter(range(len(ao_pair_counts)))
     def proc():
         device_id = cp.cuda.device.get_device_id()
+        stream = cp.cuda.get_current_stream()
         t1 = log.init_timer()
 
         local_context = context
@@ -490,6 +491,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
             j3c.get(out=host_j3c)
             if future is not None:
                 future.result()
+            stream.synchronize()
             future = writer.submit(recontract, batch_id, cderi, host_j3c)
             write_buf, write_buf1 = write_buf1, write_buf
             t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
@@ -617,6 +619,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     tasks = iter(range(len(ao_pair_counts)))
     def proc():
         device_id = cp.cuda.device.get_device_id()
+        stream = cp.cuda.get_current_stream()
         t1 = log.init_timer()
 
         local_context = context
@@ -688,6 +691,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
                 cderi_k.get(out=host_j3c)
                 if future is not None:
                     future.result()
+                stream.synchronize()
                 future = writer.submit(
                     recontract, batch_id, cderi[kp], host_j3c)
                 write_buf, write_buf1 = write_buf1, write_buf
@@ -704,6 +708,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         _append_dd_cderi(int3c2e_opt, cderi, cd_j2c_cache, omega,
                          recontract, uniq_kpts)
         t1 = log.timer_debug1('diffuse part of GDF tensor', *t1)
+
     cderip = None
     if negative_metric_size:
         cderip = {}
