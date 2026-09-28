@@ -364,6 +364,7 @@ class KnownValues(unittest.TestCase):
             charge = 1,
             spin = 1,
             basis = "6-31g",
+            precision = 1e-11,
             verbose = 0,
         )
 
@@ -393,7 +394,7 @@ class KnownValues(unittest.TestCase):
             [ 0.0630823866032415,  0.0113875747587144, -0.0252774496800612],
         ])
 
-        #assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.abs(test_energy - ref_energy) < 1e-6
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 1e-7
         assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-6
 
