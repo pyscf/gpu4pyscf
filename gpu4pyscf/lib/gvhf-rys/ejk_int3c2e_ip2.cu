@@ -29,11 +29,11 @@
 #define BLOCK_SIZE      16
 
 __global__ static
-void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
-                            double omega, double lr_factor, double sr_factor,
-                            RysIntEnvVars envs, int *shl_pair_offsets,
-                            uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int naux)
+void ejk_int3c2e_ipip_kernel(double *ejk, double *dm, double *density_auxvec,
+                             double omega, double lr_factor, double sr_factor,
+                             RysIntEnvVars envs, int *shl_pair_offsets,
+                             uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
+                             int *ao_pair_loc, int aux_offset, int naux)
 {
     // For better load balance, consume blocks in the reversed order
     int thread_id = threadIdx.x;
@@ -100,27 +100,27 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
     int idx_k = lex_xyz_offset(lk);
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
-        double v_ixx = 0;
-        double v_ixy = 0;
-        double v_ixz = 0;
-        double v_iyy = 0;
-        double v_iyz = 0;
-        double v_izz = 0;
-        double v_jxx = 0;
-        double v_jxy = 0;
-        double v_jxz = 0;
-        double v_jyy = 0;
-        double v_jyz = 0;
-        double v_jzz = 0;
-        double v1xx = 0;
-        double v1xy = 0;
-        double v1xz = 0;
-        double v1yx = 0;
-        double v1yy = 0;
-        double v1yz = 0;
-        double v1zx = 0;
-        double v1zy = 0;
-        double v1zz = 0;
+        double out_ixx = 0; // on the same center
+        double out_ixy = 0;
+        double out_ixz = 0;
+        double out_iyy = 0;
+        double out_iyz = 0;
+        double out_izz = 0;
+        double out_jxx = 0;
+        double out_jxy = 0;
+        double out_jxz = 0;
+        double out_jyy = 0;
+        double out_jyz = 0;
+        double out_jzz = 0;
+        double out_x_x = 0; // on two centers
+        double out_x_y = 0;
+        double out_x_z = 0;
+        double out_y_x = 0;
+        double out_y_y = 0;
+        double out_y_z = 0;
+        double out_z_x = 0;
+        double out_z_y = 0;
+        double out_z_z = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -162,30 +162,27 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                 dm_tensor = dm + j0 * nao + i0;
             }
 
-            double v_kxx = 0;
-            double v_kxy = 0;
-            double v_kxz = 0;
-            double v_kyy = 0;
-            double v_kyz = 0;
-            double v_kzz = 0;
-            double v_ixkx = 0;
-            double v_ixky = 0;
-            double v_ixkz = 0;
-            double v_iykx = 0;
-            double v_iyky = 0;
-            double v_iykz = 0;
-            double v_izkx = 0;
-            double v_izky = 0;
-            double v_izkz = 0;
-            double v_jxkx = 0;
-            double v_jxky = 0;
-            double v_jxkz = 0;
-            double v_jykx = 0;
-            double v_jyky = 0;
-            double v_jykz = 0;
-            double v_jzkx = 0;
-            double v_jzky = 0;
-            double v_jzkz = 0;
+            double v_ixx = 0; // on the same center
+            double v_ixy = 0;
+            double v_ixz = 0;
+            double v_iyy = 0;
+            double v_iyz = 0;
+            double v_izz = 0;
+            double v_jxx = 0;
+            double v_jxy = 0;
+            double v_jxz = 0;
+            double v_jyy = 0;
+            double v_jyz = 0;
+            double v_jzz = 0;
+            double v1xx = 0; // on two centers
+            double v1xy = 0;
+            double v1xz = 0;
+            double v1yx = 0;
+            double v1yy = 0;
+            double v1yz = 0;
+            double v1zx = 0;
+            double v1zy = 0;
+            double v1zz = 0;
 
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -297,8 +294,6 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                                 double gjz = gx[addrz+j_1];
 
                                 double f3x, f3y, f3z;
-                                double fkkx, fkky, fkkz;
-                                double goutx, gouty, goutz;
                                 double _gx_inc2, _gy_inc2, _gz_inc2;
                                 double fjx = aj2 * gjx;
                                 double fjy = aj2 * gjy;
@@ -341,46 +336,15 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                                     if (iz > 0) { fz -= iz * gx[addrz-i_1-j_1]; }
                                     f3z -= jz * fz;
                                 }
-                                fkkx = f3x * 2;
-                                fkky = f3y * 2;
-                                fkkz = f3z * 2;
-                                goutx = f3x * prod_yz;
-                                gouty = f3y * prod_xz;
-                                goutz = f3z * prod_xy;
-                                v1xx += goutx;
-                                v1yy += gouty;
-                                v1zz += goutz;
-                                v_ixkx -= goutx; // ixjx in ixkx = -ixix - ixjx
-                                v_iyky -= gouty;
-                                v_izkz -= goutz;
-                                v_jxkx -= goutx; // jxix in jxkx = -jxix - jxjx
-                                v_jyky -= gouty;
-                                v_jzkz -= goutz;
-                                double goutxy = fix * fjy * Iz_d;
-                                double goutxz = fix * fjz * Iy_d;
-                                double goutyx = fiy * fjx * Iz_d;
-                                double goutyz = fiy * fjz * Ix_d;
-                                double goutzx = fiz * fjx * Iy_d;
-                                double goutzy = fiz * fjy * Ix_d;
-                                v1xy += goutxy;
-                                v1xz += goutxz;
-                                v1yx += goutyx;
-                                v1yz += goutyz;
-                                v1zx += goutzx;
-                                v1zy += goutzy;
-                                v_ixky -= goutxy; // ixky = -ixiy - ixjy
-                                v_ixkz -= goutxz;
-                                v_iykx -= goutyx;
-                                v_iykz -= goutyz;
-                                v_izkx -= goutzx;
-                                v_izky -= goutzy;
-                                v_jxky -= goutyx; // jxky = -jxiy - jxjy
-                                v_jxkz -= goutzx;
-                                v_jykx -= goutxy;
-                                v_jykz -= goutzy;
-                                v_jzkx -= goutxz;
-                                v_jzky -= goutyz;
-
+                                v1xx += f3x * prod_yz;
+                                v1yy += f3y * prod_xz;
+                                v1zz += f3z * prod_xy;
+                                v1xy += fix * fjy * Iz_d;
+                                v1xz += fix * fjz * Iy_d;
+                                v1yx += fiy * fjx * Iz_d;
+                                v1yz += fiy * fjz * Ix_d;
+                                v1zx += fiz * fjx * Iy_d;
+                                v1zy += fiz * fjy * Ix_d;
                                 double xjxi = rjri[0*nsp];
                                 double yjyi = rjri[1*nsp];
                                 double zjzi = rjri[2*nsp];
@@ -393,30 +357,12 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                                 if (jx > 1) { f3x += jx*(jx-1) * gx[addrx-j_1*2]; }
                                 if (jy > 1) { f3y += jy*(jy-1) * gx[addry-j_1*2]; }
                                 if (jz > 1) { f3z += jz*(jz-1) * gx[addrz-j_1*2]; }
-                                fkkx += f3x;
-                                fkky += f3y;
-                                fkkz += f3z;
-                                goutx = f3x * prod_yz;
-                                gouty = f3y * prod_xz;
-                                goutz = f3z * prod_xy;
-                                v_jxx += goutx;
-                                v_jyy += gouty;
-                                v_jzz += goutz;
-                                v_jxkx -= goutx; // jxjx in jxkx = -jxix - jxjx
-                                v_jyky -= gouty;
-                                v_jzkz -= goutz;
-                                goutz = fjx * fjy * Iz_d;
-                                gouty = fjx * fjz * Iy_d;
-                                goutx = fjy * fjz * Ix_d;
-                                v_jxy += goutz;
-                                v_jxz += gouty;
-                                v_jyz += goutx;
-                                v_jxky -= goutz; // ixky = -ixiy - ixjy
-                                v_jxkz -= gouty;
-                                v_jykx -= goutz;
-                                v_jykz -= goutx;
-                                v_jzkx -= gouty;
-                                v_jzky -= goutx;
+                                v_jxx += f3x * prod_yz;
+                                v_jyy += f3y * prod_xz;
+                                v_jzz += f3z * prod_xy;
+                                v_jxy += fjx * fjy * Iz_d;
+                                v_jxz += fjx * fjz * Iy_d;
+                                v_jyz += fjy * fjz * Ix_d;
 
                                 _gx_inc2 = gijx + gix * xjxi;
                                 _gy_inc2 = gijy + giy * yjyi;
@@ -427,46 +373,63 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                                 if (ix > 1) { f3x += ix*(ix-1) * gx[addrx-i_1*2]; }
                                 if (iy > 1) { f3y += iy*(iy-1) * gx[addry-i_1*2]; }
                                 if (iz > 1) { f3z += iz*(iz-1) * gx[addrz-i_1*2]; }
-                                fkkx += f3x;
-                                fkky += f3y;
-                                fkkz += f3z;
-                                goutx = f3x * prod_yz;
-                                gouty = f3y * prod_xz;
-                                goutz = f3z * prod_xy;
-                                v_ixx += goutx;
-                                v_iyy += gouty;
-                                v_izz += goutz;
-                                v_ixkx -= goutx; // ixix in ixkx = -ixix - ixjx
-                                v_iyky -= gouty;
-                                v_izkz -= goutz;
-                                goutz = fix * fiy * Iz_d;
-                                gouty = fix * fiz * Iy_d;
-                                goutx = fiy * fiz * Ix_d;
-                                v_ixy += goutz;
-                                v_ixz += gouty;
-                                v_iyz += goutx;
-                                v_ixky -= goutz; // ixky = -ixiy - ixjy
-                                v_ixkz -= gouty;
-                                v_iykx -= goutz;
-                                v_iykz -= goutx;
-                                v_izkx -= gouty;
-                                v_izky -= goutx;
-
-                                double fkx = -fix - fjx;
-                                double fky = -fiy - fjy;
-                                double fkz = -fiz - fjz;
-                                v_kxx += fkkx * prod_yz;
-                                v_kyy += fkky * prod_xz;
-                                v_kzz += fkkz * prod_xy;
-                                v_kxy += fkx * fky * Iz_d;
-                                v_kxz += fkx * fkz * Iy_d;
-                                v_kyz += fky * fkz * Ix_d;
+                                v_ixx += f3x * prod_yz;
+                                v_iyy += f3y * prod_xz;
+                                v_izz += f3z * prod_xy;
+                                v_ixy += fix * fiy * Iz_d;
+                                v_ixz += fix * fiz * Iy_d;
+                                v_iyz += fiy * fiz * Ix_d;
                             }
                         }
                     }
                 }
             }
             if (pair_ij < shl_pair1 && kidx < ksh1) {
+                out_ixx += v_ixx;
+                out_ixy += v_ixy;
+                out_ixz += v_ixz;
+                out_iyy += v_iyy;
+                out_iyz += v_iyz;
+                out_izz += v_izz;
+                out_jxx += v_jxx;
+                out_jxy += v_jxy;
+                out_jxz += v_jxz;
+                out_jyy += v_jyy;
+                out_jyz += v_jyz;
+                out_jzz += v_jzz;
+                out_x_x += v1xx;
+                out_x_y += v1xy;
+                out_x_z += v1xz;
+                out_y_x += v1yx;
+                out_y_y += v1yy;
+                out_y_z += v1yz;
+                out_z_x += v1zx;
+                out_z_y += v1zy;
+                out_z_z += v1zz;
+                double v_kxx = v_ixx + v_jxx + 2 * v1xx;
+                double v_kyy = v_iyy + v_jyy + 2 * v1yy;
+                double v_kzz = v_izz + v_jzz + 2 * v1zz;
+                double v_kxy = v_ixy + v_jxy + v1xy + v1yx;
+                double v_kxz = v_ixz + v_jxz + v1xz + v1zx;
+                double v_kyz = v_iyz + v_jyz + v1yz + v1zy;
+                double v_ixkx = -v1xx - v_ixx; // = -ixix - ixjx
+                double v_iyky = -v1yy - v_iyy;
+                double v_izkz = -v1zz - v_izz;
+                double v_ixky = -v1xy - v_ixy; // = -ixiy - ixjy
+                double v_ixkz = -v1xz - v_ixz;
+                double v_iykx = -v1yx - v_ixy;
+                double v_iykz = -v1yz - v_iyz;
+                double v_izkx = -v1zx - v_ixz;
+                double v_izky = -v1zy - v_iyz;
+                double v_jxkx = -v1xx - v_jxx; // = -jxix - jxjx
+                double v_jyky = -v1yy - v_jyy;
+                double v_jzkz = -v1zz - v_jzz;
+                double v_jxky = -v1yx - v_jxy; // = -jxiy - jxjy
+                double v_jxkz = -v1zx - v_jxz;
+                double v_jykx = -v1xy - v_jxy;
+                double v_jykz = -v1zy - v_jyz;
+                double v_jzkx = -v1xz - v_jxz;
+                double v_jzky = -v1yz - v_jyz;
                 int ia = bas[ish*BAS_SLOTS+ATOM_OF];
                 int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
@@ -502,27 +465,27 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
             int ia = bas[ish*BAS_SLOTS+ATOM_OF];
             int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
             int natm = envs.natm;
-            atomicAdd(ejk + (ia*natm+ja)*9 + 0, v1xx);
-            atomicAdd(ejk + (ia*natm+ja)*9 + 1, v1xy);
-            atomicAdd(ejk + (ia*natm+ja)*9 + 2, v1xz);
-            atomicAdd(ejk + (ia*natm+ja)*9 + 3, v1yx);
-            atomicAdd(ejk + (ia*natm+ja)*9 + 4, v1yy);
-            atomicAdd(ejk + (ia*natm+ja)*9 + 5, v1yz);
-            atomicAdd(ejk + (ia*natm+ja)*9 + 6, v1zx);
-            atomicAdd(ejk + (ia*natm+ja)*9 + 7, v1zy);
-            atomicAdd(ejk + (ia*natm+ja)*9 + 8, v1zz);
-            atomicAdd(ejk + (ia*natm+ia)*9 + 0, v_ixx*.5);
-            atomicAdd(ejk + (ia*natm+ia)*9 + 3, v_ixy);
-            atomicAdd(ejk + (ia*natm+ia)*9 + 4, v_iyy*.5);
-            atomicAdd(ejk + (ia*natm+ia)*9 + 6, v_ixz);
-            atomicAdd(ejk + (ia*natm+ia)*9 + 7, v_iyz);
-            atomicAdd(ejk + (ia*natm+ia)*9 + 8, v_izz*.5);
-            atomicAdd(ejk + (ja*natm+ja)*9 + 0, v_jxx*.5);
-            atomicAdd(ejk + (ja*natm+ja)*9 + 3, v_jxy);
-            atomicAdd(ejk + (ja*natm+ja)*9 + 4, v_jyy*.5);
-            atomicAdd(ejk + (ja*natm+ja)*9 + 6, v_jxz);
-            atomicAdd(ejk + (ja*natm+ja)*9 + 7, v_jyz);
-            atomicAdd(ejk + (ja*natm+ja)*9 + 8, v_jzz*.5);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 0, out_x_x);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 1, out_x_y);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 2, out_x_z);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 3, out_y_x);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 4, out_y_y);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 5, out_y_z);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 6, out_z_x);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 7, out_z_y);
+            atomicAdd(ejk + (ia*natm+ja)*9 + 8, out_z_z);
+            atomicAdd(ejk + (ia*natm+ia)*9 + 0, out_ixx*.5);
+            atomicAdd(ejk + (ia*natm+ia)*9 + 3, out_ixy);
+            atomicAdd(ejk + (ia*natm+ia)*9 + 4, out_iyy*.5);
+            atomicAdd(ejk + (ia*natm+ia)*9 + 6, out_ixz);
+            atomicAdd(ejk + (ia*natm+ia)*9 + 7, out_iyz);
+            atomicAdd(ejk + (ia*natm+ia)*9 + 8, out_izz*.5);
+            atomicAdd(ejk + (ja*natm+ja)*9 + 0, out_jxx*.5);
+            atomicAdd(ejk + (ja*natm+ja)*9 + 3, out_jxy);
+            atomicAdd(ejk + (ja*natm+ja)*9 + 4, out_jyy*.5);
+            atomicAdd(ejk + (ja*natm+ja)*9 + 6, out_jxz);
+            atomicAdd(ejk + (ja*natm+ja)*9 + 7, out_jyz);
+            atomicAdd(ejk + (ja*natm+ja)*9 + 8, out_jzz*.5);
         }
     }
 }
@@ -535,9 +498,9 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int aux_offset, int naux)
 {
-    cudaFuncSetAttribute(ejk_int3c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(ejk_int3c2e_ipip_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    ejk_int3c2e_ip2_kernel<<<blocks, THREADS, shm_size>>>(
+    ejk_int3c2e_ipip_kernel<<<blocks, THREADS, shm_size>>>(
             ejk, dm, density_auxvec, omega, lr_factor, sr_factor, *envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, naux);
