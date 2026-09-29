@@ -131,8 +131,10 @@ def test_shifted_jk_derivatives(cell, method, unrestricted):
         mydf = df.GDF(cell, kpts) if method == 'gdf' else df.AFTDF(cell, kpts)
         if method == 'gdf':
             mydf.auxbasis = 'weigend'
-        vj, _ = mydf.get_jk(dm_sf, kpts=kpts, with_k=False)
+        # Build K first: older PySCF versions do not rebuild J-only GDF
+        # integrals to include the off-diagonal k-point pairs needed by K.
         _, vk = mydf.get_jk(dm, kpts=kpts, with_j=False, exxdiv=None)
+        vj, _ = mydf.get_jk(dm_sf, kpts=kpts, with_k=False)
         ej = np.einsum('kij,kji->', dm_sf, vj).real
         ek = np.einsum('skij,skji->', dm.reshape(-1, len(kpts), cell.nao, cell.nao),
                        vk.reshape(-1, len(kpts), cell.nao, cell.nao)).real
