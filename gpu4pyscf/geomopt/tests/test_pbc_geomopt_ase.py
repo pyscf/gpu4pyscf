@@ -82,12 +82,13 @@ def test_pbc_optimizer_freezes_automatic_mesh():
         basis='gth-szv', pseudo='gth-pade', precision=1e-8, verbose=0)
     mesh = np.asarray(cell.mesh).copy()
     assert cell._mesh_from_build
+    cell.mesh = [7] * 3
 
     method = _FakeMethod(cell)
     _, optimized_cell = ase_solver.kernel(method, max_steps=0)
 
     assert not cell._mesh_from_build
-    np.testing.assert_array_equal(method._geomopt_mesh, mesh)
+    np.testing.assert_array_equal(method.mesh, mesh)
     np.testing.assert_array_equal(cell.mesh, mesh)
     np.testing.assert_array_equal(optimized_cell.mesh, mesh)
 

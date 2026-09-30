@@ -61,6 +61,9 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
     else:
         raise RuntimeError(f'{method} not supported')
     is_pbc = isinstance(cell, gto.Cell)
+    if is_pbc:
+        from gpu4pyscf.pbc.tools.discretization import freeze_mesh
+        freeze_mesh(method)
 
     atoms = pyscf_to_ase_atoms(cell)
     calculator = PySCF(method=method)
@@ -89,8 +92,6 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
         atoms = atoms.atoms
     if is_pbc:
         cell = cell.set_geom_(atoms.get_positions(), unit='Ang', a=atoms.cell, inplace=False)
-        method._geomopt_mesh = calculator.mesh
-        cell._geomopt_mesh = calculator.mesh
     else:
         cell = cell.set_geom_(atoms.get_positions(), unit='Ang', inplace=False)
 
