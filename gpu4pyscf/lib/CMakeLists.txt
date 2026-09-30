@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
+cmake_minimum_required (VERSION 3.21 FATAL_ERROR) # Required by Libxc 7.1.2
 project (gpu4pyscf C CXX CUDA Fortran)
 
 set(CMAKE_C_STANDARD "99")
@@ -143,18 +143,15 @@ option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   include(ExternalProject)
   ExternalProject_Add(libxc
-    GIT_REPOSITORY https://github.com/wxj6000/libxc.git
-    GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
-    PATCH_COMMAND git apply --reject ${PROJECT_SOURCE_DIR}/libxc_prune.patch || true
+    URL https://gitlab.com/libxc/libxc/-/archive/7.1.2/libxc-7.1.2.tar.gz
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
     CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-            -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
+            -DBUILD_TESTING=OFF -DENABLE_FORTRAN=OFF
+            -DMAXORDER=3 -DDISABLE_FHC=ON
             -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
             -DCMAKE_INSTALL_LIBDIR:PATH=lib
             -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-            -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
     CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
   )
 endif()

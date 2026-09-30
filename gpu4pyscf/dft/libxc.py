@@ -22,7 +22,7 @@ from ctypes import POINTER
 # Note: gpu4pyscf relies on pyscf.dft.libxc for parsing XC functionals (e.g. parse_xc),
 # which uses pyscf.scf.dispersion.parse_dft. The local gpu4pyscf.scf.dispersion.parse_dft is not used here.
 from pyscf.dft import libxc as libxc_cpu
-from gpu4pyscf.dft.libxc_structs import xc_func_type, xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
+from gpu4pyscf.dft.libxc_structs import xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.dft import libxc_structs
 
@@ -86,7 +86,14 @@ if _libxc is None:
     )
 
 _libxc.xc_version_string.restype = ctypes.c_char_p
-__version__ = _libxc.xc_version_string().decode() + ' (CUDA)'
+_libxc_version = _libxc.xc_version_string().decode()
+__version__ = _libxc_version + ' (CUDA)'
+# The packaged 7.0.0 fork inserts params_size before the four thresholds.
+# Select the layout before binding xc_func_alloc and the other C functions.
+if _libxc_version == '7.0.0':
+    xc_func_type = libxc_structs.xc_func_type_700
+else:
+    xc_func_type = libxc_structs.xc_func_type
 
 LDA_OUTPUT_LABELS = [
                 "zk",       # 1, 1
@@ -337,4 +344,3 @@ class XCfun:
             raise KeyError(f"Functional kind {self._family} not supported")
 
         return {k: v[0] for k, v in output.items() if v is not None}
-
