@@ -66,7 +66,7 @@ class KnownValues(unittest.TestCase):
         mf.rsjk = PBCJKMatrixOpt(cell).build()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
-        mf_scanner = cell.RHF().as_scanner()
+        mf_scanner = cell.RHF().to_gpu().as_scanner()
         _check_vs_finite_diff(dat, mf_scanner)
 
     def test_gdf_rhf_vs_finite_difference(self):
