@@ -260,13 +260,26 @@ class UniformGrids(lib.StreamObject):
         self.cell = cell
         self.stdout = cell.stdout
         self.verbose = cell.verbose
-        self.mesh = cell.mesh
+        self._mesh = None
         self.non0tab = None
         self._coords = None
         self._weights = None
 
         # Storing the coords[0:3], weight, rho[0:5], exc, vxc[0:5], will take 128^3 * 15 * 8 bytes = 0.25 GB
         self.max_grid_mesh_block = [128] * 3
+
+    @property
+    def mesh(self):
+        # Follow the current cell unless a grid mesh was explicitly assigned.
+        if self._mesh is None:
+            return self.cell.mesh
+        return self._mesh
+    @mesh.setter
+    def mesh(self, value):
+        self._mesh = value
+        self.non0tab = None
+        self._coords = None
+        self._weights = None
 
     def reset(self, cell=None):
         if cell is not None:
