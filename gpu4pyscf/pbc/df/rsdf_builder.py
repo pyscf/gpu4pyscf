@@ -265,7 +265,7 @@ def _guess_omega(cell, kmesh=None):
     '''Guess optimal omega parameter for int3c2e'''
     #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
     #omega = cell_exps.min()**.5
-    omega = 0.3
+    omega = 0.4
     # SR cost ~= nkpts * naux * npairs * sparsity_factor
     # LR cost ~= nkpts * naux*nGv*npairs
     # sparsity_factor depends on nkpts and omega, reduced omega leads to
@@ -367,7 +367,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
 
-    log.debug('Generate auxcell 2c2e integrals')
+    log.debug('Generate auxcell 2c2e integrals. naux=%d', auxcell.nao)
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
         auxcell, None, omega, rsdf_omega, linear_dep_threshold)
     naux_cart, naux = cd_j2c_cache[0].shape
@@ -421,7 +421,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     ao_pair_counts = int3c2e._count_ao_pairs(cell, bas_ij_batches, cart, bvk_ncells)
     max_pair_size = int(max(ao_pair_counts, default=0))
 
-    log.info('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
+    log.info('Requires %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
     cderi = empty_mapped((naux, nao_pairs))
     cderi.fill(0.)
 
@@ -553,7 +553,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     rsdf_omega = int3c2e_opt.omega
     log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
 
-    log.debug('Generate auxcell 2c2e integrals')
+    log.debug('Generate auxcell 2c2e integrals. naux=%d', auxcell.nao)
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
         auxcell, kpts, omega, rsdf_omega, linear_dep_threshold, kmesh)
     naux_cart = cd_j2c_cache[0].shape[0]
@@ -577,7 +577,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     mem_free -= ngrids * naux_cart * 16 * nkpts # auxG_conj
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(n_compact_pairs+1, int(mem_free*0.7)//(bvk_ncells*naux_cart*16*4))
+    # Per-pair storage for work0 (complex k-space integrals) and work1
+    # (real-space integrals / metric contraction).
+    pair_bytes = naux_cart * (nkpts*16 + max(2, bvk_ncells)*8)
+    batch_size = min(n_compact_pairs+1, int(mem_free*0.9)//pair_bytes)
     log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
     if batch_size < 1:
         raise RuntimeError('Insufficient GPU memory')
@@ -608,7 +611,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
               nao_pairs, n_compact_pairs, max_pair_size)
 
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
-    log.info('Required %.6g GB mapped memory on host',
+    log.info('Requires %.6g GB mapped memory on host',
              len(cd_j2c_cache)*naux_max*nao_pairs*16e-9)
     cderi = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
@@ -648,28 +651,30 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         auxG_conj.imag *= -1
         auxG_conj *= cp.asarray(coulG)
 
-        avail_mem = mem_free - max_pair_size*max(2, bvk_ncells)*naux_cart*8 # buf1
-        avail_mem -= max_pair_size * nkpts*naux_cart*16 # buf0
-        Gblksize = int(avail_mem//(16*(max_pair_size+naux_cart*2))) // 32 * 32
+        avail_mem = mem_free - max_pair_size*nkpts*naux_cart*16 # work0
+        work1_size = max_pair_size*max(2, bvk_ncells)*naux_cart
+        # work1 holds either the SR/metric tensors or pqG. Retain the
+        # auxiliary workspace allowance for both possible buffer sizes.
+        Gblksize = int(min((avail_mem-work1_size*8)//(naux_cart*32),
+                          avail_mem//(16*(max_pair_size+naux_cart*2)))) // 32 * 32
         if Gblksize <= 0:
             raise RuntimeError('Insufficient GPU memory')
         Gblksize = min(Gblksize, ngrids)
         log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
                    ngrids, Gblksize, naux_max, batch_size)
-        buf0 = cp.empty(nkpts*max_pair_size*naux_cart, dtype=np.complex128)
-        buf1 = cp.empty(max_pair_size*max(2, bvk_ncells)*naux_cart)
-        buf2 = cp.empty(max_pair_size*Gblksize, dtype=np.complex128)
+        work0 = cp.empty(nkpts*max_pair_size*naux_cart, dtype=np.complex128)
+        work1 = cp.empty(max(work1_size, max_pair_size*Gblksize*2))
         write_buf = empty_mapped(max_pair_size*naux_max, dtype=np.complex128)
         write_buf1 = empty_mapped(max_pair_size*naux_max, dtype=np.complex128)
         future = None
         for batch_id in tasks:
             log.debug1('batch %d/%d', batch_id+1, shl_pair_batches)
-            j3c = eval_j3c(shl_pair_batch_id=batch_id, out=buf1)
+            j3c = eval_j3c(shl_pair_batch_id=batch_id, out=work1)
             if j3c.size == 0:
                 continue
 
             pair_size = j3c.shape[0]
-            j3c_buf = ndarray((nkpts, pair_size, naux_cart, 2), buffer=buf0)
+            j3c_buf = ndarray((nkpts, pair_size, naux_cart, 2), buffer=work0)
             j3c = contract('pLr,LKz->Kprz', j3c, expLk_conjz, out=j3c_buf)
             j3c = j3c.view(np.complex128)[:,:,:,0]
             t1 = log.timer_debug1(f'sr int3c2e on Device {device_id}', *t1)
@@ -677,7 +682,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 for p0, p1 in lib.prange(0, ngrids, Gblksize):
                     auxG_c = auxG_conj[:,j2c_idx,p0:p1]
-                    pqG = eval_ft(Gv[p0:p1] + kpts[kp], batch_id, out=buf2)
+                    pqG = eval_ft(Gv[p0:p1] + kpts[kp], batch_id, out=work1)
                     # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
                     # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
                     # are assumed to be real
@@ -685,7 +690,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
 
                 aux_coeff = cp.asarray(cd_j2c_cache[j2c_idx]) # at -(kj-ki)
                 naux = aux_coeff.shape[1]
-                cderi_k = ndarray((pair_size, naux), dtype=np.complex128, buffer=buf1)
+                cderi_k = ndarray((pair_size, naux), dtype=np.complex128, buffer=work1)
                 cderi_k = j3c[j2c_idx].dot(aux_coeff, out=cderi_k)
                 host_j3c = np.ndarray((pair_size, naux), dtype=np.complex128, buffer=write_buf)
                 cderi_k.get(out=host_j3c)
@@ -987,7 +992,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
     # Guess range-separation parameter based on system size
-    omega = 0.3
+    omega = 0.4
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
     mesh = cell.cutoff_to_mesh(ke_cutoff)
     nGv = np.prod(mesh)
