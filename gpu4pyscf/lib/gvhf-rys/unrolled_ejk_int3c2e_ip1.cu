@@ -42,12 +42,12 @@ void int3c2e_ip1_000(KERNEL_ARGS)
     double *rjri = shared_memory + sp_id;
     double *rw = shared_memory + BLOCK_SIZE * 4 + thread_id;
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += BLOCK_SIZE) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
+        double grad_jx = 0;
+        double grad_jy = 0;
+        double grad_jz = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -105,16 +105,18 @@ void int3c2e_ip1_000(KERNEL_ARGS)
                     }
                 }
             }
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
+            double v_jx = 0;
+            double v_jy = 0;
+            double v_jz = 0;
             double prod_xy;
             double prod_xz;
             double prod_yz;
             double Ix, Iy, Iz;
             double fxi, fyi, fzi;
             double fxj, fyj, fzj;
-            double fxk, fyk, fzk;
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -133,7 +135,6 @@ void int3c2e_ip1_000(KERNEL_ARGS)
                 double ak = expk[kp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
-                double ak2 = ak * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
@@ -198,40 +199,36 @@ void int3c2e_ip1_000(KERNEL_ARGS)
                         double hrr_010z = trr_10z - zjzi * wt;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double rt_ak = rt_aa * aij;
-                        double cpx = xpq*rt_ak;
-                        double trr_01x = cpx * 1;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        double cpy = ypq*rt_ak;
-                        double trr_01y = cpy * fac1;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double cpz = zpq*rt_ak;
-                        double trr_01z = cpz * wt;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                     }
                 }
             }
             if (ejk_aux != NULL) {
-                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
+                    int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
+                    double v_kx = -v_ix - v_jx;
+                    double v_ky = -v_iy - v_jy;
+                    double v_kz = -v_iz - v_jz;
                     atomicAdd(ejk_aux+ka*3+0, v_kx);
                     atomicAdd(ejk_aux+ka*3+1, v_ky);
                     atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
+            grad_jx += v_jx;
+            grad_jy += v_jy;
+            grad_jz += v_jz;
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix);
-            atomicAdd(ejk+ia*3+1, v_iy);
-            atomicAdd(ejk+ia*3+2, v_iz);
-            atomicAdd(ejk+ja*3+0, v_jx);
-            atomicAdd(ejk+ja*3+1, v_jy);
-            atomicAdd(ejk+ja*3+2, v_jz);
+            atomicAdd(ejk+ia*3+0, grad_ix);
+            atomicAdd(ejk+ia*3+1, grad_iy);
+            atomicAdd(ejk+ia*3+2, grad_iz);
+            atomicAdd(ejk+ja*3+0, grad_jx);
+            atomicAdd(ejk+ja*3+1, grad_jy);
+            atomicAdd(ejk+ja*3+2, grad_jz);
         }
     }
 }
@@ -253,12 +250,12 @@ void int3c2e_ip1_100(KERNEL_ARGS)
     double *rjri = shared_memory + sp_id;
     double *rw = shared_memory + BLOCK_SIZE * 4 + thread_id;
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += BLOCK_SIZE) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
+        double grad_jx = 0;
+        double grad_jy = 0;
+        double grad_jz = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -316,16 +313,18 @@ void int3c2e_ip1_100(KERNEL_ARGS)
                     }
                 }
             }
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
+            double v_jx = 0;
+            double v_jy = 0;
+            double v_jz = 0;
             double prod_xy;
             double prod_xz;
             double prod_yz;
             double Ix, Iy, Iz;
             double fxi, fyi, fzi;
             double fxj, fyj, fzj;
-            double fxk, fyk, fzk;
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -344,7 +343,6 @@ void int3c2e_ip1_100(KERNEL_ARGS)
                 double ak = expk[kp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
-                double ak2 = ak * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
@@ -381,7 +379,6 @@ void int3c2e_ip1_100(KERNEL_ARGS)
                         double wt = rw[(2*irys+1)*nst_per_block];
                         double rt = rw[ 2*irys   *nst_per_block];
                         double rt_aa = rt / (aij + ak);
-                        double b00 = .5 * rt_aa;
                         double rt_aij = rt_aa * ak;
                         double b10 = .5/aij * (1 - rt_aij);
                         double c0x = xjxi * aj_aij - xpq*rt_aij;
@@ -413,19 +410,6 @@ void int3c2e_ip1_100(KERNEL_ARGS)
                         double hrr_010z = trr_10z - zjzi * wt;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double rt_ak = rt_aa * aij;
-                        double cpx = xpq*rt_ak;
-                        double trr_11x = cpx * trr_10x + 1*b00 * 1;
-                        fxk = ak2 * trr_11x;
-                        v_kx += fxk * prod_yz;
-                        double cpy = ypq*rt_ak;
-                        double trr_01y = cpy * fac1;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double cpz = zpq*rt_ak;
-                        double trr_01z = cpz * wt;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_10y;
                         Iz = wt;
@@ -448,14 +432,6 @@ void int3c2e_ip1_100(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double trr_01x = cpx * 1;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        double trr_11y = cpy * trr_10y + 1*b00 * fac1;
-                        fyk = ak2 * trr_11y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = fac1;
                         Iz = trr_10z;
@@ -477,34 +453,36 @@ void int3c2e_ip1_100(KERNEL_ARGS)
                         double hrr_110z = trr_20z - zjzi * trr_10z;
                         fzj = aj2 * hrr_110z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                        fzk = ak2 * trr_11z;
-                        v_kz += fzk * prod_xy;
                     }
                 }
             }
             if (ejk_aux != NULL) {
-                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
+                    int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
+                    double v_kx = -v_ix - v_jx;
+                    double v_ky = -v_iy - v_jy;
+                    double v_kz = -v_iz - v_jz;
                     atomicAdd(ejk_aux+ka*3+0, v_kx);
                     atomicAdd(ejk_aux+ka*3+1, v_ky);
                     atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
+            grad_jx += v_jx;
+            grad_jy += v_jy;
+            grad_jz += v_jz;
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix);
-            atomicAdd(ejk+ia*3+1, v_iy);
-            atomicAdd(ejk+ia*3+2, v_iz);
-            atomicAdd(ejk+ja*3+0, v_jx);
-            atomicAdd(ejk+ja*3+1, v_jy);
-            atomicAdd(ejk+ja*3+2, v_jz);
+            atomicAdd(ejk+ia*3+0, grad_ix);
+            atomicAdd(ejk+ia*3+1, grad_iy);
+            atomicAdd(ejk+ia*3+2, grad_iz);
+            atomicAdd(ejk+ja*3+0, grad_jx);
+            atomicAdd(ejk+ja*3+1, grad_jy);
+            atomicAdd(ejk+ja*3+2, grad_jz);
         }
     }
 }
@@ -526,12 +504,12 @@ void int3c2e_ip1_110(KERNEL_ARGS)
     double *rjri = shared_memory + sp_id;
     double *rw = shared_memory + BLOCK_SIZE * 4 + thread_id;
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += BLOCK_SIZE) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
+        double grad_jx = 0;
+        double grad_jy = 0;
+        double grad_jz = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -589,16 +567,18 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                     }
                 }
             }
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
+            double v_jx = 0;
+            double v_jy = 0;
+            double v_jz = 0;
             double prod_xy;
             double prod_xz;
             double prod_yz;
             double Ix, Iy, Iz;
             double fxi, fyi, fzi;
             double fxj, fyj, fzj;
-            double fxk, fyk, fzk;
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -617,7 +597,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                 double ak = expk[kp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
-                double ak2 = ak * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
@@ -654,7 +633,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         double wt = rw[(2*irys+1)*nst_per_block];
                         double rt = rw[ 2*irys   *nst_per_block];
                         double rt_aa = rt / (aij + ak);
-                        double b00 = .5 * rt_aa;
                         double rt_aij = rt_aa * ak;
                         double b10 = .5/aij * (1 - rt_aij);
                         double c0x = xjxi * aj_aij - xpq*rt_aij;
@@ -691,21 +669,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         double hrr_010z = trr_10z - zjzi * wt;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double rt_ak = rt_aa * aij;
-                        double cpx = xpq*rt_ak;
-                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
-                        double trr_11x = cpx * trr_10x + 1*b00 * 1;
-                        double hrr_111x = trr_21x - xjxi * trr_11x;
-                        fxk = ak2 * hrr_111x;
-                        v_kx += fxk * prod_yz;
-                        double cpy = ypq*rt_ak;
-                        double trr_01y = cpy * fac1;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double cpz = zpq*rt_ak;
-                        double trr_01z = cpz * wt;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = hrr_010x;
                         Iy = trr_10y;
                         Iz = wt;
@@ -729,15 +692,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double trr_01x = cpx * 1;
-                        double hrr_011x = trr_11x - xjxi * trr_01x;
-                        fxk = ak2 * hrr_011x;
-                        v_kx += fxk * prod_yz;
-                        double trr_11y = cpy * trr_10y + 1*b00 * fac1;
-                        fyk = ak2 * trr_11y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = hrr_010x;
                         Iy = fac1;
                         Iz = trr_10z;
@@ -760,13 +714,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         double hrr_110z = trr_20z - zjzi * trr_10z;
                         fzj = aj2 * hrr_110z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * hrr_011x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                        fzk = ak2 * trr_11z;
-                        v_kz += fzk * prod_xy;
                         Ix = trr_10x;
                         Iy = hrr_010y;
                         Iz = wt;
@@ -788,13 +735,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_11x;
-                        v_kx += fxk * prod_yz;
-                        double hrr_011y = trr_11y - yjyi * trr_01y;
-                        fyk = ak2 * hrr_011y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = hrr_110y;
                         Iz = wt;
@@ -818,14 +758,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                        double hrr_111y = trr_21y - yjyi * trr_11y;
-                        fyk = ak2 * hrr_111y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = hrr_010y;
                         Iz = trr_10z;
@@ -846,12 +778,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_110z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * hrr_011y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_11z;
-                        v_kz += fzk * prod_xy;
                         Ix = trr_10x;
                         Iy = fac1;
                         Iz = hrr_010z;
@@ -873,13 +799,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         fzj = aj2 * hrr_020z;
                         fzj -= 1 * wt;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_11x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double hrr_011z = trr_11z - zjzi * trr_01z;
-                        fzk = ak2 * hrr_011z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_10y;
                         Iz = hrr_010z;
@@ -900,12 +819,6 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         fzj = aj2 * hrr_020z;
                         fzj -= 1 * wt;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_11y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * hrr_011z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = fac1;
                         Iz = hrr_110z;
@@ -929,35 +842,36 @@ void int3c2e_ip1_110(KERNEL_ARGS)
                         fzj = aj2 * hrr_120z;
                         fzj -= 1 * trr_10z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                        double hrr_111z = trr_21z - zjzi * trr_11z;
-                        fzk = ak2 * hrr_111z;
-                        v_kz += fzk * prod_xy;
                     }
                 }
             }
             if (ejk_aux != NULL) {
-                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
+                    int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
+                    double v_kx = -v_ix - v_jx;
+                    double v_ky = -v_iy - v_jy;
+                    double v_kz = -v_iz - v_jz;
                     atomicAdd(ejk_aux+ka*3+0, v_kx);
                     atomicAdd(ejk_aux+ka*3+1, v_ky);
                     atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
+            grad_jx += v_jx;
+            grad_jy += v_jy;
+            grad_jz += v_jz;
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix);
-            atomicAdd(ejk+ia*3+1, v_iy);
-            atomicAdd(ejk+ia*3+2, v_iz);
-            atomicAdd(ejk+ja*3+0, v_jx);
-            atomicAdd(ejk+ja*3+1, v_jy);
-            atomicAdd(ejk+ja*3+2, v_jz);
+            atomicAdd(ejk+ia*3+0, grad_ix);
+            atomicAdd(ejk+ia*3+1, grad_iy);
+            atomicAdd(ejk+ia*3+2, grad_iz);
+            atomicAdd(ejk+ja*3+0, grad_jx);
+            atomicAdd(ejk+ja*3+1, grad_jy);
+            atomicAdd(ejk+ja*3+2, grad_jz);
         }
     }
 }
@@ -979,12 +893,12 @@ void int3c2e_ip1_200(KERNEL_ARGS)
     double *rjri = shared_memory + sp_id;
     double *rw = shared_memory + BLOCK_SIZE * 4 + thread_id;
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += BLOCK_SIZE) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
+        double grad_jx = 0;
+        double grad_jy = 0;
+        double grad_jz = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -1042,16 +956,18 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                     }
                 }
             }
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
+            double v_jx = 0;
+            double v_jy = 0;
+            double v_jz = 0;
             double prod_xy;
             double prod_xz;
             double prod_yz;
             double Ix, Iy, Iz;
             double fxi, fyi, fzi;
             double fxj, fyj, fzj;
-            double fxk, fyk, fzk;
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -1070,7 +986,6 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                 double ak = expk[kp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
-                double ak2 = ak * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
@@ -1107,7 +1022,6 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                         double wt = rw[(2*irys+1)*nst_per_block];
                         double rt = rw[ 2*irys   *nst_per_block];
                         double rt_aa = rt / (aij + ak);
-                        double b00 = .5 * rt_aa;
                         double rt_aij = rt_aa * ak;
                         double b10 = .5/aij * (1 - rt_aij);
                         double c0x = xjxi * aj_aij - xpq*rt_aij;
@@ -1140,19 +1054,6 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                         double hrr_010z = trr_10z - zjzi * wt;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double rt_ak = rt_aa * aij;
-                        double cpx = xpq*rt_ak;
-                        double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
-                        fxk = ak2 * trr_21x;
-                        v_kx += fxk * prod_yz;
-                        double cpy = ypq*rt_ak;
-                        double trr_01y = cpy * fac1;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double cpz = zpq*rt_ak;
-                        double trr_01z = cpz * wt;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = trr_10x;
                         Iy = trr_10y;
                         Iz = wt;
@@ -1176,14 +1077,6 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double trr_11x = cpx * trr_10x + 1*b00 * 1;
-                        fxk = ak2 * trr_11x;
-                        v_kx += fxk * prod_yz;
-                        double trr_11y = cpy * trr_10y + 1*b00 * fac1;
-                        fyk = ak2 * trr_11y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = trr_10x;
                         Iy = fac1;
                         Iz = trr_10z;
@@ -1206,13 +1099,6 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                         double hrr_110z = trr_20z - zjzi * trr_10z;
                         fzj = aj2 * hrr_110z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_11x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                        fzk = ak2 * trr_11z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_20y;
                         Iz = wt;
@@ -1235,14 +1121,6 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double trr_01x = cpx * 1;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                        fyk = ak2 * trr_21y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_10y;
                         Iz = trr_10z;
@@ -1263,12 +1141,6 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_110z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_11y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_11z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = fac1;
                         Iz = trr_20z;
@@ -1290,34 +1162,36 @@ void int3c2e_ip1_200(KERNEL_ARGS)
                         double hrr_210z = trr_30z - zjzi * trr_20z;
                         fzj = aj2 * hrr_210z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                        fzk = ak2 * trr_21z;
-                        v_kz += fzk * prod_xy;
                     }
                 }
             }
             if (ejk_aux != NULL) {
-                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
+                    int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
+                    double v_kx = -v_ix - v_jx;
+                    double v_ky = -v_iy - v_jy;
+                    double v_kz = -v_iz - v_jz;
                     atomicAdd(ejk_aux+ka*3+0, v_kx);
                     atomicAdd(ejk_aux+ka*3+1, v_ky);
                     atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
+            grad_jx += v_jx;
+            grad_jy += v_jy;
+            grad_jz += v_jz;
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix);
-            atomicAdd(ejk+ia*3+1, v_iy);
-            atomicAdd(ejk+ia*3+2, v_iz);
-            atomicAdd(ejk+ja*3+0, v_jx);
-            atomicAdd(ejk+ja*3+1, v_jy);
-            atomicAdd(ejk+ja*3+2, v_jz);
+            atomicAdd(ejk+ia*3+0, grad_ix);
+            atomicAdd(ejk+ia*3+1, grad_iy);
+            atomicAdd(ejk+ia*3+2, grad_iz);
+            atomicAdd(ejk+ja*3+0, grad_jx);
+            atomicAdd(ejk+ja*3+1, grad_jy);
+            atomicAdd(ejk+ja*3+2, grad_jz);
         }
     }
 }
@@ -1339,12 +1213,12 @@ void int3c2e_ip1_001(KERNEL_ARGS)
     double *rjri = shared_memory + sp_id;
     double *rw = shared_memory + BLOCK_SIZE * 4 + thread_id;
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += BLOCK_SIZE) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
+        double grad_jx = 0;
+        double grad_jy = 0;
+        double grad_jz = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -1402,16 +1276,18 @@ void int3c2e_ip1_001(KERNEL_ARGS)
                     }
                 }
             }
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
+            double v_jx = 0;
+            double v_jy = 0;
+            double v_jz = 0;
             double prod_xy;
             double prod_xz;
             double prod_yz;
             double Ix, Iy, Iz;
             double fxi, fyi, fzi;
             double fxj, fyj, fzj;
-            double fxk, fyk, fzk;
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -1430,7 +1306,6 @@ void int3c2e_ip1_001(KERNEL_ARGS)
                 double ak = expk[kp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
-                double ak2 = ak * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
@@ -1469,7 +1344,6 @@ void int3c2e_ip1_001(KERNEL_ARGS)
                         double rt_aa = rt / (aij + ak);
                         double b00 = .5 * rt_aa;
                         double rt_ak = rt_aa * aij;
-                        double b01 = .5/ak * (1 - rt_ak);
                         double cpx = xpq*rt_ak;
                         double trr_01x = cpx * 1;
                         Ix = trr_01x;
@@ -1501,18 +1375,8 @@ void int3c2e_ip1_001(KERNEL_ARGS)
                         double hrr_010z = trr_10z - zjzi * wt;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double trr_02x = cpx * trr_01x + 1*b01 * 1;
-                        fxk = ak2 * trr_02x;
-                        fxk -= 1 * 1;
-                        v_kx += fxk * prod_yz;
                         double cpy = ypq*rt_ak;
                         double trr_01y = cpy * fac1;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double cpz = zpq*rt_ak;
-                        double trr_01z = cpz * wt;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_01y;
                         Iz = wt;
@@ -1534,14 +1398,8 @@ void int3c2e_ip1_001(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        double trr_02y = cpy * trr_01y + 1*b01 * fac1;
-                        fyk = ak2 * trr_02y;
-                        fyk -= 1 * fac1;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
+                        double cpz = zpq*rt_ak;
+                        double trr_01z = cpz * wt;
                         Ix = 1;
                         Iy = fac1;
                         Iz = trr_01z;
@@ -1562,35 +1420,36 @@ void int3c2e_ip1_001(KERNEL_ARGS)
                         double hrr_011z = trr_11z - zjzi * trr_01z;
                         fzj = aj2 * hrr_011z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                        fzk = ak2 * trr_02z;
-                        fzk -= 1 * wt;
-                        v_kz += fzk * prod_xy;
                     }
                 }
             }
             if (ejk_aux != NULL) {
-                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
+                    int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
+                    double v_kx = -v_ix - v_jx;
+                    double v_ky = -v_iy - v_jy;
+                    double v_kz = -v_iz - v_jz;
                     atomicAdd(ejk_aux+ka*3+0, v_kx);
                     atomicAdd(ejk_aux+ka*3+1, v_ky);
                     atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
+            grad_jx += v_jx;
+            grad_jy += v_jy;
+            grad_jz += v_jz;
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix);
-            atomicAdd(ejk+ia*3+1, v_iy);
-            atomicAdd(ejk+ia*3+2, v_iz);
-            atomicAdd(ejk+ja*3+0, v_jx);
-            atomicAdd(ejk+ja*3+1, v_jy);
-            atomicAdd(ejk+ja*3+2, v_jz);
+            atomicAdd(ejk+ia*3+0, grad_ix);
+            atomicAdd(ejk+ia*3+1, grad_iy);
+            atomicAdd(ejk+ia*3+2, grad_iz);
+            atomicAdd(ejk+ja*3+0, grad_jx);
+            atomicAdd(ejk+ja*3+1, grad_jy);
+            atomicAdd(ejk+ja*3+2, grad_jz);
         }
     }
 }
@@ -1612,12 +1471,12 @@ void int3c2e_ip1_101(KERNEL_ARGS)
     double *rjri = shared_memory + sp_id;
     double *rw = shared_memory + BLOCK_SIZE * 4 + thread_id;
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += BLOCK_SIZE) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
+        double grad_jx = 0;
+        double grad_jy = 0;
+        double grad_jz = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -1675,16 +1534,18 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                     }
                 }
             }
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
+            double v_jx = 0;
+            double v_jy = 0;
+            double v_jz = 0;
             double prod_xy;
             double prod_xz;
             double prod_yz;
             double Ix, Iy, Iz;
             double fxi, fyi, fzi;
             double fxj, fyj, fzj;
-            double fxk, fyk, fzk;
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -1703,7 +1564,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                 double ak = expk[kp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
-                double ak2 = ak * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
@@ -1742,7 +1602,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         double rt_aa = rt / (aij + ak);
                         double b00 = .5 * rt_aa;
                         double rt_ak = rt_aa * aij;
-                        double b01 = .5/ak * (1 - rt_ak);
                         double cpx = xpq*rt_ak;
                         double rt_aij = rt_aa * ak;
                         double b10 = .5/aij * (1 - rt_aij);
@@ -1778,18 +1637,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         double hrr_010z = trr_10z - zjzi * wt;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                        fxk = ak2 * trr_12x;
-                        fxk -= 1 * trr_10x;
-                        v_kx += fxk * prod_yz;
-                        double cpy = ypq*rt_ak;
-                        double trr_01y = cpy * fac1;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double cpz = zpq*rt_ak;
-                        double trr_01z = cpz * wt;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = trr_01x;
                         Iy = trr_10y;
                         Iz = wt;
@@ -1812,15 +1659,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double trr_02x = cpx * trr_01x + 1*b01 * 1;
-                        fxk = ak2 * trr_02x;
-                        fxk -= 1 * 1;
-                        v_kx += fxk * prod_yz;
-                        double trr_11y = cpy * trr_10y + 1*b00 * fac1;
-                        fyk = ak2 * trr_11y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = trr_01x;
                         Iy = fac1;
                         Iz = trr_10z;
@@ -1842,14 +1680,8 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         double hrr_110z = trr_20z - zjzi * trr_10z;
                         fzj = aj2 * hrr_110z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_02x;
-                        fxk -= 1 * 1;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                        fzk = ak2 * trr_11z;
-                        v_kz += fzk * prod_xy;
+                        double cpy = ypq*rt_ak;
+                        double trr_01y = cpy * fac1;
                         Ix = trr_10x;
                         Iy = trr_01y;
                         Iz = wt;
@@ -1859,6 +1691,7 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         fxi = ai2 * trr_20x;
                         fxi -= 1 * 1;
                         v_ix += fxi * prod_yz;
+                        double trr_11y = cpy * trr_10y + 1*b00 * fac1;
                         fyi = ai2 * trr_11y;
                         v_iy += fyi * prod_xz;
                         fzi = ai2 * trr_10z;
@@ -1871,14 +1704,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_11x;
-                        v_kx += fxk * prod_yz;
-                        double trr_02y = cpy * trr_01y + 1*b01 * fac1;
-                        fyk = ak2 * trr_02y;
-                        fyk -= 1 * fac1;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_11y;
                         Iz = wt;
@@ -1901,14 +1726,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                        fyk = ak2 * trr_12y;
-                        fyk -= 1 * trr_10y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_01y;
                         Iz = trr_10z;
@@ -1928,13 +1745,8 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_110z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_02y;
-                        fyk -= 1 * fac1;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_11z;
-                        v_kz += fzk * prod_xy;
+                        double cpz = zpq*rt_ak;
+                        double trr_01z = cpz * wt;
                         Ix = trr_10x;
                         Iy = fac1;
                         Iz = trr_01z;
@@ -1946,6 +1758,7 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         v_ix += fxi * prod_yz;
                         fyi = ai2 * trr_10y;
                         v_iy += fyi * prod_xz;
+                        double trr_11z = cpz * trr_10z + 1*b00 * wt;
                         fzi = ai2 * trr_11z;
                         v_iz += fzi * prod_xy;
                         fxj = aj2 * hrr_110x;
@@ -1955,14 +1768,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         double hrr_011z = trr_11z - zjzi * trr_01z;
                         fzj = aj2 * hrr_011z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_11x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                        fzk = ak2 * trr_02z;
-                        fzk -= 1 * wt;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_10y;
                         Iz = trr_01z;
@@ -1982,13 +1787,6 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_011z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_11y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_02z;
-                        fzk -= 1 * wt;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = fac1;
                         Iz = trr_11z;
@@ -2010,35 +1808,36 @@ void int3c2e_ip1_101(KERNEL_ARGS)
                         double hrr_111z = trr_21z - zjzi * trr_11z;
                         fzj = aj2 * hrr_111z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                        fzk = ak2 * trr_12z;
-                        fzk -= 1 * trr_10z;
-                        v_kz += fzk * prod_xy;
                     }
                 }
             }
             if (ejk_aux != NULL) {
-                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
+                    int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
+                    double v_kx = -v_ix - v_jx;
+                    double v_ky = -v_iy - v_jy;
+                    double v_kz = -v_iz - v_jz;
                     atomicAdd(ejk_aux+ka*3+0, v_kx);
                     atomicAdd(ejk_aux+ka*3+1, v_ky);
                     atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
+            grad_jx += v_jx;
+            grad_jy += v_jy;
+            grad_jz += v_jz;
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix);
-            atomicAdd(ejk+ia*3+1, v_iy);
-            atomicAdd(ejk+ia*3+2, v_iz);
-            atomicAdd(ejk+ja*3+0, v_jx);
-            atomicAdd(ejk+ja*3+1, v_jy);
-            atomicAdd(ejk+ja*3+2, v_jz);
+            atomicAdd(ejk+ia*3+0, grad_ix);
+            atomicAdd(ejk+ia*3+1, grad_iy);
+            atomicAdd(ejk+ia*3+2, grad_iz);
+            atomicAdd(ejk+ja*3+0, grad_jx);
+            atomicAdd(ejk+ja*3+1, grad_jy);
+            atomicAdd(ejk+ja*3+2, grad_jz);
         }
     }
 }
@@ -2060,12 +1859,12 @@ void int3c2e_ip1_002(KERNEL_ARGS)
     double *rjri = shared_memory + sp_id;
     double *rw = shared_memory + BLOCK_SIZE * 4 + thread_id;
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += BLOCK_SIZE) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double grad_ix = 0;
+        double grad_iy = 0;
+        double grad_iz = 0;
+        double grad_jx = 0;
+        double grad_jy = 0;
+        double grad_jz = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -2123,16 +1922,18 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                     }
                 }
             }
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
+            double v_jx = 0;
+            double v_jy = 0;
+            double v_jz = 0;
             double prod_xy;
             double prod_xz;
             double prod_yz;
             double Ix, Iy, Iz;
             double fxi, fyi, fzi;
             double fxj, fyj, fzj;
-            double fxk, fyk, fzk;
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -2151,7 +1952,6 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                 double ak = expk[kp];
                 double ai2 = ai * 2;
                 double aj2 = aj * 2;
-                double ak2 = ak * 2;
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
@@ -2224,18 +2024,8 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                         double hrr_010z = trr_10z - zjzi * wt;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        double trr_03x = cpx * trr_02x + 2*b01 * trr_01x;
-                        fxk = ak2 * trr_03x;
-                        fxk -= 2 * trr_01x;
-                        v_kx += fxk * prod_yz;
                         double cpy = ypq*rt_ak;
                         double trr_01y = cpy * fac1;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double cpz = zpq*rt_ak;
-                        double trr_01z = cpz * wt;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = trr_01x;
                         Iy = trr_01y;
                         Iz = wt;
@@ -2257,15 +2047,8 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_02x;
-                        fxk -= 1 * 1;
-                        v_kx += fxk * prod_yz;
-                        double trr_02y = cpy * trr_01y + 1*b01 * fac1;
-                        fyk = ak2 * trr_02y;
-                        fyk -= 1 * fac1;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
+                        double cpz = zpq*rt_ak;
+                        double trr_01z = cpz * wt;
                         Ix = trr_01x;
                         Iy = fac1;
                         Iz = trr_01z;
@@ -2286,15 +2069,7 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                         double hrr_011z = trr_11z - zjzi * trr_01z;
                         fzj = aj2 * hrr_011z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_02x;
-                        fxk -= 1 * 1;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                        fzk = ak2 * trr_02z;
-                        fzk -= 1 * wt;
-                        v_kz += fzk * prod_xy;
+                        double trr_02y = cpy * trr_01y + 1*b01 * fac1;
                         Ix = 1;
                         Iy = trr_02y;
                         Iz = wt;
@@ -2316,14 +2091,6 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_010z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        double trr_03y = cpy * trr_02y + 2*b01 * trr_01y;
-                        fyk = ak2 * trr_03y;
-                        fyk -= 2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                         Ix = 1;
                         Iy = trr_01y;
                         Iz = trr_01z;
@@ -2342,14 +2109,7 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                         v_jy += fyj * prod_xz;
                         fzj = aj2 * hrr_011z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_02y;
-                        fyk -= 1 * fac1;
-                        v_ky += fyk * prod_xz;
-                        fzk = ak2 * trr_02z;
-                        fzk -= 1 * wt;
-                        v_kz += fzk * prod_xy;
+                        double trr_02z = cpz * trr_01z + 1*b01 * wt;
                         Ix = 1;
                         Iy = fac1;
                         Iz = trr_02z;
@@ -2370,35 +2130,36 @@ void int3c2e_ip1_002(KERNEL_ARGS)
                         double hrr_012z = trr_12z - zjzi * trr_02z;
                         fzj = aj2 * hrr_012z;
                         v_jz += fzj * prod_xy;
-                        fxk = ak2 * trr_01x;
-                        v_kx += fxk * prod_yz;
-                        fyk = ak2 * trr_01y;
-                        v_ky += fyk * prod_xz;
-                        double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
-                        fzk = ak2 * trr_03z;
-                        fzk -= 2 * trr_01z;
-                        v_kz += fzk * prod_xy;
                     }
                 }
             }
             if (ejk_aux != NULL) {
-                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
+                    int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
+                    double v_kx = -v_ix - v_jx;
+                    double v_ky = -v_iy - v_jy;
+                    double v_kz = -v_iz - v_jz;
                     atomicAdd(ejk_aux+ka*3+0, v_kx);
                     atomicAdd(ejk_aux+ka*3+1, v_ky);
                     atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
+            grad_ix += v_ix;
+            grad_iy += v_iy;
+            grad_iz += v_iz;
+            grad_jx += v_jx;
+            grad_jy += v_jy;
+            grad_jz += v_jz;
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix);
-            atomicAdd(ejk+ia*3+1, v_iy);
-            atomicAdd(ejk+ia*3+2, v_iz);
-            atomicAdd(ejk+ja*3+0, v_jx);
-            atomicAdd(ejk+ja*3+1, v_jy);
-            atomicAdd(ejk+ja*3+2, v_jz);
+            atomicAdd(ejk+ia*3+0, grad_ix);
+            atomicAdd(ejk+ia*3+1, grad_iy);
+            atomicAdd(ejk+ia*3+2, grad_iz);
+            atomicAdd(ejk+ja*3+0, grad_jx);
+            atomicAdd(ejk+ja*3+1, grad_jy);
+            atomicAdd(ejk+ja*3+2, grad_jz);
         }
     }
 }

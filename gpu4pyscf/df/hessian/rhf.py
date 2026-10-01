@@ -1198,7 +1198,7 @@ def _int2c2e_ip2_per_atom(mol, dm, omega=None, lr_factor=None, sr_factor=None):
     nroots = order//2 + 1
     if omega < 0:
         nroots *= 2 # for short-range
-    g_size = (li+3)*(lj+3)
+    g_size = (li+3)*(lj+1)
     unit = g_size*3 + nroots*2 + 4
     nsp_max = _nearest_power2(SHM_SIZE // (unit*8))
     nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
