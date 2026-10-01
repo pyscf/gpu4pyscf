@@ -466,7 +466,7 @@ class BeckeGrids(Grids):
         return self
 
     def to_cpu(self):
-        grids = gen_grid_cpu.Grids(self.cell)
+        grids = gen_grid_cpu.BeckeGrids(self.cell)
         grids_gpu = self.copy().reset()
         return utils.to_cpu(grids_gpu, out=grids)
 
