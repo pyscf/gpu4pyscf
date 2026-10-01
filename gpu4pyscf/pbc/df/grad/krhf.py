@@ -21,13 +21,11 @@ import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.tools.k2gamma import double_translation_indices
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df import aft as aft_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned,
-    scatter_add)
+    contract, asarray, ndarray, transpose_sum, get_avail_mem, empty_aligned)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.df.int3c2e import (
@@ -113,107 +111,80 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     expLk_conj = expLk.conj()
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
 
+    kpt_iters = kk_adapted_iter(int3c2e_opt.bvk_kmesh)
+    kpt_iters = [(kp, kp_conj, cp.asarray(ki_idx, dtype=np.int32),
+                  cp.asarray(kj_idx, dtype=np.int32))
+                 for kp, kp_conj, ki_idx, kj_idx in kpt_iters]
+    uniq_kpts_idx = np.array([x[0] for x in kpt_iters])
+    uniq_kpts = kpts[uniq_kpts_idx]
+    nkpts_uniq = len(uniq_kpts)
+
+    conj_mapping = cp.asarray(
+        conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+
     mem_free = get_avail_mem(exclude_memory_pool=True)
     batch_size = blksize = 0
     if n_compact_pairs > 0:
-        mem_avail = mem_free
-        mem_avail -= naux*nkpts**2*nocc**2 * 16  # j3c_oo
-        # Bytes per auxiliary function in an integral batch.
-        batch_bytes = n_compact_pairs*bvk_ncells * 8  # compressed j3c
-        batch_bytes += n_compact_pairs*nkpts * 16  # compressed * expLk
-        # Bytes per auxiliary function in an AO contraction block.
-        block_bytes = nao**2*bvk_ncells*nkpts * 16  # j3c_full
-        block_bytes += nao**2*bvk_ncells**2 * 16  # buf1: j3c_ij
-        block_bytes += nao**2*bvk_ncells**2 * 16  # buf2: j3c_tmp / tmp
-        batch_size = min(naux, int(mem_avail*.2/batch_bytes))
-        blksize = min(batch_size, int(mem_avail*.6/block_bytes))
+        word_avail = mem_free // 8
+        word_avail -= naux*nkpts**2*nocc**2 * 2  # j3c_oo
+        batch_words = n_compact_pairs*nkpts_uniq * 2  # compressed j3c
+        # Conservatively count both integral and contraction uses of buf1.
+        block_words = max(nao**2*bvk_ncells, nkpts*nao*nocc) * 2
+        block_words += nao**2*nkpts * 2  # ao_buf
+        block_words += nkpts*nocc**2 * 2  # occupied-occupied result
+        batch_size = min(naux, int(word_avail*.75/batch_words))
+        blksize = min(batch_size, int(word_avail*.2/block_words))
         if batch_size < int(np.diff(aux_loc).max()) or blksize < 1:
             raise RuntimeError('Insufficient GPU memory for GDF gradient buffers')
 
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
-    # k=ijk_conserv[i,j] provides: -i + j - k = 2n\pi
-    # therefore, i=ijk_conserv[k,j]
-    ijk_conserv = cp.asarray(double_translation_indices(int3c2e_opt.bvk_kmesh))
-    #for ki in range(nkpts):
-    #    for kj in range(nkpts):
-    #        out[ki,kj] += j3c_tmp[ijk_conserv[ki,kj],ki]
-    #        => order_KI = argsort([ki,ijk_conserv[ki,kj]])
-    order_KI = cp.argsort((ijk_conserv * nkpts + cp.arange(nkpts)[:,None]).ravel())
-    #for kk in range(nkpts):
-    #    for kj in range(nkpts):
-    #        out[ijk_conserv[kk,kj],kj] += j3c_tmp[kk,kj]
-    #        => order_KJ = [ijk_conserv[kk,kj],kj]
-    order_KJ = (ijk_conserv * nkpts + cp.arange(nkpts)).ravel()
-    order_KJ = cp.asnumpy(order_KJ)
-
     def sr_int3c2e():
         eval_j3c, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-            aux_batch_size=batch_size, cart=True)
+            aux_batch_size=None if batch_size >= naux else batch_size, cart=True)
         aux_batches = len(aux_offsets) - 1
 
-        aux0 = aux1 = 0
-        j3c_full = cp.zeros((nao*bvk_ncells*nao,blksize,nkpts), dtype=np.complex128)
         max_aux_batch = int(np.diff(aux_offsets).max())
-        buf = cp.empty((bvk_ncells*max_aux_batch, n_compact_pairs))
-        buf1 = cp.empty(((nao*bvk_ncells)**2*blksize), dtype=np.complex128)
-        buf2 = cp.empty(((nao*bvk_ncells)**2*blksize), dtype=np.complex128)
-        # Compute the occ-occ block of j3c, should be identical to
-        #:j3c = int3c2e.sr_aux_e2(cell.cell, auxcell.cell, omega, kpts)
-        #:j3c_oo = cp.einsum('IJpqr,Ipi,Jqj->rIJij', j3c, dm_factor_r, dm_factor_l)
-        j3c_oo = cp.empty((naux, nkpts, nkpts, nocc, nocc), dtype=np.complex128)
+        buf = cp.empty(nkpts_uniq*max_aux_batch*n_compact_pairs*2)
+        work = cp.empty(max(block_words*blksize,
+                            bvk_ncells*max_aux_batch*n_compact_pairs))
+        ao_buf, buf1 = _allocate(nao**2*nkpts*blksize*2, work)
+        j3c_oo = cp.empty((naux, nkpts*nkpts, nocc, nocc), dtype=np.complex128)
+        aux_start = 0
         for kbatch in range(aux_batches):
-            compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
-            compressed = contract('tLr,LKz->trKz', compressed, expLk_conjz)
+            j3c = eval_j3c(aux_batch_id=kbatch, out=work)
+            naux_in_batch = j3c.shape[-1]
+            compressed = ndarray((nkpts_uniq, naux_in_batch, n_compact_pairs, 2), buffer=buf)
+            contract('tLr,Lkz->krtz', j3c, expLk_conjz[:,uniq_kpts_idx], out=compressed)
             compressed = compressed.view(np.complex128)[:,:,:,0]
-            # *.5 because diagonal blocks are accessed twice
-            compressed[compact_diag] *= .5
-            naux_in_batch = compressed.shape[1]
-            for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-                dk = k1 - k0
-                aux0, aux1 = aux1, aux1 + dk
-                # TODO: decompress the j3c tensor using rsdf_builder._unpack_cderi_v2
-                j3c = j3c_full[:,:dk]
-                j3c[compact_idx] = compressed[:,k0:k1]
-                j3c = j3c.reshape(nao, bvk_ncells, nao, dk, nkpts)
-
-                # Construct j3c_ij in crystal AOs
-                #:j3c_ij = cp.empty((nkpts, nkpts, nao, nao, dk), dtype=np.complex128)
-                #:j3c_I = contract('jLikK,LI->KIijk', j3c, expLk.conj())
-                #:j3c_J = contract('iLjkK,LJ->KJijk', j3c, expLk)
-                #:for ki in range(nkpts):
-                #:    for kj in range(nkpts):
-                #:        kk = ijk_conserv[ki,kj]
-                #:        j3c_ij[ki,kj] = j3c_I[kk,ki] + j3c_J[kk,kj]
-                # The indices (kk*nkpts+ki) and (kk*nkpts+kj) are precomputed and
-                # provided by order_KI and order_KJ
-                j3c_ij = ndarray((nkpts*nkpts, nao*nao*dk), dtype=np.complex128, buffer=buf1)
-                j3c_tmp = ndarray((nkpts,nkpts, nao,nao,dk), dtype=np.complex128, buffer=buf2)
-                j3c_tmp = contract('jLikK,LI->KIijk', j3c, expLk_conj, out=j3c_tmp)
-                j3c_ij[order_KI] = j3c_tmp.reshape(nkpts**2,-1)
-                j3c_tmp = contract('iLjkK,LJ->KJijk', j3c, expLk, out=j3c_tmp)
-                #:j3c_ij[order_KJ] += j3c_tmp.reshape(nkpts**2,-1)
-                j3c_ij = scatter_add(j3c_ij, order_KJ, j3c_tmp.reshape(nkpts**2,-1))
-                j3c_ij = j3c_ij.reshape(nkpts, nkpts, nao, nao, dk)
-
-                tmp = ndarray((nkpts, nkpts, nocc, nao, dk), dtype=np.complex128, buffer=buf2)
-                contract('IJpqr,Ipi->IJiqr', j3c_ij, dm_factor_r, out=tmp)
-                contract('IJiqr,Jqj->rIJij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
-            compressed = None
-        j3c_full = buf = buf1 = buf2 = eval_j3c = None
-        compressed = j3c = j3c_tmp = j3c_ij = tmp = None
+            for k_j2c, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
+                compressed_k = compressed[k_j2c]
+                # Primitive diagonal blocks are added twice when unpacking.
+                compressed_k[:,compact_diag] *= .5
+                for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                    aux0, aux1 = aux_start + k0, aux_start + k1
+                    j3c = _unpack_cderi_v2(compressed_k[k0:k1],
+                        compact_idx, kj_idx, conj_mapping, expLk, nao,
+                        axis=0, buf=buf1, out=ao_buf).transpose(0, 2, 3, 1)
+                    tmp = ndarray((nkpts,nocc,nao,k1-k0), dtype=np.complex128, buffer=buf1)
+                    contract('kpqr,kpi->kiqr', j3c, dm_factor_r, out=tmp)
+                    j3c_oo[aux0:aux1,ki_idx*nkpts+kj_idx] = contract(
+                        'kiqr,kqj->rkij', tmp, dm_factor_l[kj_idx])
+                    if kp != kp_conj:
+                        tmp = ndarray((nkpts,nocc,nao,k1-k0), dtype=np.complex128, buffer=buf1)
+                        j3c.imag *= -1 # j3c.conj() inplace
+                        contract('kqpr,kpi->kiqr', j3c, dm_factor_r[kj_idx], out=tmp)
+                        j3c_oo[aux0:aux1,kj_idx*nkpts+ki_idx] = contract(
+                            'kiqr,kqj->rkij', tmp, dm_factor_l)
+            aux_start += naux_in_batch
         return j3c_oo
 
     if n_compact_pairs > 0:
         j3c_oo = sr_int3c2e()
-        t0 = log.timer_debug1('contract dm', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e dm', *t0)
     else:
-        j3c_oo = cp.zeros((naux, nkpts, nkpts, nocc, nocc), dtype=np.complex128)
-
-    kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
-    uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-    nkpts_uniq = len(uniq_kpts)
+        j3c_oo = cp.zeros((naux, nkpts*nkpts, nocc, nocc), dtype=np.complex128)
 
     precision = auxcell.precision * 1e-6
     log.debug('Set 2c2e integrals precision %g', precision)
@@ -273,62 +244,72 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             eval_dd(Gv, out=result[n_compact_pairs:])
         return result
 
-    conj_mapping = cp.asarray(
-        conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
-
-    def unpack_ft(pqG_compressed, kj_idx):
+    def unpack_ft(pqG_compressed, kj_idx, work=None, out=None):
         # Full primitive diagonal blocks need half weights before addition.
         pqG_compressed[diag_idx] *= .5
         pqG = _unpack_cderi_v2(
             pqG_compressed.T, pair_addresses, kj_idx, conj_mapping,
-            expLk, nao, axis=0)
+            expLk, nao, axis=0, buf=work, out=out)
         return pqG.transpose(0, 2, 3, 1)
 
     def lr_3c2e(j3c_oo):
-        mem_avail = get_avail_mem()
-        mem_avail -= naux*nkpts*nocc**2 * 16  # j3c_oo[:,ki_idx,kj_idx]
-        mem_avail -= naux*nkpts*nocc**2 * 16  # auxG * ijG
-        # Complex elements per G-vector; conservative sum across stages.
-        Gsize = nao_pair * 2 # pqG_compressed
-        Gsize += bvk_ncells*nao**2  # cderi workspace in _unpack_cderi_v2
-        Gsize += nkpts*nao**2 # pqG, pqG.conj()
-        Gsize += nkpts*(nao+nocc)*nocc  # ijG
-        Gsize += naux*nkpts_uniq * 2 # auxG, auxGw
-        Gsize += naux  # auxG[:,j2c_idx]
-        Gblksize = min(ngrids, int(mem_avail*.8//(Gsize*16))//32*32)
+        mem_free = get_avail_mem()
+        word_avail = mem_free // 8
+        word_avail -= naux*nkpts*nocc**2 * 2 # result; accumulation needs no copy
+        aux_size = naux*nkpts_uniq
+        ao_size = nkpts*nao**2
+        unpack_size = nao_pair + bvk_ncells*nao**2
+        mo_size = nkpts*nocc*(nao+nocc) + naux
+        Gsize = aux_size + max(aux_size, ao_size + max(unpack_size, mo_size))
+        Gblksize = min(ngrids, int(word_avail*.8//(Gsize*2))//32*32)
         if Gblksize < 1:
             raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
-                   mem_avail*1e-9, Gblksize)
+                   mem_free*1e-9, Gblksize)
+        buf = cp.empty(Gsize*Gblksize*2)
+        work1, buf1 = _allocate(aux_size*Gblksize*2, buf)
+        work2, buf2 = _allocate(ao_size*Gblksize*2, buf1)
+        work3, buf3 = _allocate(nao_pair*Gblksize*2, buf2)
+        result = cp.empty((naux, nkpts, nocc, nocc), dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
-            auxG = ft_ao.ft_ao(auxcell, (Gv[p0:p1]+uniq_kpts[:,None]).reshape(-1,3)).T
+            Gk = Gv[p0:p1] + uniq_kpts[:,None]
+            auxG = ft_ao.ft_ao(auxcell, Gk.reshape(-1,3), out=work1).T
             auxG = auxG.reshape(naux, nkpts_uniq, nGv)
-            auxGw = auxG.conj()
+            auxGw = ndarray(auxG.shape, dtype=np.complex128, buffer=buf1)
+            cp.conjugate(auxG, out=auxGw)
             auxGw *= wcoulG_LR0[:,p0:p1]
             contract('iKG,jKG->Kij', auxGw, auxG, beta=1, out=j2c)
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-                pqG_compressed = eval_ft(Gv[p0:p1] + kpts[kp])
+                pqG_compressed = eval_ft(Gv[p0:p1] + kpts[kp], out=work3)
                 pqG_compressed[:n_compact_pairs] *= wcoulG_LR0[j2c_idx,p0:p1]
                 if separated_dd:
                     pqG_compressed[n_compact_pairs:] *= wcoulG_FR0[j2c_idx,p0:p1]
-                pqG = unpack_ft(pqG_compressed, kj_idx)
-                tmp = contract('kpqG,kpi->kiqG', pqG, dm_factor_r)
-                ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l[kj_idx])
-                j3c_oo[:,ki_idx,kj_idx] += contract(
-                    'rG,kijG->rkij', auxG[:,j2c_idx].conj(), ijG)
-                tmp = ijG = None
+                pqG = unpack_ft(pqG_compressed, kj_idx, work=buf3, out=work2)
+                kiqG, kijG = _allocate((nkpts, nocc, nao, nGv*2), buf2)
+                kiqG = kiqG.view(np.complex128)
+                kijG, aux_work = _allocate((nkpts, nocc, nocc, nGv*2), kijG)
+                kijG = kijG.view(np.complex128)
+                auxG_k = ndarray((naux,nGv), dtype=np.complex128, buffer=aux_work)
+                cp.take(auxG, j2c_idx, axis=1, out=auxG_k)
+                auxG_k.imag *= -1 # auxG.conj() inplace
+                contract('kpqG,kpi->kiqG', pqG, dm_factor_r, out=kiqG)
+                contract('kiqG,kqj->kijG', kiqG, dm_factor_l[kj_idx], out=kijG)
+                contract('rG,kijG->rkij', auxG_k, kijG, out=result)
+                #:j3c_oo[:,ki_idx,kj_idx] += result
+                _add_j3c_oo(j3c_oo, result, ki_idx*nkpts+kj_idx)
                 if kp != kp_conj:
-                    tmp = contract('kqpG,kpi->kiqG', pqG.conj(), dm_factor_r[kj_idx])
-                    ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l)
-                    j3c_oo[:,kj_idx,ki_idx] += contract(
-                        'rG,kijG->rkij', auxG[:,j2c_idx], ijG)
-                pqG = tmp = ijG = None
-            auxG = auxGw = None
+                    pqG.imag *= -1 # pqG.conj() inplace
+                    contract('kqpG,kpi->kiqG', pqG, dm_factor_r[kj_idx], out=kiqG)
+                    contract('kiqG,kqj->kijG', kiqG, dm_factor_l, out=kijG)
+                    cp.take(auxG, j2c_idx, axis=1, out=auxG_k)
+                    contract('rG,kijG->rkij', auxG_k, kijG, out=result)
+                    #:j3c_oo[:,kj_idx,ki_idx] += result
+                    _add_j3c_oo(j3c_oo, result, kj_idx*nkpts+ki_idx)
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
-    t0 = log.timer_debug1('contract dm', *t0)
+    t0 = log.timer_debug1('contract lr_int3c2e dm', *t0)
 
     ################################
     # (d/dX P|Q) contributions
@@ -347,19 +328,19 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         solve_j2c = rhf._gen_metric_solver(
             j2c_k, linear_dep_threshold, auxcell.dimension)
         metric = aux_coeff.dot(solve_j2c(aux_coeff.T))
-        j3c_oo_k = j3c_oo[:,ki_idx,kj_idx]
+        j3c_oo_k = j3c_oo[:,ki_idx*nkpts+kj_idx]
         dm_oo_k = contract('uv,vnij->unij', metric, j3c_oo_k, out=buf)
-        dm_oo[:,ki_idx,kj_idx] = dm_oo_k
+        dm_oo[:,ki_idx*nkpts+kj_idx] = dm_oo_k
         if kp == 0:
             dm_oo_kconj = dm_oo_k
         elif kp == kp_conj:
             # for kp == kp_conj != 0, dm_oo_kconj and dm_oo_k correspond to
             # the same blocks in dm_oo, which has been updated previously
-            dm_oo_kconj = dm_oo[:,kj_idx,ki_idx]
+            dm_oo_kconj = dm_oo[:,kj_idx*nkpts+ki_idx]
         else:
-            j3c_oo_k = j3c_oo[:,kj_idx,ki_idx]
+            j3c_oo_k = j3c_oo[:,kj_idx*nkpts+ki_idx]
             dm_oo_kconj = contract('vu,vnij->unij', metric, j3c_oo_k, out=buf1)
-            dm_oo[:,kj_idx,ki_idx] = dm_oo_kconj
+            dm_oo[:,kj_idx*nkpts+ki_idx] = dm_oo_kconj
 
         beta = 0
         if j_factor != 0 and kp == 0:
@@ -406,14 +387,15 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
         mem_avail = get_avail_mem()
-        mem_avail -= naux*nkpts*nocc**2 * 16  # dm_oo_k = dm_oo[:,kj_idx,ki_idx]
-        # Complex elements per G-vector; conservative sum across stages.
-        Gsize = nao_pair * 2 # dm_vG_compressed, pqG_compressed
-        Gsize += bvk_ncells*nao**2  # workspace in _unpack_cderi_v2
-        Gsize += nkpts*nao**2 # dm_vG
-        Gsize += nkpts*(nao+nocc)*nocc  # dm_vG, dm_ooG
-        Gsize += naux*nkpts_uniq # auxG
-        Gsize += naux * 3 # dm_auxG, auxG_conj, dm_auxG1
+        mem_avail -= naux*nkpts*nocc**2 * 16  # dm_oo_k = dm_oo[:,kj_idx*nkpts+ki_idx]
+        # Complex elements per G-vector. The two scratch banks alternate
+        # between MO contractions, BvK density, and AO unpacking. Keep the
+        # compact FT and auxiliary densities separate from those banks.
+        aux_size = naux*nkpts_uniq
+        ao_size = nkpts*nao**2
+        scratch1_size = max(nkpts*nocc**2, nao_pair, bvk_ncells*nao**2, naux)
+        scratch2_size = max(nkpts*nao*nocc, bvk_ncells*nao**2)
+        Gsize = aux_size + 2*naux + nao_pair + ao_size + scratch1_size + scratch2_size
         Gblksize = min(ngrids, int(mem_avail*.8//(Gsize*16))//32*32)
         if Gblksize < 1:
             raise RuntimeError('Insufficient GPU memory for GDF Fourier buffers')
@@ -428,25 +410,36 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
             auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
             _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
         null_ptr = lib.c_null_ptr()
-        buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
+        buf = cp.empty(Gsize*Gblksize*2)
+        aux_buf, work = _allocate(aux_size*Gblksize*2, buf)
+        conj_buf, work = _allocate(naux*Gblksize*2, work)
+        density_buf, work = _allocate(naux*Gblksize*2, work)
+        compact_buf, work = _allocate(nao_pair*Gblksize*2, work)
+        ao_buf, work = _allocate(ao_size*Gblksize*2, work)
+        scratch1, scratch2 = _allocate(scratch1_size*Gblksize*2, work)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
-            auxG = ft_ao.ft_ao(auxcell, Gk[:,p0:p1].reshape(-1,3)).T
+            auxG = ft_ao.ft_ao(auxcell, Gk[:,p0:p1].reshape(-1,3), out=aux_buf).T
             auxG = auxG.reshape(naux, nkpts_uniq, nGv)
 
             # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-                dm_oo_k = dm_oo[:,kj_idx,ki_idx]
+                dm_oo_k = dm_oo[:,kj_idx*nkpts+ki_idx]
                 if kp != kp_conj:
                     dm_oo_k *= 2
 
                 # Orbital response: form the unweighted BvK density first.
                 # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
-                auxG_conj = auxG[:,j2c_idx].conj()
-                dm_ooG = contract('rkji,rG->kijG', dm_oo_k, auxG_conj)
-                tmp = contract('kijG,kpi->kpjG', dm_ooG, dm_factor_r)
-                dm_vG = contract('kpjG,kqj->kpqG', tmp, dm_factor_l[kj_idx], -.5*k_factor)
-                LpqG = contract('Lk,kpqG->LqpG', expLk[:,kj_idx], dm_vG)
+                auxG_conj = ndarray((naux,nGv), dtype=np.complex128, buffer=conj_buf)
+                cp.conjugate(auxG[:,j2c_idx], out=auxG_conj)
+                dm_ooG = ndarray((nkpts,nocc,nocc,nGv), dtype=np.complex128, buffer=scratch1)
+                tmp = ndarray((nkpts,nao,nocc,nGv), dtype=np.complex128, buffer=scratch2)
+                dm_vG = ndarray((nkpts,nao,nao,nGv), dtype=np.complex128, buffer=ao_buf)
+                contract('rkji,rG->kijG', dm_oo_k, auxG_conj, out=dm_ooG)
+                contract('kijG,kpi->kpjG', dm_ooG, dm_factor_r, out=tmp)
+                contract('kpjG,kqj->kpqG', tmp, dm_factor_l[kj_idx], -.5*k_factor, out=dm_vG)
+                LpqG = ndarray((bvk_ncells,nao,nao,nGv), dtype=np.complex128, buffer=scratch2)
+                contract('Lk,kpqG->LqpG', expLk[:,kj_idx], dm_vG, out=LpqG)
                 if ft_opt.permutation_symmetry:
                     contract('Lk,kpqG->LpqG', expLk_conj, dm_vG, beta=1, out=LpqG)
                 if j_factor != 0 and kp == 0:
@@ -455,8 +448,11 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                         vG *= 2
                     bvk_dm = contract('Lk,kpq->Lpq', expLk, dm_sorted)
                     contract('Lpq,G->LpqG', bvk_dm, vG, beta=1, out=LpqG)
-                dm_vG = cp.asarray(LpqG, order='C').reshape(-1, nGv)
-                dm_vG_compressed = dm_vG[response_idx]
+                    bvk_dm = None
+                dm_vG = LpqG.reshape(-1, nGv)
+                # Save the unweighted density before indexed_scale modifies it.
+                dm_vG_compressed = ndarray((nao_pair,nGv), dtype=np.complex128, buffer=scratch1)
+                cp.take(dm_vG, response_idx, axis=0, out=dm_vG_compressed)
                 if n_compact_pairs > 0:
                     indexed_scale(dm_vG, response_idx[:n_compact_pairs], wcoulG_LR0[j2c_idx,p0:p1])
                 if separated_dd:
@@ -479,7 +475,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                     raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                 LpqG = None
 
-                pqG_compressed = eval_ft(Gv[p0:p1] + kpts[kp])
+                pqG_compressed = eval_ft(Gv[p0:p1] + kpts[kp], out=compact_buf)
                 dm_vG_compressed[diag_idx] *= .5
                 vG = cp.einsum('pg,pg->g', pqG_compressed[:n_compact_pairs],
                                dm_vG_compressed[:n_compact_pairs]).real
@@ -495,24 +491,27 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                 pqG_compressed[:n_compact_pairs] *= wcoulG_LR0[j2c_idx,p0:p1]
                 if separated_dd:
                     pqG_compressed[n_compact_pairs:] *= wcoulG_FR0[j2c_idx,p0:p1]
-                pqG = unpack_ft(pqG_compressed, kj_idx)
+                pqG = unpack_ft(pqG_compressed, kj_idx, work=scratch1, out=ao_buf)
 
                 beta = 0
-                dm_auxG = ndarray((naux,nGv), dtype=np.complex128, buffer=buf2)
+                dm_auxG = ndarray((naux,nGv), dtype=np.complex128, buffer=density_buf)
                 if j_factor != 0 and kp == 0:
                     rhoGz = cp.einsum('kpqG,kqp->G', pqG, dm_sorted)
                     cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
                     beta = j_factor
                 # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqG, c, c, dm_oo, 1j*Gv, conj(auxG))
-                tmp = contract('kpqG,kpi->kiqG', pqG, dm_factor_r)
-                ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l[kj_idx])
+                tmp = ndarray((nkpts,nocc,nao,nGv), dtype=np.complex128, buffer=scratch2)
+                ijG = ndarray((nkpts,nocc,nocc,nGv), dtype=np.complex128, buffer=scratch1)
+                contract('kpqG,kpi->kiqG', pqG, dm_factor_r, out=tmp)
+                contract('kiqG,kqj->kijG', tmp, dm_factor_l[kj_idx], out=ijG)
                 # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
                 # contracting all [0] order terms -> dm_auxG
                 contract('rkji,kijG->rG', dm_oo_k, ijG, -.5*k_factor, beta, out=dm_auxG)
 
                 # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
                 # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
-                dm_auxG1 = contract('sr,sG->rG', dm_aux[j2c_idx], auxG[:,j2c_idx])
+                dm_auxG1 = ndarray((naux,nGv), dtype=np.complex128, buffer=scratch1)
+                contract('sr,sG->rG', dm_aux[j2c_idx], auxG[:,j2c_idx], out=dm_auxG1)
                 vG = cp.einsum('rg,rg->g', dm_auxG1, auxG_conj).real
                 sigma_G -= .5 * cp.einsum('g,xyg->xy', vG, wcoulG_LR1[j2c_idx,:,:,p0:p1])
                 dm_auxG1 *= wcoulG_LR0[j2c_idx,p0:p1]
@@ -567,7 +566,12 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
         log_cutoff = math.log(int3c2e_opt.cutoff)
 
-        order_KI = (ijk_conserv.T * nkpts + cp.arange(nkpts)[:,None]).ravel()
+        # The response uses K = ki - kj, opposite to the zero-order integral.
+        response_kpts = []
+        for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
+            response_kpts.append((kp, kj_idx, ki_idx))
+            if kp != kp_conj:
+                response_kpts.append((kp_conj, ki_idx, kj_idx))
         ejk_sigma_sr = cp.zeros([cell.natm+3, 3])
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
@@ -575,56 +579,59 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
         int3c2e_envs = int3c2e_opt.int3c2e_envs
         kern = libpbc.PBCsr_ejk_int3c2e_deriv
-        aux0 = aux1 = 0
         max_aux_batch = int(np.diff(aux_loc[ksh_offsets_cpu]).max())
-        buf = cp.empty(n_compact_pairs*max_aux_batch*bvk_ncells)
-        buf1 = cp.empty((nkpts**2 * blksize*nao*nao), dtype=np.complex128)
-        buf2 = cp.empty((nkpts**2 * blksize*nao*nao), dtype=np.complex128)
+        mem_free = get_avail_mem(exclude_memory_pool=True)
+        word_avail = mem_free // 8
+        word_avail -= nkpts*n_compact_pairs*max_aux_batch * 2  # compressed
+        compressed_real_size = n_compact_pairs*bvk_ncells*max_aux_batch
+        if compressed_real_size > word_avail * 0.9:
+            raise RuntimeError('Insufficient GPU memory for GDF gradient response buffers')
+        blk_unit = (nkpts*nao**2 + max(nkpts*nocc*nao, bvk_ncells*nao**2)) * 2
+        blksize = min(max_aux_batch, int(word_avail*.9/blk_unit))
+        if blksize < 1:
+            raise RuntimeError('Insufficient GPU memory for GDF gradient response buffers')
+        buf = cp.empty(nkpts*n_compact_pairs*max_aux_batch, dtype=np.complex128)
+        buf1 = cp.empty(max(nkpts*nocc*nao*blksize*2 + nkpts*nao**2*blksize*2,
+                            bvk_ncells*nao**2*blksize*2 + nkpts*nao**2*blksize*2,
+                            n_compact_pairs*bvk_ncells*max_aux_batch))
+        work1, work2 = _allocate(nkpts*nao**2*blksize*2, buf1)
         for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
             aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
             naux_in_batch = aux_loc[ksh_offsets_cpu[kbatch+1]] - aux_ao_offset
-            compressed = ndarray((n_compact_pairs, bvk_ncells, naux_in_batch), buffer=buf)
-            for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-                dk = k1 - k0
-                aux0, aux1 = aux1, aux1 + dk
-                # The contraction with first order derivative integrals are
-                #:for ki in range(nkpts):
-                #:    for kj in range(nkpts):
-                #:        einsum('li,ijp,jk,qp,xklq->x', dm[ki], j3c[ki,kj], dm[kj],
-                #:               metric[kk_conserv[ki,kj]], j3c_ip1[kj,ki])
-                # dm_tensor stores the contraction 'li,ijp,jk,qp->lkq'.
-                dm_tensor = ndarray((nkpts,nkpts,nao,nao,dk), dtype=np.complex128, buffer=buf2)
-                tmp = ndarray((nkpts,nkpts,nocc,nao,dk), dtype=np.complex128, buffer=buf1)
-                contract('rIJij,Jqj->IJiqr', dm_oo[aux0:aux1], dm_factor_r, -.5*k_factor, out=tmp)
-                contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_l, out=dm_tensor)
-                # j3c_ip1 (xklq) is first evaluated in real space, then l and q
-                # are transformed to k-adpated indices. kpt for l is associated with
-                # the first index of dm_tensor.
-                # To match the kpt indexing of j3c_ip, dm_tensor's orbital k-indices
-                # JI needs to be transformed to abs-obs mixed k-indices KI.
-                #:dm_tensor_swap = cp.zeros_like(dm_tensor)
-                #:for ki in range(nkpts):
-                #:    for kj in range(nkpts):
-                #:        kk = ijk_conserv[kj,ki]
-                #:        dm_tensor_swap[kk,ki] = dm_tensor[ki,kj]
-                dm_tensor_swap = ndarray((nkpts*nkpts,nao,nao,dk), dtype=np.complex128, buffer=buf1)
-                dm_tensor_swap[order_KI] = dm_tensor.reshape(nkpts**2,nao,nao,dk)
-                dm_tensor_swap = dm_tensor_swap.reshape(nkpts,nkpts,nao,nao,dk)
-                if j_factor != 0:
-                    dm_tensor_swap[0] += j_factor * auxvec[aux0:aux1] * dm_sorted[:,:,:,None]
+            compressed = ndarray((nkpts, n_compact_pairs, naux_in_batch),
+                                 dtype=np.complex128, buffer=buf)
+            for kp, ki_idx, kj_idx in response_kpts:
+                for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+                    dk = k1 - k0
+                    aux0, aux1 = aux_ao_offset + k0, aux_ao_offset + k1
+                    tmp = ndarray((nkpts,nocc,nao,dk), dtype=np.complex128, buffer=work2)
+                    dm_tensor = ndarray((nkpts,nao,nao,dk), dtype=np.complex128, buffer=work1)
+                    dm_oo_blk = ndarray((dk,nkpts,nocc,nocc), dtype=np.complex128, buffer=work1)
+                    cp.take(dm_oo[aux0:aux1], ki_idx*nkpts+kj_idx, axis=1, out=dm_oo_blk)
+                    contract('rkij,kqj->kiqr', dm_oo_blk, dm_factor_r[kj_idx],
+                             -.5*k_factor, out=tmp)
+                    contract('kiqr,kpi->kpqr', tmp, dm_factor_l[ki_idx], out=dm_tensor)
+                    if j_factor != 0 and kp == 0:
+                        contract('r,kpq->kpqr', auxvec[aux0:aux1], dm_sorted[ki_idx],
+                                 j_factor, beta=1, out=dm_tensor)
 
-                tmp = ndarray((nkpts,nao,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf2)
-                tmp1 = ndarray((nao,bvk_ncells,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf1)
-                dm_tensor = contract('KJpqr,LK->JpqLr', dm_tensor_swap, expLk_conj, out=tmp)
-                dm_tensor = contract('JpqLr,NJ->qNpLr', dm_tensor, expLk, out=tmp1)
-                dm_tensor = dm_tensor.reshape(-1,bvk_ncells,dk).real
-                #:compressed[:,:,k0:k1] = dm_tensor[cgto_compact_idx]
-                cp.take(dm_tensor, compact_idx, axis=0, out=compressed[:,:,k0:k1])
+                    # Transform the first orbital k-point, then select compact
+                    # AO pairs before expanding the auxiliary image dimension.
+                    dm_realspace = ndarray((nao,bvk_ncells,nao,dk),
+                                           dtype=np.complex128, buffer=work2)
+                    contract('kpqr,Nk->qNpr', dm_tensor, expLk[:,ki_idx], out=dm_realspace)
+                    cp.take(dm_realspace.reshape(-1,dk), compact_idx, axis=0,
+                            out=compressed[kp,:,k0:k1])
+            compressed_real = ndarray((n_compact_pairs, bvk_ncells, naux_in_batch), buffer=buf1)
+            contract('ktr,Lk->tLr', compressed.real, expLk_conj.real,
+                     out=compressed_real)
+            contract('ktr,Lk->tLr', compressed.imag, expLk_conj.imag,
+                     alpha=-1, beta=1, out=compressed_real)
             err = kern(
                 ctypes.cast(ejk_sigma_sr[:-3].data.ptr, ctypes.c_void_p),
                 ctypes.cast(ejk_sigma_sr[-3:].data.ptr, ctypes.c_void_p),
                 lib.c_null_ptr(),
-                ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
+                ctypes.cast(compressed_real.data.ptr, ctypes.c_void_p),
                 ctypes.c_double(-int3c2e_opt.omega),
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
@@ -990,6 +997,48 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
         t0 = log.timer_debug1('contract sr_int3c2e_ejk_deriv', *t0)
     return ej_sigma.get()
 
+def _allocate(shape, buf):
+    a = ndarray(shape, buffer=buf)
+    return a, buf[a.size:]
+
+_add_j3c_oo_kernel = cp.RawKernel(r'''
+extern "C" __global__
+void add_j3c_oo(double2* out, const double2* values, const int* pair_idx,
+                unsigned long long nkpairs, unsigned long long npairs,
+                unsigned long long noo)
+{
+    unsigned long long pair = blockIdx.x % npairs;
+    unsigned long long aux = blockIdx.x / npairs;
+    unsigned long long src = (unsigned long long)blockIdx.x * noo;
+    unsigned long long dest = (aux * nkpairs + pair_idx[pair]) * noo;
+    for (unsigned long long ij = threadIdx.x; ij < noo; ij += blockDim.x) {
+        double2 a = out[dest + ij];
+        double2 b = values[src + ij];
+        out[dest + ij] = make_double2(a.x + b.x, a.y + b.y);
+    }
+}
+''', 'add_j3c_oo')
+
+def _add_j3c_oo(j3c_oo, values, pair_idx):
+    '''Add values to unique flattened k-point pairs: j3c_oo[:,pair_idx] += values.
+
+    Both tensors must be C-contiguous complex128 arrays. Each block handles
+    one auxiliary function and one pair; pair indices must be unique and in range.
+    '''
+    assert j3c_oo.dtype == values.dtype == np.complex128
+    assert j3c_oo.flags.c_contiguous and values.flags.c_contiguous
+    assert j3c_oo.ndim == values.ndim == 4
+    assert j3c_oo.shape[0] == values.shape[0] and j3c_oo.shape[2:] == values.shape[2:]
+    pair_idx = cp.asarray(pair_idx, dtype=np.int32, order='C')
+    assert pair_idx.ndim == 1 and len(pair_idx) == values.shape[1]
+    if values.size == 0:
+        return
+    _add_j3c_oo_kernel(
+        (values.shape[0]*len(pair_idx),), (512,),
+        (j3c_oo, values, pair_idx,
+         np.uint64(j3c_oo.shape[1]), np.uint64(values.shape[1]),
+         np.uint64(values.shape[2]*values.shape[3])))
+
 def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
                         exxdiv=None, omega=None, verbose=None,
                         linear_dep_threshold=LINEAR_DEP_THR):
@@ -1018,7 +1067,7 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
     # Guess range-separation parameter based on system size
-    omega = 0.3
+    omega = 0.4
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
     mesh = cell.cutoff_to_mesh(ke_cutoff)
     nGv = np.prod(mesh)

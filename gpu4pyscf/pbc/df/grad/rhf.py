@@ -112,14 +112,14 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free
     mem_avail -= naux*nocc**2 * 8  # j3c_oo
-    batch_size = max(1, min(naux, int(mem_avail*.5/(max(1, n_compact_pairs)*8*bvk_ncells))))
-    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*8))//8*8))
+    batch_size = max(1, min(naux, int(mem_avail*.6/(max(1, n_compact_pairs)*8*bvk_ncells))))
+    blksize = max(1, min(naux, int(mem_avail*.3/(nao**2*8))//8*8))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
     def sr_int3c2e():
         eval_j3c, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-            aux_batch_size=batch_size, cart=True)
+            aux_batch_size=None if batch_size >= naux else batch_size, cart=True)
         aux_batches = len(aux_offsets) - 1
 
         i_addr, j_addr = divmod(compact_idx, nao)
@@ -143,11 +143,11 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
         return j3c_oo
 
-    if n_compact_pairs == 0:
-        j3c_oo = cp.zeros((naux, nocc, nocc))
-    else:
+    if n_compact_pairs > 0:
         j3c_oo = sr_int3c2e()
-        t0 = log.timer_debug1('contract dm', *t0)
+        t0 = log.timer_debug1('contract sr_int3c2e dm', *t0)
+    else:
+        j3c_oo = cp.zeros((naux, nocc, nocc))
 
     # Adjust the rcut because the default cell.rcut is estimated based on
     # overlap integrals.
@@ -238,7 +238,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             contract('rG,ijG->rij', auxG, ijG, beta=1, out=j3c_oo)
         return j3c_oo
     j3c_oo = lr_3c2e(j3c_oo)
-    t0 = log.timer_debug1('contract dm', *t0)
+    t0 = log.timer_debug1('contract lr_int3c2e dm', *t0)
 
     ################################
     # (d/dX P|Q) contributions
