@@ -16,8 +16,10 @@
 
 #pragma once
 
-// V3 tiles and scratch layouts use logical 32-lane groups, even on wave64.
-constexpr int MGRID_SUBGROUP_SIZE = 32;
+#include "../../warp_size.h"
+
+constexpr int MGRID_SUBGROUP_SIZE = WARP_SIZE;
+static_assert(MGRID_SUBGROUP_SIZE == 32 || MGRID_SUBGROUP_SIZE == 64);
 
 template <typename T>
 __host__ __device__ T distance_squared(const T x, const T y, const T z) {
@@ -36,8 +38,8 @@ void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI
 __device__ __forceinline__
 double reduce(double val, double *swap, int thread_id)
 {
-    for (int offset = 16; offset > 0; offset >>= 1) {
-        val += __shfl_down_sync(__activemask(), val, offset, 32);
+    for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
+        val += __shfl_down_sync(__activemask(), val, offset, MGRID_SUBGROUP_SIZE);
     }
     int lane = thread_id % MGRID_SUBGROUP_SIZE;
     int warp = thread_id / MGRID_SUBGROUP_SIZE;
@@ -46,9 +48,10 @@ double reduce(double val, double *swap, int thread_id)
     }
     __syncthreads();
     if (warp == 0) {
-        val = (thread_id < 8) ? swap[lane] : 0.;
-        for (int offset = 4; offset > 0; offset >>= 1) {
-            val += __shfl_down_sync(__activemask(), val, offset, 32);
+        int nwarps = blockDim.x * blockDim.y * blockDim.z / MGRID_SUBGROUP_SIZE;
+        val = (lane < nwarps) ? swap[lane] : 0.;
+        for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
+            val += __shfl_down_sync(__activemask(), val, offset, MGRID_SUBGROUP_SIZE);
         }
     }
     // Without this barrier the other warps can enter the next reduce and

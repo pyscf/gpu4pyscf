@@ -282,13 +282,13 @@ void eval_lda_grad_kernel(double *grad, double *strain, double *dm,
         sigma[n*3+2] += grad_i[n] * zi + grad_j[n] * zj;
     }
 
-    for (int offset = 16; offset > 0; offset >>= 1) {
+    for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
         for (int n = 0; n < 3; ++n) {
-            grad_i[n] += __shfl_down_sync(__activemask(), grad_i[n], offset, 32);
-            grad_j[n] += __shfl_down_sync(__activemask(), grad_j[n], offset, 32);
+            grad_i[n] += __shfl_down_sync(__activemask(), grad_i[n], offset, MGRID_SUBGROUP_SIZE);
+            grad_j[n] += __shfl_down_sync(__activemask(), grad_j[n], offset, MGRID_SUBGROUP_SIZE);
         }
         for (int n = 0; n < 9; ++n) {
-            sigma[n] += __shfl_down_sync(__activemask(), sigma[n], offset, 32);
+            sigma[n] += __shfl_down_sync(__activemask(), sigma[n], offset, MGRID_SUBGROUP_SIZE);
         }
     }
     int lane = thread_id % MGRID_SUBGROUP_SIZE;

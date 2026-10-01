@@ -54,3 +54,5 @@ if num_devices > 1:
 
 # Overwrite the above settings using the global pyscf configs
 from pyscf.__config__ import * # noqa
+
+del shared_mem_optin

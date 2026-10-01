@@ -269,8 +269,8 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
                             val *= gaussian_xyz;
                         }
                         for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
-                            rho += __shfl_down_sync(__activemask(), rho, offset, 32);
-                            val += __shfl_down_sync(__activemask(), val, offset, 32);
+                            rho += __shfl_down_sync(__activemask(), rho, offset, MGRID_SUBGROUP_SIZE);
+                            val += __shfl_down_sync(__activemask(), val, offset, MGRID_SUBGROUP_SIZE);
                         }
                         if (lane == 0) {
                             int abc_index = a_index * TILE*TILE + b_index*TILE + c_index;

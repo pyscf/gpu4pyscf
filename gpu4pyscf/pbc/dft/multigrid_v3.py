@@ -1030,9 +1030,8 @@ def _apply_Gv_1j(rhoG, Gx, Gy, Gz, out=None):
     fn_name = 'apply_Gv_1j'
     if fn_name not in _kernel_registery:
         kernel_code = ('''\
-#include <cuComplex.h>
 extern "C" __global__
-void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *rhoG,
+void ''' + fn_name + r'''(double2* __restrict__ out, double2 *rhoG,
     double *Gx, double *Gy, double *Gz, long long nx, long long ny, long long nz) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     int stride = gridDim.x * blockDim.x;
@@ -1043,13 +1042,12 @@ void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *rh
         int iyz = g - nyz * ix;
         int iy = iyz / nz;
         int iz = iyz - nz * iy;
-        cuDoubleComplex rho = rhoG[g];
+        double2 rho = rhoG[g];
         double Gv = Gx[ix] + Gy[iy] + Gz[iz];
-        out[g] = make_cuDoubleComplex(-Gv * cuCimag(rho), Gv * cuCreal(rho));
+        out[g] = {-Gv * rho.y, Gv * rho.x};
     }
 }''')
-        _kernel_registery[fn_name] = cp.RawKernel(
-            kernel_code, fn_name, translate_cucomplex=cp.cuda.runtime.is_hip)
+        _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
 
     kernel = _kernel_registery[fn_name]
     out = ndarray(rhoG.shape, buffer=out, dtype=np.complex128)
@@ -1062,9 +1060,8 @@ def _contract_Gv_1j(out, xc, Gx, Gy, Gz):
     fn_name = 'contract_Gv_1j'
     if fn_name not in _kernel_registery:
         kernel_code = ('''\
-#include <cuComplex.h>
 extern "C" __global__
-void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *vxcG,
+void ''' + fn_name + r'''(double2* __restrict__ out, double2 *vxcG,
     double *Gx, double *Gy, double *Gz, long long nx, long long ny, long long nz) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     int stride = gridDim.x * blockDim.x;
@@ -1077,14 +1074,12 @@ void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *vx
         int iz = iyz - nz * iy;
         // (-i Gv) * v
         double Gv = Gx[ix] + Gy[iy] + Gz[iz];
-        cuDoubleComplex res = out[g];
-        cuDoubleComplex v = vxcG[g];
-        out[g] = make_cuDoubleComplex(cuCreal(res) + Gv * cuCimag(v),
-                                      cuCimag(res) - Gv * cuCreal(v));
+        double2 res = out[g];
+        double2 v = vxcG[g];
+        out[g] = {res.x + Gv * v.y, res.y - Gv * v.x};
     }
 }''')
-        _kernel_registery[fn_name] = cp.RawKernel(
-            kernel_code, fn_name, translate_cucomplex=cp.cuda.runtime.is_hip)
+        _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
 
     kernel = _kernel_registery[fn_name]
     workers = gpu_specs['multiProcessorCount']
