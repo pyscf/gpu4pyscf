@@ -38,9 +38,7 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                    void *shm_mem)
 {
     setup_context();
-#ifdef USE_SYCL
-    auto c_gxyz_offset = s_rys_gxyz_offset.get();
-#endif
+    GXYZ_BIND(c_gxyz_offset, s_rys_gxyz_offset);
     DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
     SHARED_SCALAR(int, ntasks);
     SHARED_SCALAR(int, pair_ij);
@@ -415,14 +413,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
 
         auto launch = [&](auto offset, int tile_chunk) {
-#ifdef USE_SYCL
-            CONSTANT_MEMCPY(s_rys_gxyz_offset, gxyz_offset+offset,
-                            tile_chunk*sizeof(GXYZOffset));
-#else
-            checkCudaErrors(
-                CONSTANT_MEMCPY(c_gxyz_offset, gxyz_offset+offset,
-                                tile_chunk*sizeof(GXYZOffset)));
-#endif
+            GXYZ_COPY_CHUNK(gxyz_offset, offset, tile_chunk*sizeof(GXYZOffset));
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
@@ -438,7 +429,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                     return;
                 }
             }
-            LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_jk_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL_DYN( rys_jk_kernel, blocks, threads, buflen,
                 dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
                 head + offset/256, gout_pattern, reserved_shm_size);

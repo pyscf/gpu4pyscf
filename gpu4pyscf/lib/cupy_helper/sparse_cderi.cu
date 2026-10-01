@@ -100,7 +100,7 @@ int unpack_block(CDERI_BLOCK *block, int p1, int p2, int nao, double *buf){
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(blockx, blocky);
     CDERI_BLOCK dev_block = *block;
-    LAUNCH_KERNEL_Q(sycl_get_queue(), _unpack, blocks, threads, 0,
+    LAUNCH_KERNEL( _unpack, blocks, threads, 0,
                     dev_block, nao, p1, buf);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

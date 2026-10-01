@@ -33,14 +33,17 @@
 // unrolled_ejk_int3c2e_ip1.cu is auto-generated upstream and must stay
 // byte-identical. Its kernels use __syncthreads() but never declare an
 // nd_item, so swap in an item-free barrier for the duration of the include.
-// The kernels are only ever instantiated from 2-D nd_range launches, so
-// get_nd_item<2>() is well-formed.
+// All launches are 3-D nd_range (LAUNCH_KERNEL_*), so get_nd_item<3>() is
+// well-formed.
 #ifdef USE_SYCL
 #pragma push_macro("__syncthreads")
 #undef __syncthreads
-#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<2>().get_group()))
+#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<3>().get_group()))
 #endif
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmacro-redefined"
 #include "unrolled_ejk_int3c2e_ip1.cu"
+#pragma GCC diagnostic pop
 #ifdef USE_SYCL
 #pragma pop_macro("__syncthreads")
 #endif
@@ -791,7 +794,7 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
         ejk, ejk_aux, dm, density_auxvec, n_dm, dev_envs,
         omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
@@ -824,7 +827,7 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     auto threads = make_block(THREADS);
     auto dev_envs = *envs;
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
-        LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
+        LAUNCH_KERNEL_DYN( ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
             ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n,
             omega, lr_factor, sr_factor, dev_envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,

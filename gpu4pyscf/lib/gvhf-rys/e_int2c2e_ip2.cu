@@ -378,7 +378,7 @@ int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
         fprintf(stderr, "CUDA Error in int2c2e_ip2 kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), e_int2c2e_ip2_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( e_int2c2e_ip2_kernel, blocks, threads, shm_size,
         out, dm, dev_envs, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     err = cudaGetLastError();

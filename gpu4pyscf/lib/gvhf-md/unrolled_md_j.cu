@@ -28,7 +28,7 @@
     auto _threads = make_block(16, 16); \
     cudaFuncSetAttribute(KERNEL, cudaFuncAttributeMaxDynamicSharedMemorySize, \
                          ((SHM)+addition_buf)*sizeof(double)); \
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), KERNEL, _blocks, _threads, \
+    LAUNCH_KERNEL_DYN( KERNEL, _blocks, _threads, \
         ((SHM)+addition_buf)*sizeof(double), \
         dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl); \
 }

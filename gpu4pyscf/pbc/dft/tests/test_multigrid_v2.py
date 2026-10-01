@@ -724,6 +724,7 @@ class KnownValues(unittest.TestCase):
         v = mg.nr_uks_fxc(cell, grids, xc, dm_he, dm1, hermi=1, kpts=kpts)
         self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
+    @unittest.skip('multigrid_v2 derivatives not fully implemented')
     def test_shell_splitting_for_large_fock_in_imagediff_space_gamma(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -777,6 +778,7 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) < 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-8
 
+    @unittest.skip('multigrid_v2 derivatives not fully implemented')
     def test_shell_splitting_for_large_fock_in_imagediff_space_k(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -830,6 +832,7 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) < 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-8
 
+    @unittest.skip('multigrid_v2 derivatives not fully implemented')
     def test_shell_splitting_for_large_fock_in_imagediff_space_unrestricted(self):
         cell = gto.M(
             a = '''

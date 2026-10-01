@@ -594,7 +594,7 @@ int contract_int3c2e_dm(double *out, double *dm, int n_dm, int naux,
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), contract_int3c2e_dm_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
         out, dm, n_dm, naux, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -619,7 +619,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
         vj, auxvec, n_dm, naux, dev_envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup);
     err = cudaGetLastError();

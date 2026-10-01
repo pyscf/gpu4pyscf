@@ -25,6 +25,10 @@ set(GPU_SRCS
   #get_veff_driver_ip1.cu
   #rys_roots_dat.cu
 )
+# CUDA-only constant tables (SYCL uses constexpr/device_global equivalents).
+if (NOT USE_SYCL)
+  list(APPEND GPU_SRCS constant_tables.cu)
+endif()
 add_library(gvhf SHARED ${GPU_SRCS})
 
 set_target_properties(gvhf PROPERTIES

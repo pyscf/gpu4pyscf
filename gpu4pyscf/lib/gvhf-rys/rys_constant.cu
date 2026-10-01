@@ -113,3 +113,28 @@ __constant__ int _c_cartesian_lexical_xyz[] = {
 };
 
 __constant__ GXYZOffset c_gxyz_offset[256];
+
+// c_nf/c_div_nf moved from rys_jk_driver.cu (CUDA-only tables).
+__constant__ int c_nf[] = {
+    1,
+    3,
+    6,
+    10,
+    15,
+    21,
+    28,
+    36,
+    45,
+};
+
+__constant__ float c_div_nf[] = {
+    1.f,
+    0.333334f,
+    0.166667f,
+    0.100001f,
+    0.066667f,
+    0.047620f,
+    0.035715f,
+    0.027778f,
+    0.022223f,
+};

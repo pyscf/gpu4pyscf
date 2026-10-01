@@ -80,6 +80,36 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(ao.get()-ref).max(), 0, 9)
         self.assertAlmostEqual(lib.fp(ao.get()), -1.6507836971790972, 8)
 
+    def test_eval_ao_deriv2_sph_fg(self):
+        cell = pbcgto.M(
+            atom='He .3 .4 .5',
+            basis=[[0, [.8, 1]],
+                   [1, [1.4, 1]],
+                   [2, [1.0, 1]],
+                   [3, [1.2, 1]],
+                   [4, [1.1, 1]]],
+            a=np.eye(3)*5, unit='B', cart=False)
+        rng = np.random.default_rng(2)
+        coords = rng.random((33, 3)) * 7 - 2
+        ni = numint.KNumInt()
+        kmesh = [2, 1, 1]
+        kpts = cell.make_kpts(kmesh)
+        ao = ni.eval_ao(cell, coords, kpts, deriv=2)
+        step = 1e-5
+        fd = []
+        for axis in range(3):
+            disp = np.zeros(3)
+            disp[axis] = step
+            plus = ni.eval_ao(cell, coords + disp, kpts, deriv=1)
+            minus = ni.eval_ao(cell, coords - disp, kpts, deriv=1)
+            fd.append(((plus - minus) / (2*step)).get())
+        components = ((0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2))
+        for k in range(len(kpts)):
+            dat = ao[k].get()
+            for n, (x, y) in enumerate(components):
+                ref = fd[y][k, 1+x]
+                np.testing.assert_allclose(dat[4+n], ref, atol=3e-9, rtol=0)
+
     # issue 675
     def test_eval_ao1(self):
         cell = pbcgto.M(a=np.eye(3)*3., atom = 'He 0.0 0.0 0.0', basis = '''

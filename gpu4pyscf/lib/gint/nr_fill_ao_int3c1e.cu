@@ -31,36 +31,12 @@
 #include "g1e_root_1.cu"
 #include "g3c1e.cu"
 
-// Abstracts 2D thread/block config (THREADSX/Y swapped between SYCL and CUDA).
-// Used 3x in this file.
-#ifdef USE_SYCL
+// 3D thread/block config via gpu_compat.h (make_grid/make_block).
+// X lane spans ntasks_ij, Y lane spans ngrids.
 #define LAUNCH_CONFIG() \
-    sycl::range<2> threads(THREADSY, THREADSX); \
-    sycl::range<2> blocks((ngrids+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
-#else
-#define LAUNCH_CONFIG() \
-    const dim3 threads(THREADSX, THREADSY); \
-    const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
-#endif
+    auto threads = make_block(THREADSX, THREADSY); \
+    auto blocks = make_grid((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
 
-// Abstracts 2D kernel launch syntax.
-// TAG:    unique SYCL class name (ignored on CUDA)
-// KERNEL: kernel function with template args if needed
-// ...:    kernel arguments
-#define GINT_CAT_(a, b) a##b
-#define GINT_CAT(a, b)  GINT_CAT_(a, b)
-#ifdef USE_SYCL
-// ARGS: parenthesized runtime args. Kernel-id (with any template args) is the
-// trailing __VA_ARGS__ so its commas survive macro expansion. SYCL kernel name
-// is generated inline per source line (unique within this translation unit).
-#define LAUNCH_KERNEL(ARGS, ...) \
-    stream.parallel_for<class GINT_CAT(gint_int3c1e_kernel_L, __LINE__)>( \
-        sycl::nd_range<2>(blocks * threads, threads), \
-        [=](auto item) [[intel::kernel_args_restrict]] { __VA_ARGS__ ARGS; });
-#else
-#define LAUNCH_KERNEL(ARGS, ...) \
-    __VA_ARGS__ <<<blocks, threads, 0, stream>>> ARGS;
-#endif
 
 static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets, const int i_l, const int j_l, const int nprim_ij,
                                   const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j,
@@ -76,16 +52,16 @@ static int GINTfill_int3c1e_tasks(double* output, const BasisProdOffsets offsets
     case 1:
         type_ijkl = (i_l << 2) | j_l;
         switch (type_ijkl) {
-        case (0<<2)|0: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_kernel00) break;
-        case (1<<2)|0: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_kernel10) break;
+        case (0<<2)|0: LAUNCH_KERNEL_S((GINTfill_int3c1e_kernel00), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+        case (1<<2)|0: LAUNCH_KERNEL_S((GINTfill_int3c1e_kernel10), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
         default:
             fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
         }
         break;
-    case 2: LAUNCH_KERNEL((output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_kernel_general<2, GSIZE2_INT3C_1E>) break;
-    case 3: LAUNCH_KERNEL((output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_kernel_general<3, GSIZE3_INT3C_1E>) break;
-    case 4: LAUNCH_KERNEL((output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_kernel_general<4, GSIZE4_INT3C_1E>) break;
-    case 5: LAUNCH_KERNEL((output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_kernel_general<5, GSIZE5_INT3C_1E>) break;
+    case 2: LAUNCH_KERNEL_S((GINTfill_int3c1e_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 3: LAUNCH_KERNEL_S((GINTfill_int3c1e_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 4: LAUNCH_KERNEL_S((GINTfill_int3c1e_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 5: LAUNCH_KERNEL_S((GINTfill_int3c1e_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     default:
         fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -109,22 +85,22 @@ static int GINTfill_int3c1e_charge_contracted_tasks(double* output, const BasisP
 
     LAUNCH_CONFIG();
     switch (type_ij) {
-    case 00: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel00) break;
-    case 10: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel10) break;
-    case 11: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<1, 1>) break;
-    case 20: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<2, 0>) break;
-    case 21: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<2, 1>) break;
-    case 22: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<2, 2>) break;
-    case 30: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<3, 0>) break;
-    case 31: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<3, 1>) break;
-    case 32: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<3, 2>) break;
-    case 40: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<4, 0>) break;
-    case 41: LAUNCH_KERNEL((output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_expanded<4, 1>) break;
+    case 00: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel00), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 10: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel10), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 11: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<1, 1>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 20: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<2, 0>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 21: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<2, 1>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 22: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<2, 2>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 30: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<3, 0>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 31: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<3, 1>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 32: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<3, 2>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 40: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<4, 0>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 41: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_expanded<4, 1>), blocks, threads, 0, stream, output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     default:
         const int nrys_roots = (i_l + j_l) / 2 + 1;
         switch (nrys_roots) {
-        case 4: LAUNCH_KERNEL((output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>) break;
-        case 5: LAUNCH_KERNEL((output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents), GINTfill_int3c1e_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>) break;
+        case 4: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+        case 5: LAUNCH_KERNEL_S((GINTfill_int3c1e_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
         default:
             fprintf(stderr, "type_ij = %d, nrys_roots = %d out of range\n", type_ij, nrys_roots);
             return 1;
@@ -148,15 +124,15 @@ static int GINTfill_int3c1e_density_contracted_tasks(double* output, const doubl
 
     LAUNCH_CONFIG();
     switch (i_l + j_l) {
-    case  0: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel00) break;
-    case  1: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel10) break;
-    case  2: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel_general< 2>) break;
-    case  3: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel_general< 3>) break;
-    case  4: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel_general< 4>) break;
-    case  5: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel_general< 5>) break;
-    case  6: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel_general< 6>) break;
-    case  7: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel_general< 7>) break;
-    case  8: LAUNCH_KERNEL((output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents), GINTfill_int3c1e_density_contracted_kernel_general< 8>) break;
+    case  0: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel00), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  1: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel10), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  2: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel_general< 2>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  3: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel_general< 3>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  4: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel_general< 4>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  5: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel_general< 5>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  6: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel_general< 6>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  7: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel_general< 7>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  8: LAUNCH_KERNEL_S((GINTfill_int3c1e_density_contracted_kernel_general< 8>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
     // Up to g + g = 8 now
     default:
         fprintf(stderr, "i_l + j_l = %d out of range\n", i_l + j_l);
@@ -189,11 +165,7 @@ int GINTfill_int3c1e(const cudaStream_t stream, const BasisProdCache* bpcache,
         return 2;
     }
 
-#ifdef USE_SYCL
-    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
-#else
-    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-#endif
+    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -243,11 +215,7 @@ int GINTfill_int3c1e_charge_contracted(const cudaStream_t stream, const BasisPro
         return 2;
     }
 
-#ifdef USE_SYCL
-    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
-#else
-    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-#endif
+    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -297,11 +265,7 @@ int GINTfill_int3c1e_density_contracted(const cudaStream_t stream, const BasisPr
         return 2;
     }
 
-#ifdef USE_SYCL
-    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
-#else
-    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
-#endif
+    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -340,4 +304,3 @@ int GINTfill_int3c1e_density_contracted(const cudaStream_t stream, const BasisPr
 }
 
 #undef LAUNCH_CONFIG
-#undef LAUNCH_KERNEL

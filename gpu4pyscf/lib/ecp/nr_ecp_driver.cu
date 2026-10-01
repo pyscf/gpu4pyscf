@@ -33,56 +33,15 @@
 
 #define ECP_ARGS  gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env
 
-#ifdef USE_SYCL
 #define ECP_LAUNCH1(TAG, KPREFIX, LI, LJ) \
-    stream.parallel_for<class TAG>( \
-        sycl::nd_range<1>(blocks * threads, threads), \
-        [=](auto item) [[intel::kernel_args_restrict]] { \
-            KPREFIX<LI,LJ>(ECP_ARGS); \
-        })
-#else
-#define ECP_LAUNCH1(TAG, KPREFIX, LI, LJ) \
-    KPREFIX<LI,LJ><<<blocks, threads>>>(ECP_ARGS)
-#endif
+    LAUNCH_KERNEL((KPREFIX<LI,LJ>), blocks, threads, 0, ECP_ARGS)
 
-#ifdef USE_SYCL
 #define ECP_LAUNCH2(TAG, KPREFIX, LI, LJ, LC) \
-    stream.parallel_for<class TAG>( \
-        sycl::nd_range<1>(blocks * threads, threads), \
-        [=](auto item) [[intel::kernel_args_restrict]] { \
-            KPREFIX<LI,LJ,LC>(ECP_ARGS); \
-        })
-#else
-#define ECP_LAUNCH2(TAG, KPREFIX, LI, LJ, LC) \
-    KPREFIX<LI,LJ,LC><<<blocks, threads>>>(ECP_ARGS)
-#endif
+    LAUNCH_KERNEL((KPREFIX<LI,LJ,LC>), blocks, threads, 0, ECP_ARGS)
 
-#ifdef USE_SYCL
 #define ECP_LAUNCH_SMEM(TAG, SMEM, KFUNC, ...) \
-    stream.submit([&](sycl::handler &cgh) { \
-        sycl::local_accessor<double, 1> local_acc(sycl::range<1>(SMEM), cgh); \
-        cgh.parallel_for<class TAG>( \
-            sycl::nd_range<1>(blocks * threads, threads), \
-            [=](auto item) [[intel::kernel_args_restrict]] { \
-                KFUNC(__VA_ARGS__, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
-            }); \
-    })
-#else
-#define ECP_LAUNCH_SMEM(TAG, SMEM, KFUNC, ...) \
-    KFUNC<<<blocks, threads, (SMEM)*sizeof(double)>>>(__VA_ARGS__, nullptr)
-#endif
+    LAUNCH_KERNEL_DYN((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__)
 
-#ifdef USE_SYCL
-#define ECP_LAUNCH_GENERAL(TAG, SMEM, KFUNC, ...) \
-    stream.submit([&](sycl::handler &cgh) { \
-        sycl::local_accessor<double, 1> local_acc(sycl::range<1>(SMEM), cgh); \
-        cgh.parallel_for<class TAG>( \
-            sycl::nd_range<1>(blocks * threads, threads), \
-            [=](auto item) [[intel::kernel_args_restrict]] { \
-                KFUNC(__VA_ARGS__, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); \
-            }); \
-    })
-#else
 #define ECP_LAUNCH_GENERAL(TAG, SMEM, KFUNC, ...) do { \
     cudaError_t _e = cudaFuncSetAttribute( \
         KFUNC, cudaFuncAttributeMaxDynamicSharedMemorySize, (SMEM)*sizeof(double)); \
@@ -91,9 +50,8 @@
                 __func__, cudaGetErrorString(_e)); \
         return 1; \
     } \
-    KFUNC<<<blocks, threads, (SMEM)*sizeof(double)>>>(__VA_ARGS__, nullptr); \
+    LAUNCH_KERNEL_DYN((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__); \
 } while(0)
-#endif
 
 extern "C" {
 int ECP_cart(double *gctr,
@@ -103,14 +61,8 @@ int ECP_cart(double *gctr,
             const int *atm, const int *bas, const double *env,
             const int li, const int lj, const int lc){
     // one task per thread block
-#ifdef USE_SYCL
-    sycl::range<1> threads(THREADS);
-    sycl::range<1> blocks(ntasks);
-    sycl::queue& stream = *sycl_get_queue();
-#else
-    dim3 threads(THREADS);
-    dim3 blocks(ntasks);
-#endif
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(ntasks);
     if (lc >= 0){
         int task_type = li * 100 + lj * 10 + lc;
         switch (task_type) {
@@ -190,14 +142,8 @@ int ECP_ip_cart(double *gctr,
             const int *atm, const int *bas, const double *env,
             const int li, const int lj, const int lc){
     // one task per thread block
-#ifdef USE_SYCL
-    sycl::range<1> threads(THREADS);
-    sycl::range<1> blocks(ntasks);
-    sycl::queue& stream = *sycl_get_queue();
-#else
-    dim3 threads(THREADS);
-    dim3 blocks(ntasks);
-#endif
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(ntasks);
     if (lc < 0){
         int task_type = li * 10 + lj;
         switch (task_type) {
@@ -278,14 +224,8 @@ int ECP_ipipv_cart(double *gctr,
             const int *atm, const int *bas, const double *env,
             const int li, const int lj, const int lc){
     // one task per thread block
-#ifdef USE_SYCL
-    sycl::range<1> threads(THREADS);
-    sycl::range<1> blocks(ntasks);
-    sycl::queue& stream = *sycl_get_queue();
-#else
-    dim3 threads(THREADS);
-    dim3 blocks(ntasks);
-#endif
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(ntasks);
     
     if (lc < 0){
         const int lij1 = li+lj+3;
@@ -338,14 +278,8 @@ int ECP_ipvip_cart(double *gctr,
             const int *atm, const int *bas, const double *env,
             const int li, const int lj, const int lc){
     // one task per thread block
-#ifdef USE_SYCL
-    sycl::range<1> threads(THREADS);
-    sycl::range<1> blocks(ntasks);
-    sycl::queue& stream = *sycl_get_queue();
-#else
-    dim3 threads(THREADS);
-    dim3 blocks(ntasks);
-#endif
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(ntasks);
 
     if (lc < 0){
         const int lij1 = li+lj+3;
@@ -395,4 +329,5 @@ int ECP_ipvip_cart(double *gctr,
 #undef ECP_ARGS
 #undef ECP_LAUNCH1
 #undef ECP_LAUNCH2
+#undef ECP_LAUNCH_SMEM
 #undef ECP_LAUNCH_GENERAL

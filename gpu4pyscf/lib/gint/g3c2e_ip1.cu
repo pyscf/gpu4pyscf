@@ -116,7 +116,8 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
 __device__
 static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double* g, double ai2, const int ish, const int jsh, const int ksh)
 {
-    KERNEL_SETUP_LOCAL();
+    setup_context();
+    GINT_CACHE_REF();
     int *ao_loc = c_bpcache.ao_loc;
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
@@ -189,21 +190,14 @@ static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double
 
 // General version
 __global__
-void GINTfill_int3c2e_ip1_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets
-                                  	 #ifdef USE_SYCL
-					 , sycl::nd_item<2> &item, double* g
-                                         #endif
-    )
+void GINTfill_int3c2e_ip1_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets,
+                                          void *shm_mem)
 {
-    #ifdef USE_SYCL
-    const int task_ij = item.get_group(1);
-    const int task_kl = item.get_group(0);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
-    extern __shared__ double g[];
-    #endif
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, g, shm_mem);
+    const int task_ij = blockIdx_x;
+    const int task_kl = blockIdx_y;
+    GINT_CACHE_REF();
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;

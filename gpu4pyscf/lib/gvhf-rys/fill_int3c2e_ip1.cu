@@ -506,7 +506,7 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs,
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), int3c2e_ip1_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( int3c2e_ip1_kernel, blocks, threads, shm_size,
         out, dev_envs, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
@@ -534,7 +534,7 @@ int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs,
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), int3c2e_ipaux_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( int3c2e_ipaux_kernel, blocks, threads, shm_size,
         out, dev_envs, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,

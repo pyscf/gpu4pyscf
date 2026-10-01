@@ -109,6 +109,15 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
 
+    def test_rks_omega_override(self):
+        mf = rks.RKS(mol_sph, xc='LC_WPBE')
+        mf.omega = 0.175
+        mf.grids.level = grids_level
+        e_gpu = mf.kernel()
+        e_cpu = mf.to_cpu().kernel()
+        print('| CPU - GPU |:', e_gpu - e_cpu)
+        assert np.abs(e_gpu - e_cpu) < 1e-6
+
     def test_rks_vv10(self):
         print("------- wB97m-v -------------")
         e_tot = run_dft('HYB_MGGA_XC_WB97M_V', mol_sph)

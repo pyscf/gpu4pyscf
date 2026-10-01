@@ -30,7 +30,7 @@
 // backends (its SYCL lambda capture would otherwise dereference a host
 // pointer on device); see LAUNCH_KERNEL_LAST in gsycl/gpu_compat.h.
 #define LAUNCH_KERNEL_ENV(KERNEL, ...) \
-    LAUNCH_KERNEL_LAST(KERNEL, *gto_envs, blocks, threads, 0, stream, __VA_ARGS__)
+    LAUNCH_KERNEL_LAST_S(KERNEL, *gto_envs, blocks, threads, 0, stream, __VA_ARGS__)
 
 #define KERNEL_PROLOGUE_BAS_GRID() \
     setup_context(); \
@@ -1971,7 +1971,7 @@ int GDFTscreen_index(cudaStream_t stream, int8_t *non0shl_mask, double log_cutof
     auto blocks  = MAKE_RANGE_2D((ngrids+block_size-1)/block_size,
                                   (nbas+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     // _screen_index takes no gto_envs; launch directly (LAUNCH_KERNEL appends envs).
-    LAUNCH_KERNEL(_screen_index, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_screen_index, blocks, threads, 0, stream,
                       non0shl_mask, log_cutoff, grids, ngrids, block_size,
                       atm, natm, bas, nbas, env);
     cudaError_t err = cudaGetLastError();

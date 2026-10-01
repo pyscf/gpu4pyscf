@@ -283,7 +283,7 @@ int launch_ss_kernel_c(
 
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), ss_summation_kernel, grid, block, 0,
+    LAUNCH_KERNEL( ss_summation_kernel, grid, block, 0,
         n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -301,7 +301,7 @@ int launch_afn_kernel_c(
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), afn_kernel, grid, block, 0,
+    LAUNCH_KERNEL( afn_kernel, grid, block, 0,
         n_pairs, p_vec, af_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -320,7 +320,7 @@ int launch_bfn_kernel_c(
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), bfn_kernel, grid, block, 0,
+    LAUNCH_KERNEL( bfn_kernel, grid, block, 0,
         n_pairs, x, taylor_coeffs, bf_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -340,7 +340,7 @@ int launch_rotation_transform_kernel(
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), rotation_transform_kernel, grid, block, 0,
+    LAUNCH_KERNEL( rotation_transform_kernel, grid, block, 0,
         n_pairs, S_local, C_tensor, di_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

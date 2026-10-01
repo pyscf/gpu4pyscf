@@ -65,7 +65,7 @@
     auto _rys_envs = *envs; auto _rys_jk = *jk; auto _rys_bounds = *bounds; \
     auto _rys_blocks = make_grid(workers, 1); \
     auto _rys_threads = make_block(nsq_per_block, gout_stride); \
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), KERNEL, _rys_blocks, _rys_threads, \
+    LAUNCH_KERNEL_DYN( KERNEL, _rys_blocks, _rys_threads, \
         (buflen)*sizeof(double), \
         _rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
         dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); \
@@ -97,7 +97,7 @@
     auto _rys_envs = *envs; auto _rys_jk = *jk; auto _rys_bounds = *bounds; \
     auto _rys_blocks = make_grid(workers, 1); \
     auto _rys_threads = make_block(nsq_per_block, gout_stride); \
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), KERNEL, _rys_blocks, _rys_threads, \
+    LAUNCH_KERNEL_DYN( KERNEL, _rys_blocks, _rys_threads, \
         (buflen)*sizeof(double), \
         _rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
         dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, \

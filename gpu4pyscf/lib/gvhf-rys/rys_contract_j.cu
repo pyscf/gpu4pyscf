@@ -25,13 +25,8 @@
 #include "rys_roots.cu"
 #include "create_tasks.cu"
 
-#ifdef USE_SYCL
-SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
-SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
-#else
-__constant__ Fold2Index c_i_in_fold2idx[165];
-__constant__ Fold3Index c_i_in_fold3idx[495];
-#endif
+FOLD_TABLE_DEFINE(Fold2Index, s_rys_i_in_fold2idx, c_i_in_fold2idx, 165);
+FOLD_TABLE_DEFINE(Fold3Index, s_rys_i_in_fold3idx, c_i_in_fold3idx, 495);
 
 __global__ static
 void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
@@ -41,10 +36,8 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                   void *shm_mem)
 {
     setup_context();
-#ifdef USE_SYCL
-    auto c_i_in_fold2idx = s_rys_i_in_fold2idx.get();
-    auto c_i_in_fold3idx = s_rys_i_in_fold3idx.get();
-#endif
+    FOLD_TABLE_BIND(c_i_in_fold2idx, s_rys_i_in_fold2idx);
+    FOLD_TABLE_BIND(c_i_in_fold3idx, s_rys_i_in_fold3idx);
     SHARED_SCALAR(int, ntasks);
     SHARED_SCALAR(int, pair_ij);
     SHARED_SCALAR(int, pair_kl0);
@@ -518,9 +511,7 @@ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             void *shm_mem)
 {
     setup_context();
-#ifdef USE_SYCL
-    auto c_i_in_fold3idx = s_rys_i_in_fold3idx.get();
-#endif
+    FOLD_TABLE_BIND(c_i_in_fold3idx, s_rys_i_in_fold3idx);
     SHARED_SCALAR(int, ntasks);
     SHARED_SCALAR(int, pair_ij);
     SHARED_SCALAR(int, pair_kl0);
@@ -917,7 +908,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     return 1;
                 }
             }
-            LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_j_with_gout_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL_DYN( rys_j_with_gout_kernel, blocks, threads, buflen,
                 dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
         } else {
@@ -937,7 +928,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     return 1;
                 }
             }
-            LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_j_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL_DYN( rys_j_kernel, blocks, threads, buflen,
                 dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
         }
@@ -975,13 +966,8 @@ int RYS_init_rysj_constant()
             }
         } }
     }
-#ifdef USE_SYCL
-    CONSTANT_MEMCPY(s_rys_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
-    CONSTANT_MEMCPY(s_rys_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
-#else
-    CONSTANT_MEMCPY(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
-    CONSTANT_MEMCPY(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
-#endif
+    FOLD_TABLE_FILL(c_i_in_fold2idx, s_rys_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
+    FOLD_TABLE_FILL(c_i_in_fold3idx, s_rys_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     return 0;
 }
 }

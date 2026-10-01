@@ -244,7 +244,7 @@ class GDF(lib.StreamObject):
 
             with self.range_coulomb(omega) as rsh_df:
                 if rsh_df._cderi is None:
-                    rsh_df.build(j_only=self._j_only)
+                    rsh_df.build(j_only=not with_k)
                 assert omega == rsh_df._omega
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)

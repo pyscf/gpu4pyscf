@@ -287,12 +287,12 @@ int cart2sph(cudaStream_t stream, double *cart_gto, double *sph_gto, int stride,
     switch (ang) {
         case 0: break;
         case 1: break;
-        case 2: LAUNCH_KERNEL(_cart2sph_ang2, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
-        case 3: LAUNCH_KERNEL(_cart2sph_ang3, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
-        case 4: LAUNCH_KERNEL(_cart2sph_ang4, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
-        case 5: LAUNCH_KERNEL(_cart2sph_ang5, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
-        case 6: LAUNCH_KERNEL(_cart2sph_ang6, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
-        case 7: LAUNCH_KERNEL(_cart2sph_ang7, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 2: LAUNCH_KERNEL_S(_cart2sph_ang2, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 3: LAUNCH_KERNEL_S(_cart2sph_ang3, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 4: LAUNCH_KERNEL_S(_cart2sph_ang4, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 5: LAUNCH_KERNEL_S(_cart2sph_ang5, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 6: LAUNCH_KERNEL_S(_cart2sph_ang6, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
+        case 7: LAUNCH_KERNEL_S(_cart2sph_ang7, blocks, threads, 0, stream, cart_gto, sph_gto, stride, count); break;
         default:
             fprintf(stderr, "Ang > 7 is not supported!\n");
             return 1;

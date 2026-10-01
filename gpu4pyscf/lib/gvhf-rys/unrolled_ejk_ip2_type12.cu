@@ -1,7 +1,6 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/create_tasks.cu"
@@ -43,7 +42,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -458,7 +457,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -1090,7 +1089,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -2466,7 +2465,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -4806,7 +4805,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -6202,7 +6201,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -8537,7 +8536,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);

@@ -456,7 +456,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     rho = cupy.empty([ncomp, ngrids])
     g1 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv):
         g0, g1 = g1, g1 + weight.size
         dms_masked = take_last2d(dms, idx, out=dm_mask_buf)
         rho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dms_masked, xctype = xctype, hermi = 1)
@@ -492,7 +492,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     del exc
 
     g0 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1):
         g1 = g0 + weight.shape[0]
 
         ao = ao[:, :, nonzero_weight_mask[g0:g1]]
@@ -594,7 +594,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     ngrids_full = grids.coords.shape[0]
     rho_drho = cupy.empty([4, ngrids_full])
     g1 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 1, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 1):
         g0, g1 = g1, g1 + weight.size
         dms_masked = take_last2d(dms_sorted, idx, out = dm_mask_buf)
         rho_drho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dms_masked, xctype = "NLC", hermi = 1)
@@ -666,7 +666,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     g0_full = 0
     g0_nonzero = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2):
         g1_full = g0_full + weight.shape[0]
 
         ao = ao[:, :, rho_nonzero_mask[g0_full : g1_full]]

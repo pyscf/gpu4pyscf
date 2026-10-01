@@ -558,7 +558,7 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip2: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), ejk_int3c2e_ip2_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( ejk_int3c2e_ip2_kernel, blocks, threads, shm_size,
         ejk, dm, density_auxvec, omega, lr_factor, sr_factor, dev_envs,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, aux_offset, naux);

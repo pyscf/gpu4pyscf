@@ -52,7 +52,7 @@
 #define LAUNCH_BRA_KERNEL(KERNEL, counts_, nbas_, nbatch_col_, ...) { \
     auto _blocks = make_grid(nbatch_col_, nbas_, counts_); \
     auto _threads = make_block(THREADS); \
-    LAUNCH_KERNEL_Q(sycl_get_queue(), KERNEL, _blocks, _threads, 0, __VA_ARGS__); \
+    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, __VA_ARGS__); \
 }
 
 // NOTE: launch geometry is x = nbas tiles, y = nrow tiles. The old CUDA
@@ -60,7 +60,7 @@
 #define LAUNCH_KET_KERNEL(KERNEL, nbas_, nrow_, ...) { \
     auto _blocks = make_grid((nbas_+TILE_X-1)/TILE_X, (nrow_+ROW_BLKSIZE-1)/ROW_BLKSIZE); \
     auto _threads = make_block(TILE_X, TILE_Y); \
-    LAUNCH_KERNEL_Q(sycl_get_queue(), KERNEL, _blocks, _threads, 0, __VA_ARGS__); \
+    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, __VA_ARGS__); \
 }
 
 static __global__

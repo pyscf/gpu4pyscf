@@ -1753,7 +1753,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
                 return 1;
             }
         }
-        LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_vjk_ip1_kernel, blocks, threads, shm_bytes,
+        LAUNCH_KERNEL_DYN( rys_vjk_ip1_kernel, blocks, threads, shm_bytes,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, nf,
             reserved_shm_size);
@@ -1850,7 +1850,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                 return 1;
             }
         }
-        LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_ejk_ip1_kernel, blocks, threads, shm_bytes,
+        LAUNCH_KERNEL_DYN( rys_ejk_ip1_kernel, blocks, threads, shm_bytes,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, dd_pool, nf,
             reserved_shm_size);
@@ -1953,7 +1953,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
 
         auto blocks = make_grid(workers, 1);
         auto threads = make_block(quartets_per_block, gout_stride);
-        LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_ejk_ip1_multidm_kernel, blocks, threads, buflen*sizeof(double),
+        LAUNCH_KERNEL_DYN( rys_ejk_ip1_multidm_kernel, blocks, threads, buflen*sizeof(double),
             envs, jk, bounds, j_factor+n, k_factor+n, dm1+n*nao2, dm2+n*nao2,
             q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
             pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size);
@@ -2048,7 +2048,7 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
 
     auto blocks = make_grid(workers, 1);
     auto threads = make_block(quartets_per_block, gout_stride);
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_ejk_ip1_sum_kernel, blocks, threads, buflen*sizeof(double),
+    LAUNCH_KERNEL_DYN( rys_ejk_ip1_sum_kernel, blocks, threads, buflen*sizeof(double),
         envs, jk, bounds, j_factor, k_factor, dm1, dm2,
         q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
         pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size);

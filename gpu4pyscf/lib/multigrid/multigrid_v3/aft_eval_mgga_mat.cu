@@ -18,25 +18,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
-#ifndef USE_SYCL
-#include <cuComplex.h>
-#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
 #include "utils.cuh"
 #include "gsycl/gpu_compat.h"
 #include "aft_recursion.cuh"
-
-#ifdef USE_SYCL
-// CUDA cuDoubleComplex stand-in. No SYCL analogue exists anywhere in the
-// codebase; this POD exactly matches cuDoubleComplex's memory layout (two
-// doubles) so device-pointer reinterpretation from Python callers is
-// unaffected. Unlike sycl::double2 (whose .x()/.y() are methods), this is a
-// real struct with real members, so existing .x/.y field-access and
-// brace-init call sites need zero further changes.
-struct alignas(16) cuDoubleComplex { double x, y; };
-#endif
 
 #define WARP_SIZE       32
 #define WARPS           8
@@ -318,7 +305,7 @@ int orth_aft_mgga_mat(double *out, cuDoubleComplex *vrhoG, cuDoubleComplex *vtau
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntile_batch*npair);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_LAST_Q(orth_mgga_mat_kernel, dev_envs, sycl_get_queue(), grids, threads, 0,
+    LAUNCH_KERNEL_LAST(orth_mgga_mat_kernel, dev_envs, grids, threads, 0,
                          out, vrhoG, vtauG, bas_ij_idx, G_bases, L_bases,
                          mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
     cudaDeviceSynchronize();

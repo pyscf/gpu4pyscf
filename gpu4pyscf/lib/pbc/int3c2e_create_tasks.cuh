@@ -57,9 +57,7 @@ typedef struct {
 __device__ inline
 int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-#endif
+    setup_context();
     tmp_storage[t_id] = keep;
     __syncthreads();
     for (int offset = 1; offset < threads; offset <<= 1) {
@@ -83,12 +81,8 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
                           uint32_t *bas_ij_idx, int *img_idx, uint32_t *sp_img_offsets,
                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    #else
-    int thread_id = threadIdx.x;
-    #endif
+    setup_context();
+    int thread_id = threadIdx_x;
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
     int *bas = envs.bas;
@@ -197,21 +191,14 @@ __device__ inline
 void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
                        ShellTripletTaskInfo *ijk_tasks_info, int *swap)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    int threads = item.get_local_range(0);
-    #else
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
-    #endif
+    setup_context();
+    int thread_id = threadIdx_x;
     int tot_tasks = num_ijk_tasks;
     __syncthreads();
     if (thread_id == 0) {
         num_ijk_tasks = 0;
     }
-    for (int base = 0; base < tot_tasks; base += THREADS) {
-        int task_id = base + thread_id;
+    for (int task_id = thread_id; task_id < tot_tasks+thread_id; task_id += THREADS) {
         register int ijk_id = 0;
         int keep = 0;
         if (task_id < tot_tasks) {
@@ -219,14 +206,15 @@ void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
             keep = ijk_tasks_info[ijk_id].remaining_imgs > 0;
         }
 
-        int offset = mask_to_index(keep, swap, threads, thread_id);
+        int offset = mask_to_index(keep, swap, THREADS, thread_id);
         if (keep) {
             rem_task_idx[num_ijk_tasks + offset] = ijk_id;
         }
         __syncthreads();
         if (thread_id == 0) {
-            num_ijk_tasks += swap[threads - 1];
+            num_ijk_tasks += swap[THREADS - 1];
         }
+        __syncthreads();
     }
     __syncthreads();
 }
@@ -237,14 +225,8 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
                      uint32_t *rem_task_idx, int num_ijk_tasks,
                      ShellTripletTaskInfo *ijk_tasks_info, int *swap)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    int threads = item.get_local_range(0);
-    #else
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
-    #endif
+    setup_context();
+    int thread_id = threadIdx_x;
     __syncthreads();
     if (thread_id == 0) {
         num_sub_tasks = 0;
@@ -255,8 +237,7 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
     }
     __syncthreads();
 
-    for (int base = 0; base < num_ijk_tasks; base += THREADS) {
-        int task_id = base + thread_id;
+    for (int task_id = thread_id; task_id < num_ijk_tasks+thread_id; task_id += THREADS) {
         register int ijk_id = 0;
         int keep = 0;
         int img_count = 0;
@@ -266,15 +247,16 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
             keep = img_count >= img_tile_size;
         }
 
-        int offset = mask_to_index(keep, swap, threads, thread_id);
+        int offset = mask_to_index(keep, swap, THREADS, thread_id);
         if (keep) {
             sub_task_idx[num_sub_tasks + offset] = ijk_id;
             ijk_tasks_info[ijk_id].img_count = img_count - img_tile_size;
         }
         __syncthreads();
         if (thread_id == 0) {
-            num_sub_tasks += swap[threads - 1];
+            num_sub_tasks += swap[THREADS - 1];
         }
+        __syncthreads();
     }
     __syncthreads();
 }
@@ -284,14 +266,9 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
                        int num_ijk_tasks, ShellTripletTaskInfo *ijk_tasks_info,
                        PBCIntEnvVars &envs, int *sp_img_idx)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    int &task_head = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
-#else
-    int thread_id = threadIdx.x;
-    __shared__ int task_head;
-#endif
+    setup_context();
+    int thread_id = threadIdx_x;
+    SHARED_SCALAR(int, task_head);
     if (thread_id == 0) {
         task_head = THREADS;
     }
@@ -383,9 +360,7 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
 __device__ inline
 int warp_max(int val)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-#endif
+    setup_context();
     for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
         val = max(val, __shfl_down_sync(0xffffffff, val, offset));
     }
@@ -395,14 +370,9 @@ int warp_max(int val)
 __device__ inline
 void block_max(int val, int& out)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int thread_id = item.get_local_id(0);
-    int (&buf)[WARPS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[WARPS]>(item.get_group());
-#else
-    int thread_id = threadIdx.x;
-    __shared__ int buf[WARPS];
-#endif
+    setup_context();
+    int thread_id = threadIdx_x;
+    SHARED_ARRAY(int, buf, [WARPS]);
 
     val = warp_max(val);
     int lane = thread_id % warpSize;

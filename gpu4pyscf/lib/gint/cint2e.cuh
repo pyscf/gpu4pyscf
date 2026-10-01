@@ -19,6 +19,15 @@
 #include "gint.h"
 
 #ifdef USE_SYCL
+// sycl_device.hpp comes via gint.h.
+#elif defined(__CUDACC__)
+#include <cuda_runtime.h>
+#endif
+// Backend-agnostic kernel macros (setup_context, threadIdx_x, DYNAMIC_SHARED_PTR,
+// LAUNCH_KERNEL_*). Included here so every gint TU gets them regardless of include order.
+#include "gsycl/gpu_compat.h"
+
+#ifdef USE_SYCL
 
 extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;
 
@@ -48,28 +57,49 @@ extern __constant__ int c_idx[TOT_NF*3];
 extern __constant__ int c_l_locs[GPU_LMAX+2];
 #endif // USE_SYCL
 
-// Abstracts 2D kernel thread-index setup for task_ij/task_kl kernels. Used 79x across gint/.
+// Provides task_ij/task_kl grid indices for 3D-launched kernels. Backend-agnostic:
+// setup_context() + index math via threadIdx_x/blockDim_x macros (gpu_compat.h).
+// Launch with make_block(THREADSX, THREADSY) + make_grid(...) so x/y lanes match.
+#define KERNEL_SETUP() \
+    setup_context(); \
+    GINT_CACHE_REF(); \
+    const int task_ij = blockIdx_x * blockDim_x + threadIdx_x; \
+    const int task_kl = blockIdx_y * blockDim_y + threadIdx_y;
+
+// Cache reference for gpu_compat-style (rank-3) kernels that spell out index
+// setup inline via setup_context(). CUDA uses the __constant__ symbol directly;
+// SYCL binds the device_global. Keeps .cu files free of backend branches.
 #ifdef USE_SYCL
-#define KERNEL_SETUP() \
-    auto item = syclex::this_work_item::get_nd_item<2>(); \
-    const int task_ij = item.get_global_id(1); \
-    const int task_kl = item.get_global_id(0); \
-    const auto& c_bpcache = s_bpcache.get();
+#define GINT_CACHE_REF() \
+    const auto& c_bpcache = s_bpcache.get()
 #else
-#define KERNEL_SETUP() \
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x; \
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+#define GINT_CACHE_REF()
 #endif
 
-// Abstracts 2D kernel local thread-index setup for threadIdx_x/blockDim_x kernels. Used 9x across gint/.
+// Backend-agnostic constant-cache symbol for CONSTANT_MEMCPY upload sites.
+// Usage: CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
 #ifdef USE_SYCL
-#define KERNEL_SETUP_LOCAL() \
-    auto item = syclex::this_work_item::get_nd_item<2>(); \
-    const int threadIdx_x = item.get_local_id(1); \
-    const int blockDim_x = item.get_local_range(1); \
-    const auto& c_bpcache = s_bpcache.get();
+#define GINT_BPCACHE_SYM s_bpcache
+#define GINT_BPCACHE_DEFINE() \
+    SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache
 #else
-#define KERNEL_SETUP_LOCAL() \
-    const int threadIdx_x = threadIdx.x; \
-    const int blockDim_x = blockDim.x;
+#define GINT_BPCACHE_SYM c_bpcache
+#define GINT_BPCACHE_DEFINE() \
+    __constant__ BasisProdCache c_bpcache
 #endif
+
+// Backend-agnostic upload of host BasisProdCache to constant memory on a
+// caller-provided stream. Usage: GINT_BPCACHE_UPLOAD(stream, bpcache);
+#ifdef USE_SYCL
+#define GINT_BPCACHE_UPLOAD(stream, src) \
+    (stream).memcpy(s_bpcache, src, sizeof(BasisProdCache)).wait()
+#else
+#define GINT_BPCACHE_UPLOAD(stream, src) \
+    do { checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, src, sizeof(BasisProdCache))); (void)(stream); } while (0)
+#endif
+
+// Context + cache setup for intra-block direct-write helpers. Use threadIdx_x /
+// blockDim_x macros directly at use sites (1D block span THREADSX*THREADSY).
+#define KERNEL_SETUP_LOCAL() \
+    setup_context(); \
+    GINT_CACHE_REF();

@@ -37,7 +37,17 @@ extern SYCL_EXTERNAL sycl_device_global<double[9]> s_c_dxyz_dabc;
 // `.x`/`.y` site in screen.cu and the eval_*_v2/strain_grad kernels. This
 // POD keeps both branches identical and supports brace-init assignment.
 struct alignas(8) float2 { float x, y; };
+
+// CUDA cuDoubleComplex stand-in. No SYCL analogue exists anywhere in the
+// codebase; this POD exactly matches cuDoubleComplex's memory layout (two
+// doubles) so device-pointer reinterpretation from Python callers is
+// unaffected. Unlike sycl::double2 (whose .x()/.y() are methods), this is
+// a real struct with real members, so existing .x/.y field-access and
+// brace-init call sites need zero further changes.
+struct alignas(16) cuDoubleComplex { double x, y; };
 #else
+#include <cuComplex.h>
+
 extern __constant__ double c_lattice_vectors[9];
 extern __constant__ double c_reciprocal_lattice_vectors[9]; // norm to 1
 extern __constant__ double c_dxyz_dabc[9];

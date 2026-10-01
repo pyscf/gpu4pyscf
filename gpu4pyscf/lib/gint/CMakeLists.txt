@@ -34,6 +34,10 @@ set(GPU_SRCS
   rys_roots_dat.cu
   cart2sph.cu
 )
+# CUDA-only constant table definitions (SYCL defines these via device_global).
+if (NOT USE_SYCL)
+  list(APPEND GPU_SRCS constant_tables.cu)
+endif()
 
 add_library(gint SHARED ${GPU_SRCS})
 

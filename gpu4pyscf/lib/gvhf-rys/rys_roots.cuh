@@ -6,6 +6,7 @@
 
 #ifdef USE_SYCL
 #include <sycl_device.hpp>
+#include "gsycl/gpu_compat.h"
 #include "rys_roots_dat.cu"
 
 #else
