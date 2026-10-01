@@ -48,6 +48,10 @@ try:
     libmgrid.ovlp_mask_estimation.restype = ctypes.c_int
     libmgrid.filter_supmol_bas.restype = ctypes.c_int
     libmgrid.MG_warp_size.restype = ctypes.c_int
+    # Effective wavefront width of the running GPU (32 on RDNA/NVIDIA, 64 on
+    # GCN/CDNA), queried from the compiled library so the `pool` scratch sized below
+    # matches the per-arch device WARP_SIZE stride in a single multi-arch build.
+    WARP_SIZE = libmgrid.MG_warp_size() if libmgrid is not None else 32
 except OSError:
     libmgrid = None
 
@@ -58,10 +62,6 @@ PRIMBAS_COORD = 3
 LMAX = 4
 SHM_SIZE = shm_size - 1024
 del shm_size
-# Effective wavefront width of the running GPU (32 on RDNA/NVIDIA, 64 on
-# GCN/CDNA), queried from the compiled library so the `pool` scratch sized below
-# matches the per-arch device WARP_SIZE stride in a single multi-arch build.
-WARP_SIZE = libmgrid.MG_warp_size() if libmgrid is not None else 32
 
 DEBUG = False
 
