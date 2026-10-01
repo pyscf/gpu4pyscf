@@ -215,7 +215,8 @@ class FFTDF(lib.StreamObject):
     def grids(self):
         from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
         grids = UniformGrids(self.cell)
-        grids.mesh = self.mesh
+        if self._mesh is not None:
+            grids.mesh = self._mesh
         return grids
     @grids.setter
     def grids(self, val):
@@ -293,5 +294,7 @@ class FFTDF(lib.StreamObject):
     def to_cpu(self):
         from pyscf.pbc.df.fft import FFTDF
         out = FFTDF(self.cell, kpts=self.kpts)
-        out.mesh = self.mesh
+        out.exxdiv = self.exxdiv
+        if self._mesh is not None:
+            out.mesh = self._mesh
         return out
