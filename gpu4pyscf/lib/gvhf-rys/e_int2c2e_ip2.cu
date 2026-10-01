@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "vhf.cuh"
 #include "rys_roots.cu"
 #include "rys_contract_k.cuh"
@@ -33,19 +34,28 @@ __global__ static
 void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
                           double omega, double lr_factor, double sr_factor,
                           int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                          int *gout_stride_lookup)
+                          int *gout_stride_lookup,
+                          void *shm_mem)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    setup_context();
+    int sp_block_id = blockIdx_x;
+    int thread_id = threadIdx_x;
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, g_size);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nsp_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+
     int *bas = envs.bas;
     double *env = envs.env;
     int nbas = envs.nbas;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, nroots;
-    __shared__ int iprim, jprim;
-    __shared__ int g_size;
-    __shared__ int nao;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -72,7 +82,6 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
     int gout_id = thread_id / nsp_per_block;
 
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
@@ -361,11 +370,18 @@ int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
                   int nbatches_shl_pair, int *shl_pair_offsets,
                   uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
-    cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    e_int2c2e_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            out, dm, *envs, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
+    auto dev_envs = *envs;
+    auto blocks = make_grid(nbatches_shl_pair);
+    auto threads = make_block(THREADS);
+    cudaError_t err = cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in int2c2e_ip2 kernel: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    LAUNCH_KERNEL_DYN( e_int2c2e_ip2_kernel, blocks, threads, shm_size,
+        out, dm, dev_envs, omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_ip2 kernel: %s\n", cudaGetErrorString(err));
         return 1;

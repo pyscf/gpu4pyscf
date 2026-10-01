@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -29,7 +30,23 @@
 #define DM_BLOCK        7
 #define GOUT_WIDTH      54
 
+// unrolled_ejk_int3c2e_ip1.cu is auto-generated upstream and must stay
+// byte-identical. Its kernels use __syncthreads() but never declare an
+// nd_item, so swap in an item-free barrier for the duration of the include.
+// All launches are 3-D nd_range (LAUNCH_KERNEL_*), so get_nd_item<3>() is
+// well-formed.
+#ifdef USE_SYCL
+#pragma push_macro("__syncthreads")
+#undef __syncthreads
+#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<3>().get_group()))
+#endif
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmacro-redefined"
 #include "unrolled_ejk_int3c2e_ip1.cu"
+#pragma GCC diagnostic pop
+#ifdef USE_SYCL
+#pragma pop_macro("__syncthreads")
+#endif
 
 __global__ static
 void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
@@ -38,21 +55,35 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             double omega, double lr_factor, double sr_factor,
                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int naux)
+                            int *ao_pair_loc, int aux_offset, int naux,
+                            void *shm_mem)
 {
-    // For better load balance, consume blocks in the reversed order
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size;
-    __shared__ int nao;
-    __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
+    setup_context();
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, ksh0);
+    SHARED_SCALAR(int, ksh1);
+    SHARED_SCALAR(int, nksh);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, lk);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, nf);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, kprim);
+    SHARED_SCALAR(int, g_size);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nst_per_block);
+    SHARED_SCALAR(int, aux_per_block);
+    SHARED_SCALAR(int, nsp_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
 
+    // For better load balance, consume blocks in the reversed order
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -389,21 +420,35 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             RysIntEnvVars envs,
                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int npairs, int naux)
+                            int *ao_pair_loc, int aux_offset, int npairs, int naux,
+                            void *shm_mem)
 {
-    // For better load balance, consume blocks in the reversed order
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size;
-    __shared__ int nao;
-    __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
+    setup_context();
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, ksh0);
+    SHARED_SCALAR(int, ksh1);
+    SHARED_SCALAR(int, nksh);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, lk);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, nf);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, kprim);
+    SHARED_SCALAR(int, g_size);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nst_per_block);
+    SHARED_SCALAR(int, aux_per_block);
+    SHARED_SCALAR(int, nsp_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
 
+    // For better load balance, consume blocks in the reversed order
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -741,14 +786,20 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int *ao_pair_loc, int aux_offset,
                     int nao, int npairs, int naux, int natm)
 {
-    cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    sum_ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-            ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
-            omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-            ao_pair_loc, aux_offset, naux);
-    cudaError_t err = cudaGetLastError();
+    auto dev_envs = *envs;
+    auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
+    auto threads = make_block(THREADS);
+    cudaError_t err = cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    LAUNCH_KERNEL_DYN( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
+        ejk, ejk_aux, dm, density_auxvec, n_dm, dev_envs,
+        omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
+        ao_pair_loc, aux_offset, naux);
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;
@@ -765,15 +816,22 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int *ao_pair_loc, int aux_offset,
                     int nao, int npairs, int naux, int natm)
 {
-    cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     size_t nao2 = nao * nao;
+
+    cudaError_t err = cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
+    auto threads = make_block(THREADS);
+    auto dev_envs = *envs;
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
-        ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-                ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n,
-                omega, lr_factor, sr_factor, *envs,
-                shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-                ao_pair_loc, aux_offset, npairs, naux);
+        LAUNCH_KERNEL_DYN( ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
+            ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n,
+            omega, lr_factor, sr_factor, dev_envs,
+            shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
+            ao_pair_loc, aux_offset, npairs, naux);
         if (density_auxvec == NULL) { // for exchange
             dm += DM_BLOCK * (size_t)npairs * naux;
         } else {
@@ -781,7 +839,7 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
             density_auxvec += DM_BLOCK * naux;
         }
     }
-    cudaError_t err = cudaGetLastError();
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;

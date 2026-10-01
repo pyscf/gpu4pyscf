@@ -22,6 +22,7 @@ from gpu4pyscf.lib.multi_gpu import num_devices
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad.tdrhf import _jk_energies_per_atom
+from gpu4pyscf.nac.finite_diff import diagonalize, diagonalize_tda
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -30,42 +31,6 @@ H       0.0000000000     0.7570000000     0.5870000000
 """
 
 bas0 = "cc-pvdz"
-
-def diagonalize(a, b, nroots=5):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    b = b.reshape(nov, nov)
-    h = np.block([[a, b], 
-                  [-b.conj(), -a.conj()]])
-    e, xy = np.linalg.eig(np.asarray(h))
-    assert np.max(np.abs(e.imag)) < 1e-14
-    assert np.max(np.abs(xy.imag)) < 1e-14
-    e = e.real
-    xy = xy.real
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
-
-
-def diagonalize_tda(a, nroots=5):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    e, xy = np.linalg.eigh(np.asarray(a))
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 
 def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, tda, singlet=True):

@@ -20,7 +20,7 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc.gto import Cell
 from pyscf.pbc.gto.cell import _estimate_rcut
-from pyscf.pbc.tools.pbc import super_cell, _build_supcell_, get_lattice_Ls
+from pyscf.pbc.tools.pbc import super_cell
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.gto.mole import extract_pgto_params
@@ -31,10 +31,10 @@ from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc
-from gpu4pyscf.pbc.df.int3c2e import (
-    fill_triu_bvk, L_AUX_MAX, THREADS
-)
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+
+L_AUX_MAX = 6
+THREADS = 256
 
 __all__ = [
     'int1e_ovlp',
@@ -47,6 +47,8 @@ __all__ = [
     'int1e_r4_origi_ip2',
     'ovlp_strain_deriv',
     'kin_strain_deriv',
+    'ovlp_derivatives',
+    'kin_derivatives',
 ]
 
 libpbc.PBCint1e_ovlp.restype = ctypes.c_int
@@ -83,29 +85,35 @@ def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
 
 def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r2_origi', 1, (0, 2), kpts, sort_output)
+    return opt.intor('PBCint1e_r2_origi', 1, (2, 0), kpts, sort_output)
 
 def int1e_r4_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r4_origi', 1, (0, 4), kpts, sort_output)
+    return opt.intor('PBCint1e_r4_origi', 1, (4, 0), kpts, sort_output)
 
 def int1e_r2_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r2_origi_ip2', 3, (0, 3), kpts, sort_output)
+    return opt.intor('PBCint1e_r2_origi_ip2', 3, (2, 1), kpts, sort_output)
 
 def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh)
-    return opt.intor('PBCint1e_r4_origi_ip2', 3, (0, 5), kpts, sort_output)
+    return opt.intor('PBCint1e_r4_origi_ip2', 3, (4, 1), kpts, sort_output)
+
+def ovlp_derivatives(cell, dm, kpts=None, kmesh=None):
+    assert isinstance(cell, Cell)
+    opt = _check_opt(cell, 1, kpts, kmesh)
+    return opt.get_ovlp_derivatives(dm, kpts)
+
+def kin_derivatives(cell, dm, kpts=None, kmesh=None):
+    assert isinstance(cell, Cell)
+    opt = _check_opt(cell, 1, kpts, kmesh, scale_precision=1e-1)
+    return opt.get_kin_derivatives(dm, kpts)
 
 def ovlp_strain_deriv(cell, dm, kpts=None):
-    assert isinstance(cell, Cell)
-    opt = _check_opt(cell, 1, kpts)
-    return opt.get_ovlp_strain_deriv(dm, kpts)
+    return ovlp_derivatives(cell, dm, kpts)[-3:]
 
 def kin_strain_deriv(cell, dm, kpts=None):
-    assert isinstance(cell, Cell)
-    opt = _check_opt(cell, 1, kpts, scale_precision=1e-1)
-    return opt.get_kin_strain_deriv(dm, kpts)
+    return kin_derivatives(cell, dm, kpts)[-3:]
 
 def _check_opt(cell, hermi, kpts, bvk_kmesh=None, scale_precision=1):
     if isinstance(cell, Mole):
@@ -287,7 +295,7 @@ class _Int1eOpt:
                 out = out[0]
         return out
 
-    def strain_deriv_intor(self, dm, kern, deriv, kpts=None):
+    def _derivatives_intor(self, dm, kern, deriv, kpts=None):
         cell = self.cell
         dm = cell.apply_C_mat_CT(dm)
         if kpts is None:
@@ -316,10 +324,11 @@ class _Int1eOpt:
         gout_stride_lookup, shm_size = _gout_stride_lookup_table(cell, deriv)
         nbatches_shl_pair = len(self.shl_pair_offsets) - 1
 
-        sigma = cp.zeros((3, 3))
+        grad_sigma = cp.zeros([cell.natm+3, 3])
         drv = getattr(libpbc, kern)
         err = drv(
-            ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grad_sigma[:-3].data.ptr, ctypes.c_void_p),
+            ctypes.cast(grad_sigma[-3:].data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.byref(self.int1e_envs),
             ctypes.c_int(shm_size),
@@ -329,23 +338,22 @@ class _Int1eOpt:
             ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
-        sigma = sigma.get()
-        sigma *= 2 / nkpts
-        return sigma
+        grad_sigma *= 2 / nkpts
+        return grad_sigma.get()
 
-    def get_ovlp_strain_deriv(self, dm, kpts=None):
+    def get_ovlp_derivatives(self, dm, kpts=None):
         '''Computes the strain derivatives for the product of density matrix and
         overlap matrix. In the case of k-points calculations, the derivatives
         are averaged over k-mesh.
         '''
-        return self.strain_deriv_intor(dm, 'PBCovlp_strain_deriv', (1, 0), kpts)
+        return self._derivatives_intor(dm, 'PBCovlp_derivatives', (1, 0), kpts)
 
-    def get_kin_strain_deriv(self, dm, kpts=None):
+    def get_kin_derivatives(self, dm, kpts=None):
         '''Computes the strain derivatives for the product of density matrix and
         kinetic matrix. In the case of k-points calculations, the derivatives
         are averaged over k-mesh.
         '''
-        return self.strain_deriv_intor(dm, 'PBCkin_strain_deriv', (3, 0), kpts)
+        return self._derivatives_intor(dm, 'PBCkin_derivatives', (3, 0), kpts)
 
 class CrossInt1e(_Int1eOpt):
     def __init__(self, cell1, cell2, bvk_kmesh=None):
@@ -421,8 +429,7 @@ class CrossInt1e(_Int1eOpt):
     def intor(self, kern, comp, deriv_ij, kpts=None, sort_output=True,
               out=None, buf=None, shls_slice=None):
         shls_slice = (0, self.cell1.nbas, self.cell1.nbas, self.cell.nbas)
-        out = super().intor(kern, comp, deriv_ij, kpts, False, out, buf,
-                             shls_slice)
+        out = super().intor(kern, comp, deriv_ij, kpts, False, out, buf, shls_slice)
         if sort_output:
             leading_shape = out.shape[:-2]
             n1, n2 = out.shape[-2:]
@@ -504,7 +511,7 @@ def _shell_overlap_mask(cell, hermi=1, precision=1e-14, Ls=None, envs=None,
 def _bvkcell_lattice_sum_Ls(bvkcell, rcut=None):
     if rcut is None:
         rcut = bvkcell.rcut
-    Ls = get_lattice_Ls(bvkcell, rcut=rcut, discard=False)
+    Ls = bvkcell.get_lattice_Ls(rcut=rcut, discard=False)
     if len(Ls) > 1:
         r = asarray(bvkcell.atom_coords())
         dist_max = dist_matrix(r, r).max().get()

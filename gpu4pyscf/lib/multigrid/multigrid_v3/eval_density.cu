@@ -17,12 +17,12 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
+#include "gsycl/gpu_compat.h"
 
 #define TILE            4
 #define WARP_SIZE       32
@@ -30,21 +30,27 @@
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J, bool is_non_orthogonal>
 __global__ static
-void eval_density_kernel(double *density, double *dm, PBCIntEnvVars envs,
+void eval_density_kernel(double *density, double *dm,
                          double *supmol_img_coords, double factor,
                          int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,
                          int *grid_tile_index, int ntiles, int tiles_per_block,
                          double a_dot_b, double a_dot_c, double b_dot_c,
                          double da_squared, double db_squared, double dc_squared,
-                         int mesh_a, int mesh_b, int mesh_c, double negligible)
+                         int mesh_a, int mesh_b, int mesh_c, double negligible,
+                         PBCIntEnvVars envs)
 {
     constexpr int threads = THREADS;
     constexpr int WARPS = THREADS / WARP_SIZE;
-    int thread_id = threadIdx.x;
-    int tile_id0 = blockIdx.x * tiles_per_block;
-    __shared__ int a_upper, b_upper, c_upper;
-    __shared__ double start_position_x, start_position_y, start_position_z;
-    __shared__ double density_value[TILE*TILE*TILE*WARPS];
+    setup_context();
+    int thread_id = threadIdx_x;
+    int tile_id0 = blockIdx_x * tiles_per_block;
+    SHARED_ARRAY(int, a_upper);
+    SHARED_ARRAY(int, b_upper);
+    SHARED_ARRAY(int, c_upper);
+    SHARED_ARRAY(double, start_position_x);
+    SHARED_ARRAY(double, start_position_y);
+    SHARED_ARRAY(double, start_position_z);
+    SHARED_ARRAY(double, density_value, [TILE*TILE*TILE*WARPS]);
 
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
@@ -306,13 +312,18 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
 
 extern "C" {
 #define eval_density_kernel_case(li, lj, slice_i, slice_j, non_orth) \
-    case (li * LMAX1 + lj): \
-        eval_density_kernel<li,lj,slice_i,slice_j,non_orth><<<block_grid, THREADS>>>( \
-            density, dm, *envs, supmol_img_coords, factor, \
+    case (li * LMAX1 + lj): { \
+        auto sycl_threads = make_block(THREADS); \
+        auto sycl_grids = make_grid(block_grid); \
+        auto dev_envs = *envs; \
+        LAUNCH_KERNEL_LAST((eval_density_kernel<li,lj,slice_i,slice_j,non_orth>), dev_envs, sycl_grids, sycl_threads, 0, \
+            density, dm, supmol_img_coords, factor, \
             shl_pair_offsets, dressed_bas_ij_idx, \
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c, negligible); \
+        cudaDeviceSynchronize(); \
+    } \
     break
 
 int evaluate_density(double *density, double *placeholder,

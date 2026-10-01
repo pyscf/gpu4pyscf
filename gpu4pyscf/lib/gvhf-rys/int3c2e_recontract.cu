@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 
 #define PTR_PBAS_IDX    4
@@ -27,9 +28,10 @@ static __global__
 void recontract_kernel(double *out, double *input, int *out_idx, int *inp_idx,
                        double *coef, int naux)
 {
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x;
-    int row_id = blockIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
+    int threads = blockDim_x;
+    int row_id = blockIdx_x;
     size_t Naux = naux;
     out = out + out_idx[row_id] * Naux;
     input = input + inp_idx[row_id] * Naux;
@@ -43,7 +45,10 @@ extern "C" {
 int recontract_ao_pair(double *out, double *input, int *out_idx, int *inp_idx,
                        double *coef, int naux, int count)
 {
-    recontract_kernel<<<count, 256>>>(out, input, out_idx, inp_idx, coef, naux);
+    auto blocks = make_grid(count);
+    auto threads = make_block(256);
+    LAUNCH_KERNEL( recontract_kernel, blocks, threads, 0,
+                    out, input, out_idx, inp_idx, coef, naux);
     cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "recontract_ao_pair error %s\n", cudaGetErrorString(err));

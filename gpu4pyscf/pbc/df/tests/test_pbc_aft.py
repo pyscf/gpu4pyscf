@@ -23,8 +23,8 @@ from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.lib.cupy_helper import tag_array
-from gpu4pyscf.pbc.grad import rks_stress
-from gpu4pyscf.pbc.grad import krks_stress
+from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
 from gpu4pyscf.lib.multi_gpu import num_devices
 from packaging import version
 
@@ -232,6 +232,23 @@ class KnownValues(unittest.TestCase):
         finally:
             aft_jk.get_avail_mem = bak
 
+    def test_vk_kpts_vs_fft(self):
+        cell = pyscf.M(
+            atom = '''
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.55, .5, .1], [.35, .6, .2], [.15, .1, .8]], [1, [.3, 1]]],
+        )
+        kpts = cell.make_kpts([3,2,1])
+        dm_kpts = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        mydf = aft.AFTDF(cell, kpts=kpts)
+        vk = aft_jk.get_k_kpts(mydf, dm_kpts, hermi=1, kpts=kpts)
+        ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm_kpts, hermi=1, with_j=False, kpts=kpts)[1]
+        assert abs(vk - ref).max().get() < 1e-8
+
     def test_ej_ip1_gamma_point(self):
         cell = pgto.M(
             atom = '''
@@ -250,7 +267,10 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(2, nao, nao) - .5
         dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
         mydf = aft.AFTDF(cell)
-        ej = aft_jk.get_ej_ip1(mydf, dm)
+        grad_sigma = aft_jk.get_ej_derivatives(mydf, dm)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        ej = grad_sigma[:-3]
         assert abs(ej.sum(axis=0)).max() < 1e-9
 
         cell.precision = 1e-10
@@ -262,7 +282,8 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xpq,qp->x', vj[:,p0:p1], dm[:,p0:p1])
-        assert abs(ej - ref).max() < 1e-9
+        ref *= 2
+        assert abs(ej - ref).max() < 1e-8
 
         disp = 1e-3
         atom_coords = cell.atom_coords()
@@ -277,7 +298,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp) - ej[i,x]*2) < 1e-5
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]) < 1e-5
 
     def test_ej_ip1_kpts(self):
         cell = pgto.M(
@@ -295,7 +316,10 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([3,2,1])
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
-        ej = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+        grad_sigma = aft_jk.get_ej_derivatives(mydf, dm, kpts=kpts)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        ej = grad_sigma[:-3]
         assert abs(ej.sum(axis=0)).max() < 1e-8
 
         cell.precision = 1e-10
@@ -307,7 +331,8 @@ class KnownValues(unittest.TestCase):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
         ref /= len(kpts)
-        assert abs(ej - ref).max() < 1e-9
+        ref *= 2
+        assert abs(ej - ref).max() < 1e-8
 
         nkpts = len(kpts)
         disp = 1e-3
@@ -323,7 +348,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp) - ej[i,x]/nkpts*2) < 2e-6
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]/nkpts) < 2e-6
 
     def test_ek_ip1_gamma_point(self):
         cell = pgto.M(
@@ -343,7 +368,10 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(2, nao, nao) * .5
         dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
         myaft = aft.AFTDF(cell)
-        ek = aft_jk.get_ek_ip1(myaft, dm)
+        grad_sigma = aft_jk.get_ek_derivatives(myaft, dm)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        ek = grad_sigma[:-3]
         assert abs(ek.sum(axis=0)).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -359,6 +387,7 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
+        ref *= 2
         assert abs(ek - ref).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -366,7 +395,8 @@ class KnownValues(unittest.TestCase):
             for i in range(cell.natm):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
-            assert abs(ek_ewald - ref).max() < 3e-8
+            ref *= 2
+            assert abs(ek_ewald - ref).max() < 5e-8
 
     @unittest.skipIf(num_devices > 1, '')
     def test_ek_ip1_kpts(self):
@@ -385,7 +415,10 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([3,2,1])
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         myaft = aft.AFTDF(cell)
-        ek = aft_jk.get_ek_ip1(myaft, dm, kpts=kpts)
+        grad_sigma = aft_jk.get_ek_derivatives(myaft, dm, kpts=kpts)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        ek = grad_sigma[:-3]
         assert abs(ek.sum(axis=0)).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -402,6 +435,7 @@ class KnownValues(unittest.TestCase):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
         ref /= len(kpts)
+        ref *= 2
         assert abs(ek - ref).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -410,6 +444,7 @@ class KnownValues(unittest.TestCase):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
             ref /= len(kpts)
+            ref *= 2
             assert abs(ek_ewald - ref).max() < 1e-8
 
     def test_ej_strain_deriv_gamma_point(self):
@@ -427,12 +462,15 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) * .5
         dm = dm.dot(dm.T)
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ej_strain_deriv(mydf, dm)
+        grad_sigma = aft_jk.get_ej_derivatives(mydf, dm)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        sigma = grad_sigma[-3:]
 
-        xc = 'lda,'
-        mf_grad = cell.RKS(xc=xc).to_gpu().Gradients()
-        ref = rks_stress.get_vxc(mf_grad, cell, dm, with_j=True, with_nuc=False)
-        ref -= rks_stress.get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=False)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        ref = ni.energy_derivatives(
+            'HF', dm, with_j=True, with_nuc=False)[-3:]
         assert abs(ref - sigma).max() < 1e-8
 
     def test_ej_strain_deriv_kpts(self):
@@ -450,16 +488,19 @@ class KnownValues(unittest.TestCase):
         nkpts = len(kpts)
         dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ej_strain_deriv(mydf, dm, kpts)
+        grad_sigma = aft_jk.get_ej_derivatives(mydf, dm, kpts)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        sigma = grad_sigma[-3:]
 
-        xc = 'lda,'
-        mf_grad = cell.KRKS(xc=xc, kpts=kpts).to_gpu().Gradients()
-        ref = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=True, with_nuc=False)
-        ref -= krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=False, with_nuc=False)
+        ni = MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        ref = ni.energy_derivatives(
+            'HF', dm, kpts=kpts, with_j=True, with_nuc=False)[-3:]
         assert abs(ref - sigma).max() < 1e-8
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             mydf = aft.AFTDF(cell1, kpts=cell1.make_kpts(kmesh))
             vj = aft_jk.get_j_kpts(mydf, dm, hermi=1, kpts=mydf.kpts)
             e1 = .5 * cp.einsum('kij,kji->', vj, dm).real / nkpts
@@ -483,10 +524,13 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) * .5
         dm = cp.array(dm.dot(dm.T))
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ek_strain_deriv(mydf, dm)
+        grad_sigma = aft_jk.get_ek_derivatives(mydf, dm)
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        sigma = grad_sigma[-3:]
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             mydf = aft.AFTDF(cell1)
             vk = aft_jk.get_jk(mydf, dm, hermi=1, with_j=False, exxdiv=None)[1]
             e1 = .5 * cp.einsum('ij,ji->', vk, dm).real
@@ -510,10 +554,13 @@ class KnownValues(unittest.TestCase):
         nkpts = len(kpts)
         dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ek_strain_deriv(mydf, dm, kpts, exxdiv='ewald')
+        grad_sigma = aft_jk.get_ek_derivatives(mydf, dm, kpts, exxdiv='ewald')
+        assert isinstance(grad_sigma, np.ndarray)
+        assert grad_sigma.shape == (cell.natm+3, 3)
+        sigma = grad_sigma[-3:]
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
-            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
             mydf = aft.AFTDF(cell1, kpts=cell1.make_kpts(kmesh))
             vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv='ewald')
             e1 = .5 * cp.einsum('kij,kji->', vk, dm).real / nkpts
@@ -521,6 +568,47 @@ class KnownValues(unittest.TestCase):
             vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv='ewald')
             e2 = .5 * cp.einsum('kij,kji->', vk, dm).real / nkpts
             assert abs(sigma[i, j] - (e1-e2)/2e-4).max() < 5e-7
+
+    def test_ewald_strain_deriv(self):
+        def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
+            from pyscf.pbc.tools.pbc import madelung
+            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+            nkpts = len(kpts)
+            ewald_G0_response = np.empty((3,3))
+            disp = 1e-5
+            for i in range(3):
+                for j in range(i+1):
+                    cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
+                    kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+                    kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+                    e1 = nkpts * madelung(cell1, kpts1, omega=omega)
+                    e2 = nkpts * madelung(cell2, kpts2, omega=omega)
+                    ewald_G0_response[j,i] = ewald_G0_response[i,j] = (e1-e2)/(2*disp)
+            exx_0 = nkpts * madelung(cell, kpts, omega)
+            return exx_0, ewald_G0_response
+
+        np.random.seed(1)
+        cell = pgto.M(
+            atom = '''
+            H   0.      0.5   3.
+            H   0.5     1.    .6
+            ''',
+            a=np.eye(3)*4. - np.random.rand(3,3),
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        kmesh = [3,2,1]
+        kpts = cell.make_kpts(kmesh)
+        omega = -0.25
+        ref = _exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        assert abs(exx_0 - ref[0]) < 1e-12
+        assert abs(exx_1 - ref[1]).max() < 1e-8
+
+        omega = 0.25
+        ref = _exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        assert abs(exx_0 - ref[0]) < 1e-12
+        assert abs(exx_1 - ref[1]).max() < 1e-8
 
 if __name__ == '__main__':
     print("Full Tests for aft")

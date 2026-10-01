@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #define RBLKSIZE 16
 #define CBLKSIZE 64
@@ -28,9 +29,10 @@
 __global__ static
 void write_kernel(double *out, double *inp, size_t ncol, int col0, int col1)
 {
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x;
-    size_t row = blockIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
+    int threads = blockDim_x;
+    size_t row = blockIdx_x;
     int dcol = col1 - col0;
     out += row * ncol + col0;
     inp += row * dcol;
@@ -43,9 +45,10 @@ __global__ static
 void transpose_write_kernel(double *out, double *inp, size_t nrow, size_t ncol,
                             int col0, int col1)
 {
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x;
-    int row_id = blockIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
+    int threads = blockDim_x;
+    int row_id = blockIdx_x;
     int dcol = col1 - col0;
     out = out + row_id * ncol + col0;
     for (int k = thread_id; k < dcol; k += threads) {
@@ -56,14 +59,12 @@ void transpose_write_kernel(double *out, double *inp, size_t nrow, size_t ncol,
 extern "C" {
 int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0, int col1)
 {
-    double *out_gpu;
-    cudaError_t err = cudaHostGetDevicePointer(&out_gpu, out_cpu, 0);
-    if(err != cudaSuccess){
-        fprintf(stderr, "store_col_segment address mapping error %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    write_kernel<<<nrow, 512>>>(out_gpu, inp, ncol, col0, col1);
-    err = cudaGetLastError();
+    MAP_PINNED_PTR(double, out_gpu, out_cpu);
+    auto blocks = make_grid(nrow);
+    auto threads = make_block(512);
+    LAUNCH_KERNEL( write_kernel, blocks, threads, 0,
+                    out_gpu, inp, (size_t)ncol, col0, col1);
+    cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "store_col_segment error %s\n", cudaGetErrorString(err));
         return 1;
@@ -73,14 +74,12 @@ int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0
 
 int transpose_write(double *out_cpu, double *inp, int nrow, int ncol, int col0, int col1)
 {
-    double *out_gpu;
-    cudaError_t err = cudaHostGetDevicePointer(&out_gpu, out_cpu, 0);
-    if(err != cudaSuccess){
-        fprintf(stderr, "transpose_write address mapping error %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    transpose_write_kernel<<<nrow, 512>>>(out_gpu, inp, nrow, ncol, col0, col1);
-    err = cudaGetLastError();
+    MAP_PINNED_PTR(double, out_gpu, out_cpu);
+    auto blocks = make_grid(nrow);
+    auto threads = make_block(512);
+    LAUNCH_KERNEL( transpose_write_kernel, blocks, threads, 0,
+                    out_gpu, inp, (size_t)nrow, (size_t)ncol, col0, col1);
+    cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "transpose_write error %s\n", cudaGetErrorString(err));
         return 1;

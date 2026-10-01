@@ -20,12 +20,15 @@
 #include <type_traits>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
 #include "rys_contract_k.cuh"
+
+GXYZ_DEFINE(GXYZOffset, s_rys_gxyz_offset, 625);
 
 #define GOUT_WIDTH1     81
 
@@ -34,23 +37,31 @@ __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                  uint32_t *pool, int *head, int gout_pattern, int reserved_shm_size)
+                  uint32_t *pool, int *head, int gout_pattern, int reserved_shm_size,
+                  void *shm_mem)
 {
+    setup_context();
+    GXYZ_BIND(c_gxyz_offset, s_rys_gxyz_offset);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    SHARED_SCALAR(int, ntasks);
+    SHARED_SCALAR(int, pair_ij);
+    SHARED_SCALAR(int, pair_kl0);
+    SHARED_SCALAR(int, ish);
+    SHARED_SCALAR(int, jsh);
+    SHARED_SCALAR(int, i0);
+    SHARED_SCALAR(int, j0);
+    SHARED_SCALAR(int, nao);
+    SHARED_ARRAY(double, ri, [3]);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [2]);
+    SHARED_SCALAR(int, expi);
+    SHARED_SCALAR(int, expj);
     // sq is short for shl_quartet
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ int i0, j0, nao;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -670,26 +681,24 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
 
         auto launch = [&](auto offset, int tile_chunk) {
-            checkCudaErrors(
-                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
-                                   tile_chunk*sizeof(GXYZOffset),
-                                   0, cudaMemcpyHostToDevice));
+            GXYZ_COPY_CHUNK(gxyz_offset, offset, tile_chunk*sizeof(GXYZOffset));
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
+            int reserved_shm_size = scheme[3];
+            auto blocks = make_grid(workers, 1);
+            auto threads = make_block(scheme[0], scheme[1]);
+            auto dev_envs = *envs;
             if (buflen > 48000) {
-                cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-                cudaError_t err = cudaGetLastError();
+                cudaError_t err = cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
                 if (err != cudaSuccess) {
                     fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
                             cudaGetErrorString(err));
                     return;
                 }
             }
-            dim3 threads(scheme[0], scheme[1]);
-            int reserved_shm_size = scheme[3];
-            rys_k_kernel<<<workers, threads, buflen>>>(
-                *envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+            LAUNCH_KERNEL_DYN( rys_k_kernel, blocks, threads, buflen,
+                dev_envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
                 head + offset/256, gout_pattern, reserved_shm_size);
         };

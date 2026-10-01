@@ -19,8 +19,10 @@ static void GINTfill_int2e_kernel0022(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -114,7 +116,7 @@ static void GINTfill_int2e_kernel0022(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -292,8 +294,10 @@ static void GINTfill_int2e_kernel0031(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -381,7 +385,7 @@ static void GINTfill_int2e_kernel0031(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -538,8 +542,10 @@ static void GINTfill_int2e_kernel0032(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -657,7 +663,7 @@ static void GINTfill_int2e_kernel0032(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -916,8 +922,10 @@ static void GINTfill_int2e_kernel1021(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1032,7 +1040,7 @@ static void GINTfill_int2e_kernel1021(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1277,8 +1285,10 @@ static void GINTfill_int2e_kernel1022(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1447,7 +1457,7 @@ static void GINTfill_int2e_kernel1022(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1872,8 +1882,10 @@ static void GINTfill_int2e_kernel1030(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1961,7 +1973,7 @@ static void GINTfill_int2e_kernel1030(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -2122,8 +2134,10 @@ static void GINTfill_int2e_kernel1031(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -2274,7 +2288,7 @@ static void GINTfill_int2e_kernel1031(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -2639,8 +2653,10 @@ static void GINTfill_int2e_kernel1111(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -2785,7 +2801,7 @@ static void GINTfill_int2e_kernel1111(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -3124,8 +3140,10 @@ static void GINTfill_int2e_kernel1120(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -3240,7 +3258,7 @@ static void GINTfill_int2e_kernel1120(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -3486,8 +3504,10 @@ static void GINTfill_int2e_kernel1121(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -3713,7 +3733,7 @@ static void GINTfill_int2e_kernel1121(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -4319,8 +4339,10 @@ static void GINTfill_int2e_kernel1130(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -4471,7 +4493,7 @@ static void GINTfill_int2e_kernel1130(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -4837,8 +4859,10 @@ static void GINTfill_int2e_kernel2011(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -4953,7 +4977,7 @@ static void GINTfill_int2e_kernel2011(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -5199,8 +5223,10 @@ static void GINTfill_int2e_kernel2020(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -5294,7 +5320,7 @@ static void GINTfill_int2e_kernel2020(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -5477,8 +5503,10 @@ static void GINTfill_int2e_kernel2021(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -5647,7 +5675,7 @@ static void GINTfill_int2e_kernel2021(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -6073,8 +6101,10 @@ static void GINTfill_int2e_kernel2030(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -6192,7 +6222,7 @@ static void GINTfill_int2e_kernel2030(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -6456,8 +6486,10 @@ static void GINTfill_int2e_kernel2110(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -6572,7 +6604,7 @@ static void GINTfill_int2e_kernel2110(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -6817,8 +6849,10 @@ static void GINTfill_int2e_kernel2111(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -7044,7 +7078,7 @@ static void GINTfill_int2e_kernel2111(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -7650,8 +7684,10 @@ static void GINTfill_int2e_kernel2120(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -7820,7 +7856,7 @@ static void GINTfill_int2e_kernel2120(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -8246,8 +8282,10 @@ static void GINTfill_int2e_kernel2200(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -8341,7 +8379,7 @@ static void GINTfill_int2e_kernel2200(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -8519,8 +8557,10 @@ static void GINTfill_int2e_kernel2210(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -8689,7 +8729,7 @@ static void GINTfill_int2e_kernel2210(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -9114,8 +9154,10 @@ static void GINTfill_int2e_kernel3010(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -9203,7 +9245,7 @@ static void GINTfill_int2e_kernel3010(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -9364,8 +9406,10 @@ static void GINTfill_int2e_kernel3011(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -9516,7 +9560,7 @@ static void GINTfill_int2e_kernel3011(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -9882,8 +9926,10 @@ static void GINTfill_int2e_kernel3020(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -10001,7 +10047,7 @@ static void GINTfill_int2e_kernel3020(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -10265,8 +10311,10 @@ static void GINTfill_int2e_kernel3100(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -10354,7 +10402,7 @@ static void GINTfill_int2e_kernel3100(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -10439,7 +10487,7 @@ static void GINTfill_int2e_kernel3100(GINTEnvVars envs, ERITensor eri, BasisProd
     int lstride = eri.stride_l;
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish] - eri.ao_offsets_i;
-    int j0 = ao_loc[jsh] - eri.ao_offsets_j; 
+    int j0 = ao_loc[jsh] - eri.ao_offsets_j;
     int k0 = ao_loc[ksh] - eri.ao_offsets_k;
     int l0 = ao_loc[lsh] - eri.ao_offsets_l;
     double* __restrict__ eri_ij = eri.data + l0*lstride+k0*kstride+j0*jstride+i0;
@@ -10511,8 +10559,10 @@ static void GINTfill_int2e_kernel3110(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -10663,7 +10713,7 @@ static void GINTfill_int2e_kernel3110(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -11028,8 +11078,10 @@ static void GINTfill_int2e_kernel3200(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -11147,7 +11199,7 @@ static void GINTfill_int2e_kernel3200(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -11400,4 +11452,3 @@ static void GINTfill_int2e_kernel3200(GINTEnvVars envs, ERITensor eri, BasisProd
     eri_ij[9+5*jstride] = gout59;
     //eri_ji[9*jstride+5] = gout59;
 }
-

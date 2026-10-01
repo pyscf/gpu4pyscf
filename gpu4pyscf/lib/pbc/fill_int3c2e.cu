@@ -24,7 +24,14 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "gvhf-rys/build_rys_gxyz.cuh"
 #include "int3c2e_create_tasks.cuh"
+#pragma push_macro("LAUNCH_KERNEL")
+#undef LAUNCH_KERNEL
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmacro-redefined"
 #include "unrolled_int3c2e.cu"
+#pragma GCC diagnostic pop
+#undef LAUNCH_KERNEL
+#pragma pop_macro("LAUNCH_KERNEL")
 
 #define REMOTE_THRESHOLD 50
 #define GOUT_WIDTH      54
@@ -39,25 +46,41 @@ void pbc_int3c2e_latsum23_kernel(double *out, double omega, PBCIntEnvVars envs, 
                                  int ao_pair_offset, int aux_offset,
                                  int nauxbas, int naux, int to_sph,
                                  float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                                 int *head, int nbatches_shl_pair, int nbatches_ksh)
+                                 int *head, int nbatches_shl_pair, int nbatches_ksh,
+                                 void *shm_mem)
 {
-    int thread_id = threadIdx.x;
-    int worker_id = blockIdx.x;
+    setup_context();
+    SHARED_SCALAR(int, sp_block_id);
+    SHARED_SCALAR(int, ksh_block_id);
+    SHARED_SCALAR(int, ksh0_cell0);
+    SHARED_SCALAR(int, ksh1_cell0);
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, lk);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, nf);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, kprim);
+    SHARED_SCALAR(int, g_size);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nst_per_block);
+    SHARED_SCALAR(int, num_ijk_tasks);
+    SHARED_SCALAR(int, num_sub_tasks);
+    SHARED_SCALAR(int, img_not_processed);
+    SHARED_SCALAR(int, img_tile_size);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    int thread_id = threadIdx_x;
+    int worker_id = blockIdx_x;
+
     c2s_pool += worker_id * (THREADS*GOUT_WIDTH);
     img_pool += worker_id * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
     ShellTripletTaskInfo *ijk_tasks_info = task_pool + worker_id * POOL_SIZE;
-    extern __shared__ double shared_memory[];
-    __shared__ int ksh0_cell0, ksh1_cell0;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size, gout_stride, nst_per_block;
-    __shared__ int num_ijk_tasks;
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
-    __shared__ int sp_block_id, ksh_block_id;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
@@ -967,7 +990,9 @@ void ovlp_img_counts_kernel(int *img_counts, PBCIntEnvVars envs,
                             float *exps, float *log_coef, float log_cutoff,
                             int permutation_symmetry)
 {
-    int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int bas_ij = global_x;
+
     int bvk_nbas = envs.bvk_ncells * envs.nbas;
     int ish = bas_ij / bvk_nbas;
     int jsh = bas_ij - bvk_nbas * ish;
@@ -1033,7 +1058,9 @@ __global__ static
 void ovlp_img_idx_kernel(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_idx, int npairs,
                          PBCIntEnvVars envs, float *exps, float *log_coef, float log_cutoff)
 {
-    int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int pair_id = global_x;
+
     if (pair_id >= npairs) {
         return;
     }
@@ -1105,12 +1132,14 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
                            int aux_offset, int nauxbas, int naux, int to_sph,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
-    pbc_int3c2e_latsum23_kernel<<<workers, THREADS, shm_size>>>(
+    cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL_DYN( pbc_int3c2e_latsum23_kernel, blocks, threads, shm_size,
             out, omega, *envs, pool, task_pool, c2s_pool, shm_size,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, sp_img_offsets,
             gout_stride_lookup, ao_pair_loc,
@@ -1132,7 +1161,9 @@ int bvk_ovlp_img_counts(int *img_counts, PBCIntEnvVars *envs,
     constexpr int threads = 512;
     int bvk_nbas = envs->nbas * envs->bvk_ncells;
     int nbatches = (envs->nbas * bvk_nbas + threads-1) / threads;
-    ovlp_img_counts_kernel<<<nbatches, threads>>>(
+    auto blocks = make_grid(nbatches);
+    auto thread_block = make_block(threads);
+    LAUNCH_KERNEL( ovlp_img_counts_kernel, blocks, thread_block, 0,
             img_counts, *envs, exps, log_coef, log_cutoff, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1147,7 +1178,9 @@ int bvk_ovlp_img_idx(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_idx, 
 {
     constexpr int threads = 512;
     int blocks = (npairs + threads-1) / threads;
-    ovlp_img_idx_kernel<<<blocks, threads>>>(
+    auto grid = make_grid(blocks);
+    auto thread_block = make_block(threads);
+    LAUNCH_KERNEL( ovlp_img_idx_kernel, grid, thread_block, 0,
         img_idx, img_offsets, bas_ij_idx, npairs, *envs, exps, log_coef, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

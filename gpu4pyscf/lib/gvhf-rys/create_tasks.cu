@@ -24,10 +24,15 @@
 
 #define Q_COND_MARGIN   4.f
 
+// KERNEL_SETUP resolves thread/block indices via gsycl/gpu_compat.h in
+// both backends (setup_context + threadIdx_x/threadIdx_y/... macros).
+#define KERNEL_SETUP() setup_context()
+
 // np.where(threads_mask)[0]
 __device__ inline
 int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
 {
+    setup_context();
     tmp_storage[t_id] = keep;
     __syncthreads();
     for (int offset = 1; offset < threads; offset <<= 1) {
@@ -50,8 +55,9 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                     int *swap,
                     RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -61,6 +67,7 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -104,7 +111,7 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         __syncthreads();
     }
     // pad data to avoid overflow
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -117,8 +124,9 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                      int *swap,
                      RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -128,6 +136,7 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -173,7 +182,8 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -186,8 +196,9 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                     int *swap,
                     RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -197,6 +208,7 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -236,7 +248,7 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -249,8 +261,9 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                        int *swap, double omega, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -260,6 +273,7 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -360,7 +374,7 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -373,8 +387,9 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                         int *swap, double omega, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -384,6 +399,7 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -487,7 +503,8 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -500,8 +517,9 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                        int *swap, double omega, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -511,6 +529,7 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -609,7 +628,8 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -622,8 +642,9 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                            int *swap,
                            RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -633,6 +654,7 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -677,7 +699,8 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -690,8 +713,9 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                               float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                               int *swap, double omega, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -701,6 +725,7 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -811,7 +836,7 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -822,10 +847,11 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                             int pair_ij, int ish, int jsh,
                             float *q_cond_ij, float *q_cond_kl,
                             int *swap,
-                            JKEnergy &jk, RysIntEnvVars envs, BoundsInfo bounds)
+                            JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -835,6 +861,7 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -879,7 +906,8 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -891,10 +919,11 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                                float *q_cond_ij, float *q_cond_kl,
                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                                int *swap,
-                               JKEnergy &jk, RysIntEnvVars envs, BoundsInfo bounds)
+                               JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    KERNEL_SETUP();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -904,6 +933,7 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
+        __syncthreads();
         return;
     }
 
@@ -1010,8 +1040,14 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+t_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
 }
+
+// KERNEL_SETUP is local to the task-filling helpers above. Undefine it so that
+// translation units which #include this file can define their own KERNEL_SETUP
+// (e.g. the unrolled_*.cu kernels) without triggering -Wmacro-redefined.
+#undef KERNEL_SETUP

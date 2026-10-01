@@ -13,10 +13,12 @@
 # limitations under the License.
 
 import numpy as np
+import cupy as cp
 import pyscf
-from pyscf.gto import intor_cross
+from pyscf.gto import intor_cross, ATOM_OF
 from pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
 
 def test_int1e_ovlp():
     cell = pyscf.M(
@@ -198,7 +200,7 @@ def test_int1e_ovlp2():
     s = int1e.int1e_ovlp(cell, kpts, kmesh).get()
     assert abs(s - ref).max() < 1e-12
 
-def test_ovlp_stress_tensor():
+def test_ovlp_derivatives():
     a = np.eye(3) * 5.
     np.random.seed(5)
     a += np.random.rand(3, 3) - .5
@@ -229,7 +231,7 @@ def test_ovlp_stress_tensor():
     ref = -(ovlp10 + ovlp01)
     ref = np.einsum('xyij,ji->xy', ref, dm)
     dat = int1e.ovlp_strain_deriv(cell, dm)
-    assert abs(dat - ref).max() < 2e-6
+    assert abs(dat - ref).max() < 1e-11
 
     nk = [5, 4, 1]
     kpts = cell.make_kpts(nk)
@@ -241,10 +243,16 @@ def test_ovlp_stress_tensor():
     ovlp01 = np.einsum('xyiLj,Lk->xykij', ovlp01, expLk, optimize=True)
     ref = ovlp01 + ovlp10
     ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
-    dat = int1e.ovlp_strain_deriv(cell, dm, kpts)
-    assert abs(dat - ref).max() < 5e-7
+    grad_sigma = int1e.ovlp_derivatives(cell, dm, kpts)
+    grad = grad_sigma[:-3]
+    sigma = grad_sigma[-3:]
+    assert abs(sigma - ref).max() < 1e-12
 
-def test_kin_stress_tensor():
+    mat = -cp.array(cell.pbc_intor('int1e_ipovlp', hermi=0, kpts=kpts))
+    ref = contract_h1e_dm(cell, mat, cp.asarray(dm)) / len(kpts)
+    assert abs(grad - ref).max() < 1e-12
+
+def test_kin_derivatives():
     a = np.eye(3) * 5.
     np.random.seed(5)
     a += np.random.rand(3, 3) - .5
@@ -275,7 +283,7 @@ def test_kin_stress_tensor():
     ref = -(kin10 + kin01)
     ref = np.einsum('xyij,ji->xy', ref, dm)
     dat = int1e.kin_strain_deriv(cell, dm)
-    assert abs(dat - ref).max() < 2e-6
+    assert abs(dat - ref).max() < 1e-11
 
     nk = [5, 4, 1]
     kpts = cell.make_kpts(nk)
@@ -287,8 +295,14 @@ def test_kin_stress_tensor():
     kin01 = np.einsum('xyiLj,Lk->xykij', kin01, expLk, optimize=True)
     ref = kin01 + kin10
     ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
-    dat = int1e.kin_strain_deriv(cell, dm, kpts)
-    assert abs(dat - ref).max() < 5e-7
+    grad_sigma = int1e.kin_derivatives(cell, dm, kpts)
+    grad = grad_sigma[:-3]
+    sigma = grad_sigma[-3:]
+    assert abs(sigma - ref).max() < 1e-11
+
+    mat = -cp.array(cell.pbc_intor('int1e_ipkin', hermi=0, kpts=kpts))
+    ref = contract_h1e_dm(cell, mat, cp.asarray(dm)) / len(kpts)
+    assert abs(grad - ref).max() < 1e-11
 
 def test_int1e_r2_origi():
     a = np.eye(3) * 5.

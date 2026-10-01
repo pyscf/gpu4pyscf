@@ -16,6 +16,14 @@
 
 #pragma once
 
+#include "md_tables.cuh"
+
+// Backend-split storage for the md_indices.cu lookup tables. SYCL has no
+// cross-TU __device__ linkage, so md_indices.cu is #included (tables become
+// inline constexpr); under CUDA it compiles as its own TU (__device__ /
+// __constant__). One macro per storage class keeps md_indices.cu ifdef-free.
+// (Macros live in md_tables.cuh, included above.)
+
 // =====================================================================
 // Per-kernel-family constants for the md_j contraction.
 //
@@ -69,9 +77,31 @@ typedef struct {
 int offset_for_Rt2_idx(int lij, int lkl);
 int qd_offset_for_threads(int npairs, int threads);
 
+#ifdef USE_SYCL
+#include "md_indices.cu"
+#endif
+
+// ---------------------------------------------------------------------
+// blockIdx / threadIdx shim for the generated unrolled_md_j*.cu kernels.
+//
+// Those two files are ~15k lines of auto-generated kernel body that index
+// the launch geometry directly as blockIdx.x/.y and threadIdx.x/.y. CUDA
+// supplies those as built-ins; SYCL has no equivalent. Rather than rewrite
+// every reference, KERNEL_SETUP() materialises two locals of this type,
+// so the generated bodies stay byte-identical to upstream/master and only
+// the macro preamble at the top of each file is backend-agnostic.
+//
+// Axis mapping is fixed by the launch: the fast-varying axis carries
+// CUDA's .x (threadIdx_x / blockIdx_x), the other carries .y.
+// ---------------------------------------------------------------------
+struct md_j_index2 {
+    int x, y;
+};
+#ifndef USE_SYCL
 extern __device__ int Rt2_idx_offsets[];
 extern __device__ uint16_t Rt2_ij_kl[];
 extern __device__ uint16_t Rt2_kl_ij[];
 extern __constant__ int8_t c_Rt2_efg_phase[];
 extern __constant__ int8_t c_Rt_tuv_fac[];
 extern __constant__ uint16_t c_Rt_idx[];
+#endif

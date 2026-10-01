@@ -20,10 +20,19 @@
 #include <string.h>
 #include <assert.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 
 #define LMAX 4
 #define THREADS 256
+
+// Backend-agnostic 3D thread-index setup for GTO eval kernels. Used 8x in this file.
+// Grid convention: make_block(THREADS) / make_grid(ngrids_blocks, nbas), so
+// threadIdx_x spans THREADS (grid lane) and blockIdx_y spans nbas (bas lane).
+#define SETUP_GTO_KERNEL() \
+    setup_context(); \
+    int grid_id = global_x; \
+    int bas_id = blockIdx_y;
 
 template <int ANG> __device__ __forceinline__
 void _cart_gto_ip2(double gto[], double gx[], double gy[], double gz[],
@@ -151,13 +160,14 @@ void _cart_deriv1_strain_tensor(
     }
 }
 
-template <int ANG> __device__
-void _eval_cart_deriv1_strain_tensor(
+template <int ANG, bool cart> __device__
+void _eval_deriv1_strain_tensor(
         double *out, double *img_coords, double *env,
         double xi, double yi, double zi, double rrcutoff,
         int *bas, int nimgs, int nao, int ngrids)
 {
-    int bas_id = blockIdx.y;
+    setup_context();
+    int bas_id = blockIdx_y;
     int nprim = bas[NPRIM_OF+bas_id*BAS_SLOTS];
     double *expi = env + bas[bas_id*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[bas_id*BAS_SLOTS+PTR_COEFF];
@@ -198,11 +208,202 @@ void _eval_cart_deriv1_strain_tensor(
                         ao, gx, gy, gz, a2, rx, ry, rz, Rx, Ry, Rz, n0);
             }
         }
-        for (int n = 0; n < min(n_cart-n0, 2); ++n) {
-            for (int x = 0; x < 9; ++x) {
-                for (int s = 0; s < 4; ++s) {
-                    out[(x*4+s)*naog+(n0+n)*ngrids] = ao[n*36+s*9+x];
+        if constexpr (cart) {
+            for (int n = 0; n < min(n_cart-n0, 2); ++n) {
+                for (int x = 0; x < 9; ++x) {
+                    for (int s = 0; s < 4; ++s) {
+                        out[(x*4+s)*naog+(n0+n)*ngrids] = ao[n*36+s*9+x];
+                    }
                 }
+            }
+        } else {
+            switch (ANG) {
+            case 0:
+                for (int x = 0; x < 9; ++x) {
+                    for (int s = 0; s < 4; ++s) {
+                        out[(x*4+s)*naog] = ao[s*9+x];
+                    }
+                }
+                break;
+            case 1:
+                switch (n0) {
+                    case 0:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+0*ngrids] = ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+1*ngrids] = ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 2:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+2*ngrids] = ao[0*36+s*9+x];
+                            }
+                        }
+                        break;
+                }
+                break;
+            case 2:
+                switch (n0) {
+                    case 0:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+2*ngrids] = -0.315391565252520002 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+4*ngrids] =  0.546274215296039535 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+0*ngrids] =  1.092548430592079070 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 2:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+3*ngrids] =  1.092548430592079070 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+2*ngrids]+= -0.315391565252520002 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+4*ngrids]+= -0.546274215296039535 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 4:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+1*ngrids] =  1.092548430592079070 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+2*ngrids]+=  0.630783130505040012 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                }
+                break;
+            case 3:
+                switch (n0) {
+                    case 0:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+4*ngrids] = -0.457045799464465739 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+6*ngrids] =  0.590043589926643510 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+0*ngrids] =  1.770130769779930531 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+2*ngrids] = -0.457045799464465739 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 2:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+3*ngrids] = -1.119528997770346170 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+5*ngrids] =  1.445305721320277020 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+4*ngrids]+= -0.457045799464465739 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+6*ngrids]+= -1.770130769779930530 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 4:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+1*ngrids] =  2.890611442640554055 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+4*ngrids]+=  1.828183197857862944 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 6:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+0*ngrids]+= -0.590043589926643510 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+2*ngrids]+= -0.457045799464465739 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+3*ngrids]+= -1.119528997770346170 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+5*ngrids]+= -1.445305721320277020 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 8:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+2*ngrids]+=  1.828183197857862944 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+3*ngrids]+=  0.746352665180230782 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                }
+                break;
+            case 4:
+                switch (n0) {
+                    case 0:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+4*ngrids] =  0.317356640745612911 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+6*ngrids] = -0.473087347878780009 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+8*ngrids] =  0.625835735449176134 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+0*ngrids] =  2.503342941796704538 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+2*ngrids] = -0.946174695757560014 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 2:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+5*ngrids] = -2.007139630671867500 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+7*ngrids] =  1.770130769779930531 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+4*ngrids]+=  0.634713281491225822 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+8*ngrids]+= -3.755014412695056800 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 4:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+1*ngrids] =  5.310392309339791593 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+3*ngrids] = -2.007139630671867500 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+4*ngrids]+= -2.538853125964903290 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+6*ngrids]+=  2.838524087272680054 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 6:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+0*ngrids]+= -2.503342941796704538 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+2*ngrids]+= -0.946174695757560014 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+5*ngrids]+= -2.007139630671867500 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+7*ngrids]+= -5.310392309339791590 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 8:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+2*ngrids]+=  5.677048174545360108 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+5*ngrids]+=  2.676186174229156671 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 10:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+4*ngrids]+=  0.317356640745612911 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+6*ngrids]+=  0.473087347878780009 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+8*ngrids]+=  0.625835735449176134 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+1*ngrids]+= -1.770130769779930530 * ao[1*36+s*9+x];
+                                out[(x*4+s)*naog+3*ngrids]+= -2.007139630671867500 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 12:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+4*ngrids]+= -2.538853125964903290 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+6*ngrids]+= -2.838524087272680054 * ao[0*36+s*9+x];
+                                out[(x*4+s)*naog+3*ngrids]+=  2.676186174229156671 * ao[1*36+s*9+x];
+                            }
+                        }
+                        break;
+                    case 14:
+                        for (int x = 0; x < 9; ++x) {
+                            for (int s = 0; s < 4; ++s) {
+                                out[(x*4+s)*naog+4*ngrids]+=  0.846284375321634430 * ao[0*36+s*9+x];
+                            }
+                        }
+                        break;
+                }
+                break;
             }
         }
     }
@@ -212,11 +413,10 @@ __global__
 static void _cart_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                 size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -312,11 +512,10 @@ __global__
 static void _cart_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                 size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -535,11 +734,10 @@ __global__
 static void _cart_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
                              size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -636,11 +834,10 @@ __global__
 static void _sph_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -768,11 +965,10 @@ __global__
 static void _sph_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
                                size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -992,26 +1188,26 @@ static void _sph_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
         break;
     case 3:
         for (int n = 0; n < 4; ++n) {
-            out[(n*nao+0)*ngrids] += 1.770130769779930531 * gto[n*10+1] - 0.590043589926643510 * gto[n*10+6];
-            out[(n*nao+1)*ngrids] += 2.890611442640554055 * gto[n*10+4];
-            out[(n*nao+2)*ngrids] += 1.828183197857862944 * gto[n*10+8] - 0.457045799464465739 * (gto[n*10+1] + gto[n*10+6]);
-            out[(n*nao+3)*ngrids] += 0.746352665180230782 * gto[n*10+9] - 1.119528997770346170 * (gto[n*10+2] + gto[n*10+7]);
-            out[(n*nao+4)*ngrids] += 1.828183197857862944 * gto[n*10+5] - 0.457045799464465739 * (gto[n*10+0] + gto[n*10+3]);
-            out[(n*nao+5)*ngrids] += 1.445305721320277020 * (gto[n*10+2] - gto[n*10+7]);
-            out[(n*nao+6)*ngrids] += 0.590043589926643510 * gto[n*10+0] - 1.770130769779930530 * gto[n*10+3];
+            out[(n*nao+0)*ngrids] = 1.770130769779930531 * gto[n*10+1] - 0.590043589926643510 * gto[n*10+6];
+            out[(n*nao+1)*ngrids] = 2.890611442640554055 * gto[n*10+4];
+            out[(n*nao+2)*ngrids] = 1.828183197857862944 * gto[n*10+8] - 0.457045799464465739 * (gto[n*10+1] + gto[n*10+6]);
+            out[(n*nao+3)*ngrids] = 0.746352665180230782 * gto[n*10+9] - 1.119528997770346170 * (gto[n*10+2] + gto[n*10+7]);
+            out[(n*nao+4)*ngrids] = 1.828183197857862944 * gto[n*10+5] - 0.457045799464465739 * (gto[n*10+0] + gto[n*10+3]);
+            out[(n*nao+5)*ngrids] = 1.445305721320277020 * (gto[n*10+2] - gto[n*10+7]);
+            out[(n*nao+6)*ngrids] = 0.590043589926643510 * gto[n*10+0] - 1.770130769779930530 * gto[n*10+3];
         }
         break;
     case 4:
         for (int n = 0; n < 4; ++n) {
-            out[(n*nao+0)*ngrids] += 2.503342941796704538 * (gto[n*15+1] - gto[n*15+6]) ;
-            out[(n*nao+1)*ngrids] += 5.310392309339791593 * gto[n*15+4] - 1.770130769779930530 * gto[n*15+11];
-            out[(n*nao+2)*ngrids] += 5.677048174545360108 * gto[n*15+8] - 0.946174695757560014 * (gto[n*15+1] + gto[n*15+6]);
-            out[(n*nao+3)*ngrids] += 2.676186174229156671 * gto[n*15+13]- 2.007139630671867500 * (gto[n*15+4] + gto[n*15+11]);
-            out[(n*nao+4)*ngrids] += 0.317356640745612911 * (gto[n*15+0] + gto[n*15+10]) + 0.634713281491225822 * gto[n*15+3] - 2.538853125964903290 * (gto[n*15+5] + gto[n*15+12]) + 0.846284375321634430 * gto[n*15+14];
-            out[(n*nao+5)*ngrids] += 2.676186174229156671 * gto[n*15+9] - 2.007139630671867500 * (gto[n*15+2] + gto[n*15+7]);
-            out[(n*nao+6)*ngrids] += 2.838524087272680054 * (gto[n*15+5] - gto[n*15+12]) + 0.473087347878780009 * (gto[n*15+10]- gto[n*15+0]);
-            out[(n*nao+7)*ngrids] += 1.770130769779930531 * gto[n*15+2] - 5.310392309339791590 * gto[n*15+7];
-            out[(n*nao+8)*ngrids] += 0.625835735449176134 * (gto[n*15+0] + gto[n*15+10]) - 3.755014412695056800 * gto[n*15+3];
+            out[(n*nao+0)*ngrids] = 2.503342941796704538 * (gto[n*15+1] - gto[n*15+6]) ;
+            out[(n*nao+1)*ngrids] = 5.310392309339791593 * gto[n*15+4] - 1.770130769779930530 * gto[n*15+11];
+            out[(n*nao+2)*ngrids] = 5.677048174545360108 * gto[n*15+8] - 0.946174695757560014 * (gto[n*15+1] + gto[n*15+6]);
+            out[(n*nao+3)*ngrids] = 2.676186174229156671 * gto[n*15+13]- 2.007139630671867500 * (gto[n*15+4] + gto[n*15+11]);
+            out[(n*nao+4)*ngrids] = 0.317356640745612911 * (gto[n*15+0] + gto[n*15+10]) + 0.634713281491225822 * gto[n*15+3] - 2.538853125964903290 * (gto[n*15+5] + gto[n*15+12]) + 0.846284375321634430 * gto[n*15+14];
+            out[(n*nao+5)*ngrids] = 2.676186174229156671 * gto[n*15+9] - 2.007139630671867500 * (gto[n*15+2] + gto[n*15+7]);
+            out[(n*nao+6)*ngrids] = 2.838524087272680054 * (gto[n*15+5] - gto[n*15+12]) + 0.473087347878780009 * (gto[n*15+10]- gto[n*15+0]);
+            out[(n*nao+7)*ngrids] = 1.770130769779930531 * gto[n*15+2] - 5.310392309339791590 * gto[n*15+7];
+            out[(n*nao+8)*ngrids] = 0.625835735449176134 * (gto[n*15+0] + gto[n*15+10]) - 3.755014412695056800 * gto[n*15+3];
         }
         break;
     }
@@ -1021,11 +1217,10 @@ __global__
 static void _sph_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
                             size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1133,41 +1328,41 @@ static void _sph_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
         break;
     case 3:
         for (int n = 0; n < 6; ++n) {
-            out[(n*nao+0)*ngrids] += 1.770130769779930531 * gto[1*6+n] - 0.590043589926643510 * gto[6*6+n];
-            out[(n*nao+1)*ngrids] += 2.890611442640554055 * gto[4*6+n];
-            out[(n*nao+2)*ngrids] += 1.828183197857862944 * gto[8*6+n] - 0.457045799464465739 * (gto[1*6+n] + gto[6*6+n]);
-            out[(n*nao+3)*ngrids] += 0.746352665180230782 * gto[9*6+n] - 1.119528997770346170 * (gto[2*6+n] + gto[7*6+n]);
-            out[(n*nao+4)*ngrids] += 1.828183197857862944 * gto[5*6+n] - 0.457045799464465739 * (gto[0*6+n] + gto[3*6+n]);
-            out[(n*nao+5)*ngrids] += 1.445305721320277020 * (gto[2*6+n] - gto[7*6+n]);
-            out[(n*nao+6)*ngrids] += 0.590043589926643510 * gto[0*6+n] - 1.770130769779930530 * gto[3*6+n];
+            out[(n*nao+0)*ngrids] = 1.770130769779930531 * gto[1*6+n] - 0.590043589926643510 * gto[6*6+n];
+            out[(n*nao+1)*ngrids] = 2.890611442640554055 * gto[4*6+n];
+            out[(n*nao+2)*ngrids] = 1.828183197857862944 * gto[8*6+n] - 0.457045799464465739 * (gto[1*6+n] + gto[6*6+n]);
+            out[(n*nao+3)*ngrids] = 0.746352665180230782 * gto[9*6+n] - 1.119528997770346170 * (gto[2*6+n] + gto[7*6+n]);
+            out[(n*nao+4)*ngrids] = 1.828183197857862944 * gto[5*6+n] - 0.457045799464465739 * (gto[0*6+n] + gto[3*6+n]);
+            out[(n*nao+5)*ngrids] = 1.445305721320277020 * (gto[2*6+n] - gto[7*6+n]);
+            out[(n*nao+6)*ngrids] = 0.590043589926643510 * gto[0*6+n] - 1.770130769779930530 * gto[3*6+n];
         }
         break;
     case 4:
         for (int n = 0; n < 6; ++n) {
-            out[(n*nao+0)*ngrids] += 2.503342941796704538 * (gto[1*6+n] - gto[6*6+n]) ;
-            out[(n*nao+1)*ngrids] += 5.310392309339791593 * gto[4*6+n] - 1.770130769779930530 * gto[11];
-            out[(n*nao+2)*ngrids] += 5.677048174545360108 * gto[8*6+n] - 0.946174695757560014 * (gto[1*6+n] + gto[6*6+n]);
-            out[(n*nao+3)*ngrids] += 2.676186174229156671 * gto[13]- 2.007139630671867500 * (gto[4*6+n] + gto[11]);
-            out[(n*nao+4)*ngrids] += 0.317356640745612911 * (gto[0*6+n] + gto[10]) + 0.634713281491225822 * gto[3*6+n] - 2.538853125964903290 * (gto[5*6+n] + gto[12]) + 0.846284375321634430 * gto[14];
-            out[(n*nao+5)*ngrids] += 2.676186174229156671 * gto[9*6+n] - 2.007139630671867500 * (gto[2*6+n] + gto[7*6+n]);
-            out[(n*nao+6)*ngrids] += 2.838524087272680054 * (gto[5*6+n] - gto[12]) + 0.473087347878780009 * (gto[10]- gto[0*6+n]);
-            out[(n*nao+7)*ngrids] += 1.770130769779930531 * gto[2*6+n] - 5.310392309339791590 * gto[7*6+n];
-            out[(n*nao+8)*ngrids] += 0.625835735449176134 * (gto[0*6+n] + gto[10]) - 3.755014412695056800 * gto[3*6+n];
+            out[(n*nao+0)*ngrids] = 2.503342941796704538 * (gto[1*6+n] - gto[6*6+n]) ;
+            out[(n*nao+1)*ngrids] = 5.310392309339791593 * gto[4*6+n] - 1.770130769779930530 * gto[11*6+n];
+            out[(n*nao+2)*ngrids] = 5.677048174545360108 * gto[8*6+n] - 0.946174695757560014 * (gto[1*6+n] + gto[6*6+n]);
+            out[(n*nao+3)*ngrids] = 2.676186174229156671 * gto[13*6+n]- 2.007139630671867500 * (gto[4*6+n] + gto[11*6+n]);
+            out[(n*nao+4)*ngrids] = 0.317356640745612911 * (gto[0*6+n] + gto[10*6+n]) + 0.634713281491225822 * gto[3*6+n] - 2.538853125964903290 * (gto[5*6+n] + gto[12*6+n]) + 0.846284375321634430 * gto[14*6+n];
+            out[(n*nao+5)*ngrids] = 2.676186174229156671 * gto[9*6+n] - 2.007139630671867500 * (gto[2*6+n] + gto[7*6+n]);
+            out[(n*nao+6)*ngrids] = 2.838524087272680054 * (gto[5*6+n] - gto[12*6+n]) + 0.473087347878780009 * (gto[10*6+n]- gto[0*6+n]);
+            out[(n*nao+7)*ngrids] = 1.770130769779930531 * gto[2*6+n] - 5.310392309339791590 * gto[7*6+n];
+            out[(n*nao+8)*ngrids] = 0.625835735449176134 * (gto[0*6+n] + gto[10*6+n]) - 3.755014412695056800 * gto[3*6+n];
         }
         break;
     }
 }
 
+template <bool cart>
 __global__
-static void _cart_deriv0_strain_tensor_kernel(
+static void _deriv0_strain_tensor_kernel(
         double *out, PBCIntEnvVars envs, double *grids,
         size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1375,86 +1570,193 @@ static void _cart_deriv0_strain_tensor_kernel(
             }
         } }
     }
-    if (li < 4) {
-        int *ao_loc = envs.ao_loc;
+    const int *ao_loc = envs.ao_loc;
+    out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
+    const size_t naog = nao * ngrids;
+    if constexpr (cart) {
         int nf = (li + 1) * (li + 2) / 2;
-        out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
-        size_t naog = nao * ngrids;
-        for (int n = 0; n < 10; ++n) {
-            if (n >= nf) break;
-            for (int x = 0; x < 9; ++x) {
-                out[x*naog+n*ngrids] = ao[n*9+x];
+        if (li < 4) {
+            for (int n = 0; n < 10; ++n) {
+                if (n >= nf) break;
+                for (int x = 0; x < 9; ++x) {
+                    out[x*naog+n*ngrids] = ao[n*9+x];
+                }
+            }
+        } else {
+            for (int n = 0; n < 15; ++n) {
+                if (n >= nf) break;
+                for (int x = 0; x < 6; ++x) {
+                    out[x*naog+n*ngrids] = ao[n*6+x];
+                }
+            }
+            out += 6 * naog; // To process zx, zy, zz
+
+            for (int n = 0; n < 45; ++n) {
+                ao[n] = 0;
+            }
+            for (int img = 0; img < nimgs; ++img) {
+                double ce = 0;
+                double ce_2a = 0;
+                double Rx = img_coords[img*3+0] + cell0_Rx;
+                double Ry = img_coords[img*3+1] + cell0_Ry;
+                double Rz = img_coords[img*3+2] + cell0_Rz;
+                double rx = xi - Rx;
+                double ry = yi - Ry;
+                double rz = zi - Rz;
+                double rr = rx * rx + ry * ry + rz * rz;
+                if (rr > rrcutoff) continue;
+                for (int ip = 0; ip < nprim; ++ip) {
+                    double ai = expi[ip];
+                    double c_exp = ci[ip] * exp(-ai * rr);
+                    ce += c_exp;
+                    ce_2a -= c_exp * ai * 2;
+                }
+                if (fabs(ce) < 1e-18) continue;
+                double az = ce_2a * rz;
+                gto[0 ] = az * rx * rx * rx * rx;
+                gto[1 ] = az * rx * rx * rx * ry;
+                gto[2 ] = (az * rz +     ce) * rx * rx * rx;
+                gto[3 ] = az * rx * rx * ry * ry;
+                gto[4 ] = (az * rz +     ce) * rx * rx * ry;
+                gto[5 ] = (az * rz + 2 * ce) * rx * rx * rz;
+                gto[6 ] = az * rx * ry * ry * ry;
+                gto[7 ] = (az * rz +     ce) * rx * ry * ry;
+                gto[8 ] = (az * rz + 2 * ce) * rx * ry * rz;
+                gto[9 ] = (az * rz + 3 * ce) * rx * rz * rz;
+                gto[10] = az * ry * ry * ry * ry;
+                gto[11] = (az * rz +     ce) * ry * ry * ry;
+                gto[12] = (az * rz + 2 * ce) * ry * ry * rz;
+                gto[13] = (az * rz + 3 * ce) * ry * rz * rz;
+                gto[14] = (az * rz + 4 * ce) * rz * rz * rz;
+                for (int n = 0; n < 15; n++) {
+                    ao[0+3*n] -= gto[n] * Rx;
+                    ao[1+3*n] -= gto[n] * Ry;
+                    ao[2+3*n] -= gto[n] * Rz;
+                }
+            }
+            for (int n = 0; n < 15; ++n) {
+                for (int x = 0; x < 3; ++x) {
+                    out[x*naog+n*ngrids] = ao[n*3+x];
+                }
             }
         }
     } else {
-        int *ao_loc = envs.ao_loc;
-        int nf = (li + 1) * (li + 2) / 2;
-        out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
-        size_t naog = nao * ngrids;
-        for (int n = 0; n < 15; ++n) {
-            if (n >= nf) break;
-            for (int x = 0; x < 6; ++x) {
-                out[x*naog+n*ngrids] = ao[n*6+x];
+        switch (li) {
+        case 0:
+            for (int n = 0; n < 9; ++n) {
+                out[n * naog] = ao[n];
             }
-        }
-        out += 6 * naog; // To process zx, zy, zz
+            break;
+        case 1:
+            for (int n = 0; n < 9; ++n) {
+                out[n*naog+0*ngrids] = ao[0*9+n];
+                out[n*naog+1*ngrids] = ao[1*9+n];
+                out[n*naog+2*ngrids] = ao[2*9+n];
+            }
+            break;
+        case 2:
+            for (int n = 0; n < 9; ++n) {
+                out[n*naog+0*ngrids] = 1.092548430592079070 * ao[1*9+n];
+                out[n*naog+1*ngrids] = 1.092548430592079070 * ao[4*9+n];
+                out[n*naog+2*ngrids] = 0.630783130505040012 * ao[5*9+n] - 0.315391565252520002 * (ao[0*9+n] + ao[3*9+n]);
+                out[n*naog+3*ngrids] = 1.092548430592079070 * ao[2*9+n];
+                out[n*naog+4*ngrids] = 0.546274215296039535 * (ao[0*9+n] - ao[3*9+n]);
+            }
+            break;
+        case 3:
+            for (int n = 0; n < 9; ++n) {
+                out[n*naog+0*ngrids] = 1.770130769779930531 * ao[1*9+n] - 0.590043589926643510 * ao[6*9+n];
+                out[n*naog+1*ngrids] = 2.890611442640554055 * ao[4*9+n];
+                out[n*naog+2*ngrids] = 1.828183197857862944 * ao[8*9+n] - 0.457045799464465739 * (ao[1*9+n] + ao[6*9+n]);
+                out[n*naog+3*ngrids] = 0.746352665180230782 * ao[9*9+n] - 1.119528997770346170 * (ao[2*9+n] + ao[7*9+n]);
+                out[n*naog+4*ngrids] = 1.828183197857862944 * ao[5*9+n] - 0.457045799464465739 * (ao[0*9+n] + ao[3*9+n]);
+                out[n*naog+5*ngrids] = 1.445305721320277020 * (ao[2*9+n] - ao[7*9+n]);
+                out[n*naog+6*ngrids] = 0.590043589926643510 * ao[0*9+n] - 1.770130769779930530 * ao[3*9+n];
+            }
+            break;
+        case 4:
+            for (int n = 0; n < 6; ++n) {
+                out[n*naog+0*ngrids] = 2.503342941796704538 * (ao[1*6+n] - ao[6*6+n]) ;
+                out[n*naog+1*ngrids] = 5.310392309339791593 * ao[4*6+n] - 1.770130769779930530 * ao[11*6+n];
+                out[n*naog+2*ngrids] = 5.677048174545360108 * ao[8*6+n] - 0.946174695757560014 * (ao[1*6+n] + ao[6*6+n]);
+                out[n*naog+3*ngrids] = 2.676186174229156671 * ao[13*6+n]- 2.007139630671867500 * (ao[4*6+n] + ao[11*6+n]);
+                out[n*naog+4*ngrids] = 0.317356640745612911 * (ao[0*6+n] + ao[10*6+n]) + 0.634713281491225822 * ao[3*6+n] - 2.538853125964903290 * (ao[5*6+n] + ao[12*6+n]) + 0.846284375321634430 * ao[14*6+n];
+                out[n*naog+5*ngrids] = 2.676186174229156671 * ao[9*6+n] - 2.007139630671867500 * (ao[2*6+n] + ao[7*6+n]);
+                out[n*naog+6*ngrids] = 2.838524087272680054 * (ao[5*6+n] - ao[12*6+n]) + 0.473087347878780009 * (ao[10*6+n]- ao[0*6+n]);
+                out[n*naog+7*ngrids] = 1.770130769779930531 * ao[2*6+n] - 5.310392309339791590 * ao[7*6+n];
+                out[n*naog+8*ngrids] = 0.625835735449176134 * (ao[0*6+n] + ao[10*6+n]) - 3.755014412695056800 * ao[3*6+n];
+            }
+            out += 6 * naog; // To process zx, zy, zz
 
-        for (int n = 0; n < 45; ++n) {
-            ao[n] = 0;
-        }
-        for (int img = 0; img < nimgs; ++img) {
-            double ce = 0;
-            double ce_2a = 0;
-            double Rx = img_coords[img*3+0] + cell0_Rx;
-            double Ry = img_coords[img*3+1] + cell0_Ry;
-            double Rz = img_coords[img*3+2] + cell0_Rz;
-            double rx = xi - Rx;
-            double ry = yi - Ry;
-            double rz = zi - Rz;
-            double rr = rx * rx + ry * ry + rz * rz;
-            if (rr > rrcutoff) continue;
-            for (int ip = 0; ip < nprim; ++ip) {
-                double ai = expi[ip];
-                double c_exp = ci[ip] * exp(-ai * rr);
-                ce += c_exp;
-                ce_2a -= c_exp * ai * 2;
+            for (int n = 0; n < 45; ++n) {
+                ao[n] = 0;
             }
-            if (fabs(ce) < 1e-18) continue;
-            double az = ce_2a * rz;
-            gto[0 ] = az * rx * rx * rx * rx;
-            gto[1 ] = az * rx * rx * rx * ry;
-            gto[2 ] = (az * rz +     ce) * rx * rx * rx;
-            gto[3 ] = az * rx * rx * ry * ry;
-            gto[4 ] = (az * rz +     ce) * rx * rx * ry;
-            gto[5 ] = (az * rz + 2 * ce) * rx * rx * rz;
-            gto[6 ] = az * rx * ry * ry * ry;
-            gto[7 ] = (az * rz +     ce) * rx * ry * ry;
-            gto[8 ] = (az * rz + 2 * ce) * rx * ry * rz;
-            gto[9 ] = (az * rz + 3 * ce) * rx * rz * rz;
-            gto[10] = az * ry * ry * ry * ry;
-            gto[11] = (az * ry * rz +     ce) * ry * ry;
-            gto[12] = (az * ry * rz + 2 * ce) * ry * rz;
-            gto[13] = (az * ry * rz + 3 * ce) * rz * rz;
-            gto[14] = (az * rz * rz + 4 * ce) * rz * rz;
-            for (int n = 0; n < 15; n++) {
-                ao[0+3*n] -= gto[n] * Rx;
-                ao[1+3*n] -= gto[n] * Ry;
-                ao[2+3*n] -= gto[n] * Rz;
+            for (int img = 0; img < nimgs; ++img) {
+                double ce = 0;
+                double ce_2a = 0;
+                double Rx = img_coords[img*3+0] + cell0_Rx;
+                double Ry = img_coords[img*3+1] + cell0_Ry;
+                double Rz = img_coords[img*3+2] + cell0_Rz;
+                double rx = xi - Rx;
+                double ry = yi - Ry;
+                double rz = zi - Rz;
+                double rr = rx * rx + ry * ry + rz * rz;
+                if (rr > rrcutoff) continue;
+                for (int ip = 0; ip < nprim; ++ip) {
+                    double ai = expi[ip];
+                    double c_exp = ci[ip] * exp(-ai * rr);
+                    ce += c_exp;
+                    ce_2a -= c_exp * ai * 2;
+                }
+                if (fabs(ce) < 1e-18) continue;
+                double az = ce_2a * rz;
+                gto[0 ] = az * rx * rx * rx * rx;
+                gto[1 ] = az * rx * rx * rx * ry;
+                gto[2 ] = (az * rz +     ce) * rx * rx * rx;
+                gto[3 ] = az * rx * rx * ry * ry;
+                gto[4 ] = (az * rz +     ce) * rx * rx * ry;
+                gto[5 ] = (az * rz + 2 * ce) * rx * rx * rz;
+                gto[6 ] = az * rx * ry * ry * ry;
+                gto[7 ] = (az * rz +     ce) * rx * ry * ry;
+                gto[8 ] = (az * rz + 2 * ce) * rx * ry * rz;
+                gto[9 ] = (az * rz + 3 * ce) * rx * rz * rz;
+                gto[10] = az * ry * ry * ry * ry;
+                gto[11] = (az * rz +     ce) * ry * ry * ry;
+                gto[12] = (az * rz + 2 * ce) * ry * ry * rz;
+                gto[13] = (az * rz + 3 * ce) * ry * rz * rz;
+                gto[14] = (az * rz + 4 * ce) * rz * rz * rz;
+                for (int n = 0; n < 15; n++) {
+                    ao[0+3*n] -= gto[n] * Rx;
+                    ao[1+3*n] -= gto[n] * Ry;
+                    ao[2+3*n] -= gto[n] * Rz;
+                }
             }
+            for (int n = 0; n < 3; ++n) {
+                out[n*naog+0*ngrids] = 2.503342941796704538 * (ao[1*3+n] - ao[6*3+n]) ;
+                out[n*naog+1*ngrids] = 5.310392309339791593 * ao[4*3+n] - 1.770130769779930530 * ao[11*3+n];
+                out[n*naog+2*ngrids] = 5.677048174545360108 * ao[8*3+n] - 0.946174695757560014 * (ao[1*3+n] + ao[6*3+n]);
+                out[n*naog+3*ngrids] = 2.676186174229156671 * ao[13*3+n]- 2.007139630671867500 * (ao[4*3+n] + ao[11*3+n]);
+                out[n*naog+4*ngrids] = 0.317356640745612911 * (ao[0*3+n] + ao[10*3+n]) + 0.634713281491225822 * ao[3*3+n] - 2.538853125964903290 * (ao[5*3+n] + ao[12*3+n]) + 0.846284375321634430 * ao[14*3+n];
+                out[n*naog+5*ngrids] = 2.676186174229156671 * ao[9*3+n] - 2.007139630671867500 * (ao[2*3+n] + ao[7*3+n]);
+                out[n*naog+6*ngrids] = 2.838524087272680054 * (ao[5*3+n] - ao[12*3+n]) + 0.473087347878780009 * (ao[10*3+n]- ao[0*3+n]);
+                out[n*naog+7*ngrids] = 1.770130769779930531 * ao[2*3+n] - 5.310392309339791590 * ao[7*3+n];
+                out[n*naog+8*ngrids] = 0.625835735449176134 * (ao[0*3+n] + ao[10*3+n]) - 3.755014412695056800 * ao[3*3+n];
+            }
+            break;
         }
     }
 }
 
+template <bool cart>
 __global__
-static void _cart_deriv1_strain_tensor_kernel(
+static void _deriv1_strain_tensor_kernel(
         double *out, PBCIntEnvVars envs, double *grids,
         size_t ngrids, int nao, double *rcut)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    SETUP_GTO_KERNEL();
     if (grid_id >= ngrids) {
         return;
     }
-    int bas_id = blockIdx.y;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1472,19 +1774,19 @@ static void _cart_deriv1_strain_tensor_kernel(
     int nimgs = envs.nimgs;
 
     switch (li) {
-    case 0: _eval_cart_deriv1_strain_tensor<0>(out, img_coords, env,
+    case 0: _eval_deriv1_strain_tensor<0, cart>(out, img_coords, env,
                     xi, yi, zi, rrcutoff, bas, nimgs, nao, ngrids);
             break;
-    case 1: _eval_cart_deriv1_strain_tensor<1>(out, img_coords, env,
+    case 1: _eval_deriv1_strain_tensor<1, cart>(out, img_coords, env,
                     xi, yi, zi, rrcutoff, bas, nimgs, nao, ngrids);
             break;
-    case 2: _eval_cart_deriv1_strain_tensor<2>(out, img_coords, env,
+    case 2: _eval_deriv1_strain_tensor<2, cart>(out, img_coords, env,
                     xi, yi, zi, rrcutoff, bas, nimgs, nao, ngrids);
             break;
-    case 3: _eval_cart_deriv1_strain_tensor<3>(out, img_coords, env,
+    case 3: _eval_deriv1_strain_tensor<3, cart>(out, img_coords, env,
                     xi, yi, zi, rrcutoff, bas, nimgs, nao, ngrids);
             break;
-    case 4: _eval_cart_deriv1_strain_tensor<4>(out, img_coords, env,
+    case 4: _eval_deriv1_strain_tensor<4, cart>(out, img_coords, env,
                     xi, yi, zi, rrcutoff, bas, nimgs, nao, ngrids);
             break;
     }
@@ -1496,30 +1798,32 @@ int PBCeval_gto_deriv(double *out, PBCIntEnvVars *envs,
                       int deriv, int cart, double *rcut)
 {
     constexpr int ngrids_per_block = THREADS;
-    int threads = ngrids_per_block;
-    dim3 blocks((ngrids+ngrids_per_block-1)/ngrids_per_block, nbas);
+
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid((ngrids+ngrids_per_block-1)/ngrids_per_block, nbas);
+    auto dev_envs = *envs;
     switch (deriv) {
     case 0:
         if (cart) {
-            _cart_deriv0_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_cart_deriv0_kernel, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
         } else {
-            _sph_deriv0_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_sph_deriv0_kernel, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
         }
         break;
     case 1:
         if (cart) {
-            _cart_deriv1_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_cart_deriv1_kernel, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
         } else {
-            _sph_deriv1_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_sph_deriv1_kernel, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
         }
         break;
     case 2:
         if (cart) {
-            _cart_deriv1_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
-            _cart_ip2_kernel<<<blocks, threads>>>(out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_cart_deriv1_kernel, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_cart_ip2_kernel, blocks, threads, 0, out+4*nao*ngrids, dev_envs, grids, ngrids, nao, rcut);
         } else {
-            _sph_deriv1_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
-            _sph_ip2_kernel<<<blocks, threads>>>(out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_sph_deriv1_kernel, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_sph_ip2_kernel, blocks, threads, 0, out+4*nao*ngrids, dev_envs, grids, ngrids, nao, rcut);
         }
         break;
     default:
@@ -1538,19 +1842,24 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
                       double *grids, int ngrids, int nao, int nbas,
                       int deriv, int cart, double *rcut)
 {
-    if (!cart) {
-        fprintf(stderr, "PBCeval_gto_strain_tensor does not support spherical GTOs\n");
-        return 1;
-    }
     constexpr int ngrids_per_block = THREADS;
-    int threads = ngrids_per_block;
-    dim3 blocks((ngrids+ngrids_per_block-1)/ngrids_per_block, nbas);
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid((ngrids+ngrids_per_block-1)/ngrids_per_block, nbas);
+    auto dev_envs = *envs;
     switch (deriv) {
     case 0:
-        _cart_deriv0_strain_tensor_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+        if (cart) {
+            LAUNCH_KERNEL(_deriv0_strain_tensor_kernel<true>, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
+        } else {
+            LAUNCH_KERNEL(_deriv0_strain_tensor_kernel<false>, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
+        }
         break;
     case 1:
-        _cart_deriv1_strain_tensor_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+        if (cart) {
+            LAUNCH_KERNEL(_deriv1_strain_tensor_kernel<true>, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
+        } else {
+            LAUNCH_KERNEL(_deriv1_strain_tensor_kernel<false>, blocks, threads, 0, out, dev_envs, grids, ngrids, nao, rcut);
+        }
         break;
     default:
         fprintf(stderr, "PBCeval_gto_strain_tensor deriv = %d not supported\n", deriv);
@@ -1564,3 +1873,5 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
     return 0;
 }
 }
+
+#undef SETUP_GTO_KERNEL

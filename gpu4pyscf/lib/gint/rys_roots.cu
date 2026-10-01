@@ -15,6 +15,9 @@
  */
 
 #include "gvhf-rys/rys_roots.cuh"
+// Backend macros for the converted helpers below (includers guarantee
+// cuda_runtime.h / sycl_device.hpp first, as before).
+#include "gsycl/gpu_compat.h"
 
 #define SQRTPIE4        .8862269254527580136
 #define PIE4            .7853981633974483096
@@ -47,10 +50,10 @@ static void GINTrys_root(double x, double *rw)
 
     for (int rt_id = 0; rt_id < NROOTS; ++rt_id) {
         const int it = (int)(x * .4);
-        double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * NROOTS*(NROOTS-1);
+        const double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * NROOTS*(NROOTS-1);
         const double u = (x - it * 2.5) * 0.8 - 1.;
         const double u2 = u * 2.;
-        double *c = datax + (2*rt_id) * DEGREE1 * INTERVALS;
+        const double *c = datax + (2*rt_id) * DEGREE1 * INTERVALS;
         //for i in range(2, degree + 1):
         //    c0, c1 = c[degree-i] - c1, c0 + c1*u2
         double c0 = c[it + DEGREE   *INTERVALS];
@@ -123,10 +126,12 @@ inline void GINTscale_u(double *u, double theta)
 __device__
 static void GINTrys_root(int nroots, double x, double *rw)
 {
+    setup_context();
+    const int gint_tx = threadIdx_x;
     // roots and weights are distributed in each thread
     const int off = nroots * (nroots - 1) / 2;
     const double t = sqrt(PIE4/x);
-    const int rt_id = threadIdx.x % nroots;
+    const int rt_id = gint_tx % nroots;
     if (x<3.0e-7){
         const double r = ROOT_SMALLX_R0[off+rt_id] + ROOT_SMALLX_R1[off+rt_id] * x;
         const double w = ROOT_SMALLX_W0[off+rt_id] + ROOT_SMALLX_W1[off+rt_id] * x;
@@ -144,10 +149,10 @@ static void GINTrys_root(int nroots, double x, double *rw)
     }
 
     const int it = (int)(x * .4);
-    double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
+    const double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
     const double u = (x - it * 2.5) * 0.8 - 1.;
     const double u2 = u * 2.;
-    double *c = datax + (2*rt_id) * DEGREE1 * INTERVALS;
+    const double *c = datax + (2*rt_id) * DEGREE1 * INTERVALS;
     //for i in range(2, degree + 1):
     //    c0, c1 = c[degree-i] - c1, c0 + c1*u2
     double c0 = c[it + DEGREE   *INTERVALS];

@@ -2,24 +2,36 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
-
 #define KERNEL_ARGS \
     RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
-    float *q_cond_ij, float *q_cond_kl
+    float *q_cond_ij, float *q_cond_kl, void *shm_mem
 
 #define KERNEL_SETUP() \
+    setup_context(); \
+    const md_j_index2 blockIdx {(int)blockIdx_x, (int)blockIdx_y}; \
+    const md_j_index2 threadIdx {(int)threadIdx_x, (int)threadIdx_y}; \
     int tx = threadIdx.x; \
     int ty = threadIdx.y; \
     int block_x = blockIdx.x; \
     int block_y = blockIdx.y; \
-    extern __shared__ double vj_kl_cache[];
+    DYNAMIC_SHARED_PTR(double, vj_kl_cache, shm_mem);
 
-#define LAUNCH_KERNEL(KERNEL, SHMSIZE) \
-    KERNEL<<<blocks, threads, SHMSIZE>>>(*envs, *jk, *bounds, q_cond_ij, q_cond_kl)
+#define LAUNCH_MD_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
+    auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds; \
+    auto _blocks = make_grid((npairs_ij + (BLOCKS_IJ) - 1) / (BLOCKS_IJ), \
+                             (npairs_kl + (BLOCKS_KL) - 1) / (BLOCKS_KL)); \
+    auto _threads = make_block(16, 16); \
+    cudaFuncSetAttribute(KERNEL, cudaFuncAttributeMaxDynamicSharedMemorySize, \
+                         ((SHM)+addition_buf)*sizeof(double)); \
+    LAUNCH_KERNEL_DYN( KERNEL, _blocks, _threads, \
+        ((SHM)+addition_buf)*sizeof(double), \
+        dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl); \
+}
 
 
 // TILEX=30, TILEY=30
@@ -4668,75 +4680,35 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
         addition_buf = 256;
     }
     switch (ijkl) {
-    case 0: { // lij=0, lkl=0, tilex=30, tiley=30
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 479) / 480, (npairs_kl + 479) / 480, 1);
-        LAUNCH_KERNEL(md_j_0_0, (2992+addition_buf)*sizeof(double)); break;
-    } break;
-    case 11: { // lij=1, lkl=0, tilex=48, tiley=23
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 367) / 368, 1);
-        LAUNCH_KERNEL(md_j_1_0, (2992+addition_buf)*sizeof(double)); break;
-    } break;
-    case 12: { // lij=1, lkl=1, tilex=10, tiley=10
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 159) / 160, (npairs_kl + 159) / 160, 1);
-        LAUNCH_KERNEL(md_j_1_1, (2944+addition_buf)*sizeof(double)); break;
-    } break;
-    case 22: { // lij=2, lkl=0, tilex=48, tiley=16
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 255) / 256, 1);
-        LAUNCH_KERNEL(md_j_2_0, (3040+addition_buf)*sizeof(double)); break;
-    } break;
-    case 23: { // lij=2, lkl=1, tilex=48, tiley=30
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 479) / 480, 1);
-        cudaFuncSetAttribute(md_j_2_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_2_1, (6112+addition_buf)*sizeof(double)); break;
-    } break;
-    case 24: { // lij=2, lkl=2, tilex=14, tiley=14
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 223) / 224, (npairs_kl + 223) / 224, 1);
-        cudaFuncSetAttribute(md_j_2_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_2_2, (5920+addition_buf)*sizeof(double)); break;
-    } break;
-    case 33: { // lij=3, lkl=0, tilex=48, tiley=46
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 735) / 736, 1);
-        cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_3_0, (6112+addition_buf)*sizeof(double)); break;
-    } break;
-    case 34: { // lij=3, lkl=1, tilex=48, tiley=24
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 383) / 384, 1);
-        cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6016+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_3_1, (6016+addition_buf)*sizeof(double)); break;
-    } break;
-    case 35: { // lij=3, lkl=2, tilex=48, tiley=11
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 175) / 176, 1);
-        cudaFuncSetAttribute(md_j_3_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_3_2, (5920+addition_buf)*sizeof(double)); break;
-    } break;
-    case 44: { // lij=4, lkl=0, tilex=48, tiley=36
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 575) / 576, 1);
-        cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6064+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_4_0, (6064+addition_buf)*sizeof(double)); break;
-    } break;
-    case 45: { // lij=4, lkl=1, tilex=48, tiley=18
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 287) / 288, 1);
-        cudaFuncSetAttribute(md_j_4_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6000+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_4_1, (6000+addition_buf)*sizeof(double)); break;
-    } break;
-    case 55: { // lij=5, lkl=0, tilex=48, tiley=26
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 415) / 416, 1);
-        cudaFuncSetAttribute(md_j_5_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_5_0, (6112+addition_buf)*sizeof(double)); break;
-    } break;
+    case 0:  // lij=0, lkl=0, tilex=30, tiley=30
+        LAUNCH_MD_KERNEL(md_j_0_0, 2992, 480, 480) break;
+    case 11: // lij=1, lkl=0, tilex=48, tiley=23
+        LAUNCH_MD_KERNEL(md_j_1_0, 2992, 768, 368) break;
+    case 12: // lij=1, lkl=1, tilex=10, tiley=10
+        LAUNCH_MD_KERNEL(md_j_1_1, 2944, 160, 160) break;
+    case 22: // lij=2, lkl=0, tilex=48, tiley=16
+        LAUNCH_MD_KERNEL(md_j_2_0, 3040, 768, 256) break;
+    case 23: // lij=2, lkl=1, tilex=48, tiley=30
+        LAUNCH_MD_KERNEL(md_j_2_1, 6112, 768, 480) break;
+    case 24: // lij=2, lkl=2, tilex=14, tiley=14
+        LAUNCH_MD_KERNEL(md_j_2_2, 5920, 224, 224) break;
+    case 33: // lij=3, lkl=0, tilex=48, tiley=46
+        LAUNCH_MD_KERNEL(md_j_3_0, 6112, 768, 736) break;
+    case 34: // lij=3, lkl=1, tilex=48, tiley=24
+        LAUNCH_MD_KERNEL(md_j_3_1, 6016, 768, 384) break;
+    case 35: // lij=3, lkl=2, tilex=48, tiley=11
+        LAUNCH_MD_KERNEL(md_j_3_2, 5920, 768, 176) break;
+    case 44: // lij=4, lkl=0, tilex=48, tiley=36
+        LAUNCH_MD_KERNEL(md_j_4_0, 6064, 768, 576) break;
+    case 45: // lij=4, lkl=1, tilex=48, tiley=18
+        LAUNCH_MD_KERNEL(md_j_4_1, 6000, 768, 288) break;
+    case 55: // lij=5, lkl=0, tilex=48, tiley=26
+        LAUNCH_MD_KERNEL(md_j_5_0, 6112, 768, 416) break;
     default: return 0;
     }
     return 1;
 }
+
+#undef LAUNCH_KERNEL
+#undef KERNEL_SETUP
+#undef KERNEL_ARGS

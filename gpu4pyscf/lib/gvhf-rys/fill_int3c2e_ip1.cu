@@ -17,8 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -33,21 +33,38 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
                     double omega, double lr_factor, double sr_factor,
                     int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int ao_pair_offset, int aux_offset,
-                    int nao_pairs, int naux)
+                    int *ao_pair_loc,                     int ao_pair_offset, int aux_offset,
+                    int nao_pairs, int naux,
+                    void *shm_mem)
 {
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    setup_context();
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, nshl_pair);
+    SHARED_SCALAR(int, ksh0);
+    SHARED_SCALAR(int, ksh1);
+    SHARED_SCALAR(int, nksh);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, lij);
+    SHARED_SCALAR(int, lk);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, nf);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, kprim);
+    SHARED_SCALAR(int, g_size);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nst_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-    __shared__ int shl_pair0, shl_pair1, nshl_pair;
-    __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lij, lk, nroots, nf, nao;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size;
-    __shared__ int gout_stride, nst_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -85,7 +102,6 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
@@ -248,21 +264,38 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
                     double omega, double lr_factor, double sr_factor,
                     int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int ao_pair_offset, int aux_offset,
-                    int nao_pairs, int naux)
+                    int *ao_pair_loc,                     int ao_pair_offset, int aux_offset,
+                    int nao_pairs, int naux,
+                    void *shm_mem)
 {
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    setup_context();
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, nshl_pair);
+    SHARED_SCALAR(int, ksh0);
+    SHARED_SCALAR(int, ksh1);
+    SHARED_SCALAR(int, nksh);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, lij);
+    SHARED_SCALAR(int, lk);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, nf);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, kprim);
+    SHARED_SCALAR(int, g_size);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nst_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-    __shared__ int shl_pair0, shl_pair1, nshl_pair;
-    __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lij, lk, nroots, nf, nao;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size;
-    __shared__ int gout_stride, nst_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -300,7 +333,6 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
@@ -466,14 +498,20 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
                  int ao_pair_offset, int aux_offset, int nao_pairs, int naux)
 {
-    cudaFuncSetAttribute(int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-            out, *envs, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
-            nao_pairs, naux);
-    cudaError_t err = cudaGetLastError();
+    auto dev_envs = *envs;
+    auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
+    auto threads = make_block(THREADS);
+    cudaError_t err = cudaFuncSetAttribute(int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    LAUNCH_KERNEL_DYN( int3c2e_ip1_kernel, blocks, threads, shm_size,
+        out, dev_envs, omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, ksh_offsets,
+        gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
+        nao_pairs, naux);
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
@@ -488,14 +526,20 @@ int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
                  int ao_pair_offset, int aux_offset, int nao_pairs, int naux)
 {
-    cudaFuncSetAttribute(int3c2e_ipaux_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    int3c2e_ipaux_kernel<<<blocks, THREADS, shm_size>>>(
-            out, *envs, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
-            nao_pairs, naux);
-    cudaError_t err = cudaGetLastError();
+    auto dev_envs = *envs;
+    auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
+    auto threads = make_block(THREADS);
+    cudaError_t err = cudaFuncSetAttribute(int3c2e_ipaux_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    LAUNCH_KERNEL_DYN( int3c2e_ipaux_kernel, blocks, threads, shm_size,
+        out, dev_envs, omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, ksh_offsets,
+        gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
+        nao_pairs, naux);
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
