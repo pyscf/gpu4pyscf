@@ -579,7 +579,7 @@ class KnownValues(unittest.TestCase):
         # with_df.mesh = cell.mesh. This assignment leads to an explicit
         # override to mesh. cell2.mesh will not be read by the scanner. This
         # problem is fixed in pyscf-2.15
-        mf1 = cell1.to_gpu().RKS(xc='camb3lyp').multigrid_numint()
+        mf1 = cell1.to_gpu().RKS(xc='camb3lyp').multigrid_numint().run()
         mf_scanner = mf1.as_scanner()
         mf_scanner(cell1)
 
