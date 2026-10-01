@@ -96,12 +96,7 @@ class GammaHessian(lib.StreamObject):
         mf = self.mf
         cell = mf.cell
         original_coords = cell.atom_coords() # Bohr
-        geomopt_mesh = getattr(
-            mf,
-            "_geomopt_mesh",
-            getattr(cell, "_geomopt_mesh", None),
-        )
-        reference_mesh = freeze_mesh(mf, cell, geomopt_mesh)
+        reference_mesh = freeze_mesh(mf)
 
         # default calculator is vasp, default unit in phonopy for vasp:
         #           | Distance   Atomic mass   Force         Force constants
