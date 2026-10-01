@@ -144,6 +144,7 @@ if(BUILD_LIBXC)
   include(ExternalProject)
   ExternalProject_Add(libxc
     URL https://gitlab.com/libxc/libxc/-/archive/7.1.2/libxc-7.1.2.tar.gz
+    PATCH_COMMAND patch -p1 --batch --forward -i ${PROJECT_SOURCE_DIR}/libxc_prune.patch
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
     CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
@@ -152,6 +153,7 @@ if(BUILD_LIBXC)
             -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
             -DCMAKE_INSTALL_LIBDIR:PATH=lib
             -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
+            -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
     CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
   )
 endif()
