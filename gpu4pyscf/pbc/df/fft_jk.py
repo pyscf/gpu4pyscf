@@ -356,8 +356,7 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
     ej = ej.get()
     ej = np.array([ej[:,:,p0:p1].sum(axis=2) for p0, p1 in aoslices[:,2:]])
     ej = ej.transpose(1,0,2)
-    if not is_gamma_point:
-        ej /= nkpts
+    ej *= 2/nkpts
     if nset == 1:
         ej = ej[0]
     return ej

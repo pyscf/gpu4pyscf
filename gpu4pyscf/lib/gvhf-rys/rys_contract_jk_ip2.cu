@@ -1295,7 +1295,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
                 return 1;
             }
         }
-        LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_ejk_ip2_type12_kernel, blocks, threads, shm_bytes,
+        LAUNCH_KERNEL_DYN( rys_ejk_ip2_type12_kernel, blocks, threads, shm_bytes,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }
@@ -1387,7 +1387,7 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
                 return 1;
             }
         }
-        LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), rys_ejk_ip2_type3_kernel, blocks, threads, shm_bytes,
+        LAUNCH_KERNEL_DYN( rys_ejk_ip2_type3_kernel, blocks, threads, shm_bytes,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }

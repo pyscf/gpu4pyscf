@@ -22,8 +22,70 @@
 
 #pragma once
 
+// double2 component access. sycl::double2 exposes .x()/.y() methods,
+// CUDA double2 exposes .x/.y fields.
+#ifdef USE_SYCL
+#define D2X(v) ((v).x())
+#define D2Y(v) ((v).y())
+#else
+#define D2X(v) ((v).x)
+#define D2Y(v) ((v).y)
+#endif
+
+// dim3 shim for auto-generated sources that still spell it (SYCL only).
+// Keeps generated files byte-identical.
+#ifdef USE_SYCL
+struct gpu4pyscf_dim3 {
+    unsigned int x, y, z;
+    gpu4pyscf_dim3(unsigned int x=1, unsigned int y=1, unsigned int z=1) : x(x), y(y), z(z) {}
+};
+#define dim3 gpu4pyscf_dim3
+#endif
+
+// Backend-split constant tables with distinct SYCL/CUDA names.
+// SYCL keeps a device_global; CUDA uses __constant__. TABLE_BIND aliases
+// the active store to the CUDA name so bodies stay backend-agnostic.
+#ifdef USE_SYCL
+#define TABLE_DEFINE(type, sname, cname, N) \
+    SYCL_EXTERNAL sycl_device_global<type[N]> sname
+#define TABLE_BIND(cname, sname) \
+    auto cname = sname.get()
+#define TABLE_FILL(cname, sname, src, bytes) \
+    CONSTANT_MEMCPY(sname, src, bytes)
+#else
+#define TABLE_DEFINE(type, sname, cname, N) \
+    __constant__ type cname[N]
+#define TABLE_BIND(cname, sname) \
+    (void)0
+#define TABLE_FILL(cname, sname, src, bytes) \
+    CONSTANT_MEMCPY(cname, src, bytes)
+#endif
+
+// Host-pinned to device-accessible pointer. SYCL uses USM (directly
+// accessible); CUDA maps the pinned allocation. Call sites must return
+// int (0 ok / 1 error) for the CUDA error path.
+#ifdef USE_SYCL
+#define MAP_PINNED_PTR(type, dev, host) \
+    type *dev = (host)
+#else
+#define MAP_PINNED_PTR(type, dev, host) \
+    type *dev; \
+    { \
+        cudaError_t _map_err = cudaHostGetDevicePointer(&dev, host, 0); \
+        if (_map_err != cudaSuccess) { \
+            fprintf(stderr, "address mapping error %s\n", cudaGetErrorString(_map_err)); \
+            return 1; \
+        } \
+    }
+#endif
+
 #include <stddef.h>
 
+// Stream/queue normalization: LAUNCH_KERNEL_* accept either a stream object
+// (e.g. sycl::queue&) or a queue pointer (e.g. sycl_get_queue()) in the
+// stream slot, in both backends (cudaStream_t is already a pointer).
+template <typename T> inline T *_gpu4pyscf_stream_ptr(T *s) { return s; }
+template <typename T> inline T *_gpu4pyscf_stream_ptr(T &s) { return &s; }
 
 #ifdef USE_SYCL
 
@@ -140,16 +202,18 @@ inline sycl::range<3> make_block(
     return sycl::range<3>(z, y, x);
 }
 
-#define LAUNCH_KERNEL(kernel, grid, block, shm_size, stream, ...) \
+#define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
     { \
-        (stream).parallel_for( \
+        sycl_get_queue()->parallel_for( \
             sycl::nd_range<3>(grid * block, block), \
             [=](sycl::nd_item<3>) { kernel(__VA_ARGS__); }); \
     }
 
-#define LAUNCH_KERNEL_Q(queue_ptr, kernel, grid, block, shm_size, ...) \
+// Explicit-stream form for call sites with their own stream/queue object
+// or pointer (e.g. solvent, vv10 take cudaStream_t params from callers).
+#define LAUNCH_KERNEL_S(kernel, grid, block, shm_size, stream, ...) \
     { \
-        (queue_ptr)->parallel_for( \
+        _gpu4pyscf_stream_ptr(stream)->parallel_for( \
             sycl::nd_range<3>(grid * block, block), \
             [=](sycl::nd_item<3>) { kernel(__VA_ARGS__); }); \
     }
@@ -158,10 +222,18 @@ inline sycl::range<3> make_block(
 // (e.g. dereferencing a host-side struct pointer whose pointee holds device
 // pointers). HOSTARG is evaluated in host code in both backends: captured by
 // value in the SYCL lambda, passed directly in CUDA.
-#define LAUNCH_KERNEL_LAST(KERNEL, HOSTARG, grid, block, shm_size, stream, ...) \
+#define LAUNCH_KERNEL_LAST(KERNEL, HOSTARG, grid, block, shm_size, ...) \
     { \
         auto _hostarg = (HOSTARG); \
-        (stream).parallel_for( \
+        sycl_get_queue()->parallel_for( \
+            sycl::nd_range<3>(grid * block, block), \
+            [=](sycl::nd_item<3>) { KERNEL(__VA_ARGS__, _hostarg); }); \
+    }
+
+#define LAUNCH_KERNEL_LAST_S(KERNEL, HOSTARG, grid, block, shm_size, stream, ...) \
+    { \
+        auto _hostarg = (HOSTARG); \
+        _gpu4pyscf_stream_ptr(stream)->parallel_for( \
             sycl::nd_range<3>(grid * block, block), \
             [=](sycl::nd_item<3>) { KERNEL(__VA_ARGS__, _hostarg); }); \
     }
@@ -170,9 +242,9 @@ inline sycl::range<3> make_block(
 // forwards its pointer as a trailing `void *shm_mem` kernel argument in
 // BOTH backends (CUDA passes nullptr; the kernel uses `extern __shared__`
 // via DYNAMIC_SHARED_PTR instead).
-#define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, stream, ...) \
+#define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, ...) \
     { \
-        (stream).submit([&](sycl::handler &cgh) { \
+        sycl_get_queue()->submit([&](sycl::handler &cgh) { \
             sycl::local_accessor<char, 1> _dynshm( \
                 sycl::range<1>(shm_size), cgh); \
             cgh.parallel_for( \
@@ -184,9 +256,9 @@ inline sycl::range<3> make_block(
         }); \
     }
 
-#define LAUNCH_KERNEL_DYN_Q(queue_ptr, kernel, grid, block, shm_size, ...) \
+#define LAUNCH_KERNEL_DYN_S(kernel, grid, block, shm_size, stream, ...) \
     { \
-        (queue_ptr)->submit([&](sycl::handler &cgh) { \
+        _gpu4pyscf_stream_ptr(stream)->submit([&](sycl::handler &cgh) { \
             sycl::local_accessor<char, 1> _dynshm( \
                 sycl::range<1>(shm_size), cgh); \
             cgh.parallel_for( \
@@ -200,18 +272,7 @@ inline sycl::range<3> make_block(
 
 // Queue-launch form of LAUNCH_KERNEL_LAST (no stream; e.g. queue-owned
 // default launches). HOSTARG is materialized on the host in both backends.
-#define LAUNCH_KERNEL_LAST_Q(KERNEL, HOSTARG, queue_ptr, grid, block, shm_size, ...) \
-    { \
-        auto _hostarg = (HOSTARG); \
-        (queue_ptr)->parallel_for( \
-            sycl::nd_range<3>(grid * block, block), \
-            [=](sycl::nd_item<3>) { KERNEL(__VA_ARGS__, _hostarg); }); \
-    }
-
 #else
-// Dummy so queue-based launch sites compile in CUDA builds.
-// The CUDA LAUNCH_KERNEL_Q macro discards this argument.
-static inline void *sycl_get_queue() { return nullptr; }
 
 inline dim3 make_grid(
     unsigned int x, unsigned int y = 1, unsigned int z = 1)
@@ -225,43 +286,26 @@ inline dim3 make_block(
     return dim3(x, y, z);
 }
 
-#define LAUNCH_KERNEL(kernel, grid, block, shm_size, stream, ...) \
+#define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
     { \
-        kernel<<<grid, block, shm_size, stream>>>(__VA_ARGS__); \
-    }
-
-#define LAUNCH_KERNEL_Q(queue_ptr, kernel, grid, block, shm_size, ...) \
-    { \
-        (void)(queue_ptr); \
-        kernel<<<grid, block>>>(__VA_ARGS__); \
+        kernel<<<grid, block, shm_size, 0>>>(__VA_ARGS__); \
     }
 
 // Launch where one trailing argument must be materialized on the host
 // (e.g. dereferencing a host-side struct pointer whose pointee holds device
 // pointers). HOSTARG is evaluated in host code in both backends.
-#define LAUNCH_KERNEL_LAST(KERNEL, HOSTARG, grid, block, shm_size, stream, ...) \
+#define LAUNCH_KERNEL_LAST(KERNEL, HOSTARG, grid, block, shm_size, ...) \
     { \
-        KERNEL<<<grid, block, shm_size, stream>>>(__VA_ARGS__, HOSTARG); \
+        KERNEL<<<grid, block, shm_size, 0>>>(__VA_ARGS__, HOSTARG); \
     }
 
 // Dynamic-shared variant: forwards shm_size as a trailing `void *shm_mem`
 // kernel argument in BOTH backends, matching DYNAMIC_SHARED_PTR.
-#define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, stream, ...) \
+#define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, ...) \
     { \
-        kernel<<<grid, block, shm_size, stream>>>(__VA_ARGS__, nullptr); \
-    }
-
-#define LAUNCH_KERNEL_DYN_Q(queue_ptr, kernel, grid, block, shm_size, ...) \
-    { \
-        (void)(queue_ptr); \
-        kernel<<<grid, block, shm_size>>>(__VA_ARGS__, nullptr); \
+        kernel<<<grid, block, shm_size, 0>>>(__VA_ARGS__, nullptr); \
     }
 
 // Queue-launch form of LAUNCH_KERNEL_LAST (no stream; e.g. queue-owned
 // default launches). HOSTARG is materialized on the host in both backends.
-#define LAUNCH_KERNEL_LAST_Q(KERNEL, HOSTARG, queue_ptr, grid, block, shm_size, ...) \
-    { \
-        (void)(queue_ptr); \
-        KERNEL<<<grid, block>>>(__VA_ARGS__, HOSTARG); \
-    }
 #endif

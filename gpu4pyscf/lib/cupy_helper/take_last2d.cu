@@ -68,7 +68,7 @@ int take_last2d(cudaStream_t stream, double *a, const double *b, int *indices,
     int ntile = (na + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntile, ntile, blk_size);
-    LAUNCH_KERNEL(_take_last2d, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_take_last2d, blocks, threads, 0, stream,
                   a, b, indices, na, nb);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -91,7 +91,7 @@ int takebak(cudaStream_t stream, double *out, double *a_h, int *indices,
 
     auto threads = make_block(THREADS*THREADS);
     auto blocks = make_grid(ntile, ncount);
-    LAUNCH_KERNEL(_takebak, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_takebak, blocks, threads, 0, stream,
                   out, a_d, indices, count, n_o, n_a);
     err = cudaGetLastError();
     if (err != cudaSuccess) {

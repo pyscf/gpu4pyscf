@@ -16,47 +16,17 @@
 
 #include <stdio.h>
 #include <cuda_runtime.h>
-#ifndef USE_SYCL
-#include <cuComplex.h>
-#include <gvhf-rys/rys_constant.cu>
-#endif
 #include "constant_objects.cuh"
 #include "gsycl/gpu_compat.h"
 
-#ifdef USE_SYCL
-SYCL_EXTERNAL sycl_device_global<double[9]> s_c_lattice_vectors;
-SYCL_EXTERNAL sycl_device_global<double[9]> s_c_reciprocal_lattice_vectors;
-SYCL_EXTERNAL sycl_device_global<double[9]> s_c_dxyz_dabc;
-// c_nf / c_div_nf are plain constexpr tables defined in constant_objects.cuh
-#else
-__constant__ double c_lattice_vectors[9];
-__constant__ double c_reciprocal_lattice_vectors[9];
-__constant__ double c_dxyz_dabc[9];
+TABLE_DEFINE(double, s_c_lattice_vectors, c_lattice_vectors, 9);
+TABLE_DEFINE(double, s_c_reciprocal_lattice_vectors, c_reciprocal_lattice_vectors, 9);
+TABLE_DEFINE(double, s_c_dxyz_dabc, c_dxyz_dabc, 9);
 
-__constant__ int c_nf[] = {
-    1,
-    3,
-    6,
-    10,
-    15,
-    21,
-    28,
-    36,
-    45,
-};
 
-__constant__ float c_div_nf[] = {
-    1.f,
-    0.333334f,
-    0.166667f,
-    0.100001f,
-    0.066667f,
-    0.047620f,
-    0.035715f,
-    0.027778f,
-    0.022223f,
-};
-#endif
+
+// c_nf/c_div_nf defined in constant_tables.cu (CUDA-only).
+
 
 // input[nc,nx,ny,nz], output[nc,mx,my,mz]
 __global__ static
@@ -111,12 +81,8 @@ void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
         for (int c = 0; c < nc; ++c) {
             size_t dst = (((size_t)c*nx + sx)*ny + sy)*nz + sz;
             size_t src = (((size_t)c*mx + x )*my + y )*mz + z;
-#ifdef USE_SYCL
-            out[dst] = double2{out[dst].x() + in[src].x(), out[dst].y() + in[src].y()};
-#else
-            out[dst].x += in[src].x;
-            out[dst].y += in[src].y;
-#endif
+            out[dst] = double2{D2X(out[dst]) + D2X(in[src]),
+                               D2Y(out[dst]) + D2Y(in[src])};
         }
     }
 }
@@ -125,21 +91,12 @@ extern "C" {
 void update_lattice_vectors(double *lattice_vectors,
                             double *reciprocal_lattice_vectors)
 {
-#ifdef USE_SYCL
-    CONSTANT_MEMCPY(s_c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
-    CONSTANT_MEMCPY(s_c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
-#else
-    CONSTANT_MEMCPY(c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
-    CONSTANT_MEMCPY(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
-#endif
+    TABLE_FILL(c_lattice_vectors, s_c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
+    TABLE_FILL(c_reciprocal_lattice_vectors, s_c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
 }
 
 void update_dxyz_dabc(double *dxyz_dabc) {
-#ifdef USE_SYCL
-    CONSTANT_MEMCPY(s_c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
-#else
-    CONSTANT_MEMCPY(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
-#endif
+    TABLE_FILL(c_dxyz_dabc, s_c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
 }
 
 int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts)
@@ -150,7 +107,7 @@ int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int count
     int nx = in_shape[0], ny = in_shape[1], nz = in_shape[2];
     auto threads = make_block(32, 16);
     auto grids = make_grid(mx, (my+15)/16);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), fft_take_kernel, grids, threads, 0,
+    LAUNCH_KERNEL( fft_take_kernel, grids, threads, 0,
                     out, in, mx, my, mz, nx, ny, nz, counts);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -169,7 +126,7 @@ int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int co
     int nx = out_shape[0], ny = out_shape[1], nz = out_shape[2];
     auto threads = make_block(32, 16);
     auto grids = make_grid(mx, (my+15)/16);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), fft_takebak_kernel, grids, threads, 0,
+    LAUNCH_KERNEL( fft_takebak_kernel, grids, threads, 0,
                     out, in, mx, my, mz, nx, ny, nz, counts);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();

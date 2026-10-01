@@ -33,7 +33,7 @@
 // blocks/threads are MAKE_RANGE_3D values in scope at each call site.
 // TAG is kept for call-site compatibility; kernel names are inferred.
 #define LAUNCH_KERNEL_3D(TAG, KERNEL, ...) \
-    LAUNCH_KERNEL_Q(sycl_get_queue(), KERNEL, blocks, threads, 0, __VA_ARGS__)
+    LAUNCH_KERNEL( KERNEL, blocks, threads, 0, __VA_ARGS__)
 
 #define KERNEL_PROLOGUE_3D_DM() \
     setup_context(); \

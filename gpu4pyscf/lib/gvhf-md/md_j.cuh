@@ -16,6 +16,14 @@
 
 #pragma once
 
+#include "md_tables.cuh"
+
+// Backend-split storage for the md_indices.cu lookup tables. SYCL has no
+// cross-TU __device__ linkage, so md_indices.cu is #included (tables become
+// inline constexpr); under CUDA it compiles as its own TU (__device__ /
+// __constant__). One macro per storage class keeps md_indices.cu ifdef-free.
+// (Macros live in md_tables.cuh, included above.)
+
 // =====================================================================
 // Per-kernel-family constants for the md_j contraction.
 //

@@ -42,21 +42,13 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
                       int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                       float *diffuse_exps, float *diffuse_ctr_coef,
                       float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
-                      double omega, int tril_symmetry, int8_t *Ecut_mask
-                      #ifdef USE_SYCL
-                      , sycl::nd_item<1> &item, std::byte *shm_mem
-                      #endif
-                      )
+                      double omega, int tril_symmetry, int8_t *Ecut_mask,
+                      void *shm_mem)
 {
-    #ifdef USE_SYCL
-    uint32_t sp_block_id = item.get_group(0);
-    int t_id = item.get_local_id(0);
-    float *shared_memory = reinterpret_cast<float*>(shm_mem);
-    #else
-    uint32_t sp_block_id = blockIdx.x;
-    int t_id = threadIdx.x;
-    extern __shared__ float shared_memory[];
-    #endif
+    setup_context();
+    DYNAMIC_SHARED_PTR(float, shared_memory, shm_mem);
+    uint32_t sp_block_id = blockIdx_x;
+    int t_id = threadIdx_x;
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -178,23 +170,13 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
 __global__ static
 void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
                    int64_t *bas_ij_idx, int *gout_stride_lookup,
-                   uint32_t npairs, double omega
-                   #ifdef USE_SYCL
-                   , sycl::nd_item<2> &item, std::byte *shm_mem
-                   #endif
-                   )
+                   uint32_t npairs, double omega, void *shm_mem)
 {
-    #ifdef USE_SYCL
-    uint32_t sp_block_id = item.get_group(1);
-    int threads = item.get_local_range(1);
-    int t_id = item.get_local_id(1);
-    float *shared_memory = reinterpret_cast<float*>(shm_mem);
-    #else
-    uint32_t sp_block_id = blockIdx.x;
-    int threads = blockDim.x;
-    int t_id = threadIdx.x;
-    extern __shared__ float shared_memory[];
-    #endif
+    setup_context();
+    DYNAMIC_SHARED_PTR(float, shared_memory, shm_mem);
+    uint32_t sp_block_id = blockIdx_x;
+    int threads = blockDim_x;
+    int t_id = threadIdx_x;
     int *bas = envs.bas;
     double *env = envs.env;
     uint32_t shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
@@ -217,13 +199,8 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
     int stride_k = stride_j * (lj + 1);
     int nfij = nfi * nfj;
 
-    #ifdef USE_SYCL
-    auto thread_block = item.get_group();
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    #else
-    __shared__ int gout_stride, nsp_per_block;
-    #endif
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nsp_per_block);
     if (t_id == 0) {
         gout_stride = gout_stride_lookup[li*LMAX1+lj];
         nsp_per_block = THREADS / gout_stride;
@@ -488,16 +465,10 @@ __global__ static
 void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
                          int nbas, int tile)
 {
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    int t_id = item.get_local_id(0);
-    int threads = item.get_local_range(0);
-    int i_tile = item.get_group(0);
-    #else
-    int t_id = threadIdx.x;
-    int threads = blockDim.x;
-    int i_tile = blockIdx.x;
-    #endif
+    setup_context();
+    int t_id = threadIdx_x;
+    int threads = blockDim_x;
+    int i_tile = blockIdx_x;
     size_t off = i_tile * tile * (size_t)njsh;
     // when nish not divisible by tile
     int nish_rem = min(tile, nish - i_tile * tile);
@@ -528,30 +499,19 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     int buflen = max(512, natm_cell0 * 3) * sizeof(float);
-    #ifdef USE_SYCL
     auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh);
-      cgh.parallel_for<class PBCfill_s_estimator_sycl>(sycl::nd_range<1>(sp_blocks * THREADS, THREADS), [=](auto item) {
-        fill_s_estimator(s_estimator, dev_envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
-                         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
-                         npairs, omega, tril_symmetry, Ecut_mask,
-                         item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
-    fill_s_estimator<<<sp_blocks, THREADS, buflen>>>(
-        s_estimator, *envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
+    auto blocks = make_grid(sp_blocks);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL_DYN( fill_s_estimator, blocks, threads, buflen,
+        s_estimator, dev_envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
         npairs, omega, tril_symmetry, Ecut_mask);
-
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCfill_s_estimator %s\n",
                 cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -560,30 +520,17 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
                   uint32_t npairs, double omega)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
-    #ifdef USE_SYCL
-    // Though the kernel is 1D launch in CUDA, SYCL must do 2D because of the
-    // free-functions used in rys_roots_for_k() method
-    sycl::range<2> threads(1, THREADS);
-    sycl::range<2> blocks(1, sp_blocks);
     auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class PBCfill_qcond_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-        q_cond_kernel(q_cond, dev_envs, bas_ij_idx, gout_stride_lookup, npairs, omega,
-                      item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-    #else
-    q_cond_kernel<<<sp_blocks, THREADS, shm_size>>>(
-        q_cond, *envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
-
+    auto blocks = make_grid(sp_blocks);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL_DYN( q_cond_kernel, blocks, threads, shm_size,
+        q_cond, dev_envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCfill_qcond %s\n",
                 cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -591,19 +538,16 @@ int PBCsort_pair_ij(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
                     int nbas, int tile)
 {
     int ntile = (nish + tile - 1) / tile;
-    #ifdef USE_SYCL
-    sycl_get_queue()->parallel_for<class PBCsort_pair_ij_sycl>(sycl::nd_range<1>(ntile * THREADS, THREADS), [=](auto item) {
-      sort_pair_ij_kernel(pair_ij, ish, jsh, nish, njsh, nbas, tile);
-    });
-    #else
-    sort_pair_ij_kernel<<<ntile, THREADS>>>(pair_ij, ish, jsh, nish, njsh, nbas, tile);
+    auto blocks = make_grid(ntile);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( sort_pair_ij_kernel, blocks, threads, 0,
+        pair_ij, ish, jsh, nish, njsh, nbas, tile);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCsort_pair_ij %s\n",
                 cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 }

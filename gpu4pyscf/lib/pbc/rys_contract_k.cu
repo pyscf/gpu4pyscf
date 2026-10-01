@@ -20,6 +20,7 @@
 #include <type_traits>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
@@ -27,20 +28,9 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "gvhf-rys/build_rys_gxyz.cuh"
 #include "pbc/create_tasks.cu"
+#include "pbc/gxyz_table.cuh"
 
-#ifdef USE_SYCL
-// NOTE: this device_global and PBC_make_gxyz_offset() below are deliberately
-// named differently from their libgvhf_rys counterparts. Both libraries are
-// loaded into the SAME process (verified via /proc/self/maps), neither lists
-// the other in DT_NEEDED, and the symbols are GLOBAL DEFAULT visibility. When
-// both exported `s_pbc_gxyz_offset` / `PBC_make_gxyz_offset`, the dynamic linker
-// bound every caller in the process to whichever library happened to load
-// first -- so one library's device_global was written by the other library's
-// host memcpy, leaving its own copy uninitialised. Reading it yields garbage
-// int8_t offsets that flow into load_dm() as an arbitrary pointer
-// displacement. Keep these names library-unique.
-SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_pbc_gxyz_offset;
-#endif
+PBC_GXYZ_DEFINE();
 
 #define GOUT_WIDTH1     81
 
@@ -55,64 +45,32 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                   float dm_penalty,
                   int64_t *pool, int *head_base, const GXYZOffset *p_gxyz_offsets,
-                  int gout_pattern, int reserved_shm_size
-                  #ifdef USE_SYCL
-                  , sycl::nd_item<2> &item, std::byte *shm_mem
-                  #endif
-                  )
+                  int gout_pattern, int reserved_shm_size, void *shm_mem)
 {
+    setup_context();
+    PBC_GXYZ_SELECT(gxyz_offsets);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    SHARED_SCALAR(int, ntasks);
+    SHARED_SCALAR(int, pair_ij);
+    SHARED_SCALAR(int, pair_kl0);
+    SHARED_SCALAR(int, cell_j);
+    SHARED_SCALAR(int, ish_cell0);
+    SHARED_SCALAR(int, jsh_cell0);
+    SHARED_SCALAR(int, i0);
+    SHARED_SCALAR(int, j0);
+    SHARED_ARRAY(double, ri, [3]);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [2]);
+    SHARED_SCALAR(int, expi);
+    SHARED_SCALAR(int, expj);
     // sq is short for shl_quartet
-    #ifdef USE_SYCL
-    int sq_id = item.get_local_id(1);
-    int nsq_per_block = item.get_local_range(1);
-    int gout_id = item.get_local_id(0);
-    int gout_stride = item.get_local_range(0);
-    int thread_id = item.get_local_id(1) + item.get_local_range(1) * item.get_local_id(0);
-
-    int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
-    int64_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
-
-    double *shared_memory = reinterpret_cast<double *>(shm_mem);
-
-    auto thread_block = item.get_group();
-    int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
-    double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
-    double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
-    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-
-    auto gxyz_offsets = s_pbc_gxyz_offset.get() + OFFSET;
-    #else
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-
-    extern __shared__ double shared_memory[];
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
-
-    // c_gxyz_offset is a 256-entry __constant__; the launcher copies the
-    // chunk for this OFFSET into it before each launch, so no offset here.
-    const GXYZOffset *gxyz_offsets = p_gxyz_offsets;
-    #endif
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    int threads = nsq_per_block * gout_stride;
+    int t_id = gout_id * nsq_per_block + sq_id;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
     int *head = head_base + OFFSET/256;
 
     int li = bounds.li;
@@ -203,7 +161,6 @@ while (1) {
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    int threads = nsq_per_block * gout_stride;
     for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
@@ -426,16 +383,7 @@ GXYZOffset *PBC_make_gxyz_offset(GXYZOffset *goff, BoundsInfo &bounds)
             goff[n+m] = goff[m];
         }
     }
-    #ifdef USE_SYCL
-    sycl_get_queue()->memcpy(s_pbc_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset)).wait();
-    return nullptr;
-    #else
-    // c_gxyz_offset holds only 256 entries; the launchers copy each 256-tile
-    // chunk (goff+OFFSET) into it right before the corresponding launch.
-    GXYZOffset *p_gxyz_offset;
-    cudaGetSymbolAddress((void**)&p_gxyz_offset, c_gxyz_offset);
-    return p_gxyz_offset;
-    #endif
+    PBC_GXYZ_FILL(goff, nf);
 }
 
 void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
@@ -581,43 +529,24 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             int buflen = scheme[2];
             int reserved_shm_size = scheme[3];
 
-            #ifdef USE_SYCL
-            sycl::range<2> blocks(1, workers);
-            sycl::range<2> threads(scheme[1], scheme[0]);
+            PBC_GXYZ_COPY_CHUNK(gxyz_offset, OFFSET, tile_chunk);
+            auto blocks = make_grid(workers, 1);
+            auto threads = make_block(scheme[0], scheme[1]);
             auto dev_envs = *envs;
-            sycl_get_queue()->submit([&](sycl::handler &cgh) {
-              sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(buflen), cgh);
-              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-                rys_k_kernel<OFFSET>(dev_envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
-                                     supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-                                     q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                                     dm_penalty, pool, head, p_gxyz_offset,
-                                     gout_pattern, reserved_shm_size,
-                                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-              });
-            });
-            #else
-            checkCudaErrors(
-                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+OFFSET,
-                                   tile_chunk*sizeof(GXYZOffset),
-                                   0, cudaMemcpyHostToDevice));
             if (buflen > 48000) {
-                cudaFuncSetAttribute(rys_k_kernel<OFFSET>, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
-                cudaError_t err = cudaGetLastError();
+                cudaError_t err = cudaFuncSetAttribute(rys_k_kernel<OFFSET>, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
                 if (err != cudaSuccess) {
                     fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
                             cudaGetErrorString(err));
                     return;
                 }
             }
-            dim3 threads(scheme[0], scheme[1]);
-            rys_k_kernel<OFFSET><<<workers, threads, buflen>>>(
-                *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
+            LAUNCH_KERNEL_DYN( rys_k_kernel<OFFSET>, blocks, threads, buflen,
+                dev_envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 dm_penalty, pool, head, p_gxyz_offset,
                 gout_pattern, reserved_shm_size);
-            #endif
         };
 
         launch(std::integral_constant<int,   0>{}, 256);

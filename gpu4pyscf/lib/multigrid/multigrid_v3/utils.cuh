@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "gsycl/gpu_compat.h"
+
 template <typename T>
 __host__ __device__ T distance_squared(const T x, const T y, const T z) {
   return x * x + y * y + z * z;
@@ -40,7 +42,7 @@ __device__ __forceinline__
 double reduce(double val, double *swap, int thread_id)
 {
 #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
+    setup_context();
 #endif
     constexpr int WARP_SIZE = 32;
     for (int offset = 16; offset > 0; offset >>= 1) {

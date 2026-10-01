@@ -128,7 +128,7 @@ int launch_rsc_kernel_c(
     int blocks = (n_tasks + threads - 1) / threads;
     auto block = make_block(threads);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), rsc_kernel, grid, block, 0,
+    LAUNCH_KERNEL( rsc_kernel, grid, block, 0,
         n_tasks, hartree2ev, k_vec,
         na, ea, nb, eb, nc, ec, nd, ed,
         fx_table, b_table, out_val);

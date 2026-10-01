@@ -59,20 +59,10 @@ void transpose_write_kernel(double *out, double *inp, size_t nrow, size_t ncol,
 extern "C" {
 int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0, int col1)
 {
-    // Host USM allocations are directly device-accessible; no address mapping.
-#ifdef USE_SYCL
-    double *out_gpu = out_cpu;
-#else
-    double *out_gpu;
-    cudaError_t err = cudaHostGetDevicePointer(&out_gpu, out_cpu, 0);
-    if(err != cudaSuccess){
-        fprintf(stderr, "store_col_segment address mapping error %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-#endif
+    MAP_PINNED_PTR(double, out_gpu, out_cpu);
     auto blocks = make_grid(nrow);
     auto threads = make_block(512);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), write_kernel, blocks, threads, 0,
+    LAUNCH_KERNEL( write_kernel, blocks, threads, 0,
                     out_gpu, inp, (size_t)ncol, col0, col1);
     cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){
@@ -84,20 +74,10 @@ int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0
 
 int transpose_write(double *out_cpu, double *inp, int nrow, int ncol, int col0, int col1)
 {
-    // Host USM allocations are directly device-accessible; no address mapping.
-#ifdef USE_SYCL
-    double *out_gpu = out_cpu;
-#else
-    double *out_gpu;
-    cudaError_t err = cudaHostGetDevicePointer(&out_gpu, out_cpu, 0);
-    if(err != cudaSuccess){
-        fprintf(stderr, "transpose_write address mapping error %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-#endif
+    MAP_PINNED_PTR(double, out_gpu, out_cpu);
     auto blocks = make_grid(nrow);
     auto threads = make_block(512);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), transpose_write_kernel, blocks, threads, 0,
+    LAUNCH_KERNEL( transpose_write_kernel, blocks, threads, 0,
                     out_gpu, inp, (size_t)nrow, (size_t)ncol, col0, col1);
     cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){

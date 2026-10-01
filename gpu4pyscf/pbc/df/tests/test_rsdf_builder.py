@@ -658,8 +658,8 @@ def test_kpts_compressed_linear_dep():
         C 1.8 1.8 0.0''', a=np.eye(3) * 3.6,
         basis=[[0, [4., 1.]],
                [0, [.1, 1.]],
-               [0, [.035, 1.]]
-              ])
+               [0, [.035, 1.]]]
+    )
     auxcell = df_cpu.make_auxcell(cell)
     nao = cell.nao
     kmesh = [2, 1, 1]

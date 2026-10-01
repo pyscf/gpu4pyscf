@@ -174,6 +174,30 @@ __device__ __forceinline__ unsigned get_smid()
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
 
+// Backend-split fold-index tables (defined once in rys_contract_j.cu).
+// SYCL keeps its own device_global names; the kernel binds them to the
+// CUDA names so bodies stay backend-agnostic.
+#define FOLD_TABLE_DEFINE(type, sname, cname, N) \
+    __constant__ type cname[N]
+#define FOLD_TABLE_BIND(cname, sname) \
+    (void)0
+#define FOLD_TABLE_FILL(cname, sname, src, bytes) \
+    CONSTANT_MEMCPY(cname, src, bytes)
+
+// Per-launch gxyz chunk publish into the 256-entry __constant__
+// (with errors checked).
+#define GXYZ_COPY_CHUNK(goff, off, bytes) \
+    checkCudaErrors(CONSTANT_MEMCPY(c_gxyz_offset, (goff) + (off), (bytes)))
+
+// Device-side gxyz table store, defined once (in rys_contract_k.cu).
+// CUDA reuses c_gxyz_offset from rys_constant.cu.
+#define GXYZ_DEFINE(type, sname, N) \
+    /* nothing: CUDA store lives in rys_constant.cu */
+
+// Kernel picks the active table. CUDA builds write device_global names
+// through into local aliases via GXYZ_BIND.
+#define GXYZ_BIND(cname, sname) (void)0
+
 extern __constant__ int _c_cartesian_lexical_xyz[];
 extern __constant__ GXYZOffset c_gxyz_offset[];
 
@@ -185,7 +209,7 @@ extern __constant__ float c_div_nf[];
 static inline unsigned get_smid()
 {
   auto max_cu = 448;
-  auto item = syclex::this_work_item::get_nd_item<2>();
+  auto item = syclex::this_work_item::get_nd_item<3>();
   auto g = item.get_group_linear_id();
   return (g % max_cu);
 }
@@ -207,6 +231,25 @@ static inline unsigned get_smid()
 
 extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
 extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
+
+#define FOLD_TABLE_DEFINE(type, sname, cname, N) \
+    SYCL_EXTERNAL sycl_device_global<type[N]> sname
+#define FOLD_TABLE_BIND(cname, sname) \
+    auto cname = sname.get()
+#define FOLD_TABLE_FILL(cname, sname, src, bytes) \
+    CONSTANT_MEMCPY(sname, src, bytes)
+
+// Per-launch gxyz chunk publish into the device_global table.
+#define GXYZ_COPY_CHUNK(goff, off, bytes) \
+    CONSTANT_MEMCPY(s_rys_gxyz_offset, (goff) + (off), (bytes))
+
+// Device-side gxyz table store, defined once (in rys_contract_k.cu).
+#define GXYZ_DEFINE(type, sname, N) \
+    SYCL_EXTERNAL sycl_device_global<type[N]> sname
+
+// Bind the SYCL store to the local name used by kernel bodies.
+#define GXYZ_BIND(cname, sname) \
+    const auto cname = sname.get()
 
 //NOTE: `_c_cartesian_lexical_xyz` equvialent in SYCL is converted to
 // `static constexpr` var defined in rys_contract_k.cuh becuase this

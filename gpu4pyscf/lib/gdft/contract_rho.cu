@@ -311,7 +311,7 @@ int GDFTcontract_rho(cudaStream_t stream, double *rho, const double *bra, const 
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    LAUNCH_KERNEL(GDFTcontract_rho_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(GDFTcontract_rho_kernel, blocks, threads, 0, stream,
                   rho, bra, ket, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -325,7 +325,7 @@ int GDFTcontract_rho4(cudaStream_t stream, double *rho, double *bra, double *ket
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    LAUNCH_KERNEL(GDFTcontract_rho4_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(GDFTcontract_rho4_kernel, blocks, threads, 0, stream,
                   rho, bra, ket, ngrids, nao, count);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -339,7 +339,7 @@ int GDFTcontract_rho_gga(cudaStream_t stream, double *rho, double *bra, double *
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    LAUNCH_KERNEL(GDFTcontract_rho_gga_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(GDFTcontract_rho_gga_kernel, blocks, threads, 0, stream,
                   rho, bra, ket, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -353,7 +353,7 @@ int GDFTcontract_rho_mgga(cudaStream_t stream, double *rho, double *bra, double 
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    LAUNCH_KERNEL(GDFTcontract_rho_mgga_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(GDFTcontract_rho_mgga_kernel, blocks, threads, 0, stream,
                   rho, bra, ket, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -368,7 +368,7 @@ int GDFT_make_dR_dao_w(cudaStream_t stream, double *out, double *ket, double *wv
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
-    LAUNCH_KERNEL(GDFT_make_dR_dao_w_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(GDFT_make_dR_dao_w_kernel, blocks, threads, 0, stream,
                   out, ket, wv, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -384,10 +384,10 @@ int GDFTscale_ao(double *out, double *ket, double *wv,
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
     if (is_real) {
-        LAUNCH_KERNEL_Q(sycl_get_queue(), dscale_ao_kernel, blocks, threads, 0,
+        LAUNCH_KERNEL( dscale_ao_kernel, blocks, threads, 0,
                         out, ket, wv, ngrids, nao, nvar);
     } else {
-        LAUNCH_KERNEL_Q(sycl_get_queue(), zscale_ao_kernel, blocks, threads, 0,
+        LAUNCH_KERNEL( zscale_ao_kernel, blocks, threads, 0,
                         out, ket, wv, ngrids, nao, nvar);
     }
     cudaError_t err = cudaGetLastError();

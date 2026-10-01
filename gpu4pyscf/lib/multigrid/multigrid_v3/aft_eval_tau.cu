@@ -18,9 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
-#ifndef USE_SYCL
-#include <cuComplex.h>
-#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
@@ -260,7 +257,7 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntiles*nbatches_shl_pair);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_LAST_Q(orth_ft_tau_dm_kernel, dev_envs, sycl_get_queue(), grids, threads, 0,
+    LAUNCH_KERNEL_LAST(orth_ft_tau_dm_kernel, dev_envs, grids, threads, 0,
                          densityR, densityI, tauR, tauI, dm, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
                          mesh_cum, nimgs_cum, ntiles, factor);
     cudaDeviceSynchronize();

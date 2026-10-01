@@ -494,7 +494,7 @@ int dm_to_Rt(double *out, double *dm, int n_dm, RysIntEnvVars *envs,
     int blocks = (npairs + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL_LAST_Q(dm_to_Rt_kernel, *envs, sycl_get_queue(), grid, threads, 0,
+    LAUNCH_KERNEL_LAST(dm_to_Rt_kernel, *envs, grid, threads, 0,
                          out, dm, n_dm, bas_ij_idx, pair_loc, npairs, ao_loc);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -510,7 +510,7 @@ int Rt_to_dm(double *dm, double *Rt, int n_dm, RysIntEnvVars *envs,
     int blocks = (npairs + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL_LAST_Q(Rt_to_dm_kernel, *envs, sycl_get_queue(), grid, threads, 0,
+    LAUNCH_KERNEL_LAST(Rt_to_dm_kernel, *envs, grid, threads, 0,
                          dm, Rt, n_dm, bas_ij_idx, pair_loc, npairs, ao_loc);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -526,7 +526,7 @@ int aux_to_Rt(double *out, double *aux, RysIntEnvVars *envs,
     int blocks = (nbas_aux + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL_LAST_Q(aux_to_Rt_kernel, *envs, sycl_get_queue(), grid, threads, 0,
+    LAUNCH_KERNEL_LAST(aux_to_Rt_kernel, *envs, grid, threads, 0,
                          out, aux, aux_loc, aux_xyz_loc, nbas_aux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -21,9 +21,7 @@ __device__
 static void GINTwrite_int3c1e_ip(const double* g, double* output, const double minus_two_a, const double* u2, const double* AC, const int ish, const int jsh, const int i_grid,
                                  const int i_l, const int j_l, const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j, const int ngrids)
 {
-    #ifdef USE_SYCL
-    const auto& c_bpcache = s_bpcache.get();
-    #endif
+    GINT_CACHE_REF();
     const int* ao_loc = c_bpcache.ao_loc;
 
     const int i0 = ao_loc[ish  ] - ao_offsets_i;
@@ -100,15 +98,10 @@ static void GINTfill_int3c1e_ip_kernel_general(double* output, const BasisProdOf
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_grid = item.get_global_id(0);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    setup_context();
+    const int task_ij = global_x;
+    const int task_grid = global_y;
+    GINT_CACHE_REF();
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -213,17 +206,11 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_expanded(double* outpu
 
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int thread_y_id = item.get_global_id(0);
-    const int total_threads_y = item.get_global_range(0);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
-    const int total_threads_y = gridDim.y * blockDim.y;
-    #endif    
+    setup_context();
+    const int task_ij = global_x;
+    const int thread_y_id = global_y;
+    const int total_threads_y = gridDim_y * blockDim_y;
+    GINT_CACHE_REF();
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -333,17 +320,11 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_general(double* output
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int thread_y_id = item.get_global_id(0);
-    const int total_threads_y = item.get_global_range(0);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
-    const int total_threads_y = gridDim.y * blockDim.y;
-    #endif
+    setup_context();
+    const int task_ij = global_x;
+    const int thread_y_id = global_y;
+    const int total_threads_y = gridDim_y * blockDim_y;
+    GINT_CACHE_REF();
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -401,9 +382,7 @@ __device__
 static void GINTwrite_int3c1e_ip1_density_contracted(const double* g, double* output, const double minus_two_a, const double* density, const int* aoslice, const int nao,
                                                      const int ish, const int jsh, const int i_grid, const int i_l, const int j_l, const int ngrids)
 {
-    #ifdef USE_SYCL
-    const auto& c_bpcache = s_bpcache.get();
-    #endif
+    GINT_CACHE_REF();
     const int* ao_loc = c_bpcache.ao_loc;
 
     const int i0 = ao_loc[ish];
@@ -470,15 +449,10 @@ static void GINTfill_int3c1e_ip1_density_contracted_kernel_general(double* outpu
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_grid = item.get_global_id(0);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    setup_context();
+    const int task_ij = global_x;
+    const int task_grid = global_y;
+    GINT_CACHE_REF();
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -514,17 +488,11 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel_general(double* outpu
 
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_grid = item.get_global_id(0);
-    const int thread_x_id = item.get_global_id(1);
-    const int total_threads_x = item.get_global_range(1);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
-    const int thread_x_id = blockIdx.x * blockDim.x + threadIdx.x;
-    const int total_threads_x = gridDim.x * blockDim.x;
-    #endif
+    setup_context();
+    const int task_grid = global_y;
+    const int thread_x_id = global_x;
+    const int total_threads_x = gridDim_x * blockDim_x;
+    GINT_CACHE_REF();
     if (task_grid >= ngrids) {
         return;
     }
@@ -619,9 +587,7 @@ static void GINTwrite_int3c1e_ip2_charge_contracted(const double* g, double* out
                                                     const int ish, const int jsh, const int i_grid, const int i_l, const int j_l,
                                                     const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j, const int* gridslice, const int ngrids)
 {
-    #ifdef USE_SYCL
-    const auto& c_bpcache = s_bpcache.get();
-    #endif
+    GINT_CACHE_REF();
     const int* ao_loc = c_bpcache.ao_loc;
 
     const int i0 = ao_loc[ish] - ao_offsets_i;
@@ -692,15 +658,10 @@ static void GINTfill_int3c1e_ip2_charge_contracted_kernel_general(double* output
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_grid = item.get_global_id(0);
-    const auto& c_bpcache = s_bpcache.get();
-    #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
-    #endif
+    setup_context();
+    const int task_ij = global_x;
+    const int task_grid = global_y;
+    GINT_CACHE_REF();
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;

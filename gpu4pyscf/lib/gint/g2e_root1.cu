@@ -19,7 +19,10 @@ static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    KERNEL_SETUP();
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -88,7 +91,10 @@ static void GINTfill_int2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    KERNEL_SETUP();
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -202,7 +208,10 @@ static void GINTfill_int2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisProd
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    KERNEL_SETUP();
+    setup_context();
+    GINT_CACHE_REF();
+    const int task_ij = global_x;
+    const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }

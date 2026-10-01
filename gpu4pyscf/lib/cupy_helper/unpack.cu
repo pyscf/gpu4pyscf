@@ -226,10 +226,10 @@ int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi,
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(nx, ny);
     if (dtype == 1) { // float64
-        LAUNCH_KERNEL(_dfill_triu, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(_dfill_triu, blocks, threads, 0, stream,
                       a, n, counts, hermi);
     } else {
-        LAUNCH_KERNEL(_zfill_triu, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(_zfill_triu, blocks, threads, 0, stream,
                       a, n, counts, hermi);
     }
     cudaError_t err = cudaGetLastError();
@@ -246,7 +246,7 @@ int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
     int ny = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(nx, ny);
-    LAUNCH_KERNEL(_pack_tril, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_pack_tril, blocks, threads, 0, stream,
                   a_tril, a, n, counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -263,9 +263,9 @@ int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
     int ny = (nao + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(nx, ny);
-    LAUNCH_KERNEL(_unpack_tril, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_unpack_tril, blocks, threads, 0, stream,
                   eri_tril, eri, nao, counts);
-    LAUNCH_KERNEL(_dfill_triu, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_dfill_triu, blocks, threads, 0, stream,
                   eri, nao, counts, hermi);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -280,7 +280,7 @@ int decompress_and_fill(cudaStream_t stream, double *out, int out_stride,
 {
     auto threads = make_block(512);
     auto blocks = make_grid((npairs+RBLKSIZE-1)/RBLKSIZE);
-    LAUNCH_KERNEL(decompress_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(decompress_kernel, blocks, threads, 0, stream,
                   out, out_stride, cderi, pair_idx, npairs, nao, naux, aux0, aux1);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -304,7 +304,7 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
     }
     auto threads = make_block(CBLKSIZE * STRIDE);
     auto blocks = make_grid((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
-    LAUNCH_KERNEL(d_t_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(d_t_kernel, blocks, threads, 0, stream,
                   out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1, fill_triu);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -328,7 +328,7 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
     }
     auto threads = make_block(CBLKSIZE * STRIDE);
     auto blocks = make_grid((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
-    LAUNCH_KERNEL(z_d_t_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(z_d_t_kernel, blocks, threads, 0, stream,
                   out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

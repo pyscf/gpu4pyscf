@@ -16,11 +16,18 @@
 // hang_analysis_evidence/DEFECT5_free_and_device_global_audit.md, Finding A.
 extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gvhf_bpcache;
 
+// Single-definition macro for the bpcache store (used once, in constant.cu).
+#define GVHF_CONSTANT_DEFINE_BPCACHE() \
+    SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gvhf_bpcache
+
 #else // USE_SYCL
 extern __constant__ BasisProdCache c_bpcache;
 //extern __constaont__ int16_t c_idx4c[NFffff*3];
 extern __constant__ int c_idx[TOT_NF*3];
 extern __constant__ int c_l_locs[GPU_LMAX+2];
+
+#define GVHF_CONSTANT_DEFINE_BPCACHE() \
+    __constant__ BasisProdCache c_bpcache
 #endif // USE_SYCL
 
 #endif //GPU4PYSCF_CONSTANT_CUH

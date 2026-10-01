@@ -47,7 +47,7 @@ int recontract_ao_pair(double *out, double *input, int *out_idx, int *inp_idx,
 {
     auto blocks = make_grid(count);
     auto threads = make_block(256);
-    LAUNCH_KERNEL_Q(sycl_get_queue(), recontract_kernel, blocks, threads, 0,
+    LAUNCH_KERNEL( recontract_kernel, blocks, threads, 0,
                     out, input, out_idx, inp_idx, coef, naux);
     cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){

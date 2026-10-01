@@ -667,7 +667,7 @@ int VXC_vv10nlc_fock_eval_UWE(const cudaStream_t stream,
 {
     auto threads = make_block(NG_PER_BLOCK);
     auto blocks = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    LAUNCH_KERNEL(vv10_fock_eval_UWE_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(vv10_fock_eval_UWE_kernel, blocks, threads, 0, stream,
                   U, W, E, grid_coord, rho_weight, omega, kappa, ngrids);
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -685,7 +685,7 @@ int VXC_vv10nlc_fock_eval_omega_derivative(const cudaStream_t stream,
 {
     auto threads = make_block(NG_PER_BLOCK);
     auto blocks = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    LAUNCH_KERNEL(vv10_fock_eval_omega_derivative_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(vv10_fock_eval_omega_derivative_kernel, blocks, threads, 0, stream,
                   omega, domega_drho, domega_dgamma, rho, gamma, C_factor, ngrids);
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -706,7 +706,7 @@ int VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(const cudaStream_t stream,
     constexpr int n_grids_per_block = 128;
     auto threads = make_block(n_grids_per_block, 1);
     auto blocks = make_grid((ngrids + n_grids_per_block - 1) / n_grids_per_block, natm);
-    LAUNCH_KERNEL(vv10_grad_eval_E_grid_response_offdiagonal_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(vv10_grad_eval_E_grid_response_offdiagonal_kernel, blocks, threads, 0, stream,
                   Egr, grid_coord, rho_weight, omega, kappa, grid_associated_atom, grid_offsets_of_atom, natm, i_grid_begin, ngrids);
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -725,7 +725,7 @@ int VXC_vv10nlc_hess_eval_UWABCE(const cudaStream_t stream,
 {
     auto threads = make_block(NG_PER_BLOCK);
     auto blocks = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    LAUNCH_KERNEL(vv10_hess_eval_UWABCE_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(vv10_hess_eval_UWABCE_kernel, blocks, threads, 0, stream,
                   U, W, A, B, C, E, grid_coord, rho_weight, omega, kappa, ngrids);
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -744,7 +744,7 @@ int VXC_vv10nlc_hess_eval_omega_derivative(const cudaStream_t stream,
 {
     auto threads = make_block(NG_PER_BLOCK);
     auto blocks = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    LAUNCH_KERNEL(vv10_hess_eval_omega_derivative_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(vv10_hess_eval_omega_derivative_kernel, blocks, threads, 0, stream,
                   omega, domega_drho, domega_dgamma,
                   d2omega_drho2, d2omega_dgamma2, d2omega_drho_dgamma,
                   rho, gamma, C_factor, ngrids);
@@ -772,7 +772,7 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
         auto threads = make_block(NG_PER_BLOCK, 1);
         auto blocks = make_grid((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK,
                                 (ntrial + n_trial_per_thread - 1) / n_trial_per_thread);
-        LAUNCH_KERNEL(vv10_hess_eval_f_t_offdiagonal_kernel<n_trial_per_thread>, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(vv10_hess_eval_f_t_offdiagonal_kernel<n_trial_per_thread>, blocks, threads, 0, stream,
                       f_rho_t, f_gamma_t,
                       grid_coord, grid_weight, rho, omega, kappa,
                       domega_drho, domega_dgamma, dkappa_drho,
@@ -781,7 +781,7 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
     {
         auto threads = make_block(NG_PER_BLOCK);
         auto blocks = make_grid((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK);
-        LAUNCH_KERNEL(vv10_hess_eval_f_t_diagonal_kernel, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(vv10_hess_eval_f_t_diagonal_kernel, blocks, threads, 0, stream,
                       f_rho_t, f_gamma_t,
                       rho,
                       U, W, A, B, C,
@@ -808,7 +808,7 @@ int VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(const cudaStream_t strea
     constexpr int n_grids_per_block = 128;
     auto threads = make_block(n_grids_per_block, 1);
     auto blocks = make_grid((ngrids + n_grids_per_block - 1) / n_grids_per_block, natm);
-    LAUNCH_KERNEL(vv10_hess_eval_EUW_grid_response_offdiagonal_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(vv10_hess_eval_EUW_grid_response_offdiagonal_kernel, blocks, threads, 0, stream,
                   Egr, Ugr, Wgr, grid_coord, rho_weight, omega, kappa, grid_associated_atom, grid_offsets_of_atom, ngrids, natm);
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -829,7 +829,7 @@ int VXC_vv10nlc_hess_eval_EUW_with_weight1(const cudaStream_t stream,
     auto threads = make_block(NG_PER_BLOCK, 1);
     auto blocks = make_grid((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK,
                             (nderivative + n_derivative_per_thread - 1) / n_derivative_per_thread);
-    LAUNCH_KERNEL(vv10_hess_eval_EUW_with_weight1_kernel<n_derivative_per_thread>, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(vv10_hess_eval_EUW_with_weight1_kernel<n_derivative_per_thread>, blocks, threads, 0, stream,
                   Ew, Uw, Ww,
                   grid_coord, grid_weight1, rho, omega, kappa,
                   ngrids, nderivative);
@@ -852,7 +852,7 @@ int VXC_vv10nlc_hess_eval_D_B_in_double_grid_response_offdiagonal(const cudaStre
     constexpr int n_grids_per_block = 128;
     auto threads = make_block(n_grids_per_block, 1);
     auto blocks = make_grid((ngrids + n_grids_per_block - 1) / n_grids_per_block, natm);
-    LAUNCH_KERNEL(vv10_hess_eval_D_B_in_double_grid_response_offdiagonal_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(vv10_hess_eval_D_B_in_double_grid_response_offdiagonal_kernel, blocks, threads, 0, stream,
                   D_B, grid_coord, rho_weight, omega, kappa, grid_associated_atom, grid_offsets_of_atom, ngrids, natm);
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

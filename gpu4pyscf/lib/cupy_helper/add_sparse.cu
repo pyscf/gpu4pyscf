@@ -42,7 +42,7 @@ int add_sparse(cudaStream_t stream, double *a, double *b, int *indices, int n, i
     int ntile = (m + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntile, ntile);
-    LAUNCH_KERNEL(_add_sparse, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_add_sparse, blocks, threads, 0, stream,
                   a, b, indices, n, m, count);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

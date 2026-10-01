@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 
@@ -31,64 +32,32 @@
 #define POOL_SIZE       65536
 
 
-#ifdef USE_SYCL
-#define KERNEL_SETUP()                                                  \
-    int thread_id = item.get_local_id(0);                               \
-    auto thread_block = item.get_group();                               \
-    int &sp_block_id = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &nao = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int &img_max = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); \
-    int (&img_counts)[sp_threads] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[sp_threads]>(thread_block); \
-    double *shared_memory = reinterpret_cast<double *>(shm_mem);
-
-#define KERNEL_ARGS()                                           \
-    double *out, double *vG,                                    \
-    PBCIntEnvVars envs, int *shl_pair_offsets,                  \
-    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,  \
-    int *gout_stride_lookup, double *Gv, int nGv,               \
-    int nbatches_shl_pair, int compressing, int *head,          \
-    sycl::nd_item<1> &item, std::byte *shm_mem
-
-#else // USE_SYCL
-
-#define KERNEL_SETUP()                          \
-    int thread_id = threadIdx.x;                \
-    __shared__ int sp_block_id;                 \
-    __shared__ int shl_pair0, shl_pair1;        \
-    __shared__ int li, lj;                      \
-    __shared__ int iprim, jprim;                \
-    __shared__ int nao;                         \
-    __shared__ int gout_stride, nsp_per_block;  \
-    __shared__ int img_max;                     \
-    __shared__ int img_counts[sp_threads];      \
-    extern __shared__ double shared_memory[];
-
-#define KERNEL_ARGS()                                           \
-    double *out, double *vG,                                    \
-    PBCIntEnvVars envs, int *shl_pair_offsets,                  \
-    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,  \
-    int *gout_stride_lookup, double *Gv, int nGv,               \
-    int nbatches_shl_pair, int compressing, int *head
-
-#endif // USE_SYCL
-
-
 __global__ static
-void ft_aopair_kernel(KERNEL_ARGS())
+void ft_aopair_kernel(double *out, double *vG,
+    PBCIntEnvVars envs, int *shl_pair_offsets,
+    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
+    int *gout_stride_lookup, double *Gv, int nGv,
+    int nbatches_shl_pair, int compressing, int *head,
+    void *shm_mem)
 {
     constexpr int nGv_per_block = 16;
     constexpr int sp_threads = THREADS / nGv_per_block;
     constexpr unsigned mask = (1u << nGv_per_block) - 1;
-    constexpr unsigned sp_mask = (1u << sp_threads) - 1;
-    KERNEL_SETUP();
+    setup_context();
+    SHARED_SCALAR(int, sp_block_id);
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nsp_per_block);
+    SHARED_SCALAR(int, img_max);
+    SHARED_ARRAY(int, img_counts, [sp_threads]);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int t_id = thread_id / nGv_per_block;
 while (1) {
@@ -157,10 +126,10 @@ while (1) {
             img_counts[t_id] = img1 - img0;
         }
         __syncthreads();
-#ifdef USE_SYCL
-        // See ft_ao.cu for why a sub-group shuffle restricted to a lane
-        // subset (thread_id < sp_threads) is UB in SYCL when sp_threads
-        // doesn't match the HW sub-group width -- scan serially instead.
+        // Serial scan (not a sub-group shuffle): only thread_id < sp_threads
+        // lanes hold valid counts, so a shuffle would have partial sub-group
+        // participation, which is UB in SYCL. Integer max is bit-identical
+        // on both backends.
         if (thread_id == 0) {
             int count = img_counts[0];
             for (int w = 1; w < sp_threads; ++w) {
@@ -168,17 +137,6 @@ while (1) {
             }
             img_max = count;
         }
-#else
-        if (thread_id < sp_threads) {
-            int count = img_counts[thread_id];
-            for (int offset = sp_threads/2; offset > 0; offset /= 2) {
-                count = max(count, __shfl_down_sync(sp_mask, count, offset));
-            }
-            if (thread_id == 0) {
-                img_max = count;
-            }
-        }
-#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -370,13 +328,31 @@ while (1) {
 }
 
 __global__ static
-void ft_pdotp_kernel(KERNEL_ARGS())
+void ft_pdotp_kernel(double *out, double *vG,
+    PBCIntEnvVars envs, int *shl_pair_offsets,
+    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
+    int *gout_stride_lookup, double *Gv, int nGv,
+    int nbatches_shl_pair, int compressing, int *head,
+    void *shm_mem)
 {
     constexpr int nGv_per_block = 16;
     constexpr int sp_threads = THREADS / nGv_per_block;
     constexpr unsigned mask = (1u << nGv_per_block) - 1;
-    constexpr unsigned sp_mask = (1u << sp_threads) - 1;
-    KERNEL_SETUP();
+    setup_context();
+    SHARED_SCALAR(int, sp_block_id);
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nsp_per_block);
+    SHARED_SCALAR(int, img_max);
+    SHARED_ARRAY(int, img_counts, [sp_threads]);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int t_id = thread_id / nGv_per_block;
 while (1) {
@@ -445,10 +421,10 @@ while (1) {
             img_counts[t_id] = img1 - img0;
         }
         __syncthreads();
-#ifdef USE_SYCL
-        // See ft_ao.cu for why a sub-group shuffle restricted to a lane
-        // subset (thread_id < sp_threads) is UB in SYCL when sp_threads
-        // doesn't match the HW sub-group width -- scan serially instead.
+        // Serial scan (not a sub-group shuffle): only thread_id < sp_threads
+        // lanes hold valid counts, so a shuffle would have partial sub-group
+        // participation, which is UB in SYCL. Integer max is bit-identical
+        // on both backends.
         if (thread_id == 0) {
             int count = img_counts[0];
             for (int w = 1; w < sp_threads; ++w) {
@@ -456,17 +432,6 @@ while (1) {
             }
             img_max = count;
         }
-#else
-        if (thread_id < sp_threads) {
-            int count = img_counts[thread_id];
-            for (int offset = sp_threads/2; offset > 0; offset /= 2) {
-                count = max(count, __shfl_down_sync(sp_mask, count, offset));
-            }
-            if (thread_id == 0) {
-                img_max = count;
-            }
-        }
-#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -730,20 +695,10 @@ int contract_ft_aopair(double *out, double *vG, PBCIntEnvVars *envs, int *head,
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-#ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class ft_aopair_contract_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
-        ft_aopair_kernel(
-            out, vG, dev_envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
-            gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head,
-            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-#else
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    ft_aopair_kernel<<<workers, THREADS, shm_size>>>(
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(workers);
+    LAUNCH_KERNEL_DYN( ft_aopair_kernel, blocks, threads, shm_size,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();
@@ -751,7 +706,6 @@ int contract_ft_aopair(double *out, double *vG, PBCIntEnvVars *envs, int *head,
         fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-#endif
     return 0;
 }
 
@@ -765,20 +719,10 @@ int contract_ft_pdotp(double *out, double *vG, PBCIntEnvVars *envs, int *head,
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-#ifdef USE_SYCL
-    auto dev_envs = *envs;
-    sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<std::byte, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class ft_pdotp_contract_sycl>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) {
-        ft_pdotp_kernel(
-            out, vG, dev_envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
-            gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head,
-            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-      });
-    });
-#else
     cudaFuncSetAttribute(ft_pdotp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    ft_pdotp_kernel<<<workers, THREADS, shm_size>>>(
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(workers);
+    LAUNCH_KERNEL_DYN( ft_pdotp_kernel, blocks, threads, shm_size,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();
@@ -786,10 +730,6 @@ int contract_ft_pdotp(double *out, double *vG, PBCIntEnvVars *envs, int *head,
         fprintf(stderr, "CUDA Error in ft_pdotp_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-#endif
     return 0;
 }
 }
-
-#undef KERNEL_SETUP
-#undef KERNEL_ARGS

@@ -820,7 +820,7 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
     auto threads = make_block(THREADS, 1);
     auto blocks = make_grid(nksh, nbatches_shl_pair);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), contract_int3c2e_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( contract_int3c2e_kernel, blocks, threads, shm_size,
                         dev_envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -844,7 +844,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
     auto threads = make_block(THREADS, 1);
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), contract_auxvec_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( contract_auxvec_kernel, blocks, threads, shm_size,
                         dev_envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
                         aux_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();

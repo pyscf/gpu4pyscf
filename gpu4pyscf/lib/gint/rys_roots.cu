@@ -15,6 +15,9 @@
  */
 
 #include "gvhf-rys/rys_roots.cuh"
+// Backend macros for the converted helpers below (includers guarantee
+// cuda_runtime.h / sycl_device.hpp first, as before).
+#include "gsycl/gpu_compat.h"
 
 #define SQRTPIE4        .8862269254527580136
 #define PIE4            .7853981633974483096
@@ -123,16 +126,12 @@ inline void GINTscale_u(double *u, double theta)
 __device__
 static void GINTrys_root(int nroots, double x, double *rw)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    const int threadIdx_x = item.get_local_id(1);
-#else
-    const int threadIdx_x = threadIdx.x;
-#endif
+    setup_context();
+    const int gint_tx = threadIdx_x;
     // roots and weights are distributed in each thread
     const int off = nroots * (nroots - 1) / 2;
     const double t = sqrt(PIE4/x);
-    const int rt_id = threadIdx_x % nroots;
+    const int rt_id = gint_tx % nroots;
     if (x<3.0e-7){
         const double r = ROOT_SMALLX_R0[off+rt_id] + ROOT_SMALLX_R1[off+rt_id] * x;
         const double w = ROOT_SMALLX_W0[off+rt_id] + ROOT_SMALLX_W1[off+rt_id] * x;

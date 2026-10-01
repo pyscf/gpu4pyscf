@@ -352,7 +352,7 @@ extern "C" {
         
         auto block = make_block(threads);
         auto grid = make_grid(blocks);
-        LAUNCH_KERNEL_Q(sycl_get_queue(), build_jk_2c2e_kernel, grid, block, 0,
+        LAUNCH_KERNEL( build_jk_2c2e_kernel, grid, block, 0,
             w_1d, P, J, K,
             pair_i, pair_j, kr_offsets,
             aoslice, natorb, loc_row, loc_col,
@@ -395,7 +395,7 @@ extern "C" {
         
         auto block = make_block(threads);
         auto grid = make_grid(blocks);
-        LAUNCH_KERNEL_Q(sycl_get_queue(), build_jk_1c2e_kernel, grid, block, 0,
+        LAUNCH_KERNEL( build_jk_1c2e_kernel, grid, block, 0,
             P, J, K,
             gss, gsp, hsp, gpp, gp2, repd,
             intij, intkl, intrep,

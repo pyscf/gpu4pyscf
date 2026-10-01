@@ -784,7 +784,7 @@ int pcm_d_s(cudaStream_t stream, double *matrix_d, double *matrix_s,
     int ntiley = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, ntiley);
-    LAUNCH_KERNEL(_pcm_d_s, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_pcm_d_s, blocks, threads, 0, stream,
                   matrix_d, matrix_s, coords, norm_vec, r_vdw, charge_exp, switch_fun, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -801,7 +801,7 @@ int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double 
         const int ntiley = (n + THREADS - 1) / THREADS;
         auto threads = make_block(THREADS, THREADS);
         auto blocks = make_grid(1, ntiley);
-        LAUNCH_KERNEL(_pcm_left_multiply_S_offdiagonal, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(_pcm_left_multiply_S_offdiagonal, blocks, threads, 0, stream,
                       output, right_vector, coords, charge_exp, n);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -812,7 +812,7 @@ int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double 
         const int ntilex = (n + THREADS * THREADS - 1) / (THREADS * THREADS);
         auto threads = make_block(THREADS * THREADS);
         auto blocks = make_grid(ntilex);
-        LAUNCH_KERNEL(_pcm_left_multiply_S_diagonal, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(_pcm_left_multiply_S_diagonal, blocks, threads, 0, stream,
                       output, right_vector, S_diag, n);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -830,11 +830,11 @@ int pcm_left_multiply_d(const cudaStream_t stream, double *output, const double 
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, 1);
     if (transpose) {
-        LAUNCH_KERNEL(_pcm_left_multiply_D<true>, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(_pcm_left_multiply_D<true>, blocks, threads, 0, stream,
                       output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
     }
     else {
-        LAUNCH_KERNEL(_pcm_left_multiply_D<false>, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(_pcm_left_multiply_D<false>, blocks, threads, 0, stream,
                       output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
     }
     cudaError_t err = cudaGetLastError();
@@ -853,7 +853,7 @@ int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
     int ntiley = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, ntiley);
-    LAUNCH_KERNEL(_pcm_dD_dS, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_pcm_dD_dS, blocks, threads, 0, stream,
                   matrix_dD, matrix_dS, coords, norm_vec, charge_exp, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -869,7 +869,7 @@ int pcm_left_multiply_ds(const cudaStream_t stream, double *output, const double
     const int ntilex = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, 1);
-    LAUNCH_KERNEL(_pcm_left_multiply_dS, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_pcm_left_multiply_dS, blocks, threads, 0, stream,
                   output, right_vector, coords, charge_exp, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -888,7 +888,7 @@ int pcm_left_multiply_ds_one_atom(const cudaStream_t stream, double *output, con
     const int ntilex = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, 1);
-    LAUNCH_KERNEL(_pcm_left_multiply_dS_one_atom, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_pcm_left_multiply_dS_one_atom, blocks, threads, 0, stream,
                   output, right_vector, coords, charge_exp, n, g0, g1);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -905,11 +905,11 @@ int pcm_left_multiply_dd(const cudaStream_t stream, double *output, const double
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, 1);
     if (transpose) {
-        LAUNCH_KERNEL(_pcm_left_multiply_dD<true>, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(_pcm_left_multiply_dD<true>, blocks, threads, 0, stream,
                       output, right_vector, coords, charge_exp, norm_vec, n);
     }
     else {
-        LAUNCH_KERNEL(_pcm_left_multiply_dD<false>, blocks, threads, 0, stream,
+        LAUNCH_KERNEL_S(_pcm_left_multiply_dD<false>, blocks, threads, 0, stream,
                       output, right_vector, coords, charge_exp, norm_vec, n);
     }
     cudaError_t err = cudaGetLastError();
@@ -928,7 +928,7 @@ int pcm_d2d_d2s(cudaStream_t stream, double *matrix_d2D, double *matrix_d2S,
     const int ntiley = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, ntiley);
-    LAUNCH_KERNEL(_pcm_d2D_d2S, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_pcm_d2D_d2S, blocks, threads, 0, stream,
                   matrix_d2D, matrix_d2S, coords, norm_vec, charge_exp, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -945,7 +945,7 @@ int pcm_contract_d2s_offdiagonal(const cudaStream_t stream, double *output,
     constexpr int n_thread_per_block = 16; // 32 will cause "too many resources requested for launch", out of register
     auto threads = make_block(n_thread_per_block, n_thread_per_block);
     auto blocks = make_grid(natm, natm);
-    LAUNCH_KERNEL(_pcm_contract_d2S_offdiagonal<n_thread_per_block>, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_pcm_contract_d2S_offdiagonal<n_thread_per_block>, blocks, threads, 0, stream,
                   output, left_vector, right_vector, gridslice, coords, charge_exp, ngrids, natm);
     cudaError_t err = cudaGetLastError();
 
@@ -963,7 +963,7 @@ int pcm_d2f_to_d2sii(cudaStream_t stream, const double* F, const double* dF, con
     const int ntiley = (n_atom * n_atom + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, ntiley);
-    LAUNCH_KERNEL(_pcm_d2F_to_d2Sii, blocks, threads, 0, stream,
+    LAUNCH_KERNEL_S(_pcm_d2F_to_d2Sii, blocks, threads, 0, stream,
                   F, dF, d2F, charge_exp, d2Sii, n_atom, n_grid);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

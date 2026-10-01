@@ -25,14 +25,21 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 // unrolled_int3c2e.cu is auto-generated upstream and must stay byte-identical.
 // Its kernels use __syncthreads() but never declare an nd_item, so swap in an
-// item-free barrier for the duration of the include. The kernels are only ever
-// instantiated from 2-D nd_range launches, so get_nd_item<2>() is well-formed.
+// item-free barrier for the duration of the include. All launches are 3-D
+// nd_range (LAUNCH_KERNEL_*), so get_nd_item<3>() is well-formed.
 #ifdef USE_SYCL
 #pragma push_macro("__syncthreads")
 #undef __syncthreads
-#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<2>().get_group()))
+#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<3>().get_group()))
 #endif
+#pragma push_macro("LAUNCH_KERNEL")
+#undef LAUNCH_KERNEL
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmacro-redefined"
 #include "unrolled_int3c2e.cu"
+#pragma GCC diagnostic pop
+#undef LAUNCH_KERNEL
+#pragma pop_macro("LAUNCH_KERNEL")
 #ifdef USE_SYCL
 #pragma pop_macro("__syncthreads")
 #endif
@@ -1623,7 +1630,7 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_DYN_Q(sycl_get_queue(), int3c2e_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL_DYN( int3c2e_kernel, blocks, threads, shm_size,
         out, dev_envs, pool, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
@@ -1646,7 +1653,7 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
     auto blocks = make_grid(nshl_pair, aux_batches);
     auto thread_block = make_block(threads);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_Q(sycl_get_queue(), cart2sph_kernel, blocks, thread_block, 0,
+    LAUNCH_KERNEL( cart2sph_kernel, blocks, thread_block, 0,
         out, input, dev_envs, bas_ij_idx, out_offsets, input_offsets,
         naux, nbas, nao_sph, pair_compressed);
     cudaError_t err = cudaGetLastError();
