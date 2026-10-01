@@ -1,7 +1,7 @@
 diff --git a/src/sources.mk b/src/sources.mk
 --- a/src/sources.mk
 +++ b/src/sources.mk
-@@ -6,322 +6,76 @@
+@@ -6,322 +6,78 @@
  	func_reference.c \
  	functionals.c \
  	gga.c \
@@ -257,7 +257,7 @@ diff --git a/src/sources.mk b/src/sources.mk
 -	mgga_x_2d_js17.c \
 -	mgga_x_2d_prhg07.c \
 -	mgga_x_2d_prp10.c \
--	mgga_x_br89.c \
+ 	mgga_x_br89.c \
 -	mgga_x_br89_explicit.c \
 -	mgga_x_edmgga.c \
 -	mgga_x_eel.c \
@@ -276,7 +276,7 @@ diff --git a/src/sources.mk b/src/sources.mk
 -	mgga_x_mbeef.c \
 -	mgga_x_mbeefvdw.c \
 -	mgga_x_mbr.c \
--	mgga_x_mbrxc_bg.c \
+ 	mgga_x_mbrxc_bg.c \
 -	mgga_x_mbrxh_bg.c \
 -	mgga_x_mcml.c \
 -	mgga_x_mggac.c \
