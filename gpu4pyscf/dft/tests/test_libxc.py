@@ -134,14 +134,16 @@ class KnownValues(unittest.TestCase):
         self._check_xc('LR_HF(0.3)+ITYH,LYP', spin=1, deriv=1)
 
     def test_rsh_omega_override(self):
-        # LRC_WPBEH rather than LC_WPBE: LC_WPBE's vxc differs from pyscf by
-        # ~2e-9 even at its default omega
-        self._check_xc('HYB_GGA_XC_LRC_WPBEH', deriv=1, omega=0.1)
-        self._check_xc('HYB_GGA_XC_LRC_WPBEH', spin=1, deriv=1, omega=0.1)
+        # libxc 7.1.2 and libxc 7.0.0 has small differences in XC_LRC_WPBEH
+        if numint_gpu.libxc.__version__[:5] == numint_cpu.libxc.__version__[:5]:
+            # LRC_WPBEH rather than LC_WPBE: LC_WPBE's vxc differs from pyscf by
+            # ~2e-9 even at its default omega
+            self._check_xc('HYB_GGA_XC_LRC_WPBEH', deriv=1, omega=0.1)
+            self._check_xc('HYB_GGA_XC_LRC_WPBEH', spin=1, deriv=1, omega=0.1)
+            # functionals are cached; the override must not leak into the next call
+            self._check_xc('HYB_GGA_XC_LRC_WPBEH', deriv=1)
         self._check_xc('CAM_B3LYP', deriv=1, omega=0.2)
         self._check_xc('LR_HF(0.3)+ITYH,LYP', deriv=1, omega=0.175)
-        # functionals are cached; the override must not leak into the next call
-        self._check_xc('HYB_GGA_XC_LRC_WPBEH', deriv=1)
 
     def test_to_cpu_keeps_omega(self):
         ni = numint_gpu()
