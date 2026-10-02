@@ -1993,14 +1993,21 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
     def __init__(self, cell):
         self.reset(cell)
-        self.mesh = cell.mesh
+        self._mesh = None
+
+    @property
+    def mesh(self):
+        # Follow the current cell unless a DF mesh was explicitly assigned.
+        if self._mesh is None:
+            return self.cell.mesh
+        return self._mesh
+    @mesh.setter
+    def mesh(self, value):
+        self._mesh = value
 
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell
-            # Preferable to preserve the mesh setting during geometry
-            # optimization
-            #self.mesh = cell.mesh
         self.bvkcell = None
         self.mg_envs = None
         self.aft_buckets = None

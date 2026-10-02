@@ -17,14 +17,14 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import gen_grid as gen_grid_cpu
-from pyscf.pbc.gto.cell import get_uniform_grids
 from pyscf.pbc.gto import eval_gto as pbc_eval_gto
 from pyscf.dft.gen_grid import gen_atomic_grids
 import gpu4pyscf
-from gpu4pyscf.dft import Grids
 from gpu4pyscf.lib import utils, logger
-from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
+from gpu4pyscf.dft import Grids
+from gpu4pyscf.dft import radi
+from gpu4pyscf.pbc.gto.cell import get_uniform_grids
 
 libgdft = load_library('libgdft')
 
@@ -260,13 +260,26 @@ class UniformGrids(lib.StreamObject):
         self.cell = cell
         self.stdout = cell.stdout
         self.verbose = cell.verbose
-        self.mesh = cell.mesh
+        self._mesh = None
         self.non0tab = None
         self._coords = None
         self._weights = None
 
         # Storing the coords[0:3], weight, rho[0:5], exc, vxc[0:5], will take 128^3 * 15 * 8 bytes = 0.25 GB
         self.max_grid_mesh_block = [128] * 3
+
+    @property
+    def mesh(self):
+        # Follow the current cell unless a grid mesh was explicitly assigned.
+        if self._mesh is None:
+            return self.cell.mesh
+        return self._mesh
+    @mesh.setter
+    def mesh(self, value):
+        self._mesh = value
+        self.non0tab = None
+        self._coords = None
+        self._weights = None
 
     def reset(self, cell=None):
         if cell is not None:
@@ -279,11 +292,8 @@ class UniformGrids(lib.StreamObject):
     @property
     def coords(self):
         if self._coords is None:
-            coords = cp.asarray(get_uniform_grids(self.cell, self.mesh))
-            self._coords = coords
-        if isinstance(self._coords, np.ndarray):
-            self._coords = cp.asarray(self._coords)
-        return self._coords
+            return get_uniform_grids(self.cell, self.mesh)
+        return cp.asarray(self._coords)
     @coords.setter
     def coords(self, x):
         self._coords = x
@@ -292,12 +302,8 @@ class UniformGrids(lib.StreamObject):
     def weights(self):
         if self._weights is None:
             ngrids = np.prod(self.mesh)
-            weights = cp.empty(ngrids)
-            weights[:] = self.cell.vol / ngrids
-            self._weights = weights
-        if isinstance(self._weights, np.ndarray):
-            self._weights = cp.asarray(self._weights)
-        return self._weights
+            return cp.full(ngrids, self.cell.vol / ngrids)
+        return cp.asarray(self._weights)
     @weights.setter
     def weights(self, x):
         self._weights = x
@@ -403,14 +409,14 @@ class UniformGrids(lib.StreamObject):
     to_gpu = utils.to_gpu
 
     def to_cpu(self):
-        # Although appears in _keys, we have to manually set them to be compatible with pyscf==2.8.0
-        # Because they're not in _keys of the CPU version.
-        if self._coords is not None and isinstance(self._coords, cp.ndarray):
-            self._coords = self._coords.get()
-        if self._weights is not None and isinstance(self._weights, cp.ndarray):
-            self._weights = self._weights.get()
-
-        return utils.to_cpu(self)
+        grids = gen_grid_cpu.UniformGrids(self.cell)
+        if self._mesh is not None:
+            grids.mesh = self._mesh
+        if self._coords is not None:
+            grids._coords = cp.asnumpy(self._coords)
+        if self._weights is not None:
+            grids._weights = cp.asnumpy(self._weights)
+        return grids
 
 
 class BeckeGrids(Grids):
@@ -459,7 +465,11 @@ class BeckeGrids(Grids):
         self.non0tab = None
         return self
 
+    def to_cpu(self):
+        grids = gen_grid_cpu.BeckeGrids(self.cell)
+        grids_gpu = self.copy().reset()
+        return utils.to_cpu(grids_gpu, out=grids)
+
     to_gpu = utils.to_gpu
-    to_cpu = utils.to_cpu
 
 AtomicGrids = BeckeGrids
