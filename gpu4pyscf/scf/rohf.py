@@ -90,13 +90,6 @@ class ROHF(hf.RHF):
     init_guess_by_chkfile    = rohf_cpu.ROHF.init_guess_by_chkfile
     make_rdm2 = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
-    to_rhf = NotImplemented
-    to_uhf = NotImplemented
-    to_ghf = NotImplemented
-    to_rks = NotImplemented
-    to_uks = NotImplemented
-    to_gks = NotImplemented
-    to_ks = NotImplemented
     stability = NotImplemented
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented

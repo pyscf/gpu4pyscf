@@ -133,13 +133,6 @@ class GHF(hf.SCF):
     scf = kernel = hf.RHF.kernel
     make_rdm2 = NotImplemented
     newton = NotImplemented
-    to_rhf = NotImplemented
-    to_uhf = NotImplemented
-    to_ghf = NotImplemented
-    to_rks = NotImplemented
-    to_uks = NotImplemented
-    to_gks = NotImplemented
-    to_ks = NotImplemented
     canonicalize = NotImplemented
     density_fit             = hf.RHF.density_fit
     # TODO: Enable followings after testing

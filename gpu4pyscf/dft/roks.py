@@ -42,7 +42,11 @@ class ROKS(rks.KohnShamDFT, ROHF):
 
     energy_elec = uks.UKS.energy_elec
     nuc_grad_method = NotImplemented
-    to_hf = NotImplemented
+
+    def to_hf(self):
+        '''Convert to ROHF object.'''
+        from gpu4pyscf import scf
+        return self._transfer_attrs_(scf.ROHF(self.mol))
 
     to_gpu = utils.to_gpu
     device = utils.device
