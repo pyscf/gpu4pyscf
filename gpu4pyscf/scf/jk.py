@@ -45,7 +45,6 @@ libvhf_rys.RYS_build_jk.restype = ctypes.c_int
 libvhf_rys.RYS_build_k.restype = ctypes.c_int
 libvhf_rys.cuda_version.restype = ctypes.c_int
 CUDA_VERSION = libvhf_rys.cuda_version()
-libgint = load_library('libgint')
 
 PTR_BAS_COORD = 7
 LMAX = 4
@@ -236,6 +235,7 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
     Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
     Fused kernel to perform 'pi,nij,qj->npq'
     '''
+    libgint = load_library('libgint')
     spherical_matrix = cp.asarray(spherical_matrix, order='C')
     spherical_matrix_ndim = spherical_matrix.ndim
     if spherical_matrix_ndim == 2:
@@ -295,6 +295,7 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
     Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
     Fused kernel to perform 'pi,npq,qj->nij'
     '''
+    libgint = load_library('libgint')
     cartesian_matrix = cp.asarray(cartesian_matrix, order='C')
     cartesian_matrix_ndim = cartesian_matrix.ndim
     if cartesian_matrix_ndim == 2:
@@ -354,6 +355,7 @@ def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
     Sort AO and perform sph2cart transformation (if needed) for the second last axis
     Fused kernel to perform 'pi,nij->npj'
     '''
+    libgint = load_library('libgint')
     right_matrix = cp.asarray(right_matrix, order='C')
     ndim = right_matrix.ndim
     if ndim == 2:

@@ -26,7 +26,6 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     tag_array, contract, condense, transpose_sum, get_avail_mem, ndarray)
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu

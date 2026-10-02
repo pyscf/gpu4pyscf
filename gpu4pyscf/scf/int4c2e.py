@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,664 +12,161 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+'''
+Compute four-center ERIs
+'''
 
 import ctypes
-import copy
 import numpy as np
-import scipy.linalg
-import cupy
-from pyscf import gto
-from pyscf.scf import _vhf
-from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library
+import cupy as cp
+import math
+from pyscf import gto, lib
+from gpu4pyscf.__config__ import shm_size
+from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
-from gpu4pyscf.gto.mole import basis_seg_contraction
+from gpu4pyscf.lib.cupy_helper import fill_symmetric, contract
+from gpu4pyscf.scf.jk import libvhf_rys, _VHFOpt, QUEUE_DEPTH, LMAX
+from gpu4pyscf.gto.mole import SortedMole
 
-LMAX_ON_GPU = 4
-FREE_CUPY_CACHE = True
-BINSIZE = 128   # TODO bug for 256
-libgvhf = load_library('libgvhf')
-libgint = load_library('libgint')
+def get_int4c2e(mol, vhfopt=None, direct_scf_tol=1e-13, aosym=True, omega=None):
+    if vhfopt is None:
+        mol = SortedMole.from_mol(mol, decontract=False)
+        vhfopt = _VHFOpt(mol).build()
 
-_einsum = cupy.einsum
-"""
-def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
-    '''
-    loop over all int3c2e blocks
-    - outer loop for k
-    - inner loop for ij pair
-    '''
-    fn = getattr(libgint, 'GINTfill_int3c2e_' + ip_type)
-    if ip_type == '':       order = 0
-    if ip_type == 'ip1':    order = 1
-    if ip_type == 'ip2':    order = 1
-    if ip_type == 'ipip1':  order = 2
-    if ip_type == 'ip1ip2': order = 2
-    if ip_type == 'ipvip1': order = 2
-    if ip_type == 'ipip2':  order = 2
-
-    if omega is None: omega = 0.0
-    if stream is None: stream = cupy.cuda.get_current_stream()
-
-    nao = intopt.mol.nao
-    naux = intopt.auxmol.nao
-    norb = nao + naux + 1
-
-    comp = 3**order
-
-    nbins = 1
-    for aux_id, log_q_kl in enumerate(intopt.aux_log_qs):
-        cp_kl_id = aux_id + len(intopt.log_qs)
-        lk = intopt.aux_angular[aux_id]
-
-        for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
-            cpi = intopt.cp_idx[cp_ij_id]
-            cpj = intopt.cp_jdx[cp_ij_id]
-            li = intopt.angular[cpi]
-            lj = intopt.angular[cpj]
-
-            i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-            j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
-            k0, k1 = intopt.cart_aux_loc[aux_id], intopt.cart_aux_loc[aux_id+1]
-            ni = i1 - i0
-            nj = j1 - j0
-            nk = k1 - k0
-
-            bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
-            bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)
-
-            ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
-            strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
-
-            int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
-            err = fn(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                intopt.bpcache,
-                ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins),
-                ctypes.c_int(cp_ij_id),
-                ctypes.c_int(cp_kl_id),
-                ctypes.c_double(omega))
-            if err != 0:
-                raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
-
-            int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
-            int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
-            int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
-
-            i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-            j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-            k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
-
-            yield i0,i1,j0,j1,k0,k1,int3c_blk
-
-
-def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_scf_tol=1e-13, omega=None, stream=None):
-    '''
-    Generate full int3c2e_ip tensor on GPU
-    ip_type == 1: int3c2e_ip1
-    ip_type == 2: int3c2e_ip2
-    '''
-    fn = getattr(libgint, 'GINTfill_int3c2e_' + ip_type)
-    if omega is None: omega = 0.0
-    if stream is None: stream = cupy.cuda.get_current_stream()
-    if auxmol is None:
-        from pyscf.df.addons import make_auxmol
-        auxmol = make_auxmol(mol, auxbasis)
-
-    nao_sph = mol.nao
-    naux_sph = auxmol.nao
-
-    intopt = _VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(direct_scf_tol, diag_block_with_triu=True)
-
-    nao = intopt.mol.nao
-    naux = intopt.auxmol.nao
-    norb = nao + naux + 1
-
-    int3c = cupy.zeros([3, naux_sph, nao_sph, nao_sph], order='C')
-    nbins = 1
-    for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
-        cpi = intopt.cp_idx[cp_ij_id]
-        cpj = intopt.cp_jdx[cp_ij_id]
-        li = intopt.angular[cpi]
-        lj = intopt.angular[cpj]
-
-        for aux_id, log_q_kl in enumerate(intopt.aux_log_qs):
-            cp_kl_id = aux_id + len(intopt.log_qs)
-            i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-            j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
-            k0, k1 = intopt.cart_aux_loc[aux_id], intopt.cart_aux_loc[aux_id+1]
-            ni = i1 - i0
-            nj = j1 - j0
-            nk = k1 - k0
-            lk = intopt.aux_angular[aux_id]
-
-            bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
-            bins_locs_kl = np.array([0, len(log_q_kl)], dtype=np.int32)
-
-            ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
-            strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
-
-            int3c_blk = cupy.zeros([3, nk, nj, ni], order='C', dtype=np.float64)
-            err = fn(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                intopt.bpcache,
-                ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins),
-                ctypes.c_int(cp_ij_id),
-                ctypes.c_int(cp_kl_id),
-                ctypes.c_double(omega))
-            if err != 0:
-                raise RuntimeError("int3c2e_ip failed\n")
-
-            int3c_blk = cart2sph(int3c_blk, axis=1, ang=lk)
-            int3c_blk = cart2sph(int3c_blk, axis=2, ang=lj)
-            int3c_blk = cart2sph(int3c_blk, axis=3, ang=li)
-
-            i0, i1 = intopt.sph_ao_loc[cpi], intopt.sph_ao_loc[cpi+1]
-            j0, j1 = intopt.sph_ao_loc[cpj], intopt.sph_ao_loc[cpj+1]
-            k0, k1 = intopt.sph_aux_loc[aux_id], intopt.sph_aux_loc[aux_id+1]
-
-            int3c[:, k0:k1, j0:j1, i0:i1] = int3c_blk
-    ao_idx = np.argsort(intopt.sph_ao_idx)
-    aux_idx = np.argsort(intopt.sph_aux_idx)
-    int3c = int3c[cupy.ix_(np.arange(3), aux_idx, ao_idx, ao_idx)]
-
-    return int3c.transpose([0,3,2,1])
-"""
-
-def get_int4c2e(mol, vhfopt=None, direct_scf_tol=1e-13, aosym=True, omega=None, stream=None):
-    '''
-    Generate full int4c2e tensor on GPU
-    '''
-
-    if omega is None: omega = 0.0
-    if vhfopt is None: vhfopt = _VHFOpt(mol, 'int2e').build(direct_scf_tol)
-    if stream is None: stream = cupy.cuda.get_current_stream()
-
-    nao = vhfopt.mol.nao
-    norb = nao
-
-    int4c = cupy.zeros([nao, nao, nao, nao], order='F')
-    ao_offsets = np.array([0, 0, 0, 0], dtype=np.int32)
-    strides = np.array([1, nao, nao*nao, nao*nao*nao], dtype=np.int32)
-    for cp_ij_id, log_q_ij in enumerate(vhfopt.log_qs):
-        for cp_kl_id, log_q_kl in enumerate(vhfopt.log_qs):
-            bins_locs_ij = vhfopt.bins[cp_ij_id]
-            bins_locs_kl = vhfopt.bins[cp_kl_id]
-            nbins_locs_ij = len(bins_locs_ij) - 1
-            nbins_locs_kl = len(bins_locs_kl) - 1
-            bins_floor_ij = vhfopt.bins_floor[cp_ij_id]
-            bins_floor_kl = vhfopt.bins_floor[cp_kl_id]
-            log_cutoff = np.log(direct_scf_tol)
-            err = libgint.GINTfill_int2e(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                vhfopt.bpcache,
-                ctypes.cast(int4c.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                bins_floor_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_floor_kl.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins_locs_ij),
-                ctypes.c_int(nbins_locs_kl),
-                ctypes.c_int(cp_ij_id),
-                ctypes.c_int(cp_kl_id),
-                ctypes.c_double(log_cutoff),
-                ctypes.c_double(omega))
-
-            if err != 0:
-                raise RuntimeError("int2c2e failed\n")
-
-    coeff = vhfopt.coeff
-    int4c = cupy.einsum('ijkl,ip->pjkl', int4c, coeff)
-    int4c = cupy.einsum('pjkl,jq->pqkl', int4c, coeff)
-    int4c = cupy.einsum('pqkl,kr->pqrl', int4c, coeff)
-    int4c = cupy.einsum('pqrl,ls->pqrs', int4c, coeff)
-
-    return int4c
-
-def get_int4c2e_jk(mol, dm, vhfopt=None, direct_scf_tol=1e-13, with_k=True, omega=None, stream=None):
-
-    if omega is None: omega = 0.0
-    if vhfopt is None: vhfopt = _VHFOpt(mol, 'int2e').build(direct_scf_tol)
-    if stream is None: stream = cupy.cuda.get_current_stream()
-
-    coeff = cupy.asarray(vhfopt.coeff)
-    dm_sorted = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
-
-    log_qs = vhfopt.log_qs
-    ncptype = len(log_qs)
-    cp_idx, cp_jdx = np.tril_indices(ncptype)
-    l_ctr_shell_locs = vhfopt.l_ctr_offsets
-    l_ctr_ao_locs = vhfopt.mol.ao_loc[l_ctr_shell_locs]
-
-    nao = vhfopt.mol.nao
-    norb = nao
-    vj = cupy.zeros([nao, nao])
-    vk = cupy.zeros([nao, nao])
-    for cp_ij_id, log_q_ij in enumerate(vhfopt.log_qs):
-        for cp_kl_id, log_q_kl in enumerate(vhfopt.log_qs[:cp_ij_id+1]):
-            cpi = cp_idx[cp_ij_id]
-            cpj = cp_jdx[cp_ij_id]
-            cpk = cp_idx[cp_kl_id]
-            cpl = cp_jdx[cp_kl_id]
-            i0, i1 = l_ctr_ao_locs[cpi], l_ctr_ao_locs[cpi+1]
-            j0, j1 = l_ctr_ao_locs[cpj], l_ctr_ao_locs[cpj+1]
-            k0, k1 = l_ctr_ao_locs[cpk], l_ctr_ao_locs[cpk+1]
-            l0, l1 = l_ctr_ao_locs[cpl], l_ctr_ao_locs[cpl+1]
-            ni = i1 - i0
-            nj = j1 - j0
-            nk = k1 - k0
-            nl = l1 - l0
-            bins_locs_ij = vhfopt.bins[cp_ij_id]
-            bins_locs_kl = vhfopt.bins[cp_kl_id]
-            nbins_locs_ij = len(bins_locs_ij) - 1
-            nbins_locs_kl = len(bins_locs_kl) - 1
-            bins_floor_ij = vhfopt.bins_floor[cp_ij_id]
-            bins_floor_kl = vhfopt.bins_floor[cp_kl_id]
-            int4c = cupy.zeros([nl, nk, nj, ni], order='C')
-            ao_offsets = np.array([i0, j0, k0, l0], dtype=np.int32)
-            strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
-            log_cutoff = np.log(direct_scf_tol)
-
-            err = libgint.GINTfill_int2e(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                vhfopt.bpcache,
-                ctypes.cast(int4c.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(norb),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                bins_floor_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_floor_kl.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins_locs_ij),
-                ctypes.c_int(nbins_locs_kl),
-                ctypes.c_int(cp_ij_id),
-                ctypes.c_int(cp_kl_id),
-                ctypes.c_double(log_cutoff),
-                ctypes.c_double(omega))
-
-            if err != 0:
-                raise RuntimeError("int4c2e failed\n")
-
-            if cp_ij_id == cp_kl_id: int4c *= 0.5
-            contract('lkji,kl->ij', int4c, dm_sorted[k0:k1,l0:l1], alpha=1.0, beta=1.0, out=vj[i0:i1,j0:j1])
-            contract('lkji,ij->kl', int4c, dm_sorted[i0:i1,j0:j1], alpha=1.0, beta=1.0, out=vj[k0:k1,l0:l1])
-
-            contract('lkji,jl->ik', int4c, dm_sorted[j0:j1,l0:l1], alpha=1.0, beta=1.0, out=vk[i0:i1,k0:k1])
-            contract('lkji,jk->il', int4c, dm_sorted[j0:j1,k0:k1], alpha=1.0, beta=1.0, out=vk[i0:i1,l0:l1])
-            contract('lkji,il->jk', int4c, dm_sorted[i0:i1,l0:l1], alpha=1.0, beta=1.0, out=vk[j0:j1,k0:k1])
-            contract('lkji,ik->jl', int4c, dm_sorted[i0:i1,k0:k1], alpha=1.0, beta=1.0, out=vk[j0:j1,l0:l1])
-
-    vj = cupy.einsum('ip,ij,jq->pq', coeff, vj, coeff)
-    vk = cupy.einsum('ip,ij,jq->pq', coeff, vk, coeff)
-    vj = vj + vj.T
-    vj *= 2.0
-    vk = vk + vk.T
-    return vj, vk
+    mo = vhfopt.sorted_mol.ctr_coeff
+    return _ao2mo_general(vhfopt, [mo]*4, omega)
 
 def get_int4c2e_ovov(mol, orbo, orbv, vhfopt=None, direct_scf_tol=1e-13, stream=None, omega=None):
     '''
     Generate 2-electron integrals (ov|ov) on GPU
     '''
+    if vhfopt is None:
+        mol = SortedMole.from_mol(mol, decontract=False)
+        vhfopt = _VHFOpt(mol).build()
 
-    if omega is None: omega = 0.0
-    if vhfopt is None: vhfopt = _VHFOpt(mol, 'int2e').build(direct_scf_tol)
-    if stream is None: stream = cupy.cuda.get_current_stream()
+    orbo = vhfopt.sorted_mol.apply_C_dot(orbo)
+    orbv = vhfopt.sorted_mol.apply_C_dot(orbv)
+    return _ao2mo_general(vhfopt, [orbo,orbv,orbo,orbv], omega)
 
-    orbo = cupy.asarray(orbo)
-    orbv = cupy.asarray(orbv)
-    coeff = vhfopt.coeff
+def _ao2mo_general(vhfopt, mo_coeffs, omega=None):
+    assert isinstance(vhfopt, _VHFOpt)
+    mol = vhfopt.sorted_mol
+    log = logger.new_logger(mol)
+    t0 = log.init_timer()
 
-    orbo = coeff @ orbo
-    orbv = coeff @ orbv
+    if omega is None:
+        omega = mol.omega
 
-    nao, nocc = orbo.shape
-    nvir = orbv.shape[1]
-    ovov = cupy.zeros([nocc, nvir, nocc, nvir], order='C')
-    for i0,i1,j0,j1,k0,k1,l0,l1,int4c in loop_int4c2e_general(vhfopt):
-        int4c_oaaa = _einsum('lkji,io->ojkl', int4c[0], orbo[i0:i1])
+    ao_loc = mol.ao_loc_nr()
+    nao = int(ao_loc[-1])
+    ao_loc = cp.asarray(ao_loc)
 
-        int4c_oaoa = _einsum('ojkl,kr->ojrl', int4c_oaaa, orbo[k0:k1])
-        int4c_ovoa = _einsum('ojrl,jp->oprl', int4c_oaoa, orbv[j0:j1])
-        ovov += _einsum('oprl,lq->oprq', int4c_ovoa, orbv[l0:l1])
+    assert mo_coeffs[0].shape[0] == nao
+    nmo0, nmo1, nmo2, nmo3 = [x.shape[1] for x in mo_coeffs]
+    swap_2e = min(nmo0, nmo1) < min(nmo2, nmo3)
+    idx = [0, 1, 2, 3]
+    if swap_2e:
+        idx = [2, 3, 0, 1]
+        nmo0, nmo1, nmo2, nmo3 = nmo2, nmo3, nmo0, nmo1
+    swap_ij = nmo0 > nmo1
+    swap_kl = nmo2 > nmo3
+    if swap_ij:
+        idx = [idx[1], idx[0], idx[2], idx[3]]
+    if swap_kl:
+        idx = [idx[0], idx[1], idx[3], idx[2]]
+    mo_coeffs = [mo_coeffs[i] for i in idx]
 
-        int4c_oaao = _einsum('ojkl,lr->ojkr', int4c_oaaa, orbo[l0:l1])
-        int4c_ovao = _einsum('ojkr,jp->opkr', int4c_oaao, orbv[j0:j1])
-        ovov += _einsum('opkr,kq->oprq', int4c_ovao, orbv[k0:k1])
+    uniq_l = mol.uniq_l_ctr[:,0]
+    nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    carts = [cp.arange(n) for n in nf]
 
-        int4c_aoaa = _einsum('lkji,jo->iokl', int4c[0], orbo[j0:j1])
+    bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                      for k, v in vhfopt.bas_pair_cache.items()}
+    bas_ij_idx = []
+    pair_loc = []
+    ao_pair_addresses = []
+    for i, j in bas_pair_cache:
+        bas_ij = bas_pair_cache[i, j][0]
+        bas_ij_idx.append(bas_ij)
+        pair_loc.append(cp.arange(len(bas_ij)+0, dtype=np.int32) * (nf[i] * nf[j]))
+        ish, jsh = divmod(bas_ij, mol.nbas)
+        iaddr = ao_loc[ish,None] + carts[i]
+        jaddr = ao_loc[jsh,None] + carts[j]
+        ao_pair_addresses.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+    bas_ij_idx = cp.hstack(bas_ij_idx, dtype=np.int32)
+    ao_pair_addresses = cp.hstack(ao_pair_addresses, dtype=np.int32)
+    nao_pairs = len(ao_pair_addresses)
 
-        int4c_aooa = _einsum('iokl,kr->iorl', int4c_aoaa, orbo[k0:k1])
-        int4c_vooa = _einsum('iorl,ip->porl', int4c_aooa, orbv[i0:i1])
-        ovov += _einsum('porl,lq->oprq', int4c_vooa, orbv[l0:l1])
+    log_cutoff = math.log(vhfopt.direct_scf_tol)
 
-        int4c_aoao = _einsum('iokl,lr->iokr', int4c_aoaa, orbo[l0:l1])
-        int4c_voao = _einsum('iokr,ip->pokr', int4c_aoao, orbv[i0:i1])
-        ovov += _einsum('pokr,kq->oprq', int4c_voao, orbv[k0:k1])
+    workers = gpu_specs['multiProcessorCount']
+    # An additional integer to count for the proccessed pair_ijs
+    pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
 
-    ovov += ovov.transpose([2,3,0,1])
-    return ovov
+    l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+    assert all(uniq_l <= LMAX)
+
+    rys_envs = vhfopt.rys_envs
+    kern = libvhf_rys.RYS_fill_int4c2e
+
+    kl0 = kl1 = 0
+    eri_mo = cp.empty((nao_pairs, nmo2, nmo3))
+    for kl_id, (k, l) in enumerate(bas_pair_cache):
+        pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
+        npairs_kl = pair_kl_mapping.size
+        if npairs_kl == 0:
+            continue
+        kl0, kl1 = kl1, kl1 + npairs_kl * nf[k] * nf[l]
+        eri = cp.empty((nao_pairs, kl1-kl0))
+        ij0 = ij1 = 0
+        for ij_id, (i, j) in enumerate(bas_pair_cache):
+            shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
+            pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+            npairs_ij = pair_ij_mapping.size
+            if npairs_ij == 0:
+                continue
+            ij0, ij1 = ij1, ij1 + npairs_ij * nf[i] * nf[j]
+            err = kern(
+                ctypes.cast(eri[ij0:ij1].data.ptr, ctypes.c_void_p),
+                ctypes.c_int(kl1 - kl0),
+                ctypes.c_double(omega),
+                ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
+                ctypes.c_int(shm_size),
+                ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_loc[ij_id].data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_loc[kl_id].data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                mol._bas.ctypes)
+            if err != 0:
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                raise RuntimeError(f'fill_int4c2e kernel for {llll} failed')
+        eri = fill_symmetric(eri, ao_pair_addresses, nao)
+        eri = contract('pqr,pi->iqr', eri, mo_coeffs[2])
+        contract('iqr,qj->rij', eri, mo_coeffs[3], out=eri_mo[kl0:kl1])
+    eri_mo = fill_symmetric(eri_mo.reshape(nao_pairs,-1), ao_pair_addresses, nao)
+    eri_mo = eri_mo.reshape(nao,nao,nmo2,nmo3)
+    eri_mo = contract('pqkl,pi->iqkl', eri_mo, mo_coeffs[0])
+    eri_mo = contract('iqkl,qj->ijkl', eri_mo, mo_coeffs[1])
+    if swap_ij:
+        eri_mo = eri_mo.transpose(1,0,2,3)
+    if swap_kl:
+        eri_mo = eri_mo.transpose(0,1,3,2)
+    if swap_2e:
+        eri_mo = eri_mo.transpose(2,3,0,1)
+    log.timer_debug1('AO2MO transform 4c2e', *t0)
+    return eri_mo
+
+def get_int4c2e_jk(mol, dm, vhfopt=None, direct_scf_tol=1e-13, with_k=True, omega=None, stream=None):
+    raise DeprecationWarning
 
 def loop_int4c2e_general(intopt, ip_type='', direct_scf_tol=1e-13, omega=None, stream=None):
-    '''
-    loop over all int2e blocks
-    - outer loop for ij pair
-    - inner loop for kl pair
-    '''
-    if ip_type == '':
-        order = 0
-        fn = getattr(libgint, 'GINTfill_int2e')
-    else:
-        fn = getattr(libgint, 'GINTfill_int2e_' + ip_type)
-    if ip_type == 'ip1':    order = 1
-    if ip_type == 'ip2':    order = 1
-    if ip_type == 'ipip1':  order = 2
-    if ip_type == 'ip1ip2': order = 2
-    if ip_type == 'ipvip1': order = 2
-    if ip_type == 'ipip2':  order = 2
-
-    if omega is None: omega = 0.0
-    if stream is None: stream = cupy.cuda.get_current_stream()
-
-    comp = 3**order
-    nao = intopt.mol.nao
-    log_qs = intopt.log_qs
-    ncptype = len(log_qs)
-    cp_idx, cp_jdx = np.tril_indices(ncptype)
-    cart_ao_loc = intopt.mol.ao_loc_nr(cart=True)
-    cart_ao_loc = [cart_ao_loc[cp] for cp in intopt.l_ctr_offsets]
-
-    log_cutoff = np.log(direct_scf_tol)
-    for cp_ij_id, log_q_ij in enumerate(log_qs):
-        cpi = cp_idx[cp_ij_id]
-        cpj = cp_jdx[cp_ij_id]
-        i0, i1 = cart_ao_loc[cpi], cart_ao_loc[cpi+1]
-        j0, j1 = cart_ao_loc[cpj], cart_ao_loc[cpj+1]
-        ni = i1 - i0
-        nj = j1 - j0
-        for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
-            cpk = cp_idx[cp_kl_id]
-            cpl = cp_jdx[cp_kl_id]
-            k0, k1 = cart_ao_loc[cpk], cart_ao_loc[cpk+1]
-            l0, l1 = cart_ao_loc[cpl], cart_ao_loc[cpl+1]
-            nk = k1 - k0
-            nl = l1 - l0
-            bins_locs_ij = intopt.bins[cp_ij_id]
-            bins_locs_kl = intopt.bins[cp_kl_id]
-            nbins_locs_ij = len(bins_locs_ij) - 1
-            nbins_locs_kl = len(bins_locs_kl) - 1
-            bins_floor_ij = intopt.bins_floor[cp_ij_id]
-            bins_floor_kl = intopt.bins_floor[cp_kl_id]
-
-            ao_offsets = np.array([i0,j0,k0,l0], dtype=np.int32)
-            strides = np.array([1,ni,ni*nj,ni*nj*nk], dtype=np.int32)
-
-            int4c = cupy.zeros([comp,nl,nk,nj,ni], order='C', dtype=np.float64)
-            err = fn(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                intopt.bpcache,
-                ctypes.cast(int4c.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(nao),
-                strides.ctypes.data_as(ctypes.c_void_p),
-                ao_offsets.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                bins_floor_ij.ctypes.data_as(ctypes.c_void_p),
-                bins_floor_kl.ctypes.data_as(ctypes.c_void_p),
-                ctypes.c_int(nbins_locs_ij),
-                ctypes.c_int(nbins_locs_kl),
-                ctypes.c_int(cp_ij_id),
-                ctypes.c_int(cp_kl_id),
-                ctypes.c_double(log_cutoff),
-                ctypes.c_double(omega))
-
-            if err != 0:
-                raise RuntimeError(f'GINT_fill_int4c2e general failed, err={err}')
-            if cp_ij_id == cp_kl_id:
-                int4c *= 0.5
-            yield i0,i1,j0,j1,k0,k1,l0,l1,int4c
-
-class _VHFOpt:
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
-
-    def __init__(self, mol, intor, prescreen='CVHFnoscreen',
-                 qcondname='CVHFsetnr_direct_scf', dmcondname=None):
-        self.mol, self.coeff = basis_seg_contraction(mol)
-        self.coeff = cupy.asarray(self.coeff)
-        # Note mol._bas will be sorted in .build() method. VHFOpt should be
-        # initialized after mol._bas updated.
-        self._intor = intor
-        self._prescreen = prescreen
-        self._qcondname = qcondname
-        self._dmcondname = dmcondname
-
-    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False):
-        mol = self.mol
-        cput0 = logger.init_timer(mol)
-        # Sort basis according to angular momentum and contraction patterns so
-        # as to group the basis functions to blocks in GPU kernel.
-        l_ctrs = mol._bas[:,[gto.ANG_OF, gto.NPRIM_OF]]
-        uniq_l_ctr, _, inv_idx, l_ctr_counts = np.unique(
-            l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
-
-        # Limit the number of AOs in each group
-        if group_size is not None:
-            uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
-                uniq_l_ctr, l_ctr_counts, group_size)
-
-        if mol.verbose >= logger.DEBUG1:
-            logger.debug1(mol, 'Number of shells for each [l, nprim] group')
-            for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
-                logger.debug1(mol, '    %s : %s', l_ctr, n)
-
-        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
-        # Sort contraction coefficients before updating self.mol
-        ao_loc = mol.ao_loc_nr(cart=True)
-        nao = ao_loc[-1]
-        # Some addressing problems in GPU kernel code
-        assert nao < 32768
-        ao_idx = np.array_split(np.arange(nao), ao_loc[1:-1])
-        ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
-        self.coeff = self.coeff[ao_idx]
-        # Sort basis inplace
-        mol._bas = mol._bas[sorted_idx]
-
-        # Initialize vhfopt after reordering mol._bas
-        _vhf.VHFOpt.__init__(self, mol, self._intor, self._prescreen,
-                             self._qcondname, self._dmcondname)
-        self.direct_scf_tol = cutoff
-
-        lmax = uniq_l_ctr[:,0].max()
-        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
-        l_slices = np.append(0, np.cumsum(nbas_by_l))
-        if lmax >= LMAX_ON_GPU:
-            self.g_shls = l_slices[LMAX_ON_GPU:LMAX_ON_GPU+2].tolist()
-        else:
-            self.g_shls = []
-        if lmax > LMAX_ON_GPU:
-            self.h_shls = l_slices[LMAX_ON_GPU+1:].tolist()
-        else:
-            self.h_shls = []
-
-        # TODO: is it more accurate to filter with overlap_cond (or exp_cond)?
-        q_cond = self.get_q_cond()
-        cput1 = logger.timer(mol, 'Initialize q_cond', *cput0)
-        log_qs = []
-        pair2bra = []
-        pair2ket = []
-        bins = []
-        bins_floor = []
-        l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
-            if uniq_l_ctr[i,0] > LMAX_ON_GPU:
-                # no integrals with h functions should be evaluated on GPU
-                continue
-
-            for q0, q1 in zip(l_ctr_offsets[:i], l_ctr_offsets[1:i+1]):
-                q_sub = q_cond[p0:p1,q0:q1]
-                idx = np.argwhere(q_sub > cutoff)
-                q_sub = q_sub[idx[:,0], idx[:,1]]
-                log_q = np.log(q_sub)
-                log_q[log_q > 0] = 0
-                nbins = (len(log_q) + BINSIZE)//BINSIZE
-                s_index, bin_floor = _make_s_index(log_q, nbins=nbins, cutoff=cutoff)
-
-                ishs = idx[:,0]
-                jshs = idx[:,1]
-                idx = np.lexsort((ishs, jshs, s_index), axis=-1)
-                ishs = ishs[idx]
-                jshs = jshs[idx]
-                s_index = s_index[idx]
-
-                ishs += p0
-                jshs += q0
-                pair2bra.append(ishs)
-                pair2ket.append(jshs)
-                bins.append(_make_bins(s_index, nbins=nbins))
-                bins_floor.append(bin_floor)
-                log_qs.append(cupy.asarray(log_q[idx]))
-
-            q_sub = q_cond[p0:p1,p0:p1]
-            idx = np.argwhere(q_sub > cutoff)
-            if not diag_block_with_triu:
-                # Drop the shell pairs in the upper triangle for diagonal blocks
-                mask = idx[:,0] >= idx[:,1]
-                idx = idx[mask,:]
-
-            q_sub = q_sub[idx[:,0], idx[:,1]]
-            log_q = np.log(q_sub)
-            log_q[log_q > 0] = 0
-            nbins = (len(log_q) + BINSIZE)//BINSIZE
-            s_index, bin_floor = _make_s_index(log_q, nbins=nbins, cutoff=cutoff)
-            ishs = idx[:,0]
-            jshs = idx[:,1]
-            idx = np.lexsort((ishs, jshs, s_index), axis=-1)
-            ishs = ishs[idx]
-            jshs = jshs[idx]
-            s_index = s_index[idx]
-
-            ishs += p0
-            jshs += p0
-            pair2bra.append(ishs)
-            pair2ket.append(jshs)
-            bins.append(_make_bins(s_index, nbins=nbins))
-            bins_floor.append(bin_floor)
-            log_qs.append(cupy.asarray(log_q[idx]))
-
-        # TODO
-        self.pair2bra = pair2bra
-        self.pair2ket = pair2ket
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = l_ctr_offsets
-        self.bas_pair2shls = np.hstack(
-            pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
-
-        self.bas_pairs_locs = np.append(
-            0, np.cumsum([x.size for x in pair2bra])).astype(np.int32)
-        self.bins = bins
-        self.bins_floor = bins_floor
-        self.log_qs = log_qs
-        ao_loc = mol.ao_loc_nr(cart=True)
-        ncptype = len(log_qs)
-        self.bpcache = ctypes.POINTER(BasisProdCache)()
-        if diag_block_with_triu:
-            scale_shellpair_diag = 1.
-        else:
-            scale_shellpair_diag = 0.5
-        libgvhf.GINTinit_basis_prod(
-            ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
-            ao_loc.ctypes.data_as(ctypes.c_void_p),
-            self.bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
-            self.bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
-            mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.natm),
-            mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.nbas),
-            mol._env.ctypes.data_as(ctypes.c_void_p))
-        logger.timer(mol, 'Initialize GPU cache', *cput1)
-        return self
-
-    init_cvhf_direct = _vhf.VHFOpt.init_cvhf_direct
-    get_q_cond       = _vhf.VHFOpt.get_q_cond
-    set_dm           = _vhf.VHFOpt.set_dm
-
-    def clear(self):
-        _vhf.VHFOpt.__del__(self)
-        libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
-        return self
-
-    def __del__(self):
-        try:
-            self.clear()
-        except AttributeError:
-            pass
+    raise DeprecationWarning
 
 class BasisProdCache(ctypes.Structure):
     pass
-
-def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
-    '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
-    scale = nbins / np.log(min(cutoff, .1))
-    s_index = np.floor(scale * log_q).astype(np.int32)
-    bins = np.bincount(s_index)
-    if bins.size < nbins:
-        bins = np.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
-    else:
-        bins = bins[:nbins]
-    assert bins.max() < 65536 * 8
-    return np.append(0, np.cumsum(bins)).astype(np.int32)
-
-def _make_s_index(log_q, nbins=10, cutoff=1e-12):
-    '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
-    scale = nbins / np.log(min(cutoff, .1))
-    s_index = np.floor(scale * log_q).astype(np.int32)
-    bins_floor = np.arange(nbins) / scale
-    return s_index, bins_floor
-
-def _make_bins(s_index, nbins=10):
-    bins = np.bincount(s_index)
-    if bins.size < nbins:
-        bins = np.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
-    else:
-        bins = bins[:nbins]
-    assert bins.max() < 65536 * 8
-    return np.append(0, np.cumsum(bins)).astype(np.int32)
-
-def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
-    '''Splits l_ctr patterns into small groups with group_size the maximum
-    number of AOs in each group
-    '''
-    l = uniq_l_ctr[:,0]
-    _l_ctrs = []
-    _l_ctr_counts = []
-    for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
-        l = l_ctr[0]
-        nf = (l + 1) * (l + 2) // 2
-        max_shells = max(group_size // nf, 2)
-        if l > LMAX_ON_GPU or counts <= max_shells:
-            _l_ctrs.append(l_ctr)
-            _l_ctr_counts.append(counts)
-            continue
-
-        nsubs, rests = counts.__divmod__(max_shells)
-        _l_ctrs.extend([l_ctr] * nsubs)
-        _l_ctr_counts.extend([max_shells] * nsubs)
-        if rests > 0:
-            _l_ctrs.append(l_ctr)
-            _l_ctr_counts.append(rests)
-    uniq_l_ctr = np.vstack(_l_ctrs)
-    l_ctr_counts = np.hstack(_l_ctr_counts)
-    return uniq_l_ctr, l_ctr_counts
