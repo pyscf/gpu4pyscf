@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import warnings
+import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
