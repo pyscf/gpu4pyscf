@@ -864,12 +864,64 @@ class SCF(pyscf_lib.StreamObject):
     stability                = NotImplemented
     update_                  = NotImplemented
     istype                   = hf_cpu.SCF.istype
-    to_rhf                   = NotImplemented
-    to_uhf                   = NotImplemented
-    to_ghf                   = NotImplemented
-    to_rks                   = NotImplemented
-    to_uks                   = NotImplemented
-    to_gks                   = NotImplemented
+
+    def to_rhf(self):
+        '''Convert the input mean-field object to a RHF/ROHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        return addons.convert_to_rhf(self)
+
+    def to_uhf(self):
+        '''Convert the input mean-field object to a UHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        return addons.convert_to_uhf(self)
+
+    def to_ghf(self):
+        '''Convert the input mean-field object to a GHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        return addons.convert_to_ghf(self)
+
+    def to_rks(self, xc='HF'):
+        '''Convert the input mean-field object to a RKS/ROKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_rhf().to_ks(xc)
+
+    def to_uks(self, xc='HF'):
+        '''Convert the input mean-field object to a UKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_uhf().to_ks(xc)
+
+    def to_gks(self, xc='HF'):
+        '''Convert the input mean-field object to a GKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_ghf().to_ks(xc)
+
     to_ks                    = NotImplemented
     canonicalize             = NotImplemented
     gen_response             = NotImplemented
@@ -993,7 +1045,25 @@ class SCF(pyscf_lib.StreamObject):
         raise NotImplementedError
 
     def _transfer_attrs_(self, dst):
-        raise NotImplementedError
+        '''This helper function transfers attributes from one SCF object to
+        another SCF object. It is invoked by to_ks and to_hf methods.
+        '''
+        from gpu4pyscf.df.df_jk import _DFHF
+        if isinstance(self, _DFHF) and not hasattr(dst, 'with_df'):
+            # * Handle DF_SCF instances for to_xxx methods.
+            # * Only the molecular SCF methods need to be explicitly converted.
+            #   For PBC SCF methods, DF is enabled by default. calling density_fit()
+            #   may alter the DF class. Conversion should be avoided here.
+            dst = dst.density_fit(auxbasis=self.with_df.auxbasis)
+        # Search for all tracked attributes, including those in base classes
+        cls_keys = [getattr(cls, '_keys', ()) for cls in dst.__class__.__mro__[:-1]]
+        dst_keys = set(dst.__dict__).union(*cls_keys)
+
+        loc_dic = self.__dict__
+        keys = set(loc_dic).intersection(dst_keys)
+        dst.__dict__.update({k: loc_dic[k] for k in keys})
+        dst.converged = False
+        return dst
 
 class KohnShamDFT:
     '''
@@ -1054,3 +1124,9 @@ class RHF(SCF):
         mf = hf_cpu.RHF(self.mol)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def to_ks(self, xc='HF'):
+        '''Convert to RKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.RKS(self.mol, xc=xc))

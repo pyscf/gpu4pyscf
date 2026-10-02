@@ -90,13 +90,6 @@ class ROHF(hf.RHF):
     init_guess_by_chkfile    = rohf_cpu.ROHF.init_guess_by_chkfile
     make_rdm2 = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
-    to_rhf = NotImplemented
-    to_uhf = NotImplemented
-    to_ghf = NotImplemented
-    to_rks = NotImplemented
-    to_uks = NotImplemented
-    to_gks = NotImplemented
-    to_ks = NotImplemented
     stability = NotImplemented
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
@@ -223,6 +216,12 @@ class ROHF(hf.RHF):
         ms = (neleca - nelecb) * .5
         ss = ms * (ms + 1)
         return ss, ms*2+1
+
+    def to_ks(self, xc='HF'):
+        '''Convert to UKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.ROKS(self.mol, xc=xc))
 
 
 class HF1e(ROHF):
