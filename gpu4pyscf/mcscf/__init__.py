@@ -12,13 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from gpu4pyscf.fci.direct_spin1 import FCI
-from gpu4pyscf.fci.direct_spin1 import FCISolver
-
-
-def solver(mol=None, singlet=False, symm=None):
-    if singlet:
-        raise NotImplementedError('GPU spin-adapted FCI is not implemented')
-    if symm or (symm is None and mol is not None and mol.symmetry):
-        raise NotImplementedError('GPU symmetry-adapted FCI is not implemented')
-    return FCISolver(mol)
+from .df import DFCASCI, DFCASSCF
