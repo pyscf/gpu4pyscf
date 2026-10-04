@@ -22,6 +22,9 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <stdio.h>
+
 // double2 component access. sycl::double2 exposes .x()/.y() methods,
 // CUDA double2 exposes .x/.y fields.
 #ifdef USE_SYCL
@@ -33,7 +36,7 @@
 #endif
 
 // dim3 shim for auto-generated sources that still spell it (SYCL only).
-// Keeps generated files byte-identical.
+// Keeps generated files byte-identical with upstream.
 #ifdef USE_SYCL
 struct gpu4pyscf_dim3 {
     unsigned int x, y, z;
@@ -44,7 +47,8 @@ struct gpu4pyscf_dim3 {
 
 // Backend-split constant tables with distinct SYCL/CUDA names.
 // SYCL keeps a device_global; CUDA uses __constant__. TABLE_BIND aliases
-// the active store to the CUDA name so bodies stay backend-agnostic.
+// the active store to the CUDA name so bodies stay backend-agnostic;
+// TABLE_FILL publishes host data.
 #ifdef USE_SYCL
 #define TABLE_DEFINE(type, sname, cname, N) \
     SYCL_EXTERNAL sycl_device_global<type[N]> sname
@@ -61,31 +65,22 @@ struct gpu4pyscf_dim3 {
     CONSTANT_MEMCPY(cname, src, bytes)
 #endif
 
-// Host-pinned to device-accessible pointer. SYCL uses USM (directly
-// accessible); CUDA maps the pinned allocation. Call sites must return
-// int (0 ok / 1 error) for the CUDA error path.
+// Host-pinned buffer address mapping. SYCL uses USM (buffers directly
+// accessible from device); CUDA maps the pinned allocation. Call sites
+// must return int for the error path.
 #ifdef USE_SYCL
-#define MAP_PINNED_PTR(type, dev, host) \
-    type *dev = (host)
+#define MAP_PINNED_PTR(type, dev, host) type *dev = (host)
 #else
 #define MAP_PINNED_PTR(type, dev, host) \
     type *dev; \
     { \
-        cudaError_t _map_err = cudaHostGetDevicePointer(&dev, host, 0); \
-        if (_map_err != cudaSuccess) { \
-            fprintf(stderr, "address mapping error %s\n", cudaGetErrorString(_map_err)); \
+        cudaError_t _err = cudaHostGetDevicePointer(&dev, host, 0); \
+        if (_err != cudaSuccess) { \
+            fprintf(stderr, "address mapping error %s\n", cudaGetErrorString(_err)); \
             return 1; \
         } \
     }
 #endif
-
-#include <stddef.h>
-
-// Stream/queue normalization: LAUNCH_KERNEL_* accept either a stream object
-// (e.g. sycl::queue&) or a queue pointer (e.g. sycl_get_queue()) in the
-// stream slot, in both backends (cudaStream_t is already a pointer).
-template <typename T> inline T *_gpu4pyscf_stream_ptr(T *s) { return s; }
-template <typename T> inline T *_gpu4pyscf_stream_ptr(T &s) { return &s; }
 
 #ifdef USE_SYCL
 
@@ -218,26 +213,6 @@ inline sycl::range<3> make_block(
             [=](sycl::nd_item<3>) { kernel(__VA_ARGS__); }); \
     }
 
-// Launch where one trailing argument must be materialized on the host
-// (e.g. dereferencing a host-side struct pointer whose pointee holds device
-// pointers). HOSTARG is evaluated in host code in both backends: captured by
-// value in the SYCL lambda, passed directly in CUDA.
-#define LAUNCH_KERNEL_LAST(KERNEL, HOSTARG, grid, block, shm_size, ...) \
-    { \
-        auto _hostarg = (HOSTARG); \
-        sycl_get_queue()->parallel_for( \
-            sycl::nd_range<3>(grid * block, block), \
-            [=](sycl::nd_item<3>) { KERNEL(__VA_ARGS__, _hostarg); }); \
-    }
-
-#define LAUNCH_KERNEL_LAST_S(KERNEL, HOSTARG, grid, block, shm_size, stream, ...) \
-    { \
-        auto _hostarg = (HOSTARG); \
-        _gpu4pyscf_stream_ptr(stream)->parallel_for( \
-            sycl::nd_range<3>(grid * block, block), \
-            [=](sycl::nd_item<3>) { KERNEL(__VA_ARGS__, _hostarg); }); \
-    }
-
 // Dynamic-shared variant: allocates shm_size bytes of local memory and
 // forwards its pointer as a trailing `void *shm_mem` kernel argument in
 // BOTH backends (CUDA passes nullptr; the kernel uses `extern __shared__`
@@ -270,9 +245,10 @@ inline sycl::range<3> make_block(
         }); \
     }
 
-// Queue-launch form of LAUNCH_KERNEL_LAST (no stream; e.g. queue-owned
-// default launches). HOSTARG is materialized on the host in both backends.
 #else
+// Dummy so queue-based launch sites compile in CUDA builds.
+// The CUDA LAUNCH_KERNEL macro discards this argument.
+static inline void *sycl_get_queue() { return nullptr; }
 
 inline dim3 make_grid(
     unsigned int x, unsigned int y = 1, unsigned int z = 1)
@@ -291,12 +267,9 @@ inline dim3 make_block(
         kernel<<<grid, block, shm_size, 0>>>(__VA_ARGS__); \
     }
 
-// Launch where one trailing argument must be materialized on the host
-// (e.g. dereferencing a host-side struct pointer whose pointee holds device
-// pointers). HOSTARG is evaluated in host code in both backends.
-#define LAUNCH_KERNEL_LAST(KERNEL, HOSTARG, grid, block, shm_size, ...) \
+#define LAUNCH_KERNEL_S(kernel, grid, block, shm_size, stream, ...) \
     { \
-        KERNEL<<<grid, block, shm_size, 0>>>(__VA_ARGS__, HOSTARG); \
+        kernel<<<grid, block, shm_size, stream>>>(__VA_ARGS__); \
     }
 
 // Dynamic-shared variant: forwards shm_size as a trailing `void *shm_mem`
@@ -306,6 +279,13 @@ inline dim3 make_block(
         kernel<<<grid, block, shm_size, 0>>>(__VA_ARGS__, nullptr); \
     }
 
-// Queue-launch form of LAUNCH_KERNEL_LAST (no stream; e.g. queue-owned
-// default launches). HOSTARG is materialized on the host in both backends.
+#define LAUNCH_KERNEL_DYN_S(kernel, grid, block, shm_size, stream, ...) \
+    { \
+        kernel<<<grid, block, shm_size, stream>>>(__VA_ARGS__, nullptr); \
+    }
 #endif
+
+// Stream/queue normalization helper: LAUNCH_KERNEL_{S,DYN_S} accept either a
+// stream object or a queue pointer in the stream slot, on both backends.
+template <typename T> inline T *_gpu4pyscf_stream_ptr(T *s) { return s; }
+template <typename T> inline T *_gpu4pyscf_stream_ptr(T &s) { return &s; }
