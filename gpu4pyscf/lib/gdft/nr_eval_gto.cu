@@ -28,9 +28,12 @@
 // Abstracts 2D kernel launch/setup syntax. blocks/threads/stream/gto_envs
 // must be in scope. The envs struct is materialized on the host in both
 // backends (its SYCL lambda capture would otherwise dereference a host
-// pointer on device); see LAUNCH_KERNEL_LAST in gsycl/gpu_compat.h.
+// pointer on device).
 #define LAUNCH_KERNEL_ENV(KERNEL, ...) \
-    LAUNCH_KERNEL_LAST_S(KERNEL, *gto_envs, blocks, threads, 0, stream, __VA_ARGS__)
+    { \
+        auto _hostarg = (*gto_envs); \
+        LAUNCH_KERNEL_S(KERNEL, blocks, threads, 0, stream, __VA_ARGS__, _hostarg); \
+    }
 
 #define KERNEL_PROLOGUE_BAS_GRID() \
     setup_context(); \

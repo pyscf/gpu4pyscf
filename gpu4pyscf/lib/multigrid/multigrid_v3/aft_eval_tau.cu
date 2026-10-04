@@ -257,9 +257,7 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntiles*nbatches_shl_pair);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_LAST(orth_ft_tau_dm_kernel, dev_envs, grids, threads, 0,
-                         densityR, densityI, tauR, tauI, dm, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
-                         mesh_cum, nimgs_cum, ntiles, factor);
+        LAUNCH_KERNEL(orth_ft_tau_dm_kernel, grids, threads, 0, densityR, densityI, tauR, tauI, dm, shl_pair_offsets, bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum, ntiles, factor, dev_envs);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

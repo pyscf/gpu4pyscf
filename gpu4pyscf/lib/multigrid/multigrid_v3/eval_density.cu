@@ -316,12 +316,12 @@ extern "C" {
         auto sycl_threads = make_block(THREADS); \
         auto sycl_grids = make_grid(block_grid); \
         auto dev_envs = *envs; \
-        LAUNCH_KERNEL_LAST((eval_density_kernel<li,lj,slice_i,slice_j,non_orth>), dev_envs, sycl_grids, sycl_threads, 0, \
+        LAUNCH_KERNEL((eval_density_kernel<li,lj,slice_i,slice_j,non_orth>), sycl_grids, sycl_threads, 0, \
             density, dm, supmol_img_coords, factor, \
             shl_pair_offsets, dressed_bas_ij_idx, \
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
-            mesh_a, mesh_b, mesh_c, negligible); \
+            mesh_a, mesh_b, mesh_c, negligible, dev_envs); \
         cudaDeviceSynchronize(); \
     } \
     break

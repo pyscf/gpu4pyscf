@@ -557,7 +557,6 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
                     grid_frac_ranges, pair_ke, Ecut_by_shell, primary_atoms,
                     dev_envs, bas_ij_idx, li_inc, lj_inc, npairs,
                     log_threshold, undressed_threshold);
-    cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in gaussian_prod_grid_ranges: %s\n", cudaGetErrorString(err));
@@ -583,7 +582,6 @@ int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
     LAUNCH_KERNEL( grid_range_to_tiles_kernel, grids, threads, 0,
                     grid_tile_idx, dressed_bas_ij, bas_ij_idx, grid_frac_ranges,
                     nimgs_x, nimgs_y, nimgs_z, mesh_x, mesh_y, mesh_z, npairs, nbas, head);
-    cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in grid_range_to_tiles: %s\n", cudaGetErrorString(err));
@@ -616,9 +614,8 @@ int bvk_ovlp_mask_estimation(int8_t *ovlp_mask, PBCIntEnvVars *envs,
     int bvk_nbas = nbas * envs->bvk_ncells;
     auto threads = make_block(16, 16);
     auto grids = make_grid((bvk_nbas + 15) / 16, (nbas + 15) / 16);
-    LAUNCH_KERNEL_LAST(ovlp_mask_estimation_kernel, *envs, grids, threads, 0,
-                         ovlp_mask, img_coords, nimgs, log_cutoff);
-    cudaDeviceSynchronize();
+        auto dev_envs = *envs;
+        LAUNCH_KERNEL(ovlp_mask_estimation_kernel, grids, threads, 0, ovlp_mask, img_coords, nimgs, log_cutoff, dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_mask_estimation: %s\n", cudaGetErrorString(err));
@@ -634,9 +631,8 @@ int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
     int blocks = (npairs + THREADS-1)/THREADS;
     auto threads = make_block(THREADS);
     auto grids = make_grid(blocks);
-    LAUNCH_KERNEL_LAST(supmol_non_trivial_pairs_kernel, *envs, grids, threads, 0,
-                         supmol_bas_ij, bas_ij_idx, npairs, log_cutoff, is_mgga, head);
-    cudaDeviceSynchronize();
+        auto dev_envs = *envs;
+        LAUNCH_KERNEL(supmol_non_trivial_pairs_kernel, grids, threads, 0, supmol_bas_ij, bas_ij_idx, npairs, log_cutoff, is_mgga, head, dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_mask_estimation: %s\n", cudaGetErrorString(err));
@@ -652,10 +648,8 @@ int estimate_aft_Ecut(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
     int blocks = (npairs + THREADS-1)/THREADS;
     auto threads = make_block(THREADS);
     auto grids = make_grid(blocks);
-    LAUNCH_KERNEL_LAST(estimate_aft_Ecut_kernel, *envs, grids, threads, 0,
-                         Ecut, bas_ij_idx, img_coords, nimgs, npairs, log_cutoff,
-                         Ecut_max, is_mgga);
-    cudaDeviceSynchronize();
+        auto dev_envs = *envs;
+        LAUNCH_KERNEL(estimate_aft_Ecut_kernel, grids, threads, 0, Ecut, bas_ij_idx, img_coords, nimgs, npairs, log_cutoff, Ecut_max, is_mgga, dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in raw_ovlp_mask: %s\n", cudaGetErrorString(err));
