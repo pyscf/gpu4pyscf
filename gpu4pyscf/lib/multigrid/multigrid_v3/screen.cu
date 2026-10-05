@@ -23,7 +23,6 @@
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
-#include "gsycl/gpu_compat.h"
 
 #define TILE    4
 #define THREADS 256

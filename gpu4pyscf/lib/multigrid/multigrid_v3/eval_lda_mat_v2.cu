@@ -22,7 +22,6 @@
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
-#include "gsycl/gpu_compat.h"
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
@@ -265,7 +264,6 @@ extern "C" {
             out, vxc, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
             negligible, dev_envs); \
-        cudaDeviceSynchronize(); \
     } \
     break
 

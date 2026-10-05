@@ -22,7 +22,6 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
 #include "utils.cuh"
-#include "gsycl/gpu_compat.h"
 #include "aft_recursion.cuh"
 
 #define THREADS         256
@@ -258,7 +257,6 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
     auto grids = make_grid(ntiles*nbatches_shl_pair);
     auto dev_envs = *envs;
         LAUNCH_KERNEL(orth_ft_tau_dm_kernel, grids, threads, 0, densityR, densityI, tauR, tauI, dm, shl_pair_offsets, bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum, ntiles, factor, dev_envs);
-    cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_ft_tau_dm_kernel: %s\n", cudaGetErrorString(err));
