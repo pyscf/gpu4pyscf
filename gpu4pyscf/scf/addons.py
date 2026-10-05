@@ -67,6 +67,7 @@ def convert_to_uhf(mf, out=None, remove_df=False):
             dft.roks.ROKS     : dft.uks.UKS,
             dft.rks.RKS       : dft.uks.UKS,
             scf.rohf.ROHF     : scf.uhf.UHF,
+            scf.rohf.HF1e     : scf.uhf.UHF,
             scf.hf.RHF        : scf.uhf.UHF,
         }
         out = _object_without_soscf(mf, known_cls, remove_df)
@@ -206,6 +207,7 @@ def convert_to_ghf(mf, out=None, remove_df=False):
             dft.rks.RKS       : dft.gks.GKS,
             dft.uks.UKS       : dft.gks.GKS,
             scf.rohf.ROHF     : scf.ghf.GHF,
+            scf.rohf.HF1e     : scf.ghf.GHF,
             scf.hf.RHF        : scf.ghf.GHF,
             scf.uhf.UHF       : scf.ghf.GHF,
         }
