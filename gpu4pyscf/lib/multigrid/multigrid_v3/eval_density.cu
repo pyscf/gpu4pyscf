@@ -22,7 +22,6 @@
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
-#include "gsycl/gpu_compat.h"
 
 #define TILE            4
 #define WARP_SIZE       32
@@ -322,7 +321,6 @@ extern "C" {
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
             a_dot_b, a_dot_c, b_dot_c, da_squared, db_squared, dc_squared, \
             mesh_a, mesh_b, mesh_c, negligible, dev_envs); \
-        cudaDeviceSynchronize(); \
     } \
     break
 

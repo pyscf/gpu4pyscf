@@ -22,7 +22,6 @@
 #include "constant_objects.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
-#include "gsycl/gpu_compat.h"
 
 #define TILE            4
 #define WARP_SIZE       32
@@ -377,7 +376,6 @@ extern "C" {
             grad, strain, dm, vxc, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
             factor, negligible, dev_envs); \
-        cudaDeviceSynchronize(); \
     } \
     break
 

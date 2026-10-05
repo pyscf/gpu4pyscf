@@ -20,7 +20,6 @@
 #include <string.h>
 #include <assert.h>
 #include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 
 #define LMAX 4
