@@ -485,10 +485,8 @@ static void left_cart2sph_inplace(double* cartesian_matrix, const int n_ao_carte
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_ao  = gid_x;  // AO index (Cartesian or spherical)
-    const int i_bas = gid_y;  // Shell (basis function) index
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_ao_cartesian || i_bas >= n_bas)
         return;
@@ -508,10 +506,8 @@ static void left_sph2cart_inplace(double* cartesian_matrix, const int n_ao_carte
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_ao  = gid_x;  // AO index (Cartesian or spherical)
-    const int i_bas = gid_y;  // Shell (basis function) index
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_ao_cartesian || i_bas >= n_bas)
         return;
@@ -533,10 +529,8 @@ static void left_sph2cart(double* cartesian_matrix, const double* spherical_matr
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_ao  = gid_x;  // AO index (Cartesian or spherical)
-    const int i_bas = gid_y;  // Shell (basis function) index
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_right || i_bas >= n_bas)
         return;
@@ -556,10 +550,8 @@ static void right_cart2sph_inplace(double* cartesian_matrix, const int n_ao_cart
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_ao  = gid_x;  // AO index (Cartesian or spherical)
-    const int i_bas = gid_y;  // Shell (basis function) index
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_ao_cartesian || i_bas >= n_bas)
         return;
@@ -579,10 +571,8 @@ static void right_sph2cart_inplace(double* cartesian_matrix, const int n_ao_cart
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_ao  = gid_x;  // AO index (Cartesian or spherical)
-    const int i_bas = gid_y;  // Shell (basis function) index
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_ao_cartesian || i_bas >= n_bas)
         return;
@@ -602,10 +592,8 @@ static void copy_spherical_cart2sph(const double* cartesian_matrix, double* sphe
                                     const int* d_ao_idx)
 {
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_bas = gid_x;  // i-shell (row basis function) index
-    const int j_bas = gid_y;  // j-shell (column basis function) index
+    const int i_bas = global_x;  // i-shell (row basis function) index
+    const int j_bas = global_y;  // j-shell (column basis function) index
 
     if (i_bas >= n_bas_i || j_bas >= n_bas_j)
         return;
@@ -633,10 +621,8 @@ static void copy_spherical_sph2cart(double* cartesian_matrix, const double* sphe
                                     const int* d_ao_idx)
 {
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_bas = gid_x;  // i-shell (row basis function) index
-    const int j_bas = gid_y;  // j-shell (column basis function) index
+    const int i_bas = global_x;  // i-shell (row basis function) index
+    const int j_bas = global_y;  // j-shell (column basis function) index
 
     if (i_bas >= n_bas_i || j_bas >= n_bas_j)
         return;
@@ -664,10 +650,8 @@ static void copy_cartesian_pad_to_unpad(const double* cartesian_matrix, double* 
                                         const int* d_ao_idx)
 {
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_bas = gid_x;  // i-shell (row basis function) index
-    const int j_bas = gid_y;  // j-shell (column basis function) index
+    const int i_bas = global_x;  // i-shell (row basis function) index
+    const int j_bas = global_y;  // j-shell (column basis function) index
 
     if (i_bas >= n_bas_i || j_bas >= n_bas_j)
         return;
@@ -693,10 +677,8 @@ static void copy_cartesian_unpad_to_pad(double* cartesian_matrix, const double* 
                                         const int* d_ao_idx)
 {
     setup_context();
-    const int gid_x = global_x;
-    const int gid_y = global_y;
-    const int i_bas = gid_x;  // i-shell (row basis function) index
-    const int j_bas = gid_y;  // j-shell (column basis function) index
+    const int i_bas = global_x;  // i-shell (row basis function) index
+    const int j_bas = global_y;  // j-shell (column basis function) index
 
     if (i_bas >= n_bas_i || j_bas >= n_bas_j)
         return;
