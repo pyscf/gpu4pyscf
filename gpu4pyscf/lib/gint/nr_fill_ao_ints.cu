@@ -45,7 +45,7 @@
 #define GINT_CAT_(a, b) a##b
 #define GINT_CAT(a, b)  GINT_CAT_(a, b)
 #define GINT_LAUNCH_KERNEL(...) \
-    LAUNCH_KERNEL_S((__VA_ARGS__), blocks, threads, 0, stream, *envs, *eri, *offsets);
+    LAUNCH_KERNEL((__VA_ARGS__), blocks, threads, 0, ON_STREAM(stream), *envs, *eri, *offsets);
 
 __host__
 static int GINTfill_int2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)

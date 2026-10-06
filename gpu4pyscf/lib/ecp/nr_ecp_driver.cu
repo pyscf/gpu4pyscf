@@ -39,8 +39,9 @@
 #define ECP_LAUNCH2(TAG, KPREFIX, LI, LJ, LC) \
     LAUNCH_KERNEL((KPREFIX<LI,LJ,LC>), blocks, threads, 0, ECP_ARGS)
 
-#define ECP_LAUNCH_SMEM(TAG, SMEM, KFUNC, ...) \
-    LAUNCH_KERNEL_DYN((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__)
+#define ECP_LAUNCH_SMEM(TAG, SMEM, KFUNC, ...) { \
+    LAUNCH_KERNEL_DYN((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__); \
+}
 
 #define ECP_LAUNCH_GENERAL(TAG, SMEM, KFUNC, ...) do { \
     cudaError_t _e = cudaFuncSetAttribute( \
@@ -52,6 +53,38 @@
     } \
     LAUNCH_KERNEL_DYN((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__); \
 } while(0)
+
+namespace {
+
+// Forwarding wrappers giving the (overloaded) type1_cart/type2_cart kernels a
+// unique name usable as a non-type template argument.
+__global__
+void ecp_type2_cart_wrap(double *gctr,
+                         const int LI, const int LJ, const int LC,
+                         const int *ao_loc, const int nao,
+                         const int *tasks, const int ntasks,
+                         const int *ecpbas, const int *ecploc,
+                         const int *atm, const int *bas, const double *env,
+                         void *shm_mem)
+{
+    type2_cart(gctr, LI, LJ, LC, ao_loc, nao, tasks, ntasks,
+               ecpbas, ecploc, atm, bas, env, shm_mem);
+}
+
+__global__
+void ecp_type1_cart_wrap(double *gctr,
+                         const int LI, const int LJ,
+                         const int *ao_loc, const int nao,
+                         const int *tasks, const int ntasks,
+                         const int *ecpbas, const int *ecploc,
+                         const int *atm, const int *bas, const double *env,
+                         void *shm_mem)
+{
+    type1_cart(gctr, LI, LJ, ao_loc, nao, tasks, ntasks,
+               ecpbas, ecploc, atm, bas, env, shm_mem);
+}
+
+} // namespace
 
 extern "C" {
 int ECP_cart(double *gctr,
@@ -99,7 +132,7 @@ int ECP_cart(double *gctr,
             int smem_size4 = lj1*nfj*ljc1; // angj
             int smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
 
-            ECP_LAUNCH_SMEM(type2_cart_sycl, smem_size, type2_cart,
+            ECP_LAUNCH_SMEM(type2_cart_sycl, smem_size, ecp_type2_cart_wrap,
                             gctr, li, lj, lc, ao_loc, nao,
                             tasks, ntasks, ecpbas, ecploc, atm, bas, env);
         }}
@@ -121,7 +154,7 @@ int ECP_cart(double *gctr,
             const int lij3 = lij1*lij1*lij1;
             int smem_size = lij3 + lij1*lij1;
 
-            ECP_LAUNCH_SMEM(type1_cart_kernel, smem_size, type1_cart,
+            ECP_LAUNCH_SMEM(type1_cart_kernel, smem_size, ecp_type1_cart_wrap,
                             gctr, li, lj, ao_loc, nao,
                             tasks, ntasks, ecpbas, ecploc, atm, bas, env);
         }

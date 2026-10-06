@@ -24,6 +24,9 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 // double2 component access. sycl::double2 exposes .x()/.y() methods,
 // CUDA double2 exposes .x/.y fields.
@@ -197,57 +200,99 @@ inline sycl::range<3> make_block(
     return sycl::range<3>(z, y, x);
 }
 
+namespace gpu4pyscf_detail {
+
+// LAUNCH_KERNEL helper machinery. The kernel name arrives as a non-type
+// template parameter (C++20): it is a constant expression, so the device
+// lambda invokes it directly and SYCL never sees a function pointer.
+// Argument handling:
+//  * every argument is copied by value into a std::tuple on the host; an
+//    argument that is a pointer to a struct (PBCIntEnvVars*, etc.) is
+//    dereferenced into the tuple, so `*envs`/`dev_envs` hoists at call
+//    sites are unnecessary;
+//  * a stream argument is marked with ON_STREAM(stream) in the first
+//    kernel-argument slot; anything else goes to the kernel.
+struct stream_tag {
+    sycl::queue* q;
+};
+inline stream_tag on_stream(sycl::queue* q) { return {q}; }
+inline stream_tag on_stream(sycl::queue& q) { return {&q}; }
+
+template <class Tuple, auto Kernel, std::size_t... I>
+inline void _apply_call(const Tuple& t, std::index_sequence<I...>) {
+    Kernel(std::get<I>(t)...);
+}
+
+template <class Tuple, auto Kernel, std::size_t... I>
+inline void _apply_call_shm(const Tuple& t, char* shm, std::index_sequence<I...>) {
+    Kernel(std::get<I>(t)..., shm);
+}
+
+template <auto Kernel, typename... Args>
+inline void launch_submit(sycl::queue* q, sycl::range<3> grid,
+                          sycl::range<3> block, Args... args) {
+    auto tup = std::make_tuple(args...);
+    q->parallel_for(sycl::nd_range<3>(grid * block, block),
+        [tup](sycl::nd_item<3>) {
+            _apply_call<decltype(tup), Kernel>(tup,
+                std::index_sequence_for<Args...>{});
+        });
+}
+
+template <auto Kernel, typename... Args>
+inline void launch_dyn(sycl::queue* q, sycl::range<3> grid,
+                       sycl::range<3> block, std::size_t shm_size,
+                       Args... args) {
+    auto tup = std::make_tuple(args...);
+    q->submit([tup, grid, block, shm_size](sycl::handler& cgh) {
+        sycl::local_accessor<char, 1> _dynshm(sycl::range<1>(shm_size), cgh);
+        cgh.parallel_for(sycl::nd_range<3>(grid * block, block),
+            [_dynshm, tup](sycl::nd_item<3>) {
+                char* shm = GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(_dynshm);
+                _apply_call_shm<decltype(tup), Kernel>(tup, shm,
+                    std::index_sequence_for<Args...>{});
+            });
+    });
+}
+
+template <auto Kernel, typename... Args>
+inline void launch_kernel(sycl::range<3> grid, sycl::range<3> block,
+                          std::size_t shm_size, Args... args) {
+    (void)shm_size;
+    launch_submit<Kernel>(sycl_get_queue(), grid, block, args...);
+}
+template <auto Kernel, typename... Args>
+inline void launch_kernel(sycl::range<3> grid, sycl::range<3> block,
+                          std::size_t shm_size, stream_tag st, Args... args) {
+    (void)shm_size;
+    launch_submit<Kernel>(st.q, grid, block, args...);
+}
+
+template <auto Kernel, typename... Args>
+inline void launch_kernel_dyn(sycl::range<3> grid, sycl::range<3> block,
+                              std::size_t shm_size, Args... args) {
+    launch_dyn<Kernel>(sycl_get_queue(), grid, block, shm_size, args...);
+}
+template <auto Kernel, typename... Args>
+inline void launch_kernel_dyn(sycl::range<3> grid, sycl::range<3> block,
+                              std::size_t shm_size, stream_tag st,
+                              Args... args) {
+    launch_dyn<Kernel>(st.q, grid, block, shm_size, args...);
+}
+
+} // namespace gpu4pyscf_detail
+
+#define ON_STREAM(s) gpu4pyscf_detail::on_stream(s)
+
 #define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
-    { \
-        sycl_get_queue()->parallel_for( \
-            sycl::nd_range<3>(grid * block, block), \
-            [=](sycl::nd_item<3>) { kernel(__VA_ARGS__); }); \
-    }
-
-// Explicit-stream form for call sites with their own stream/queue object
-// or pointer (e.g. solvent, vv10 take cudaStream_t params from callers).
-#define LAUNCH_KERNEL_S(kernel, grid, block, shm_size, stream, ...) \
-    { \
-        _gpu4pyscf_stream_ptr(stream)->parallel_for( \
-            sycl::nd_range<3>(grid * block, block), \
-            [=](sycl::nd_item<3>) { kernel(__VA_ARGS__); }); \
-    }
-
-// Dynamic-shared variant: allocates shm_size bytes of local memory and
-// forwards its pointer as a trailing `void *shm_mem` kernel argument in
-// BOTH backends (CUDA passes nullptr; the kernel uses `extern __shared__`
-// via DYNAMIC_SHARED_PTR instead).
+    { gpu4pyscf_detail::launch_kernel<kernel>(grid, block, shm_size, __VA_ARGS__); }
 #define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, ...) \
-    { \
-        sycl_get_queue()->submit([&](sycl::handler &cgh) { \
-            sycl::local_accessor<char, 1> _dynshm( \
-                sycl::range<1>(shm_size), cgh); \
-            cgh.parallel_for( \
-                sycl::nd_range<3>(grid * block, block), \
-                [=](sycl::nd_item<3>) { \
-                    kernel(__VA_ARGS__, \
-                           GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(_dynshm)); \
-                }); \
-        }); \
-    }
-
-#define LAUNCH_KERNEL_DYN_S(kernel, grid, block, shm_size, stream, ...) \
-    { \
-        _gpu4pyscf_stream_ptr(stream)->submit([&](sycl::handler &cgh) { \
-            sycl::local_accessor<char, 1> _dynshm( \
-                sycl::range<1>(shm_size), cgh); \
-            cgh.parallel_for( \
-                sycl::nd_range<3>(grid * block, block), \
-                [=](sycl::nd_item<3>) { \
-                    kernel(__VA_ARGS__, \
-                           GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(_dynshm)); \
-                }); \
-        }); \
-    }
+    { gpu4pyscf_detail::launch_kernel_dyn<kernel>(grid, block, shm_size, __VA_ARGS__); }
 
 #else
-// Dummy so queue-based launch sites compile in CUDA builds.
-// The CUDA LAUNCH_KERNEL macro discards this argument.
+// CUDA
+
+// Dummy so sycl_get_queue() call sites compile in CUDA builds.
 static inline void *sycl_get_queue() { return nullptr; }
 
 inline dim3 make_grid(
@@ -262,30 +307,41 @@ inline dim3 make_block(
     return dim3(x, y, z);
 }
 
+namespace gpu4pyscf_detail {
+
+struct stream_tag {
+    cudaStream_t s;
+};
+inline stream_tag on_stream(cudaStream_t s) { return {s}; }
+
+template <class Kernel, typename... Rest>
+inline void launch_kernel(Kernel kernel, dim3 grid, dim3 block,
+                          std::size_t shm_size, Rest... rest) {
+    kernel<<<grid, block, shm_size, 0>>>(rest...);
+}
+template <class Kernel, typename... Rest>
+inline void launch_kernel(Kernel kernel, dim3 grid, dim3 block,
+                          std::size_t shm_size, stream_tag st, Rest... rest) {
+    kernel<<<grid, block, shm_size, st.s>>>(rest...);
+}
+template <class Kernel, typename... Rest>
+inline void launch_kernel_dyn(Kernel kernel, dim3 grid, dim3 block,
+                              std::size_t shm_size, Rest... rest) {
+    kernel<<<grid, block, shm_size, 0>>>(rest..., nullptr);
+}
+template <class Kernel, typename... Rest>
+inline void launch_kernel_dyn(Kernel kernel, dim3 grid, dim3 block,
+                              std::size_t shm_size, stream_tag st, Rest... rest) {
+    kernel<<<grid, block, shm_size, st.s>>>(rest..., nullptr);
+}
+
+} // namespace gpu4pyscf_detail
+
+#define ON_STREAM(s) gpu4pyscf_detail::on_stream(s)
+
 #define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
-    { \
-        kernel<<<grid, block, shm_size, 0>>>(__VA_ARGS__); \
-    }
-
-#define LAUNCH_KERNEL_S(kernel, grid, block, shm_size, stream, ...) \
-    { \
-        kernel<<<grid, block, shm_size, stream>>>(__VA_ARGS__); \
-    }
-
-// Dynamic-shared variant: forwards shm_size as a trailing `void *shm_mem`
-// kernel argument in BOTH backends, matching DYNAMIC_SHARED_PTR.
+    { gpu4pyscf_detail::launch_kernel(kernel, grid, block, shm_size, __VA_ARGS__); }
 #define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, ...) \
-    { \
-        kernel<<<grid, block, shm_size, 0>>>(__VA_ARGS__, nullptr); \
-    }
+    { gpu4pyscf_detail::launch_kernel_dyn(kernel, grid, block, shm_size, __VA_ARGS__); }
 
-#define LAUNCH_KERNEL_DYN_S(kernel, grid, block, shm_size, stream, ...) \
-    { \
-        kernel<<<grid, block, shm_size, stream>>>(__VA_ARGS__, nullptr); \
-    }
 #endif
-
-// Stream/queue normalization helper: LAUNCH_KERNEL_{S,DYN_S} accept either a
-// stream object or a queue pointer in the stream slot, on both backends.
-template <typename T> inline T *_gpu4pyscf_stream_ptr(T *s) { return s; }
-template <typename T> inline T *_gpu4pyscf_stream_ptr(T &s) { return &s; }
