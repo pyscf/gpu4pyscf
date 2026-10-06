@@ -1,325 +1,333 @@
-diff --git a/CMakeLists.txt b/CMakeLists.txt
-index f4bc824fd..d886f75aa 100644
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
-@@ -145,144 +145,34 @@ set(raw_sources_list
-   functionals.c
-   hybrids.c
-   gga.c
--  gga_c_acgga.c
--  gga_c_acggap.c
--  gga_c_am05.c
--  gga_c_bmk.c
--  gga_c_chachiyo.c
--  gga_c_cs1.c
--  gga_c_ft97.c
--  gga_c_gapc.c
--  gga_c_gaploc.c
--  gga_c_hcth_a.c
--  gga_c_lm.c
-   gga_c_lyp.c
-   gga_c_lypr.c
-   gga_c_op_b88.c
--  gga_c_op_g96.c
-   gga_c_op_pbe.c
--  gga_c_op_pw91.c
--  gga_c_op_xalpha.c
--  gga_c_optc.c
-   gga_c_p86.c
--  gga_c_p86vwn.c
-   gga_c_pbe.c
--  gga_c_pbe_vwn.c
-   gga_c_pbeloc.c
--  gga_c_pbe_erf_gws.c
-   gga_c_pw91.c
--  gga_c_q2d.c
--  gga_c_regtpss.c
--  gga_c_revtca.c
--  gga_c_scan_e0.c
--  gga_c_sg4.c
--  gga_c_sogga11.c
--  gga_c_tca.c
--  gga_c_w94.c
--  gga_c_wi.c
--  gga_c_wl.c
--  gga_c_zpbeint.c
--  gga_c_zvpbeint.c
--  gga_c_zvpbeloc.c
--  gga_k_dk.c
--  gga_k_pg.c
--  gga_k_rational_p.c
--  gga_k_meyer.c
--  gga_k_ol1.c
--  gga_k_ol2.c
--  gga_x_ol2.c
--  gga_k_pearson.c
--  gga_k_tflw.c
--  gga_k_thakkar.c
--  gga_k_gds08.c
--  gga_k_exp4.c
--  gga_x_2d_b86.c
--  gga_x_2d_b86_mgc.c
--  gga_x_2d_b88.c
--  gga_x_2d_pbe.c
--  gga_x_airy.c
--  gga_x_ak13.c
--  gga_x_am05.c
--  gga_x_b86.c
-   gga_x_b88.c
--  gga_k_llp.c
--  gga_k_pw86.c
--  gga_k_mpbe.c
--  gga_k_apbe.c
--  gga_k_apbeint.c
--  gga_k_lc94.c
--  gga_k_lkt.c
--  gga_k_vt84f.c
--  gga_x_bayesian.c
--  gga_x_beefvdw.c
--  gga_x_bpccac.c
--  gga_x_c09x.c
--  gga_x_cap.c
--  gga_x_chachiyo.c
--  gga_x_dk87.c
--  gga_x_ev93.c
--  gga_x_ft97.c
--  gga_x_g96.c
--  gga_x_gg99.c
--  gga_x_hcth_a.c
-   gga_x_hjs.c
--  gga_x_hjs_b88_v2.c
--  gga_x_htbs.c
-   gga_x_ityh.c
--  gga_x_ityh_optx.c
-   gga_x_ityh_pbe.c
--  gga_x_kt.c
--  gga_x_lag.c
-   gga_x_lb.c
--  gga_x_lg93.c
--  gga_x_lspbe.c
--  gga_x_lsrpbe.c
--  gga_x_lv_rpw86.c
--  gga_x_mpbe.c
--  gga_x_n12.c
--  gga_x_ncap.c
-   gga_x_optx.c
-   gga_x_pbe.c
--  gga_x_pbea.c
-   gga_x_pbeint.c
--  gga_x_pbepow.c
--  gga_x_pbetrans.c
--  gga_x_pbe_erf_gws.c
-   gga_x_pw86.c
-   gga_x_pw91.c
--  gga_x_q1d.c
--  gga_x_q2d.c
--  gga_x_rge2.c
-   gga_x_rpbe.c
--  gga_x_s12.c
-   gga_x_sfat.c
-   gga_x_sfat_pbe.c
--  gga_x_sg4.c
--  gga_x_sogga11.c
--  gga_x_ssb_sw.c
--  gga_x_vmt.c
--  gga_x_vmt84.c
-   gga_x_wc.c
-   gga_x_wpbeh.c
--  gga_x_fd_lb94.c
--  gga_xc_1w.c
-   gga_xc_b97.c
--  gga_xc_edf1.c
--  gga_xc_oblyp_d.c
--  gga_xc_th1.c
--  gga_xc_th2.c
--  gga_xc_th3.c
-   gga_xc_vv10.c
--  gga_k_lgap.c
--  gga_k_lgap_ge.c
--  gga_c_ccdf.c
--  gga_x_bkl.c
-   hyb_gga_xc_b1wc.c
-   hyb_gga_xc_b3lyp.c
-   hyb_gga_xc_cam_b3lyp.c
--  hyb_gga_xc_camy_b3lyp.c
--  hyb_gga_xc_camy_blyp.c
--  hyb_gga_xc_edf2.c
-   hyb_gga_xc_hse.c
-   hyb_gga_xc_lc_blyp.c
-   hyb_gga_xc_lcy_blyp.c
-@@ -290,166 +180,41 @@ set(raw_sources_list
-   hyb_gga_xc_o3lyp.c
-   hyb_gga_xc_pbeh.c
-   hyb_gga_xc_wb97.c
--  hyb_lda_xc_cam_lda0.c
--  hyb_lda_xc_bn05.c
--  hyb_mgga_x_dldf.c
-   hyb_mgga_x_m05.c
--  hyb_mgga_x_mvsh.c
--  hyb_mgga_xc_b88b95.c
--  hyb_mgga_xc_kcis.c
-   hyb_mgga_xc_tpssh.c
-   hyb_mgga_xc_wb97mv.c
--  hyb_mgga_x_js18.c
--  hyb_mgga_x_pjs18.c
--  hyb_gga_xc_cam_o3lyp.c
--  hyb_gga_x_cam_s12.c
--  hyb_gga_xc_case21.c
--  hyb_mgga_xc_gas22.c
--  integrate.c
-+  #integrate.c
-   lda.c
--  lda_c_1d_csc.c
--  lda_c_1d_loos.c
--  lda_c_2d_amgb.c
--  lda_c_2d_prm.c
--  lda_c_chachiyo.c
--  lda_c_chachiyo_mod.c
--  lda_c_gombas.c
--  lda_c_hl.c
--  lda_c_lp96.c
--  lda_c_ml1.c
--  lda_c_pk09.c
-   lda_c_pw.c
-   lda_c_pz.c
-   lda_c_rc04.c
--  lda_c_rpa.c
-   lda_c_vwn.c
--  lda_c_vwn_1.c
--  lda_c_vwn_2.c
-   lda_c_vwn_3.c
--  lda_c_vwn_4.c
-   lda_c_vwn_rpa.c
--  lda_c_wigner.c
--  lda_c_gk72.c
--  lda_c_w20.c
--  lda_c_pw_erf.c
--  lda_k_tf.c
--  lda_k_zlp.c
--  lda_k_gds08_worker.c
-   lda_x.c
--  lda_x_1d_soft.c
--  lda_x_1d_exponential.c
--  lda_x_2d.c
--  lda_x_erf.c
--  lda_x_rel.c
--  lda_xc_1d_ehwlrg.c
--  lda_xc_ksdt.c
--  lda_xc_teter93.c
--  lda_xc_zlp.c
--  lda_c_pmgb06.c
--  lda_xc_tih.c
--  lda_x_sloc.c
--  lda_x_yukawa.c
--  lda_c_epc17.c
--  lda_c_epc18.c
-   mgga.c
-   mgga_c_b88.c
--  mgga_c_b94.c
--  mgga_c_bc95.c
--  mgga_c_cs.c
--  mgga_c_kcis.c
--  mgga_c_kcisk.c
--  mgga_xc_lp90.c
-   mgga_c_m05.c
-   mgga_c_m06l.c
--  mgga_c_m08.c
--  mgga_c_pkzb.c
-   mgga_c_revscan.c
-   mgga_c_revtpss.c
-   mgga_c_rscan.c
-   mgga_c_scan.c
-   mgga_c_scanl.c
-   mgga_c_tpss.c
--  mgga_c_tpssloc.c
--  mgga_c_vsxc.c
--  mgga_c_cc.c
--  mgga_c_ccalda.c
--  mgga_k_pc07.c
--  mgga_k_csk.c
--  mgga_k_csk_loc.c
--  mgga_k_pgslb.c
--  mgga_x_2d_prhg07.c
--  mgga_x_2d_prp10.c
--  mgga_x_br89.c
--  mgga_x_br89_explicit.c
--  mgga_x_tb09.c
--  mgga_x_gvt4.c
--  mgga_x_gx.c
--  mgga_x_jk.c
--  mgga_x_lta.c
-   mgga_x_m06l.c
--  mgga_x_m08.c
--  mgga_x_m11.c
--  mgga_x_m11_l.c
--  mgga_x_mbeef.c
--  mgga_x_mbeefvdw.c
--  mgga_x_mn12.c
--  mgga_x_ms.c
--  mgga_x_msb.c
--  mgga_x_mvs.c
--  mgga_x_mvsb.c
--  mgga_x_pbe_gx.c
--  mgga_x_pkzb.c
-   mgga_x_rscan.c
--  mgga_x_sa_tpss.c
-   mgga_x_scan.c
-   mgga_x_scanl.c
--  mgga_x_tau_hcth.c
--  mgga_x_tm.c
--  mgga_x_regtm.c
--  mgga_x_revtm.c
-   mgga_x_tpss.c
--  mgga_x_regtpss.c
--  mgga_x_vt84.c
--  mgga_x_rtpss.c
-   mgga_xc_b97mv.c
--  mgga_xc_cc06.c
--  mgga_xc_hle17.c
--  mgga_xc_otpss_d.c
--  mgga_xc_zlp.c
--  mgga_xc_b98.c
--  mgga_x_2d_js17.c
--  mgga_x_edmgga.c
--  mgga_x_gdme.c
--  mgga_x_rlda.c
-   mgga_x_scanl.c
-   mgga_c_scanl.c
--  mgga_x_mbrxh_bg.c
--  mgga_x_mbrxc_bg.c
--  mgga_x_task.c
--  mgga_x_mggac.c
--  mgga_x_th.c
--  mgga_x_mbr.c
--  mgga_c_ltapw.c
-   mgga_x_r2scan.c
-   mgga_c_r2scan.c
--  mgga_k_lk.c
--  mgga_k_rda.c
--  mgga_k_gea2.c
--  mgga_k_gea4.c
-   mgga_x_r2scanl.c
-   mgga_c_r2scanl.c
--  mgga_c_rregtm.c
--  mgga_x_mcml.c
--  mgga_c_rmggac.c
--  mgga_x_rppscan.c
--  mgga_c_rppscan.c
--  mgga_x_r4scan.c
--  mgga_x_ft98.c
--  mgga_x_ktbm.c
--  hyb_mgga_xc_br3p86.c
--  mgga_x_vcml.c
-   hyb_mgga_xc_r2scan.c
--  mgga_x_eel.c
-   mix_func.c
-   deorbitalize_func.c
-   references.c
+diff --git a/src/sources.mk b/src/sources.mk
+--- a/src/sources.mk
++++ b/src/sources.mk
+@@ -6,322 +6,78 @@
+ 	func_reference.c \
+ 	functionals.c \
+ 	gga.c \
+-	gga_c_acgga.c \
+-	gga_c_acggap.c \
+-	gga_c_am05.c \
+-	gga_c_bmk.c \
+-	gga_c_ccdf.c \
+-	gga_c_chachiyo.c \
+-	gga_c_cs1.c \
+-	gga_c_ft97.c \
+-	gga_c_gapc.c \
+-	gga_c_gaploc.c \
+-	gga_c_hcth_a.c \
+-	gga_c_lm.c \
+ 	gga_c_lyp.c \
+ 	gga_c_lypr.c \
+ 	gga_c_op_b88.c \
+-	gga_c_op_g96.c \
+ 	gga_c_op_pbe.c \
+-	gga_c_op_pw91.c \
+-	gga_c_op_xalpha.c \
+-	gga_c_optc.c \
+ 	gga_c_p86.c \
+-	gga_c_p86vwn.c \
+ 	gga_c_pbe.c \
+-	gga_c_pbe_erf_gws.c \
+-	gga_c_pbe_vwn.c \
+ 	gga_c_pbeloc.c \
+ 	gga_c_pw91.c \
+-	gga_c_q2d.c \
+-	gga_c_regtpss.c \
+-	gga_c_revtca.c \
+-	gga_c_scan_e0.c \
+-	gga_c_sg4.c \
+-	gga_c_sogga11.c \
+-	gga_c_tca.c \
+-	gga_c_w94.c \
+-	gga_c_wi.c \
+-	gga_c_wl.c \
+-	gga_c_zpbeint.c \
+-	gga_c_zvpbeint.c \
+-	gga_c_zvpbeloc.c \
+-	gga_k_apbe.c \
+-	gga_k_apbeint.c \
+-	gga_k_dk.c \
+-	gga_k_exp4.c \
+-	gga_k_gds08.c \
+-	gga_k_lc94.c \
+-	gga_k_lgap.c \
+-	gga_k_lgap_ge.c \
+-	gga_k_lkt.c \
+-	gga_k_llp.c \
+-	gga_k_meyer.c \
+-	gga_k_mpbe.c \
+-	gga_k_ol1.c \
+-	gga_k_ol2.c \
+-	gga_k_pearson.c \
+-	gga_k_pg.c \
+-	gga_k_pw86.c \
+-	gga_k_rational_p.c \
+-	gga_k_tflw.c \
+-	gga_k_thakkar.c \
+-	gga_k_vt84f.c \
+-	gga_x_2d_b86.c \
+-	gga_x_2d_b86_mgc.c \
+-	gga_x_2d_b88.c \
+-	gga_x_2d_pbe.c \
+-	gga_x_airy.c \
+-	gga_x_ak13.c \
+-	gga_x_am05.c \
+-	gga_x_b86.c \
+ 	gga_x_b88.c \
+-	gga_x_bayesian.c \
+-	gga_x_beefvdw.c \
+-	gga_x_bkl.c \
+-	gga_x_bpccac.c \
+-	gga_x_c09x.c \
+-	gga_x_cap.c \
+-	gga_x_chachiyo.c \
+-	gga_x_dk87.c \
+-	gga_x_ev93.c \
+-	gga_x_fd_lb94.c \
+-	gga_x_ft97.c \
+-	gga_x_g96.c \
+-	gga_x_gg99.c \
+-	gga_x_hcth_a.c \
+ 	gga_x_hjs.c \
+-	gga_x_hjs_b88_v2.c \
+-	gga_x_htbs.c \
+ 	gga_x_ityh.c \
+-	gga_x_ityh_optx.c \
+ 	gga_x_ityh_pbe.c \
+-	gga_x_kt.c \
+-	gga_x_lb.c \
+-	gga_x_lg93.c \
+-	gga_x_lspbe.c \
+-	gga_x_lsrpbe.c \
+-	gga_x_lv_rpw86.c \
+-	gga_x_mpbe.c \
+-	gga_x_n12.c \
+-	gga_x_ncap.c \
+-	gga_x_ol2.c \
+ 	gga_x_optx.c \
+ 	gga_x_pbe.c \
+-	gga_x_pbe_erf_gws.c \
+-	gga_x_pbea.c \
+ 	gga_x_pbeint.c \
+-	gga_x_pbepow.c \
+-	gga_x_pbetrans.c \
+ 	gga_x_pw86.c \
+ 	gga_x_pw91.c \
+-	gga_x_q1d.c \
+-	gga_x_q2d.c \
+-	gga_x_rge2.c \
+ 	gga_x_rpbe.c \
+-	gga_x_s12.c \
+ 	gga_x_sfat.c \
+ 	gga_x_sfat_pbe.c \
+-	gga_x_sg4.c \
+-	gga_x_sogga11.c \
+-	gga_x_ssb_sw.c \
+-	gga_x_vmt.c \
+-	gga_x_vmt84.c \
+ 	gga_x_wc.c \
+ 	gga_x_wpbeh.c \
+-	gga_xc_1w.c \
+ 	gga_xc_b97.c \
+-	gga_xc_edf1.c \
+-	gga_xc_oblyp_d.c \
+-	gga_xc_th1.c \
+-	gga_xc_th2.c \
+-	gga_xc_th3.c \
+ 	gga_xc_vv10.c \
+-	hyb_gga_x_cam_s12.c \
+ 	hyb_gga_xc_b1wc.c \
+ 	hyb_gga_xc_b3lyp.c \
+ 	hyb_gga_xc_cam_b3lyp.c \
+-	hyb_gga_xc_cam_o3lyp.c \
+-	hyb_gga_xc_camy_b3lyp.c \
+-	hyb_gga_xc_camy_blyp.c \
+-	hyb_gga_xc_case21.c \
+-	hyb_gga_xc_edf2.c \
+ 	hyb_gga_xc_hse.c \
+ 	hyb_gga_xc_lc_blyp.c \
+-	hyb_gga_xc_lcy_blyp.c \
+-	hyb_gga_xc_lcy_pbe.c \
+ 	hyb_gga_xc_o3lyp.c \
+ 	hyb_gga_xc_pbeh.c \
+ 	hyb_gga_xc_wb97.c \
+-	hyb_lda_xc_bn05.c \
+-	hyb_lda_xc_cam_lda0.c \
+-	hyb_mgga_x_dldf.c \
+-	hyb_mgga_x_js18.c \
+ 	hyb_mgga_x_m05.c \
+-	hyb_mgga_x_mvsh.c \
+-	hyb_mgga_x_pjs18.c \
+-	hyb_mgga_x_wr2scan.c \
+-	hyb_mgga_xc_b88b95.c \
+-	hyb_mgga_xc_br3p86.c \
+ 	hyb_mgga_xc_coach.c \
+-	hyb_mgga_xc_gas22.c \
+-	hyb_mgga_xc_kcis.c \
+ 	hyb_mgga_xc_r2scan.c \
+ 	hyb_mgga_xc_tpssh.c \
+ 	hyb_mgga_xc_wb97mv.c \
+ 	hybrids.c \
+ 	integrate.c \
+ 	lda.c \
+-	lda_c_1d_css.c \
+-	lda_c_1d_loos.c \
+-	lda_c_2d_amgb.c \
+-	lda_c_2d_prm.c \
+-	lda_c_chachiyo.c \
+-	lda_c_chachiyo_mod.c \
+-	lda_c_epc17.c \
+-	lda_c_epc18.c \
+-	lda_c_gk72.c \
+-	lda_c_gombas.c \
+-	lda_c_hl.c \
+-	lda_c_lp96.c \
+-	lda_c_ml1.c \
+-	lda_c_pk09.c \
+-	lda_c_pmgb06.c \
+ 	lda_c_pw.c \
+-	lda_c_pw_erf.c \
+ 	lda_c_pz.c \
+ 	lda_c_rc04.c \
+-	lda_c_rpa.c \
+-	lda_c_rpaf.c \
+ 	lda_c_vwn.c \
+-	lda_c_vwn_1.c \
+-	lda_c_vwn_2.c \
+ 	lda_c_vwn_3.c \
+-	lda_c_vwn_4.c \
+ 	lda_c_vwn_rpa.c \
+-	lda_c_w20.c \
+-	lda_c_wigner.c \
+-	lda_k_tf.c \
+-	lda_k_zlp.c \
+ 	lda_x.c \
+-	lda_x_1d_exponential.c \
+-	lda_x_1d_soft.c \
+-	lda_x_2d.c \
+-	lda_x_erf.c \
+-	lda_x_rel.c \
+-	lda_x_sloc.c \
+-	lda_x_yukawa.c \
+-	lda_xc_1d_ehwlrg.c \
+-	lda_xc_ksdt.c \
+-	lda_xc_teter93.c \
+-	lda_xc_th_fl.c \
+-	lda_xc_tih.c \
+-	lda_xc_zlp.c \
+ 	math_brent.c \
+ 	mgga.c \
+ 	mgga_c_b88.c \
+-	mgga_c_b94.c \
+-	mgga_c_bc95.c \
+-	mgga_c_cc.c \
+-	mgga_c_ccalda.c \
+-	mgga_c_cs.c \
+-	mgga_c_kcis.c \
+-	mgga_c_kcisk.c \
+-	mgga_c_lak.c \
+-	mgga_c_ltapw.c \
+ 	mgga_c_m05.c \
+ 	mgga_c_m06l.c \
+ 	mgga_c_m08.c \
+-	mgga_c_mscan.c \
+-	mgga_c_pkzb.c \
+ 	mgga_c_r2scan.c \
+ 	mgga_c_r2scanl.c \
+ 	mgga_c_revscan.c \
+ 	mgga_c_revtpss.c \
+-	mgga_c_rmggac.c \
+-	mgga_c_rppscan.c \
+-	mgga_c_rregtm.c \
+ 	mgga_c_rscan.c \
+ 	mgga_c_scan.c \
+ 	mgga_c_scanl.c \
+ 	mgga_c_tpss.c \
+-	mgga_c_tpssloc.c \
+-	mgga_c_vsxc.c \
+-	mgga_k_csk.c \
+-	mgga_k_csk_loc.c \
+-	mgga_k_gea2.c \
+-	mgga_k_gea4.c \
+-	mgga_k_lk.c \
+-	mgga_k_pc07.c \
+-	mgga_k_pgslb.c \
+-	mgga_k_rda.c \
+-	mgga_x_2d_js17.c \
+-	mgga_x_2d_prhg07.c \
+-	mgga_x_2d_prp10.c \
+ 	mgga_x_br89.c \
+-	mgga_x_br89_explicit.c \
+-	mgga_x_edmgga.c \
+-	mgga_x_eel.c \
+-	mgga_x_ft98.c \
+-	mgga_x_gdme.c \
+-	mgga_x_gvt4.c \
+-	mgga_x_gx.c \
+-	mgga_x_jk.c \
+-	mgga_x_ktbm.c \
+-	mgga_x_lak.c \
+-	mgga_x_lta.c \
+ 	mgga_x_m06l.c \
+-	mgga_x_m08.c \
+-	mgga_x_m11.c \
+-	mgga_x_m11_l.c \
+-	mgga_x_mbeef.c \
+-	mgga_x_mbeefvdw.c \
+-	mgga_x_mbr.c \
+ 	mgga_x_mbrxc_bg.c \
+-	mgga_x_mbrxh_bg.c \
+-	mgga_x_mcml.c \
+-	mgga_x_mggac.c \
+ 	mgga_x_mn12.c \
+-	mgga_x_ms.c \
+-	mgga_x_msb.c \
+-	mgga_x_msb86bl.c \
+-	mgga_x_mscan.c \
+-	mgga_x_mspbel.c \
+-	mgga_x_msrpbel.c \
+-	mgga_x_mvs.c \
+-	mgga_x_pbe_gx.c \
+-	mgga_x_pkzb.c \
+ 	mgga_x_r2scan.c \
+ 	mgga_x_r2scanl.c \
+-	mgga_x_r4scan.c \
+-	mgga_x_regtm.c \
+-	mgga_x_regtpss.c \
+-	mgga_x_revtm.c \
+-	mgga_x_rlda.c \
+-	mgga_x_rppscan.c \
+ 	mgga_x_rscan.c \
+-	mgga_x_rtpss.c \
+-	mgga_x_sa_tpss.c \
+ 	mgga_x_scan.c \
+ 	mgga_x_scanl.c \
+-	mgga_x_sregtm_v1.c \
+-	mgga_x_sregtm_v2.c \
+-	mgga_x_sregtm_v3.c \
+-	mgga_x_task.c \
+-	mgga_x_tau_hcth.c \
+-	mgga_x_tb09.c \
+-	mgga_x_th.c \
+-	mgga_x_tm.c \
+ 	mgga_x_tpss.c \
+-	mgga_x_vcml.c \
+-	mgga_x_vt84.c \
+ 	mgga_xc_b97mv.c \
+-	mgga_xc_b98.c \
+-	mgga_xc_cc06.c \
+-	mgga_xc_hle17.c \
+-	mgga_xc_lp90.c \
+-	mgga_xc_otpss_d.c \
+-	mgga_xc_zlp.c \
+ 	mix_func.c \
+ 	references.c \
+ 	special_functions.c \
 diff --git a/src/funcs_gga.c b/src/funcs_gga.c
-index e282b05cf..842a03a32 100644
 --- a/src/funcs_gga.c
 +++ b/src/funcs_gga.c
-@@ -260,216 +260,216 @@ extern xc_func_info_type xc_func_info_gga_c_mggac;
+@@ -267,223 +267,223 @@
  extern xc_func_info_type xc_func_info_gga_x_q1d;
  
  const xc_func_info_type *xc_gga_known_funct[] = {
@@ -557,7 +565,6 @@ index e282b05cf..842a03a32 100644
 -  &xc_func_info_gga_x_lag,
 -  &xc_func_info_gga_xc_mohlyp,
 -  &xc_func_info_gga_xc_mohlyp2,
--  &xc_func_info_gga_xc_th_fl,
 -  &xc_func_info_gga_xc_th_fc,
 -  &xc_func_info_gga_xc_th_fcfo,
 -  &xc_func_info_gga_xc_th_fco,
@@ -573,7 +580,6 @@ index e282b05cf..842a03a32 100644
 +  //&xc_func_info_gga_x_lag,
 +  //&xc_func_info_gga_xc_mohlyp,
 +  //&xc_func_info_gga_xc_mohlyp2,
-+  //&xc_func_info_gga_xc_th_fl,
 +  //&xc_func_info_gga_xc_th_fc,
 +  //&xc_func_info_gga_xc_th_fcfo,
 +  //&xc_func_info_gga_xc_th_fco,
@@ -630,8 +636,19 @@ index e282b05cf..842a03a32 100644
 -  &xc_func_info_gga_x_ncapr,
 +  //&xc_func_info_gga_x_ncapr,
    &xc_func_info_gga_xc_b97_3c,
+   &xc_func_info_gga_xc_dlb97,
+   &xc_func_info_gga_x_t_pbe1,
+   &xc_func_info_gga_x_t_pbe2,
 -  &xc_func_info_gga_x_bkl1,
 -  &xc_func_info_gga_x_bkl2,
++  //&xc_func_info_gga_x_bkl1,
++  //&xc_func_info_gga_x_bkl2,
+   &xc_func_info_gga_c_bkl1,
+   &xc_func_info_gga_c_bkl2,
+   &xc_func_info_gga_x_df3_opt1,
+-  &xc_func_info_gga_x_df3_opt2,
++  //&xc_func_info_gga_x_df3_opt2,
+   &xc_func_info_gga_x_llp,
 -  &xc_func_info_gga_x_s12g,
 -  &xc_func_info_gga_k_vw,
 -  &xc_func_info_gga_k_ge2,
@@ -657,8 +674,6 @@ index e282b05cf..842a03a32 100644
 -  &xc_func_info_gga_k_lc94,
 -  &xc_func_info_gga_k_llp,
 -  &xc_func_info_gga_k_thakkar,
-+  //&xc_func_info_gga_x_bkl1,
-+  //&xc_func_info_gga_x_bkl2,
 +  //&xc_func_info_gga_x_s12g,
 +  //&xc_func_info_gga_k_vw,
 +  //&xc_func_info_gga_k_ge2,
@@ -687,7 +702,7 @@ index e282b05cf..842a03a32 100644
    &xc_func_info_gga_x_wpbeh,
    &xc_func_info_gga_x_hjs_pbe,
    &xc_func_info_gga_x_hjs_pbe_sol,
-@@ -477,46 +477,46 @@ const xc_func_info_type *xc_gga_known_funct[] = {
+@@ -491,46 +491,46 @@
    &xc_func_info_gga_x_hjs_b97x,
    &xc_func_info_gga_x_ityh,
    &xc_func_info_gga_x_sfat,
@@ -768,10 +783,9 @@ index e282b05cf..842a03a32 100644
    NULL
  };
 diff --git a/src/funcs_hyb_gga.c b/src/funcs_hyb_gga.c
-index a8b808e36..036a41caa 100644
 --- a/src/funcs_hyb_gga.c
 +++ b/src/funcs_hyb_gga.c
-@@ -115,7 +115,7 @@ extern xc_func_info_type xc_func_info_hyb_gga_xc_cam_pbeh;
+@@ -115,7 +115,7 @@
  extern xc_func_info_type xc_func_info_hyb_gga_xc_camy_pbeh;
  
  const xc_func_info_type *xc_hyb_gga_known_funct[] = {
@@ -780,10 +794,10 @@ index a8b808e36..036a41caa 100644
    &xc_func_info_hyb_gga_xc_b97_1p,
    &xc_func_info_hyb_gga_xc_pbe_mol0,
    &xc_func_info_hyb_gga_xc_pbe_sol0,
-@@ -126,11 +126,11 @@ const xc_func_info_type *xc_hyb_gga_known_funct[] = {
+@@ -126,11 +126,11 @@
    &xc_func_info_hyb_gga_xc_b3p86_nwchem,
    &xc_func_info_hyb_gga_xc_relpbe0,
-   &xc_func_info_hyb_gga_xc_opb3lyp,
+   &xc_func_info_hyb_gga_xc_cqtp25,
 -  &xc_func_info_hyb_gga_xc_case21,
 +  //&xc_func_info_hyb_gga_xc_case21,
    &xc_func_info_hyb_gga_xc_pbe_2x,
@@ -794,7 +808,7 @@ index a8b808e36..036a41caa 100644
    &xc_func_info_hyb_gga_xc_wb97x_d3,
    &xc_func_info_hyb_gga_xc_lc_blyp,
    &xc_func_info_hyb_gga_xc_b3pw91,
-@@ -158,7 +158,7 @@ const xc_func_info_type *xc_hyb_gga_known_funct[] = {
+@@ -158,7 +158,7 @@
    &xc_func_info_hyb_gga_xc_sb98_2a,
    &xc_func_info_hyb_gga_xc_sb98_2b,
    &xc_func_info_hyb_gga_xc_sb98_2c,
@@ -803,7 +817,7 @@ index a8b808e36..036a41caa 100644
    &xc_func_info_hyb_gga_xc_hse03,
    &xc_func_info_hyb_gga_xc_hse06,
    &xc_func_info_hyb_gga_xc_hjs_pbe,
-@@ -172,7 +172,7 @@ const xc_func_info_type *xc_hyb_gga_known_funct[] = {
+@@ -172,7 +172,7 @@
    &xc_func_info_hyb_gga_xc_mb3lyp_rc04,
    &xc_func_info_hyb_gga_xc_mpwlyp1m,
    &xc_func_info_hyb_gga_xc_revb3lyp,
@@ -812,7 +826,7 @@ index a8b808e36..036a41caa 100644
    &xc_func_info_hyb_gga_xc_pbe0_13,
    &xc_func_info_hyb_gga_xc_b3lyps,
    &xc_func_info_hyb_gga_xc_qtp17,
-@@ -182,16 +182,16 @@ const xc_func_info_type *xc_hyb_gga_known_funct[] = {
+@@ -182,16 +182,16 @@
    &xc_func_info_hyb_gga_xc_wb97x,
    &xc_func_info_hyb_gga_xc_lrc_wpbeh,
    &xc_func_info_hyb_gga_xc_wb97x_v,
@@ -834,7 +848,7 @@ index a8b808e36..036a41caa 100644
    &xc_func_info_hyb_gga_xc_lc_wpbe,
    &xc_func_info_hyb_gga_xc_hse12,
    &xc_func_info_hyb_gga_xc_hse12s,
-@@ -207,12 +207,12 @@ const xc_func_info_type *xc_hyb_gga_known_funct[] = {
+@@ -207,12 +207,12 @@
    &xc_func_info_hyb_gga_xc_cam_qtp_00,
    &xc_func_info_hyb_gga_xc_cam_qtp_02,
    &xc_func_info_hyb_gga_xc_lc_qtp,
@@ -851,7 +865,7 @@ index a8b808e36..036a41caa 100644
    &xc_func_info_hyb_gga_xc_rcam_b3lyp,
    &xc_func_info_hyb_gga_xc_wc04,
    &xc_func_info_hyb_gga_xc_wp04,
-@@ -223,10 +223,10 @@ const xc_func_info_type *xc_hyb_gga_known_funct[] = {
+@@ -223,10 +223,10 @@
    &xc_func_info_hyb_gga_xc_lc_pbeop,
    &xc_func_info_hyb_gga_xc_lc_blypr,
    &xc_func_info_hyb_gga_xc_mcam_b3lyp,
@@ -867,13 +881,12 @@ index a8b808e36..036a41caa 100644
    NULL
  };
 diff --git a/src/funcs_hyb_lda.c b/src/funcs_hyb_lda.c
-index a3440d775..e39c345e4 100644
 --- a/src/funcs_hyb_lda.c
 +++ b/src/funcs_hyb_lda.c
-@@ -6,9 +6,9 @@ extern xc_func_info_type xc_func_info_hyb_lda_xc_bn05;
- extern xc_func_info_type xc_func_info_hyb_lda_x_erf;
+@@ -8,9 +8,9 @@
  
  const xc_func_info_type *xc_hyb_lda_known_funct[] = {
+   &xc_func_info_hyb_lda_xc_b93,
 -  &xc_func_info_hyb_lda_xc_lda0,
 -  &xc_func_info_hyb_lda_xc_cam_lda0,
 -  &xc_func_info_hyb_lda_xc_bn05,
@@ -885,11 +898,10 @@ index a3440d775..e39c345e4 100644
    NULL
  };
 diff --git a/src/funcs_hyb_mgga.c b/src/funcs_hyb_mgga.c
-index 6ae91c580..1949514f8 100644
 --- a/src/funcs_hyb_mgga.c
 +++ b/src/funcs_hyb_mgga.c
-@@ -53,56 +53,56 @@ extern xc_func_info_type xc_func_info_hyb_mgga_x_pjs18;
- extern xc_func_info_type xc_func_info_hyb_mgga_xc_lc_tmlyp;
+@@ -57,58 +57,58 @@
+ extern xc_func_info_type xc_func_info_hyb_mgga_xc_coach;
  
  const xc_func_info_type *xc_hyb_mgga_known_funct[] = {
 -  &xc_func_info_hyb_mgga_x_dldf,
@@ -915,9 +927,8 @@ index 6ae91c580..1949514f8 100644
 +  //&xc_func_info_hyb_mgga_x_revm11,
    &xc_func_info_hyb_mgga_x_revm06,
    &xc_func_info_hyb_mgga_x_m06_sx,
--  &xc_func_info_hyb_mgga_x_cf22d,
+   &xc_func_info_hyb_mgga_x_cf22d,
 -  &xc_func_info_hyb_mgga_xc_br3p86,
-+  //&xc_func_info_hyb_mgga_x_cf22d,
 +  //&xc_func_info_hyb_mgga_xc_br3p86,
    &xc_func_info_hyb_mgga_xc_tpss0,
 -  &xc_func_info_hyb_mgga_xc_b94_hyb,
@@ -970,18 +981,20 @@ index 6ae91c580..1949514f8 100644
    &xc_func_info_hyb_mgga_xc_r2scanh,
    &xc_func_info_hyb_mgga_xc_r2scan0,
    &xc_func_info_hyb_mgga_xc_r2scan50,
+-  &xc_func_info_hyb_mgga_x_wr2scan,
 -  &xc_func_info_hyb_mgga_xc_edmggah,
 -  &xc_func_info_hyb_mgga_x_js18,
 -  &xc_func_info_hyb_mgga_x_pjs18,
 -  &xc_func_info_hyb_mgga_xc_lc_tmlyp,
++  //&xc_func_info_hyb_mgga_x_wr2scan,
 +  //&xc_func_info_hyb_mgga_xc_edmggah,
 +  //&xc_func_info_hyb_mgga_x_js18,
 +  //&xc_func_info_hyb_mgga_x_pjs18,
 +  //&xc_func_info_hyb_mgga_xc_lc_tmlyp,
-   NULL
- };
+   &xc_func_info_hyb_mgga_x_pi_m06_2x_dl,
+   &xc_func_info_hyb_mgga_x_pi_m06_2x,
+   &xc_func_info_hyb_mgga_xc_coach,
 diff --git a/src/funcs_key.c b/src/funcs_key.c
-index 501ed5407..55f5624c6 100644
 --- a/src/funcs_key.c
 +++ b/src/funcs_key.c
 @@ -2,10 +2,10 @@
@@ -999,27 +1012,31 @@ index 501ed5407..55f5624c6 100644
    {"lda_c_xalpha", 6},
    {"lda_c_vwn", 7},
    {"lda_c_vwn_rpa", 8},
-@@ -15,339 +15,339 @@ xc_functional_key_t xc_functional_keys[] = {
+@@ -15,362 +15,362 @@
    {"lda_c_pw", 12},
    {"lda_c_pw_mod", 13},
    {"lda_c_ob_pw", 14},
 -  {"lda_c_2d_amgb", 15},
 -  {"lda_c_2d_prm", 16},
 -  {"lda_c_vbh", 17},
+-  {"lda_c_1d_css", 18},
 -  {"lda_c_1d_csc", 18},
 -  {"lda_x_2d", 19},
 -  {"lda_xc_teter93", 20},
 -  {"lda_x_1d_soft", 21},
+-  {"lda_x_1d", 21},
 -  {"lda_c_ml1", 22},
 -  {"lda_c_ml2", 23},
 -  {"lda_c_gombas", 24},
 +  //{"lda_c_2d_amgb", 15},
 +  //{"lda_c_2d_prm", 16},
 +  //{"lda_c_vbh", 17},
++  //{"lda_c_1d_css", 18},
 +  //{"lda_c_1d_csc", 18},
 +  //{"lda_x_2d", 19},
 +  //{"lda_xc_teter93", 20},
 +  //{"lda_x_1d_soft", 21},
++  //{"lda_x_1d", 21},
 +  //{"lda_c_ml1", 22},
 +  //{"lda_c_ml2", 23},
 +  //{"lda_c_gombas", 24},
@@ -1046,8 +1063,13 @@ index 501ed5407..55f5624c6 100644
 +  //{"hyb_mgga_x_dldf", 36},
    {"mgga_c_dldf", 37},
    {"gga_x_bcgp", 38},
+   {"gga_x_bgcp", 38},
 -  {"gga_c_acgga", 39},
+-  {"gga_c_bgcp", 39},
+-  {"gga_c_bcgp", 39},
 +  //{"gga_c_acgga", 39},
++  //{"gga_c_bgcp", 39},
++  //{"gga_c_bcgp", 39},
    {"gga_x_lambda_oc2_n", 40},
 -  {"gga_x_b86_r", 41},
 -  {"mgga_xc_zlp", 42},
@@ -1108,6 +1130,7 @@ index 501ed5407..55f5624c6 100644
 -  {"hyb_gga_x_n12_sx", 81},
 -  {"gga_x_n12", 82},
 -  {"gga_c_regtpss", 83},
+-  {"gga_c_vpbe", 83},
 -  {"gga_c_op_xalpha", 84},
 -  {"gga_c_op_g96", 85},
 +  //{"gga_c_zpbesol", 63},
@@ -1131,6 +1154,7 @@ index 501ed5407..55f5624c6 100644
 +  //{"hyb_gga_x_n12_sx", 81},
 +  //{"gga_x_n12", 82},
 +  //{"gga_c_regtpss", 83},
++  //{"gga_c_vpbe", 83},
 +  //{"gga_c_op_xalpha", 84},
 +  //{"gga_c_op_g96", 85},
    {"gga_c_op_pbe", 86},
@@ -1159,8 +1183,9 @@ index 501ed5407..55f5624c6 100644
    {"gga_x_pbe", 101},
    {"gga_x_pbe_r", 102},
 -  {"gga_x_b86", 103},
--  {"gga_x_b86_mgc", 105},
 +  //{"gga_x_b86", 103},
+   {"hyb_lda_xc_b93", 104},
+-  {"gga_x_b86_mgc", 105},
 +  //{"gga_x_b86_mgc", 105},
    {"gga_x_b88", 106},
 -  {"gga_x_g96", 107},
@@ -1303,7 +1328,7 @@ index 501ed5407..55f5624c6 100644
 -  {"gga_x_lag", 193},
 -  {"gga_xc_mohlyp", 194},
 -  {"gga_xc_mohlyp2", 195},
--  {"gga_xc_th_fl", 196},
+-  {"lda_xc_th_fl", 196},
 -  {"gga_xc_th_fc", 197},
 -  {"gga_xc_th_fcfo", 198},
 -  {"gga_xc_th_fco", 199},
@@ -1318,7 +1343,7 @@ index 501ed5407..55f5624c6 100644
 +  //{"gga_x_lag", 193},
 +  //{"gga_xc_mohlyp", 194},
 +  //{"gga_xc_mohlyp2", 195},
-+  //{"gga_xc_th_fl", 196},
++  //{"lda_xc_th_fl", 196},
 +  //{"gga_xc_th_fc", 197},
 +  //{"gga_xc_th_fcfo", 198},
 +  //{"gga_xc_th_fco", 199},
@@ -1364,6 +1389,7 @@ index 501ed5407..55f5624c6 100644
 -  {"mgga_x_mn12_l", 227},
 -  {"mgga_x_ms2_rev", 228},
 -  {"mgga_xc_cc06", 229},
+-  {"mgga_x_gp86", 230},
 -  {"mgga_x_mk00", 230},
 +  //{"gga_k_rational_p", 218},
 +  //{"gga_k_pg1", 219},
@@ -1377,6 +1403,7 @@ index 501ed5407..55f5624c6 100644
 +  //{"mgga_x_mn12_l", 227},
 +  //{"mgga_x_ms2_rev", 228},
 +  //{"mgga_xc_cc06", 229},
++  //{"mgga_x_gp86", 230},
 +  //{"mgga_x_mk00", 230},
    {"mgga_c_tpss", 231},
 -  {"mgga_c_vsxc", 232},
@@ -1389,12 +1416,11 @@ index 501ed5407..55f5624c6 100644
    {"mgga_c_m05_2x", 238},
 -  {"mgga_c_pkzb", 239},
 -  {"mgga_c_bc95", 240},
--  {"mgga_c_revtpss", 241},
--  {"mgga_xc_tpsslyp1w", 242},
--  {"mgga_x_mk00b", 243},
 +  //{"mgga_c_pkzb", 239},
 +  //{"mgga_c_bc95", 240},
-+  //{"mgga_c_revtpss", 241},
+   {"mgga_c_revtpss", 241},
+-  {"mgga_xc_tpsslyp1w", 242},
+-  {"mgga_x_mk00b", 243},
 +  //{"mgga_xc_tpsslyp1w", 242},
 +  //{"mgga_x_mk00b", 243},
    {"mgga_x_bloc", 244},
@@ -1483,9 +1509,6 @@ index 501ed5407..55f5624c6 100644
 -  {"gga_x_chachiyo", 298},
 -  {"mgga_x_rtpss", 299},
 -  {"mgga_x_ms2b", 300},
--  {"mgga_x_ms2bs", 301},
--  {"mgga_x_mvsb", 302},
--  {"mgga_x_mvsbs", 303},
 -  {"hyb_mgga_x_revm11", 304},
 +  //{"hyb_mgga_x_m08_hx", 295},
 +  //{"hyb_mgga_x_m08_so", 296},
@@ -1493,9 +1516,6 @@ index 501ed5407..55f5624c6 100644
 +  //{"gga_x_chachiyo", 298},
 +  //{"mgga_x_rtpss", 299},
 +  //{"mgga_x_ms2b", 300},
-+  //{"mgga_x_ms2bs", 301},
-+  //{"mgga_x_mvsb", 302},
-+  //{"mgga_x_mvsbs", 303},
 +  //{"hyb_mgga_x_revm11", 304},
    {"hyb_mgga_x_revm06", 305},
    {"mgga_c_revm06", 306},
@@ -1534,19 +1554,46 @@ index 501ed5407..55f5624c6 100644
 -  {"lda_c_epc17_2", 329},
 -  {"lda_c_epc18_1", 330},
 -  {"lda_c_epc18_2", 331},
--  {"gga_x_bkl1", 338},
--  {"gga_x_bkl2", 339},
--  {"hyb_mgga_x_cf22d", 340},
--  {"mgga_c_cf22d", 341},
 +  //{"lda_c_epc17", 328},
 +  //{"lda_c_epc17_2", 329},
 +  //{"lda_c_epc18_1", 330},
 +  //{"lda_c_epc18_2", 331},
+   {"gga_xc_dlb97", 332},
+-  {"mgga_x_mscan", 333},
+-  {"mgga_c_mscan", 334},
++  //{"mgga_x_mscan", 333},
++  //{"mgga_c_mscan", 334},
+   {"gga_x_t_pbe1", 335},
+   {"gga_x_t_pbe2", 336},
+-  {"lda_x_t_sloc", 337},
+-  {"gga_x_bkl1", 338},
+-  {"gga_x_bkl2", 339},
++  //{"lda_x_t_sloc", 337},
 +  //{"gga_x_bkl1", 338},
 +  //{"gga_x_bkl2", 339},
-+  //{"hyb_mgga_x_cf22d", 340},
-+  //{"mgga_c_cf22d", 341},
-   {"hyb_gga_xc_opb3lyp", 386},
+   {"hyb_mgga_x_cf22d", 340},
+   {"mgga_c_cf22d", 341},
+-  {"mgga_x_lak", 342},
++  //{"mgga_x_lak", 342},
+   {"gga_c_bkl1", 343},
+   {"gga_c_bkl2", 344},
+-  {"mgga_c_lak", 345},
++  //{"mgga_c_lak", 345},
+   {"gga_x_df3_opt1", 346},
+-  {"gga_x_df3_opt2", 347},
+-  {"mgga_xc_t_hle17", 348},
+-  {"lda_c_bj89", 349},
++  //{"gga_x_df3_opt2", 347},
++  //{"mgga_xc_t_hle17", 348},
++  //{"lda_c_bj89", 349},
+   {"gga_x_llp", 350},
+-  {"lda_c_lp96_b", 351},
+-  {"lda_k_lp96_b", 352},
+-  {"lda_c_rpaf", 353},
++  //{"lda_c_lp96_b", 351},
++  //{"lda_k_lp96_b", 352},
++  //{"lda_c_rpaf", 353},
+   {"hyb_gga_xc_cqtp25", 385},
 -  {"mgga_c_cc", 387},
 -  {"mgga_c_ccalda", 388},
 -  {"hyb_mgga_xc_br3p86", 389},
@@ -1570,7 +1617,16 @@ index 501ed5407..55f5624c6 100644
    {"hyb_gga_xc_wb97x_d3", 399},
    {"hyb_gga_xc_lc_blyp", 400},
    {"hyb_gga_xc_b3pw91", 401},
-@@ -389,22 +389,22 @@ xc_functional_key_t xc_functional_keys[] = {
+@@ -398,7 +398,7 @@
+   {"hyb_gga_xc_sb98_2a", 423},
+   {"hyb_gga_xc_sb98_2b", 424},
+   {"hyb_gga_xc_sb98_2c", 425},
+-  {"hyb_gga_x_sogga11_x", 426},
++  //{"hyb_gga_x_sogga11_x", 426},
+   {"hyb_gga_xc_hse03", 427},
+   {"hyb_gga_xc_hse06", 428},
+   {"hyb_gga_xc_hjs_pbe", 429},
+@@ -413,22 +413,22 @@
    {"hyb_gga_xc_mb3lyp_rc04", 437},
    {"hyb_mgga_x_m05", 438},
    {"hyb_mgga_x_m05_2x", 439},
@@ -1604,7 +1660,7 @@ index 501ed5407..55f5624c6 100644
    {"hyb_gga_xc_pbe0_13", 456},
    {"hyb_mgga_xc_tpssh", 457},
    {"hyb_mgga_xc_revtpssh", 458},
-@@ -416,17 +416,17 @@ xc_functional_key_t xc_functional_keys[] = {
+@@ -440,17 +440,17 @@
    {"hyb_gga_xc_wb97x", 464},
    {"hyb_gga_xc_lrc_wpbeh", 465},
    {"hyb_gga_xc_wb97x_v", 466},
@@ -1628,7 +1684,7 @@ index 501ed5407..55f5624c6 100644
    {"hyb_gga_xc_lc_wpbe", 478},
    {"hyb_gga_xc_hse12", 479},
    {"hyb_gga_xc_hse12s", 480},
-@@ -444,35 +444,35 @@ xc_functional_key_t xc_functional_keys[] = {
+@@ -468,37 +468,37 @@
    {"hyb_gga_xc_lc_qtp", 492},
    {"mgga_x_rscan", 493},
    {"mgga_c_rscan", 494},
@@ -1646,7 +1702,9 @@ index 501ed5407..55f5624c6 100644
 -  {"gga_k_baltin", 504},
 -  {"gga_k_lieb", 505},
 -  {"gga_k_absp1", 506},
+-  {"gga_k_absr1", 506},
 -  {"gga_k_absp2", 507},
+-  {"gga_k_absr2", 507},
 -  {"gga_k_gr", 508},
 -  {"gga_k_ludena", 509},
 -  {"gga_k_gp85", 510},
@@ -1670,7 +1728,9 @@ index 501ed5407..55f5624c6 100644
 +  //{"gga_k_baltin", 504},
 +  //{"gga_k_lieb", 505},
 +  //{"gga_k_absp1", 506},
++  //{"gga_k_absr1", 506},
 +  //{"gga_k_absp2", 507},
++  //{"gga_k_absr2", 507},
 +  //{"gga_k_gr", 508},
 +  //{"gga_k_ludena", 509},
 +  //{"gga_k_gp85", 510},
@@ -1690,7 +1750,7 @@ index 501ed5407..55f5624c6 100644
    {"gga_x_wpbeh", 524},
    {"gga_x_hjs_pbe", 525},
    {"gga_x_hjs_pbe_sol", 526},
-@@ -481,197 +481,197 @@ xc_functional_key_t xc_functional_keys[] = {
+@@ -507,211 +507,211 @@
    {"gga_x_ityh", 529},
    {"gga_x_sfat", 530},
    {"hyb_mgga_xc_wb97m_v", 531},
@@ -1924,6 +1984,8 @@ index 501ed5407..55f5624c6 100644
    {"hyb_mgga_xc_r2scanh", 659},
    {"hyb_mgga_xc_r2scan0", 660},
    {"hyb_mgga_xc_r2scan50", 661},
+-  {"hyb_mgga_x_wr2scan", 662},
++  //{"hyb_mgga_x_wr2scan", 662},
    {"hyb_gga_xc_cam_pbeh", 681},
 -  {"hyb_gga_xc_camy_pbeh", 682},
 +  //{"hyb_gga_xc_camy_pbeh", 682},
@@ -2006,7 +2068,12 @@ index 501ed5407..55f5624c6 100644
 -  {"mgga_x_ktbm_23", 758},
 -  {"mgga_x_ktbm_24", 759},
 -  {"mgga_x_ktbm_gap", 760},
--  {"lda_k_gds08_worker", 100001},
+-  {"mgga_x_mspbel", 761},
+-  {"mgga_x_rmspbel", 762},
+-  {"mgga_x_msrpbel", 763},
+-  {"mgga_x_rmsrpbel", 764},
+-  {"mgga_x_msb86bl", 765},
+-  {"mgga_x_rmsb86bl", 766},
 +  //{"hyb_mgga_xc_lc_tmlyp", 720},
 +  //{"mgga_x_mtask", 724},
 +  //{"gga_x_q1d", 734},
@@ -2036,14 +2103,29 @@ index 501ed5407..55f5624c6 100644
 +  //{"mgga_x_ktbm_23", 758},
 +  //{"mgga_x_ktbm_24", 759},
 +  //{"mgga_x_ktbm_gap", 760},
-+  //{"lda_k_gds08_worker", 100001},
++  //{"mgga_x_mspbel", 761},
++  //{"mgga_x_rmspbel", 762},
++  //{"mgga_x_msrpbel", 763},
++  //{"mgga_x_rmsrpbel", 764},
++  //{"mgga_x_msb86bl", 765},
++  //{"mgga_x_rmsb86bl", 766},
+   {"hyb_mgga_x_pi_m06_2x_dl", 767},
+   {"mgga_c_pi_m06_2x_dl", 768},
+   {"hyb_mgga_x_pi_m06_2x", 769},
+   {"mgga_c_pi_m06_2x", 770},
+   {"hyb_mgga_xc_coach", 771},
+-  {"mgga_x_sregtm_v1", 772},
+-  {"mgga_x_sregtm_v2", 773},
+-  {"mgga_x_sregtm_v3", 774},
++  //{"mgga_x_sregtm_v1", 772},
++  //{"mgga_x_sregtm_v2", 773},
++  //{"mgga_x_sregtm_v3", 774},
  {"", -1}
  };
 diff --git a/src/funcs_lda.c b/src/funcs_lda.c
-index 0bd48dbfe..e28856ae2 100644
 --- a/src/funcs_lda.c
 +++ b/src/funcs_lda.c
-@@ -75,10 +75,10 @@ extern xc_func_info_type xc_func_info_lda_k_gds08_worker;
+@@ -80,10 +80,10 @@
  
  const xc_func_info_type *xc_lda_known_funct[] = {
    &xc_func_info_lda_x,
@@ -2058,14 +2140,14 @@ index 0bd48dbfe..e28856ae2 100644
    &xc_func_info_lda_c_xalpha,
    &xc_func_info_lda_c_vwn,
    &xc_func_info_lda_c_vwn_rpa,
-@@ -88,63 +88,63 @@ const xc_func_info_type *xc_lda_known_funct[] = {
+@@ -93,68 +93,68 @@
    &xc_func_info_lda_c_pw,
    &xc_func_info_lda_c_pw_mod,
    &xc_func_info_lda_c_ob_pw,
 -  &xc_func_info_lda_c_2d_amgb,
 -  &xc_func_info_lda_c_2d_prm,
 -  &xc_func_info_lda_c_vbh,
--  &xc_func_info_lda_c_1d_csc,
+-  &xc_func_info_lda_c_1d_css,
 -  &xc_func_info_lda_x_2d,
 -  &xc_func_info_lda_xc_teter93,
 -  &xc_func_info_lda_x_1d_soft,
@@ -2075,7 +2157,7 @@ index 0bd48dbfe..e28856ae2 100644
 +  //&xc_func_info_lda_c_2d_amgb,
 +  //&xc_func_info_lda_c_2d_prm,
 +  //&xc_func_info_lda_c_vbh,
-+  //&xc_func_info_lda_c_1d_csc,
++  //&xc_func_info_lda_c_1d_css,
 +  //&xc_func_info_lda_x_2d,
 +  //&xc_func_info_lda_xc_teter93,
 +  //&xc_func_info_lda_x_1d_soft,
@@ -2095,6 +2177,7 @@ index 0bd48dbfe..e28856ae2 100644
 -  &xc_func_info_lda_xc_zlp,
 -  &xc_func_info_lda_k_tf,
 -  &xc_func_info_lda_k_lp,
+-  &xc_func_info_lda_xc_th_fl,
 -  &xc_func_info_lda_xc_ksdt,
 -  &xc_func_info_lda_c_chachiyo,
 -  &xc_func_info_lda_c_lp96,
@@ -2106,6 +2189,11 @@ index 0bd48dbfe..e28856ae2 100644
 -  &xc_func_info_lda_c_epc17_2,
 -  &xc_func_info_lda_c_epc18_1,
 -  &xc_func_info_lda_c_epc18_2,
+-  &xc_func_info_lda_x_t_sloc,
+-  &xc_func_info_lda_c_bj89,
+-  &xc_func_info_lda_c_lp96_b,
+-  &xc_func_info_lda_k_lp96_b,
+-  &xc_func_info_lda_c_rpaf,
 -  &xc_func_info_lda_x_rel,
 -  &xc_func_info_lda_xc_1d_ehwlrg_1,
 -  &xc_func_info_lda_xc_1d_ehwlrg_2,
@@ -2117,6 +2205,7 @@ index 0bd48dbfe..e28856ae2 100644
 +  //&xc_func_info_lda_xc_zlp,
 +  //&xc_func_info_lda_k_tf,
 +  //&xc_func_info_lda_k_lp,
++  //&xc_func_info_lda_xc_th_fl,
 +  //&xc_func_info_lda_xc_ksdt,
 +  //&xc_func_info_lda_c_chachiyo,
 +  //&xc_func_info_lda_c_lp96,
@@ -2128,6 +2217,11 @@ index 0bd48dbfe..e28856ae2 100644
 +  //&xc_func_info_lda_c_epc17_2,
 +  //&xc_func_info_lda_c_epc18_1,
 +  //&xc_func_info_lda_c_epc18_2,
++  //&xc_func_info_lda_x_t_sloc,
++  //&xc_func_info_lda_c_bj89,
++  //&xc_func_info_lda_c_lp96_b,
++  //&xc_func_info_lda_k_lp96_b,
++  //&xc_func_info_lda_c_rpaf,
 +  //&xc_func_info_lda_x_rel,
 +  //&xc_func_info_lda_xc_1d_ehwlrg_1,
 +  //&xc_func_info_lda_xc_1d_ehwlrg_2,
@@ -2169,16 +2263,13 @@ index 0bd48dbfe..e28856ae2 100644
    &xc_func_info_lda_c_upw92,
    &xc_func_info_lda_c_rpw92,
 -  &xc_func_info_lda_x_sloc,
--  &xc_func_info_lda_k_gds08_worker,
 +  //&xc_func_info_lda_x_sloc,
-+  //&xc_func_info_lda_k_gds08_worker,
    NULL
  };
 diff --git a/src/funcs_mgga.c b/src/funcs_mgga.c
-index c0549f605..27f676e09 100644
 --- a/src/funcs_mgga.c
 +++ b/src/funcs_mgga.c
-@@ -177,178 +177,178 @@ extern xc_func_info_type xc_func_info_mgga_x_ktbm_gap;
+@@ -190,191 +190,191 @@
  
  const xc_func_info_type *xc_mgga_known_funct[] = {
    &xc_func_info_mgga_c_dldf,
@@ -2234,7 +2325,7 @@ index c0549f605..27f676e09 100644
 -  &xc_func_info_mgga_x_mn12_l,
 -  &xc_func_info_mgga_x_ms2_rev,
 -  &xc_func_info_mgga_xc_cc06,
--  &xc_func_info_mgga_x_mk00,
+-  &xc_func_info_mgga_x_gp86,
 +  //&xc_func_info_mgga_x_pkzb,
 +  //&xc_func_info_mgga_x_br89_1,
 +  //&xc_func_info_mgga_k_pgsl025,
@@ -2246,7 +2337,7 @@ index c0549f605..27f676e09 100644
 +  //&xc_func_info_mgga_x_mn12_l,
 +  //&xc_func_info_mgga_x_ms2_rev,
 +  //&xc_func_info_mgga_xc_cc06,
-+  //&xc_func_info_mgga_x_mk00,
++  //&xc_func_info_mgga_x_gp86,
    &xc_func_info_mgga_c_tpss,
 -  &xc_func_info_mgga_c_vsxc,
 +  //&xc_func_info_mgga_c_vsxc,
@@ -2258,12 +2349,11 @@ index c0549f605..27f676e09 100644
    &xc_func_info_mgga_c_m05_2x,
 -  &xc_func_info_mgga_c_pkzb,
 -  &xc_func_info_mgga_c_bc95,
--  &xc_func_info_mgga_c_revtpss,
--  &xc_func_info_mgga_xc_tpsslyp1w,
--  &xc_func_info_mgga_x_mk00b,
 +  //&xc_func_info_mgga_c_pkzb,
 +  //&xc_func_info_mgga_c_bc95,
-+  //&xc_func_info_mgga_c_revtpss,
+   &xc_func_info_mgga_c_revtpss,
+-  &xc_func_info_mgga_xc_tpsslyp1w,
+-  &xc_func_info_mgga_x_mk00b,
 +  //&xc_func_info_mgga_xc_tpsslyp1w,
 +  //&xc_func_info_mgga_x_mk00b,
    &xc_func_info_mgga_x_bloc,
@@ -2297,27 +2387,30 @@ index c0549f605..27f676e09 100644
    &xc_func_info_mgga_c_revm06_l,
 -  &xc_func_info_mgga_x_rtpss,
 -  &xc_func_info_mgga_x_ms2b,
--  &xc_func_info_mgga_x_ms2bs,
--  &xc_func_info_mgga_x_mvsb,
--  &xc_func_info_mgga_x_mvsbs,
 +  //&xc_func_info_mgga_x_rtpss,
 +  //&xc_func_info_mgga_x_ms2b,
-+  //&xc_func_info_mgga_x_ms2bs,
-+  //&xc_func_info_mgga_x_mvsb,
-+  //&xc_func_info_mgga_x_mvsbs,
    &xc_func_info_mgga_c_revm06,
    &xc_func_info_mgga_c_m06_sx,
 -  &xc_func_info_mgga_x_ft98,
 +  //&xc_func_info_mgga_x_ft98,
    &xc_func_info_mgga_c_tpss_gaussian,
 -  &xc_func_info_mgga_x_eel,
--  &xc_func_info_mgga_c_cf22d,
+-  &xc_func_info_mgga_x_mscan,
+-  &xc_func_info_mgga_c_mscan,
++  //&xc_func_info_mgga_x_eel,
++  //&xc_func_info_mgga_x_mscan,
++  //&xc_func_info_mgga_c_mscan,
+   &xc_func_info_mgga_c_cf22d,
+-  &xc_func_info_mgga_x_lak,
+-  &xc_func_info_mgga_c_lak,
+-  &xc_func_info_mgga_xc_t_hle17,
 -  &xc_func_info_mgga_c_cc,
 -  &xc_func_info_mgga_c_ccalda,
 -  &xc_func_info_mgga_c_rregtm,
 -  &xc_func_info_mgga_c_b94,
-+  //&xc_func_info_mgga_x_eel,
-+  //&xc_func_info_mgga_c_cf22d,
++  //&xc_func_info_mgga_x_lak,
++  //&xc_func_info_mgga_c_lak,
++  //&xc_func_info_mgga_xc_t_hle17,
 +  //&xc_func_info_mgga_c_cc,
 +  //&xc_func_info_mgga_c_ccalda,
 +  //&xc_func_info_mgga_c_rregtm,
@@ -2461,6 +2554,12 @@ index c0549f605..27f676e09 100644
 -  &xc_func_info_mgga_x_ktbm_23,
 -  &xc_func_info_mgga_x_ktbm_24,
 -  &xc_func_info_mgga_x_ktbm_gap,
+-  &xc_func_info_mgga_x_mspbel,
+-  &xc_func_info_mgga_x_rmspbel,
+-  &xc_func_info_mgga_x_msrpbel,
+-  &xc_func_info_mgga_x_rmsrpbel,
+-  &xc_func_info_mgga_x_msb86bl,
+-  &xc_func_info_mgga_x_rmsb86bl,
 +  //&xc_func_info_mgga_x_mtask,
 +  //&xc_func_info_mgga_x_ktbm_0,
 +  //&xc_func_info_mgga_x_ktbm_1,
@@ -2488,5 +2587,19 @@ index c0549f605..27f676e09 100644
 +  //&xc_func_info_mgga_x_ktbm_23,
 +  //&xc_func_info_mgga_x_ktbm_24,
 +  //&xc_func_info_mgga_x_ktbm_gap,
++  //&xc_func_info_mgga_x_mspbel,
++  //&xc_func_info_mgga_x_rmspbel,
++  //&xc_func_info_mgga_x_msrpbel,
++  //&xc_func_info_mgga_x_rmsrpbel,
++  //&xc_func_info_mgga_x_msb86bl,
++  //&xc_func_info_mgga_x_rmsb86bl,
+   &xc_func_info_mgga_c_pi_m06_2x_dl,
+   &xc_func_info_mgga_c_pi_m06_2x,
+-  &xc_func_info_mgga_x_sregtm_v1,
+-  &xc_func_info_mgga_x_sregtm_v2,
+-  &xc_func_info_mgga_x_sregtm_v3,
++  //&xc_func_info_mgga_x_sregtm_v1,
++  //&xc_func_info_mgga_x_sregtm_v2,
++  //&xc_func_info_mgga_x_sregtm_v3,
    NULL
  };
