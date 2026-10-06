@@ -30,21 +30,35 @@
 #define OF_COMPLEX      2
 #define POOL_SIZE       65536
 
+
 __global__ static
 void ft_aopair_kernel(double *out, double *vG,
-                      PBCIntEnvVars envs, int *shl_pair_offsets,
-                      uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
-                      int *gout_stride_lookup, double *Gv, int nGv,
-                      int nbatches_shl_pair, int compressing, int *head)
+    PBCIntEnvVars envs, int *shl_pair_offsets,
+    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
+    int *gout_stride_lookup, double *Gv, int nGv,
+    int nbatches_shl_pair, int compressing, int *head,
+    void *shm_mem)
 {
     constexpr int nGv_per_block = 16;
-    constexpr unsigned mask = (1u << nGv_per_block) - 1;
     constexpr int sp_threads = THREADS / nGv_per_block;
-    constexpr unsigned sp_mask = (1u << sp_threads) - 1;
-    int thread_id = threadIdx.x;
+    constexpr unsigned mask = (1u << nGv_per_block) - 1;
+    setup_context();
+    SHARED_SCALAR(int, sp_block_id);
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nsp_per_block);
+    SHARED_SCALAR(int, img_max);
+    SHARED_ARRAY(int, img_counts, [sp_threads]);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int t_id = thread_id / nGv_per_block;
-    __shared__ int sp_block_id;
 while (1) {
     if (thread_id == 0) {
         sp_block_id = atomicAdd(head, 1);
@@ -59,11 +73,6 @@ while (1) {
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj;
-    __shared__ int iprim, jprim;
-    __shared__ int nao;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -91,7 +100,6 @@ while (1) {
     int stride_j = li + 1;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nGsp_per_block;
-    extern __shared__ double shared_memory[];
     double *gxR = shared_memory + nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
@@ -113,20 +121,20 @@ while (1) {
         int jsh = bas_ij % bvk_nbas;
         int img0 = img_offsets[pair_ij];
         int img1 = img_offsets[pair_ij+1];
-        __shared__ int img_max;
-        __shared__ int img_counts[sp_threads];
         if (Gv_id_in_block == 0) {
             img_counts[t_id] = img1 - img0;
         }
         __syncthreads();
-        if (thread_id < sp_threads) {
-            int count = img_counts[thread_id];
-            for (int offset = sp_threads/2; offset > 0; offset /= 2) {
-                count = max(count, __shfl_down_sync(sp_mask, count, offset));
+        // Serial scan (not a sub-group shuffle): only thread_id < sp_threads
+        // lanes hold valid counts, so a shuffle would have partial sub-group
+        // participation, which is UB in SYCL. Integer max is bit-identical
+        // on both backends.
+        if (thread_id == 0) {
+            int count = img_counts[0];
+            for (int w = 1; w < sp_threads; ++w) {
+                count = max(count, img_counts[w]);
             }
-            if (thread_id == 0) {
-                img_max = count;
-            }
+            img_max = count;
         }
         __syncthreads();
 
@@ -320,19 +328,32 @@ while (1) {
 
 __global__ static
 void ft_pdotp_kernel(double *out, double *vG,
-                     PBCIntEnvVars envs, int *shl_pair_offsets,
-                     uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
-                     int *gout_stride_lookup, double *Gv, int nGv,
-                     int nbatches_shl_pair, int compressing, int *head)
+    PBCIntEnvVars envs, int *shl_pair_offsets,
+    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
+    int *gout_stride_lookup, double *Gv, int nGv,
+    int nbatches_shl_pair, int compressing, int *head,
+    void *shm_mem)
 {
     constexpr int nGv_per_block = 16;
-    constexpr unsigned mask = (1u << nGv_per_block) - 1;
     constexpr int sp_threads = THREADS / nGv_per_block;
-    constexpr unsigned sp_mask = (1u << sp_threads) - 1;
-    int thread_id = threadIdx.x;
+    constexpr unsigned mask = (1u << nGv_per_block) - 1;
+    setup_context();
+    SHARED_SCALAR(int, sp_block_id);
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, nao);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nsp_per_block);
+    SHARED_SCALAR(int, img_max);
+    SHARED_ARRAY(int, img_counts, [sp_threads]);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int t_id = thread_id / nGv_per_block;
-    __shared__ int sp_block_id;
 while (1) {
     if (thread_id == 0) {
         sp_block_id = atomicAdd(head, 1);
@@ -347,11 +368,6 @@ while (1) {
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj;
-    __shared__ int iprim, jprim;
-    __shared__ int nao;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -379,7 +395,6 @@ while (1) {
     int stride_j = li + 2;
     int g_size = stride_j * (lj + 2);
     int gx_len = g_size * nGsp_per_block;
-    extern __shared__ double shared_memory[];
     double *gxR = shared_memory + nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
@@ -401,20 +416,20 @@ while (1) {
         int jsh = bas_ij % bvk_nbas;
         int img0 = img_offsets[pair_ij];
         int img1 = img_offsets[pair_ij+1];
-        __shared__ int img_max;
-        __shared__ int img_counts[sp_threads];
         if (Gv_id_in_block == 0) {
             img_counts[t_id] = img1 - img0;
         }
         __syncthreads();
-        if (thread_id < sp_threads) {
-            int count = img_counts[thread_id];
-            for (int offset = sp_threads/2; offset > 0; offset /= 2) {
-                count = max(count, __shfl_down_sync(sp_mask, count, offset));
+        // Serial scan (not a sub-group shuffle): only thread_id < sp_threads
+        // lanes hold valid counts, so a shuffle would have partial sub-group
+        // participation, which is UB in SYCL. Integer max is bit-identical
+        // on both backends.
+        if (thread_id == 0) {
+            int count = img_counts[0];
+            for (int w = 1; w < sp_threads; ++w) {
+                count = max(count, img_counts[w]);
             }
-            if (thread_id == 0) {
-                img_max = count;
-            }
+            img_max = count;
         }
         __syncthreads();
 
@@ -675,12 +690,14 @@ int contract_ft_aopair(double *out, double *vG, PBCIntEnvVars *envs, int *head,
                        int *gout_stride_lookup, double *grids, int ngrids,
                        int compressing)
 {
-    cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
-    ft_aopair_kernel<<<workers, THREADS, shm_size>>>(
+    cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(workers);
+    LAUNCH_KERNEL_DYN( ft_aopair_kernel, blocks, threads, shm_size,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();
@@ -697,12 +714,14 @@ int contract_ft_pdotp(double *out, double *vG, PBCIntEnvVars *envs, int *head,
                       int *gout_stride_lookup, double *grids, int ngrids,
                       int compressing)
 {
-    cudaFuncSetAttribute(ft_pdotp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
-    ft_pdotp_kernel<<<workers, THREADS, shm_size>>>(
+    cudaFuncSetAttribute(ft_pdotp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(workers);
+    LAUNCH_KERNEL_DYN( ft_pdotp_kernel, blocks, threads, shm_size,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();

@@ -82,7 +82,8 @@ def double_translation_indices(kmesh):
     tz = cp.array(translation_map(kmesh[2]), dtype=np.int32)
     idx = cp.ravel_multi_index([tx[:,None,None,:,None,None],
                                 ty[None,:,None,None,:,None],
-                                tz[None,None,:,None,None,:]], kmesh)
+                                tz[None,None,:,None,None,:]],
+                                tuple(int(n) for n in kmesh))
     nk = np.prod(kmesh)
     return idx.reshape(nk, nk)
 

@@ -44,11 +44,10 @@ class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         L = 4
-        n = 21
         cell = pbcgto.Cell()
         cell.build(unit = 'B',
+                   precision = 1e-9,
                    a = ((L,0,0),(0,L,0),(0,0,L)),
-                   mesh = [n,n,n],
                    atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
                            ['He', (L/2.   ,L/2.,L/2.+.5)]],
                    basis = { 'He': [[0, (0.8, 1.0)],
@@ -271,20 +270,33 @@ class KnownValues(unittest.TestCase):
         cell.basis = [[0, (4.0, 1.0)], [0, (1.0, 1.0)]]
         cell.build()
 
-        mf = cell.RKS(xc='pbe0').to_gpu().density_fit().run()
+        auxbasis = [
+            [0, [8., 1]],
+            [0, [4., 1]],
+            [0, [2., 1]],
+            [0, [1. , 1]],
+            [1, [1. , 1]],
+            [2, [1. , 1]],
+        ]
+        mf = cell.RKS(xc='pbe0').to_gpu().density_fit(auxbasis=auxbasis).run()
         self.assertTrue(isinstance(mf.with_df, GDF))
-        self.assertAlmostEqual(mf.e_tot, -0.4483496502, 7)
+        self.assertAlmostEqual(mf.e_tot, -0.4417427888, 7)
         #mf_ref = mf.to_cpu().run()
         #self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
+        mf = mf.multigrid_numint().run()
+        self.assertAlmostEqual(mf.e_tot, -0.4411729210, 7)
+
         nk = [2, 1, 1]
         kpts = cell.make_kpts(nk)
-        kmf = pbcdft.KRKS(cell, xc='pbe0', kpts=kpts).density_fit().run()
-        self.assertTrue(isinstance(kmf.with_df, GDF))
-        self.assertAlmostEqual(kmf.e_tot, -0.44429306, 6)
-        #mf_ref = kmf.to_cpu()
-        #mf_ref.run()
-        #self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
+        kmf = pbcdft.KRKS(cell, xc='pbe0', kpts=kpts).density_fit(auxbasis=auxbasis).run()
+        self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(kmf.e_tot, -0.4376911788, 6)
+        #mf_ref = mf.to_cpu().run()
+        #self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
+
+        kmf = kmf.multigrid_numint().run()
+        self.assertAlmostEqual(kmf.e_tot, -0.4371213206, 6)
 
     def test_reset(self):
         cell = pbcgto.Cell()
@@ -413,11 +425,23 @@ class KnownValues(unittest.TestCase):
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
     def test_pbe0_krks_density_fit(self):
+        auxbasis = [
+            [0, [6., 1]],
+            [0, [3., 1]],
+            [0, [2., 1]],
+            [0, [1. , 1]],
+            [1, [1. , 1]],
+            [2, [1. , 1]],
+            [3, [1. , 1]],
+        ]
         kpts = cell.make_kpts([2,1,1])
-        mf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu().density_fit().density_fit()
-        mf = mf.multigrid_numint()
+        mf0 = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu()
+        mf = mf0.density_fit(auxbasis=auxbasis).multigrid_numint()
         mf.run()
-        self.assertAlmostEqual(mf.e_tot, -0.4487749435875342, 8)
+        self.assertAlmostEqual(mf.e_tot, -0.4498648935239443, 8)
+
+        mf = mf0.density_fit(auxbasis=auxbasis).run()
+        self.assertAlmostEqual(mf.e_tot, -0.4500415798899024, 8)
 
     def test_pbe0_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
@@ -450,11 +474,24 @@ class KnownValues(unittest.TestCase):
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
     def test_hse06_krks_density_fit(self):
+        auxbasis = [
+            [0, [6., 1]],
+            [0, [3., 1]],
+            [0, [2., 1]],
+            [0, [1. , 1]],
+            [1, [1. , 1]],
+            [2, [1. , 1]],
+            [3, [1. , 1]],
+        ]
         kpts = cell.make_kpts([2,1,1])
-        mf = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu().density_fit()
-        mf = mf.multigrid_numint()
-        mf.run()
-        self.assertAlmostEqual(mf.e_tot, -0.41851381877297245, 8)
+        mf0 = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu()
+        mf = mf0.density_fit(auxbasis=auxbasis).multigrid_numint().run()
+        mf1 = mf0.multigrid_numint().run()
+        self.assertAlmostEqual(mf.e_tot, mf1.e_tot, 4)
+        self.assertAlmostEqual(mf.e_tot, -0.4196032331000882, 8)
+
+        mf = mf0.density_fit(auxbasis=auxbasis).run()
+        self.assertAlmostEqual(mf.e_tot, -0.4197798873685143, 8)
 
     def test_hse06_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
@@ -513,6 +550,15 @@ class KnownValues(unittest.TestCase):
         kmf.time_reversal_symmetry = False
         kmf.run()
         self.assertAlmostEqual(kmf.e_tot, -0.45774883471428585, 8)
+
+    def test_rsh_short_range_only(self):
+        omega = 0.25
+        xc = f'RSH({omega}, 0.0, 0.3) + 0.8*LDA'
+        mf = cell.KRKS(xc=xc).to_gpu().run()
+        ref = mf.e_tot
+        mf.rsjk = PBCJKMatrixOpt(cell, omega)
+        mf.run()
+        assert abs(mf.e_tot - ref) < 1e-9
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.rks")

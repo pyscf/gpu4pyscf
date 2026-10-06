@@ -20,6 +20,7 @@
 #include <string.h>
 #include <cuda_runtime.h>
 
+
 #include "gint.h"
 #include "config.h"
 #include "cuda_alloc.cuh"
@@ -31,6 +32,7 @@
 #include "gout3c2e.cu"
 #include "g3c2e_ipip1.cu"
 
+
 __host__
 static int GINTfill_int3c2e_ipip1_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
 {
@@ -38,8 +40,8 @@ static int GINTfill_int3c2e_ipip1_tasks(ERITensor *eri, BasisProdOffsets *offset
     int ntasks_ij = offsets->ntasks_ij;
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
-    dim3 threads(THREADSX, THREADSY);
-    dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
+    auto threads = make_block(THREADSX, THREADSY);
+    auto blocks = make_grid((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
     int li = envs->i_l;
     int lj = envs->j_l;
     int lk = envs->k_l;
@@ -47,84 +49,85 @@ static int GINTfill_int3c2e_ipip1_tasks(ERITensor *eri, BasisProdOffsets *offset
 
     switch (type_ijk) {
         // li+lj+lk=0
-        case 0: GINTfill_int3c2e_ipip1_kernel000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 0: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel000), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
         // li+lj+lk=1
-        case 1: GINTfill_int3c2e_ipip1_kernel<0,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 10: GINTfill_int3c2e_ipip1_kernel<0,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 100: GINTfill_int3c2e_ipip1_kernel<1,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 1: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,0,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 10: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,1,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 100: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,0,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
         // li+lj+lk=2
-        case 2: GINTfill_int3c2e_ipip1_kernel<0,0,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 11: GINTfill_int3c2e_ipip1_kernel<0,1,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 20: GINTfill_int3c2e_ipip1_kernel<0,2,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 101: GINTfill_int3c2e_ipip1_kernel<1,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 110: GINTfill_int3c2e_ipip1_kernel<1,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 200: GINTfill_int3c2e_ipip1_kernel<2,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 2: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,0,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 11: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,1,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 20: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,2,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 101: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,0,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 110: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,1,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 200: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,0,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
         // li+lj+lk=3
-        case 3: GINTfill_int3c2e_ipip1_kernel<0,0,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 12: GINTfill_int3c2e_ipip1_kernel<0,1,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 21: GINTfill_int3c2e_ipip1_kernel<0,2,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 30: GINTfill_int3c2e_ipip1_kernel<0,3,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 102: GINTfill_int3c2e_ipip1_kernel<1,0,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 111: GINTfill_int3c2e_ipip1_kernel<1,1,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 120: GINTfill_int3c2e_ipip1_kernel<1,2,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 201: GINTfill_int3c2e_ipip1_kernel<2,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 210: GINTfill_int3c2e_ipip1_kernel<2,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 300: GINTfill_int3c2e_ipip1_kernel<3,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 3: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,0,3>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 12: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,1,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 21: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,2,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 30: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,3,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 102: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,0,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 111: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,1,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 120: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,2,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 201: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,0,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 210: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,1,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 300: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<3,0,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
         // li+lj+lk=4
-        case 4: GINTfill_int3c2e_ipip1_kernel<0,0,4><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 13: GINTfill_int3c2e_ipip1_kernel<0,1,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 22: GINTfill_int3c2e_ipip1_kernel<0,2,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 31: GINTfill_int3c2e_ipip1_kernel<0,3,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 40: GINTfill_int3c2e_ipip1_kernel<0,4,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 103: GINTfill_int3c2e_ipip1_kernel<1,0,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 112: GINTfill_int3c2e_ipip1_kernel<1,1,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 121: GINTfill_int3c2e_ipip1_kernel<1,2,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 130: GINTfill_int3c2e_ipip1_kernel<1,3,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 202: GINTfill_int3c2e_ipip1_kernel<2,0,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 211: GINTfill_int3c2e_ipip1_kernel<2,1,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 220: GINTfill_int3c2e_ipip1_kernel<2,2,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 301: GINTfill_int3c2e_ipip1_kernel<3,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 310: GINTfill_int3c2e_ipip1_kernel<3,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 400: GINTfill_int3c2e_ipip1_kernel<4,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 4: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,0,4>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 13: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,1,3>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 22: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,2,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 31: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,3,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 40: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,4,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 103: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,0,3>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 112: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,1,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 121: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,2,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 130: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,3,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 202: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,0,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 211: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,1,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 220: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,2,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 301: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<3,0,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 310: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<3,1,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 400: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<4,0,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
         // li+lj+lk=5
-        //case 5: GINTfill_int3c2e_ipip1_kernel<0,0,5><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 14: GINTfill_int3c2e_ipip1_kernel<0,1,4><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 23: GINTfill_int3c2e_ipip1_kernel<0,2,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 32: GINTfill_int3c2e_ipip1_kernel<0,3,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 41: GINTfill_int3c2e_ipip1_kernel<0,4,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        //case 50: GINTfill_int3c2e_ipip1_kernel<0,5,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 104: GINTfill_int3c2e_ipip1_kernel<1,0,4><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 113: GINTfill_int3c2e_ipip1_kernel<1,1,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 122: GINTfill_int3c2e_ipip1_kernel<1,2,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 131: GINTfill_int3c2e_ipip1_kernel<1,3,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 140: GINTfill_int3c2e_ipip1_kernel<1,4,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 203: GINTfill_int3c2e_ipip1_kernel<2,0,3><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 212: GINTfill_int3c2e_ipip1_kernel<2,1,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 221: GINTfill_int3c2e_ipip1_kernel<2,2,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 230: GINTfill_int3c2e_ipip1_kernel<2,3,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 302: GINTfill_int3c2e_ipip1_kernel<3,0,2><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 311: GINTfill_int3c2e_ipip1_kernel<3,1,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 320: GINTfill_int3c2e_ipip1_kernel<3,2,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 401: GINTfill_int3c2e_ipip1_kernel<4,0,1><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 410: GINTfill_int3c2e_ipip1_kernel<4,1,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        //case 500: GINTfill_int3c2e_ipip1_kernel<5,0,0><<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        //case 5: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,0,5>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 14: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,1,4>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 23: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,2,3>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 32: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,3,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 41: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,4,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        //case 50: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<0,5,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 104: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,0,4>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 113: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,1,3>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 122: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,2,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 131: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,3,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 140: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<1,4,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 203: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,0,3>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 212: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,1,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 221: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,2,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 230: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<2,3,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 302: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<3,0,2>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 311: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<3,1,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 320: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<3,2,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 401: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<4,0,1>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        case 410: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<4,1,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
+        //case 500: LAUNCH_KERNEL((GINTfill_int3c2e_ipip1_kernel<5,0,0>), blocks, threads, 0, stream, *envs, *eri, *offsets) break;
 #ifdef UNROLL_INT3C2E
 #endif
         default: {
-            dim3 threads(THREADSX*THREADSY);
-            dim3 blocks(ntasks_ij, ntasks_kl);
             const int li_ceil = li + 2;
             const int gsize = 3*nrys_roots*(li_ceil+1)*(lj+1)*(lk+1);
+            const int shm_size = gsize*sizeof(double);
             cudaError_t err = cudaFuncSetAttribute(
                 GINTfill_int3c2e_ipip1_general_kernel,
                 cudaFuncAttributeMaxDynamicSharedMemorySize,
                 (gsize+16)*sizeof(double));
             if (err != cudaSuccess) {
-                fprintf(stderr, "CUDA Error of GINTfill_int3c2e_ipip1_kernel: %s\n", cudaGetErrorString(err));
+                fprintf(stderr, "cudaFuncSetAttribute error: %s\n", cudaGetErrorString(err));
                 return 1;
             }
-            const int shm_size = gsize*sizeof(double);
-            GINTfill_int3c2e_ipip1_general_kernel<<<blocks, threads, shm_size, stream>>>(*envs, *eri, *offsets);
+            auto threads = make_block(THREADSX*THREADSY);
+            auto blocks = make_grid(ntasks_ij, ntasks_kl);
+            LAUNCH_KERNEL_DYN( GINTfill_int3c2e_ipip1_general_kernel, blocks, threads, shm_size,
+                *envs, *eri, *offsets);
         }
     }
 
@@ -156,7 +159,7 @@ int GINTfill_int3c2e_ipip1(cudaStream_t stream, BasisProdCache *bpcache, double 
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
-    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    GINT_BPCACHE_UPLOAD(stream, bpcache);
 
     ERITensor eritensor;
     eritensor.stride_j = strides[1];

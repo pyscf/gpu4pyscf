@@ -2,6 +2,10 @@
 #include <limits.h>
 #include <omp.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void condense_primitive_ovlp_mask(int8_t *c_ovlp_mask, int8_t *p_ovlp_mask,
                                   int *p2c_mapping, int c_nbas, int p_nbas)
 {
@@ -33,3 +37,7 @@ void take2d_add(double *out, double *inp, int *idx, int nrow, int ncol, int idxl
                 } }
         }
 }
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

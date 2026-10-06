@@ -26,13 +26,12 @@ class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         L = 4
-        n = 21
         cell = pbcgto.M(
             unit = 'B',
             verbose = 7,
             output = '/dev/null',
             a = ((L,0,0),(0,L,0),(0,0,L)),
-            mesh = [n,n,n],
+            precision = 1e-9,
             atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
                     ['He', (L/2.   ,L/2.,L/2.+.5)]],
             basis = { 'He': [[0, (0.8, 1.0)],

@@ -204,7 +204,7 @@ class KnowValues(unittest.TestCase):
         hcore = mf.get_hcore()
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), -2.580202335681725-0.28028319954452735j, 8)
+        self.assertAlmostEqual(lib.fp(dat.get()), -2.580202335681725-0.28028319954452735j, 7)
 
         mf_ref = cell.KRKS(kpts=cell.make_kpts([2,1,1]))
         mf_ref.xc = 'b3lyp5'

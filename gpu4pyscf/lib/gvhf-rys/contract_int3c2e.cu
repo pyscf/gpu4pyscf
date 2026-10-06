@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
 #include "rys_roots.cu"
@@ -117,26 +118,39 @@ void _store_vj(double *out, double *vj_cache, int li, int lj, size_t nao,
 __global__ static
 void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
                                 RysIntEnvVars envs, int *shl_pair_offsets,
-                                uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                                uint32_t *bas_ij_idx, int *gout_stride_lookup,
+                                void *shm_mem)
 {
-    int thread_id = threadIdx.x;
+    setup_context();
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, lk);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, kprim);
+    SHARED_SCALAR(int, g_size);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nst_per_block);
+    SHARED_SCALAR(int, dm_id0);
+    SHARED_SCALAR(double, xk);
+    SHARED_SCALAR(double, yk);
+    SHARED_SCALAR(double, zk);
+    SHARED_SCALAR(int, expk);
+    SHARED_SCALAR(int, ck);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+
+    int thread_id = threadIdx_x;
     int nbas = envs.nbas;
-    int ksh = blockIdx.x + nbas;
+    int ksh = blockIdx_x + nbas;
     int *bas = envs.bas;
     int *ao_loc = envs.ao_loc;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int dm_id0;
-    __shared__ double xk, yk, zk;
-    __shared__ int expk, ck;
     if (thread_id == 0) {
-        int sp_block_id = gridDim.y - blockIdx.y - 1;
+        int sp_block_id = gridDim_y - blockIdx_y - 1;
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
         int bas_ij0 = bas_ij_idx[shl_pair0];
@@ -356,23 +370,34 @@ __global__ static
 void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, int n_dm, int naux,
                                     RysIntEnvVars envs, int *shl_pair_offsets,
                                     uint32_t *bas_ij_idx, int *ksh_offsets,
-                                    int *gout_stride_lookup)
+                                    int *gout_stride_lookup,
+                                    void *shm_mem)
 {
     // For better load balance, consume blocks in the reversed order
-    int thread_id = threadIdx.x;
+    setup_context();
+    SHARED_SCALAR(int, shl_pair0);
+    SHARED_SCALAR(int, shl_pair1);
+    SHARED_SCALAR(int, ksh0);
+    SHARED_SCALAR(int, ksh1);
+    SHARED_SCALAR(int, li);
+    SHARED_SCALAR(int, lj);
+    SHARED_SCALAR(int, lk);
+    SHARED_SCALAR(int, nroots);
+    SHARED_SCALAR(int, iprim);
+    SHARED_SCALAR(int, jprim);
+    SHARED_SCALAR(int, kprim);
+    SHARED_SCALAR(int, gout_stride);
+    SHARED_SCALAR(int, nst_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+
+    int thread_id = threadIdx_x;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int ksh0, ksh1;
-    __shared__ int li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int gout_stride, nst_per_block;
     double omega = env[PTR_RANGE_OMEGA];
     if (thread_id == 0) {
-        int sp_block_id = gridDim.x - blockIdx.x - 1;
-        int ksh_block_id = gridDim.y - blockIdx.y - 1;
+        int sp_block_id = gridDim_x - blockIdx_x - 1;
+        int ksh_block_id = gridDim_y - blockIdx_y - 1;
         ksh0 = ksh_offsets[ksh_block_id];
         ksh1 = ksh_offsets[ksh_block_id+1];
         shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -561,11 +586,17 @@ int contract_int3c2e_dm(double *out, double *dm, int n_dm, int naux,
                         int nbas_aux, int nbatches_shl_pair, int *shl_pair_offsets,
                         uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
-    cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbas_aux, nbatches_shl_pair);
-    contract_int3c2e_dm_kernel<<<blocks, THREADS, shm_size>>>(
-            out, dm, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
+    auto dev_envs = *envs;
+    auto blocks = make_grid(nbas_aux, nbatches_shl_pair);
+    auto threads = make_block(THREADS);
+    cudaError_t err = cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    LAUNCH_KERNEL_DYN( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
+        out, dm, n_dm, naux, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
         return 1;
@@ -580,16 +611,23 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
                             int *shl_pair_offsets, int *ksh_offsets,
                             uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
-    cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    contract_int3c2e_auxvec_kernel<<<blocks, THREADS, shm_size>>>(
-            vj, auxvec, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup);
-    cudaError_t err = cudaGetLastError();
+    auto dev_envs = *envs;
+    auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
+    auto threads = make_block(THREADS);
+    cudaError_t err = cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    LAUNCH_KERNEL_DYN( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
+        vj, auxvec, n_dm, naux, dev_envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
+        gout_stride_lookup);
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
+
 }

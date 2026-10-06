@@ -16,13 +16,15 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "gsycl/gpu_compat.h"
 #define THREADS        32
 
 __global__
 static void _calc_distances(double *dist, const double *x, const double *y, int m, int n)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    int i = global_x;
+    int j = global_y;
     if (i >= m || j >= n){
         return;
     }
@@ -38,9 +40,10 @@ int dist_matrix(cudaStream_t stream, double *dist, const double *x, const double
 {
     int ntilex = (m + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntilex, ntiley);
-    _calc_distances<<<blocks, threads, 0, stream>>>(dist, x, y, m, n);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, ntiley);
+    LAUNCH_KERNEL(_calc_distances, blocks, threads, 0, stream,
+                  dist, x, y, m, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

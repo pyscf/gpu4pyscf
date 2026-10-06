@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
@@ -31,30 +30,49 @@
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
 void eval_mgga_grad_kernel(double *grad, double *strain, double *dm,
-                           double *vrho_weights, double *vtau_weights, PBCIntEnvVars envs,
+                           double *vrho_weights, double *vtau_weights,
                            int64_t *bas_ij_idx, float2 *grid_frac_ranges,
                            double da_squared, double db_squared, double dc_squared,
                            int mesh_a, int mesh_b, int mesh_c, int npairs,
-                           double factor, double negligible)
+                           double factor, double negligible,
+                           PBCIntEnvVars envs)
 {
+    setup_context();
     constexpr int tile = 16;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
+    int tx = threadIdx_x;
+    int ty = threadIdx_y;
     int thread_id = ty * tile + tx;
-    int pair_id = blockIdx.x;
+    int pair_id = blockIdx_x;
 
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
 
-    __shared__ int a_start, a_stop, a_center;
-    __shared__ int b_start, b_stop;
-    __shared__ int c_start, c_stop;
-    __shared__ double cc, exp_da_squared;
-    __shared__ double xi, yi, zi;
-    __shared__ double xj, yj, zj;
-    __shared__ double xij, yij, zij, ai, aj, aij, theta_rr;
-    __shared__ double xjxi, yjyi, zjzi;
-    __shared__ double dm_cache[nfi*nfj];
+    SHARED_ARRAY(int, a_start);
+    SHARED_ARRAY(int, a_stop);
+    SHARED_ARRAY(int, a_center);
+    SHARED_ARRAY(int, b_start);
+    SHARED_ARRAY(int, b_stop);
+    SHARED_ARRAY(int, c_start);
+    SHARED_ARRAY(int, c_stop);
+    SHARED_ARRAY(double, cc);
+    SHARED_ARRAY(double, exp_da_squared);
+    SHARED_ARRAY(double, xi);
+    SHARED_ARRAY(double, yi);
+    SHARED_ARRAY(double, zi);
+    SHARED_ARRAY(double, xj);
+    SHARED_ARRAY(double, yj);
+    SHARED_ARRAY(double, zj);
+    SHARED_ARRAY(double, xij);
+    SHARED_ARRAY(double, yij);
+    SHARED_ARRAY(double, zij);
+    SHARED_ARRAY(double, ai);
+    SHARED_ARRAY(double, aj);
+    SHARED_ARRAY(double, aij);
+    SHARED_ARRAY(double, theta_rr);
+    SHARED_ARRAY(double, xjxi);
+    SHARED_ARRAY(double, yjyi);
+    SHARED_ARRAY(double, zjzi);
+    SHARED_ARRAY(double, dm_cache, [nfi*nfj]);
 
     int *bas = envs.bas;
     double *env = envs.env;
@@ -484,11 +502,13 @@ void eval_mgga_grad_kernel(double *grad, double *strain, double *dm,
 
 extern "C" {
 #define eval_mgga_grad_kernel_case(li, lj, slice_i, slice_j) \
-    case (li * LMAX1 + lj): \
-        eval_mgga_grad_kernel<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
-            grad, strain, dm, vxc, tau, *envs, bas_ij_idx, grid_frac_ranges, \
+    case (li * LMAX1 + lj): { \
+        auto dev_envs = *envs; \
+        LAUNCH_KERNEL((eval_mgga_grad_kernel<li,lj,slice_i,slice_j>), grids, threads, 0, \
+            grad, strain, dm, vxc, tau, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
-            factor, negligible); \
+            factor, negligible, dev_envs); \
+    } \
     break
 
 int evaluate_mgga_grad(double *grad, double *strain, double *dm,
@@ -503,7 +523,8 @@ int evaluate_mgga_grad(double *grad, double *strain, double *dm,
     double da_squared = distance_squared(dxyz_dabc[0], dxyz_dabc[1], dxyz_dabc[2]);
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
-    dim3 threads(16, 16);
+    auto threads = make_block(16, 16);
+    auto grids = make_grid(npairs, 1);
     switch (li * LMAX1 + lj) {
         eval_mgga_grad_kernel_case(0,0, 1, 1);
         eval_mgga_grad_kernel_case(1,0, 3, 1);

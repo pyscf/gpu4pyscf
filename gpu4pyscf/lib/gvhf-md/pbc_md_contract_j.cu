@@ -23,6 +23,7 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
+#include "gsycl/gpu_compat.h"
 
 #define RT2_MAX 9
 #define IJ_SIZE 11
@@ -38,13 +39,14 @@
 
 __device__
 inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
-                      int nsq_per_block, int gout_id, int gout_stride)
+                       int nsq_per_block, int gout_id, int gout_stride)
 {
+    setup_context();
     int nf2 = (l + 1) * (l + 2) / 2;
     int nf3 = nf2 * (l + 3) / 3;
     int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
-    uint16_t *p1 = c_Rt_idx + offsets;
-    int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
+    const uint16_t *p1 = c_Rt_idx + offsets;
+    const int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
     double Rt_tmp[RT_TMP_SIZE];
     nf2 -= 1; // Drop the first element in Rt. It is assigned outside
     nf3 -= 1;
@@ -73,22 +75,26 @@ __global__
 void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
                      float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley,
-                     uint16_t *pRt2_kl_ij, int8_t *efg_phase)
+                     int rt2_off, int efg_off, void *shm_mem)
 {
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, dm_kl_cache, shm_mem);
+    const uint16_t *pRt2_kl_ij = Rt2_kl_ij + rt2_off;
+    const int8_t *efg_phase = c_Rt2_efg_phase + efg_off;
     int64_t *pair_ij_mapping = (int64_t*)bounds.pair_ij_mapping;
     int64_t *pair_kl_mapping = (int64_t*)bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
     int bsizey = threadsy * tiley;
-    int pair_ij0 = blockIdx.x * bsizex;
-    int pair_kl0 = blockIdx.y * bsizey;
+    int pair_ij0 = blockIdx_x * bsizex;
+    int pair_kl0 = blockIdx_y * bsizey;
     if (q_cond_ij[pair_ij0] + q_cond_kl[pair_kl0] < bounds.cutoff) {
         return;
     }
 
-    int sq_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    int nsq_per_block = blockDim.x;
+    int sq_id = threadIdx_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    int nsq_per_block = blockDim_x;
     //assert(nsq_per_block == threadsx * threadsy);
     int t_id = gout_id * nsq_per_block + sq_id;
     int tx = sq_id % threadsx;
@@ -106,12 +112,11 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
 
     int npairs_ij = bounds.npairs_ij;
     int npairs_kl = bounds.npairs_kl;
-    extern __shared__ double dm_kl_cache[];
     double *Rq_cache = dm_kl_cache + nf3kl*bsizey;
     double *Rp_cache = dm_kl_cache + bsizey*(4+nf3kl);
     double *gamma_inc = dm_kl_cache + bsizey*(4+nf3kl) + threadsx*4 + sq_id;
     double *Rt = gamma_inc + (order+1) * nsq_per_block;
-    uint16_t *Rt2_address = pRt2_kl_ij;
+    uint16_t *Rt2_address = const_cast<uint16_t*>(pRt2_kl_ij);
     if (nf3ij * nf3kl <= RT2_IDX_CACHE_SIZE) {
         int l4 = bounds.lij + bounds.lkl;
         int nf3 = (l4 + 1) * (l4 + 2) * (l4 + 3) / 6;
@@ -125,7 +130,7 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
 
     __syncthreads();
     for (int n = t_id; n < bsizey; n += threads) {
-        int pair_kl = blockIdx.y * bsizey + n;
+        int pair_kl = blockIdx_y * bsizey + n;
         if (pair_kl < npairs_kl) {
             int64_t bas_kl = pair_kl_mapping[pair_kl];
             int ksh = bas_kl / NBAS_MAX;
@@ -157,7 +162,7 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
             int kl = n / tiley;
             int batch_kl = n  - kl * tiley;
             int sq_kl = ty + batch_kl * threadsy;
-            int pair_kl = blockIdx.y * bsizey + sq_kl;
+            int pair_kl = blockIdx_y * bsizey + sq_kl;
             if (pair_kl < npairs_kl) {
                 int kl_loc0 = pair_kl_loc[pair_kl];
                 dm_kl_cache[sq_kl+kl*bsizey] = dm[kl_loc0+kl];
@@ -166,7 +171,7 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
     }
 
     for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
-        int pair_ij0 = (blockIdx.x * tilex + batch_ij) * threadsx;
+        int pair_ij0 = (blockIdx_x * tilex + batch_ij) * threadsx;
         if (pair_ij0 >= npairs_ij) {
             break;
         }
@@ -202,12 +207,12 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
             vj_ij[n] = 0.;
         }
         for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
-            int pair_kl0 = (blockIdx.y * tiley + batch_kl) * threadsy;
+            int pair_kl0 = (blockIdx_y * tiley + batch_kl) * threadsy;
             if (pair_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond_kl[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond_ij[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond_kl[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond_ij[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -366,25 +371,26 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
     }
     }
     int nsq_per_block = threads_ij * threads_kl;
-    dim3 threads(nsq_per_block, gout_stride);
     int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
     int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
-    dim3 blocks(blocks_ij, blocks_kl);
-    uint16_t *pRt2_kl_ij;
-    int8_t *efg_phase;
-    cudaGetSymbolAddress((void**)&pRt2_kl_ij, Rt2_kl_ij);
-    cudaGetSymbolAddress((void**)&efg_phase, c_Rt2_efg_phase);
-    pRt2_kl_ij += offset_for_Rt2_idx(lij, lkl);
-    efg_phase += offset_for_Rt2_idx(0, lkl);
     int dm_size = dm_xyz_size * nimgs_uniq_pair;
+
+    auto threads = make_block(nsq_per_block, gout_stride);
+    auto blocks = make_grid(blocks_ij, blocks_kl);
+    // Table pointers cannot be formed on the host (device-only addresses),
+    // so the host passes offsets and each kernel derives its own pointers.
+    const int rt2_off = offset_for_Rt2_idx(lij, lkl);
+    const int efg_off = offset_for_Rt2_idx(0, lkl);
+    auto dev_envs = *envs;
     for (int i_dm = 0; i_dm < n_dm; ++i_dm) {
         JKMatrix jmat = {vj+i_dm*dm_size, NULL, dm+i_dm*dm_size, n_dm, 0, omega};
         if (1){//!pbc_md_j_unrolled(envs, &jmat, &bounds, omega)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
-            pbc_md_j_kernel<<<blocks, threads, buflen>>>(
-                *envs, jmat, bounds, q_cond_ij, q_cond_kl,
-                threads_ij, threads_kl, tilex, tiley, pRt2_kl_ij, efg_phase);
+            LAUNCH_KERNEL_DYN( pbc_md_j_kernel, blocks, threads, buflen,
+                                dev_envs, jmat, bounds, q_cond_ij, q_cond_kl,
+                                threads_ij, threads_kl, tilex, tiley,
+                                rt2_off, efg_off);
         }
     }
     cudaError_t err = cudaGetLastError();

@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #define THREADS         16
 #define RBLKSIZE        16
@@ -30,8 +31,9 @@
 __global__ static
 void _pack_tril(double *a_tril, double *a, size_t n, int counts)
 {
-    size_t j = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t i = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    size_t j = global_x;
+    size_t i = global_y;
 
     if (i >= n || j >= n || i < j) {
         return;
@@ -47,8 +49,9 @@ void _pack_tril(double *a_tril, double *a, size_t n, int counts)
 __global__ static
 void _unpack_tril(double *eri_tril, double *eri, size_t nao, int counts)
 {
-    size_t j = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t i = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    size_t j = global_x;
+    size_t i = global_y;
     if (i >= nao || j >= nao || i < j) {
         return;
     }
@@ -63,8 +66,9 @@ void _unpack_tril(double *eri_tril, double *eri, size_t nao, int counts)
 __global__ static
 void _dfill_triu(double *eri, size_t nao, int counts, int hermi)
 {
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    int j = global_x;
+    int i = global_y;
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
@@ -82,8 +86,9 @@ void _dfill_triu(double *eri, size_t nao, int counts, int hermi)
 __global__ static
 void _zfill_triu(double *eri, size_t nao, int counts, int hermi)
 {
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    int j = global_x;
+    int i = global_y;
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
@@ -107,9 +112,10 @@ void decompress_kernel(double *out, size_t out_stride,
                        double *cderi, int *pair_idx, int npairs, int nao,
                        size_t naux, int aux0, int aux1)
 {
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x;
-    int batch_id = blockIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
+    int threads = blockDim_x;
+    int batch_id = blockIdx_x;
     int dcol = aux1 - aux0;
     int pair0 = batch_id * RBLKSIZE;
     int pair1 = min(pair0 + RBLKSIZE, npairs);
@@ -135,9 +141,10 @@ void d_t_kernel(double *out, size_t out_stride,
                 double *cderi, int *pair_idx, int npairs, int nao,
                 int aux0, int aux1, int fill_triu)
 {
-    int bx = blockIdx.x;
-    int by = blockIdx.y;
-    int thread_id = threadIdx.x;
+    setup_context();
+    int bx = blockIdx_x;
+    int by = blockIdx_y;
+    int thread_id = threadIdx_x;
     int threads = STRIDE * CBLKSIZE;
     int tx = thread_id % CBLKSIZE;
     int ty = thread_id / CBLKSIZE;
@@ -147,7 +154,7 @@ void d_t_kernel(double *out, size_t out_stride,
     size_t Npairs = npairs;
     size_t Nao = nao;
 
-    __shared__ double buf[RBLKSIZE][CBLKSIZE+1];
+    SHARED_ARRAY(double, buf, [RBLKSIZE][CBLKSIZE+1]);
     if (pair_start+tx < npairs) {
         for (int k = ty; k < min(RBLKSIZE, daux-aux_start); k += STRIDE) {
             buf[k][tx] = cderi[(aux_start+k)*Npairs+pair_start+tx];
@@ -176,9 +183,10 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
                   double2 *cderi, int *pair_idx, int npairs, int nao,
                   int aux0, int aux1)
 {
-    int bx = blockIdx.x;
-    int by = blockIdx.y;
-    int thread_id = threadIdx.x;
+    setup_context();
+    int bx = blockIdx_x;
+    int by = blockIdx_y;
+    int thread_id = threadIdx_x;
     int threads = STRIDE * CBLKSIZE;
     int tx = thread_id % CBLKSIZE;
     int ty = thread_id / CBLKSIZE;
@@ -188,7 +196,7 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
     size_t Npairs = npairs;
     size_t Nao = nao;
 
-    __shared__ double2 buf[RBLKSIZE][CBLKSIZE+1];
+    SHARED_ARRAY(double2, buf, [RBLKSIZE][CBLKSIZE+1]);
     if (pair_start+tx < npairs) {
         for (int k = ty; k < min(RBLKSIZE, daux-aux_start); k += STRIDE) {
             buf[k][tx] = cderi[(aux_start+k)*Npairs+pair_start+tx];
@@ -213,14 +221,16 @@ extern "C" {
 int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi,
               int dtype)
 {
-    dim3 threads(THREADS, THREADS);
-    int nx = (n + threads.x - 1) / threads.x;
-    int ny = (n + threads.y - 1) / threads.y;
-    dim3 blocks(nx, ny);
+    int nx = (n + THREADS - 1) / THREADS;
+    int ny = (n + THREADS - 1) / THREADS;
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(nx, ny);
     if (dtype == 1) { // float64
-        _dfill_triu<<<blocks, threads, 0, stream>>>(a, n, counts, hermi);
+        LAUNCH_KERNEL(_dfill_triu, blocks, threads, 0, stream,
+                      a, n, counts, hermi);
     } else {
-        _zfill_triu<<<blocks, threads, 0, stream>>>(a, n, counts, hermi);
+        LAUNCH_KERNEL(_zfill_triu, blocks, threads, 0, stream,
+                      a, n, counts, hermi);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -232,11 +242,12 @@ int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi,
 
 int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
 {
-    dim3 threads(THREADS, THREADS);
-    int nx = (n + threads.x - 1) / threads.x;
-    int ny = (n + threads.y - 1) / threads.y;
-    dim3 blocks(nx, ny);
-    _pack_tril<<<blocks, threads, 0, stream>>>(a_tril, a, n, counts);
+    int nx = (n + THREADS - 1) / THREADS;
+    int ny = (n + THREADS - 1) / THREADS;
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(nx, ny);
+    LAUNCH_KERNEL(_pack_tril, blocks, threads, 0, stream,
+                  a_tril, a, n, counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "pack_tril error %s\n", cudaGetErrorString(err));
@@ -248,12 +259,14 @@ int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
 int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
                 int nao, int counts, int hermi)
 {
-    dim3 threads(THREADS, THREADS);
-    int nx = (nao + threads.x - 1) / threads.x;
-    int ny = (nao + threads.y - 1) / threads.y;
-    dim3 blocks(nx, ny);
-    _unpack_tril<<<blocks, threads, 0, stream>>>(eri_tril, eri, nao, counts);
-    _dfill_triu<<<blocks, threads, 0, stream>>>(eri, nao, counts, hermi);
+    int nx = (nao + THREADS - 1) / THREADS;
+    int ny = (nao + THREADS - 1) / THREADS;
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(nx, ny);
+    LAUNCH_KERNEL(_unpack_tril, blocks, threads, 0, stream,
+                  eri_tril, eri, nao, counts);
+    LAUNCH_KERNEL(_dfill_triu, blocks, threads, 0, stream,
+                  eri, nao, counts, hermi);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -265,9 +278,10 @@ int decompress_and_fill(cudaStream_t stream, double *out, int out_stride,
                         double *cderi, int *pair_idx, int npairs, int nao,
                         int naux, int aux0, int aux1)
 {
-    dim3 blocks((npairs+RBLKSIZE-1)/RBLKSIZE);
-    decompress_kernel<<<blocks, 512, 0, stream>>>(
-            out, out_stride, cderi, pair_idx, npairs, nao, naux, aux0, aux1);
+    auto threads = make_block(512);
+    auto blocks = make_grid((npairs+RBLKSIZE-1)/RBLKSIZE);
+    LAUNCH_KERNEL(decompress_kernel, blocks, threads, 0, stream,
+                  out, out_stride, cderi, pair_idx, npairs, nao, naux, aux0, aux1);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "decompress_and_fill error %s\n", cudaGetErrorString(err));
@@ -282,16 +296,16 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
 {
     double *eri_gpu = cderi;
     if (on_host) {
-        cudaError_t err = cudaHostGetDevicePointer(&eri_gpu, cderi, 0);
+        cudaError_t err = cudaHostGetDevicePointer((void **)&eri_gpu, (void *)cderi, 0);
         if (err != cudaSuccess) {
             fprintf(stderr, "decompress_and_transpose address mapping error %s\n", cudaGetErrorString(err));
             return 1;
         }
     }
-    dim3 threads(CBLKSIZE * STRIDE);
-    dim3 blocks((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
-    d_t_kernel<<<blocks, threads, 0, stream>>>(
-            out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1, fill_triu);
+    auto threads = make_block(CBLKSIZE * STRIDE);
+    auto blocks = make_grid((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
+    LAUNCH_KERNEL(d_t_kernel, blocks, threads, 0, stream,
+                  out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1, fill_triu);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
@@ -306,16 +320,16 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
 {
     double2 *eri_gpu = cderi;
     if (on_host) {
-        cudaError_t err = cudaHostGetDevicePointer(&eri_gpu, cderi, 0);
+        cudaError_t err = cudaHostGetDevicePointer((void **)&eri_gpu, (void *)cderi, 0);
         if (err != cudaSuccess) {
             fprintf(stderr, "decompress_and_transpose address mapping error %s\n", cudaGetErrorString(err));
             return 1;
         }
     }
-    dim3 threads(CBLKSIZE * STRIDE);
-    dim3 blocks((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
-    z_d_t_kernel<<<blocks, threads, 0, stream>>>(
-            out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1);
+    auto threads = make_block(CBLKSIZE * STRIDE);
+    auto blocks = make_grid((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
+    LAUNCH_KERNEL(z_d_t_kernel, blocks, threads, 0, stream,
+                  out, out_stride, eri_gpu, pair_idx, npairs, nao, aux0, aux1);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));

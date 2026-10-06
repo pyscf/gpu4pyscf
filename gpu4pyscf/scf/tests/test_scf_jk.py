@@ -355,6 +355,21 @@ def test_q_cond():
     q_cond = q_cond[bas_ij.argsort()]
     assert abs(qref[mask] - q_cond.get()).max() < 1e-3
 
+def test_get_k_rsh_distant_centers():
+    # A finite interatomic density retains LR exchange even when SR integrals
+    # are negligible. Mixed RSH operators must not use SR-only screening.
+    mol = pyscf.M(atom='H 0 0 0; H 0 0 10', basis='sto-3g', verbose=0)
+    dm = pyscf.scf.RHF(mol).get_init_guess(key='1e')
+    omega = .33
+    k_lr = get_jk(mol, dm, hermi=1, with_j=False, omega=omega)[1]
+    k_sr = get_jk(mol, dm, hermi=1, with_j=False, omega=-omega)[1]
+    assert abs(k_lr[0, 1]) > .05
+    for lr_factor, sr_factor in ((.65, .19), (1., 0.), (0., 1.), (1., 1.)):
+        ref = lr_factor * k_lr + sr_factor * k_sr
+        vk = jk.get_k(mol, cp.asarray(dm), hermi=1, omega=omega,
+                      lr_factor=lr_factor, sr_factor=sr_factor)
+        assert abs(vk.get() - ref).max() < 1e-10
+
 def test_jk_get_k_sr():
     mol = pyscf.M(atom='''
     O  0.0000  0.7375 -0.0528

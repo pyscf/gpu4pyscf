@@ -19,12 +19,18 @@
 
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -std=legacy -fPIC")
 set(CMAKE_VERBOSE_MAKEFILE ON)
-add_library(solvent SHARED
-mnsol_interface.f90
-mnsol_mem.F
-mnsol.F
-pcm.cu
+
+set(FTN_SRCS
+  mnsol_interface.f90
+  mnsol_mem.F
+  mnsol.F
 )
+
+set(GPU_SRCS
+  pcm.cu
+)
+
+add_library(solvent SHARED ${FTN_SRCS} ${GPU_SRCS})
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
 #option(ENABLE_STATIC "Enforce static library build" 0)
@@ -34,6 +40,17 @@ pcm.cu
 
 set_target_properties(solvent PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-set_target_properties(solvent PROPERTIES 
-  CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 
+if (USE_SYCL)
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  # Unlike the other GPU targets, `solvent` also carries Fortran sources, so
+  # the SYCL/C++-only flags must be guarded by a COMPILE_LANGUAGE genex
+  # instead of applied to the whole target.
+  target_compile_options(solvent PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-x c++ -nocudainc -nocudalib>
+  )
+  target_link_libraries(solvent PRIVATE sycl_compat gsycl)
+else()
+  set_target_properties(solvent PROPERTIES
+    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+endif()

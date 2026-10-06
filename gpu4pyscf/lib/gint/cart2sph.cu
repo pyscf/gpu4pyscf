@@ -15,6 +15,8 @@
  */
 
 #include <stdio.h>
+#include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 template<int L>
 __device__
@@ -482,8 +484,9 @@ static void left_cart2sph_inplace(double* cartesian_matrix, const int n_ao_carte
     constexpr int n_cartesian_of_l = (L + 1) * (L + 2) / 2;
     constexpr int n_spherical_of_l = 2 * L + 1;
 
-    const int i_ao = blockIdx.x * blockDim.x + threadIdx.x;
-    const int i_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_ao_cartesian || i_bas >= n_bas)
         return;
@@ -502,8 +505,9 @@ static void left_sph2cart_inplace(double* cartesian_matrix, const int n_ao_carte
     constexpr int n_cartesian_of_l = (L + 1) * (L + 2) / 2;
     constexpr int n_spherical_of_l = 2 * L + 1;
 
-    const int i_ao = blockIdx.x * blockDim.x + threadIdx.x;
-    const int i_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_ao_cartesian || i_bas >= n_bas)
         return;
@@ -524,8 +528,9 @@ static void left_sph2cart(double* cartesian_matrix, const double* spherical_matr
     constexpr int n_cartesian_of_l = (L + 1) * (L + 2) / 2;
     constexpr int n_spherical_of_l = 2 * L + 1;
 
-    const int i_ao = blockIdx.x * blockDim.x + threadIdx.x;
-    const int i_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_right || i_bas >= n_bas)
         return;
@@ -544,8 +549,9 @@ static void right_cart2sph_inplace(double* cartesian_matrix, const int n_ao_cart
     constexpr int n_cartesian_of_l = (L + 1) * (L + 2) / 2;
     constexpr int n_spherical_of_l = 2 * L + 1;
 
-    const int i_ao = blockIdx.x * blockDim.x + threadIdx.x;
-    const int i_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_ao_cartesian || i_bas >= n_bas)
         return;
@@ -564,8 +570,9 @@ static void right_sph2cart_inplace(double* cartesian_matrix, const int n_ao_cart
     constexpr int n_cartesian_of_l = (L + 1) * (L + 2) / 2;
     constexpr int n_spherical_of_l = 2 * L + 1;
 
-    const int i_ao = blockIdx.x * blockDim.x + threadIdx.x;
-    const int i_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_ao  = global_x;  // AO index (Cartesian or spherical)
+    const int i_bas = global_y;  // Shell (basis function) index
 
     if (i_ao >= n_ao_cartesian || i_bas >= n_bas)
         return;
@@ -584,8 +591,9 @@ static void copy_spherical_cart2sph(const double* cartesian_matrix, double* sphe
                                     const int l_j, const int n_bas_j, const int cartesian_offset_j, const int spherical_offset_j,
                                     const int* d_ao_idx)
 {
-    const int i_bas = blockIdx.x * blockDim.x + threadIdx.x;
-    const int j_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_bas = global_x;  // i-shell (row basis function) index
+    const int j_bas = global_y;  // j-shell (column basis function) index
 
     if (i_bas >= n_bas_i || j_bas >= n_bas_j)
         return;
@@ -612,8 +620,9 @@ static void copy_spherical_sph2cart(double* cartesian_matrix, const double* sphe
                                     const int l_j, const int n_bas_j, const int cartesian_offset_j, const int spherical_offset_j,
                                     const int* d_ao_idx)
 {
-    const int i_bas = blockIdx.x * blockDim.x + threadIdx.x;
-    const int j_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_bas = global_x;  // i-shell (row basis function) index
+    const int j_bas = global_y;  // j-shell (column basis function) index
 
     if (i_bas >= n_bas_i || j_bas >= n_bas_j)
         return;
@@ -640,8 +649,9 @@ static void copy_cartesian_pad_to_unpad(const double* cartesian_matrix, double* 
                                         const int l_j, const int n_bas_j, const int j_pad_offset, const int j_unpad_offset,
                                         const int* d_ao_idx)
 {
-    const int i_bas = blockIdx.x * blockDim.x + threadIdx.x;
-    const int j_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_bas = global_x;  // i-shell (row basis function) index
+    const int j_bas = global_y;  // j-shell (column basis function) index
 
     if (i_bas >= n_bas_i || j_bas >= n_bas_j)
         return;
@@ -666,8 +676,9 @@ static void copy_cartesian_unpad_to_pad(double* cartesian_matrix, const double* 
                                         const int l_j, const int n_bas_j, const int j_pad_offset, const int j_unpad_offset,
                                         const int* d_ao_idx)
 {
-    const int i_bas = blockIdx.x * blockDim.x + threadIdx.x;
-    const int j_bas = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_bas = global_x;  // i-shell (row basis function) index
+    const int j_bas = global_y;  // j-shell (column basis function) index
 
     if (i_bas >= n_bas_i || j_bas >= n_bas_j)
         return;
@@ -690,8 +701,9 @@ static void left_cart2cart(double* destination_matrix, const double* source_matr
                            const int n_right, const int n_ao_copy, const int i_destination_offset, const int i_source_offset,
                            const int* d_ao_idx)
 {
-    const int i_right = blockIdx.x * blockDim.x + threadIdx.x;
-    const int i_left = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_right = global_x;
+    const int i_left  = global_y;
 
     if (i_right >= n_right || i_left >= n_ao_copy)
         return;
@@ -714,20 +726,20 @@ extern "C" {
                 const int l_i = l_of_group[i_group];
                 const int n_bas = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
 
-                const dim3 threads(16, 16);
-                const dim3 blocks((n_ao_cartesian + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
+                auto threads = make_block(16, 16);
+                auto blocks = make_grid((n_ao_cartesian + 16 - 1) / 16, (n_bas + 16 - 1) / 16);
                 switch (l_i) {
-                    case  0: left_cart2sph_inplace< 0> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  1: left_cart2sph_inplace< 1> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  2: left_cart2sph_inplace< 2> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  3: left_cart2sph_inplace< 3> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  4: left_cart2sph_inplace< 4> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  5: left_cart2sph_inplace< 5> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  6: left_cart2sph_inplace< 6> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  7: left_cart2sph_inplace< 7> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  8: left_cart2sph_inplace< 8> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  9: left_cart2sph_inplace< 9> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case 10: left_cart2sph_inplace<10> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
+                    case  0: LAUNCH_KERNEL((left_cart2sph_inplace< 0>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  1: LAUNCH_KERNEL((left_cart2sph_inplace< 1>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  2: LAUNCH_KERNEL((left_cart2sph_inplace< 2>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  3: LAUNCH_KERNEL((left_cart2sph_inplace< 3>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  4: LAUNCH_KERNEL((left_cart2sph_inplace< 4>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  5: LAUNCH_KERNEL((left_cart2sph_inplace< 5>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  6: LAUNCH_KERNEL((left_cart2sph_inplace< 6>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  7: LAUNCH_KERNEL((left_cart2sph_inplace< 7>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  8: LAUNCH_KERNEL((left_cart2sph_inplace< 8>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  9: LAUNCH_KERNEL((left_cart2sph_inplace< 9>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case 10: LAUNCH_KERNEL((left_cart2sph_inplace<10>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
@@ -742,20 +754,20 @@ extern "C" {
                 const int l_i = l_of_group[i_group];
                 const int n_bas = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
 
-                const dim3 threads(16, 16);
-                const dim3 blocks((n_ao_cartesian + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
+                auto threads = make_block(16, 16);
+                auto blocks = make_grid((n_ao_cartesian + 16 - 1) / 16, (n_bas + 16 - 1) / 16);
                 switch (l_i) {
-                    case  0: right_cart2sph_inplace< 0> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  1: right_cart2sph_inplace< 1> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  2: right_cart2sph_inplace< 2> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  3: right_cart2sph_inplace< 3> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  4: right_cart2sph_inplace< 4> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  5: right_cart2sph_inplace< 5> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  6: right_cart2sph_inplace< 6> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  7: right_cart2sph_inplace< 7> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  8: right_cart2sph_inplace< 8> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  9: right_cart2sph_inplace< 9> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case 10: right_cart2sph_inplace<10> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
+                    case  0: LAUNCH_KERNEL((right_cart2sph_inplace< 0>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  1: LAUNCH_KERNEL((right_cart2sph_inplace< 1>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  2: LAUNCH_KERNEL((right_cart2sph_inplace< 2>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  3: LAUNCH_KERNEL((right_cart2sph_inplace< 3>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  4: LAUNCH_KERNEL((right_cart2sph_inplace< 4>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  5: LAUNCH_KERNEL((right_cart2sph_inplace< 5>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  6: LAUNCH_KERNEL((right_cart2sph_inplace< 6>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  7: LAUNCH_KERNEL((right_cart2sph_inplace< 7>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  8: LAUNCH_KERNEL((right_cart2sph_inplace< 8>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  9: LAUNCH_KERNEL((right_cart2sph_inplace< 9>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case 10: LAUNCH_KERNEL((right_cart2sph_inplace<10>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
@@ -770,19 +782,16 @@ extern "C" {
             for (int i_group = 0; i_group < n_l_ctr_group; i_group++) {
                 const int l_i = l_of_group[i_group];
                 const int n_bas_i = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
-        
+
                 int j_cartesian_offset = 0;
                 int j_spherical_offset = 0;
                 for (int j_group = 0; j_group < n_l_ctr_group; j_group++) {
                     const int l_j = l_of_group[j_group];
                     const int n_bas_j = n_total_bas_of_group[j_group] - n_pad_bas_of_group[j_group];
 
-                    const dim3 threads(32, 32);
-                    const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
-                    copy_spherical_cart2sph<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-                                                                            l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
-                                                                            l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
-                                                                            d_ao_idx);
+                    auto threads = make_block(32, 32);
+                    auto blocks = make_grid((n_bas_i + 32 - 1) / 32, (n_bas_j + 32 - 1) / 32);
+                    LAUNCH_KERNEL((copy_spherical_cart2sph), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical, l_i, n_bas_i, i_cartesian_offset, i_spherical_offset, l_j, n_bas_j, j_cartesian_offset, j_spherical_offset, d_ao_idx)
 
                     j_cartesian_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_spherical_offset += n_bas_j * (l_j * 2 + 1);
@@ -796,19 +805,16 @@ extern "C" {
             for (int i_group = 0; i_group < n_l_ctr_group; i_group++) {
                 const int l_i = l_of_group[i_group];
                 const int n_bas_i = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
-        
+
                 int j_pad_offset = 0;
                 int j_unpad_offset = 0;
                 for (int j_group = 0; j_group < n_l_ctr_group; j_group++) {
                     const int l_j = l_of_group[j_group];
                     const int n_bas_j = n_total_bas_of_group[j_group] - n_pad_bas_of_group[j_group];
 
-                    const dim3 threads(32, 32);
-                    const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
-                    copy_cartesian_pad_to_unpad<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-                                                                                l_i, n_bas_i, i_pad_offset, i_unpad_offset,
-                                                                                l_j, n_bas_j, j_pad_offset, j_unpad_offset,
-                                                                                d_ao_idx);
+                    auto threads = make_block(32, 32);
+                    auto blocks = make_grid((n_bas_i + 32 - 1) / 32, (n_bas_j + 32 - 1) / 32);
+                    LAUNCH_KERNEL((copy_cartesian_pad_to_unpad), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical, l_i, n_bas_i, i_pad_offset, i_unpad_offset, l_j, n_bas_j, j_pad_offset, j_unpad_offset, d_ao_idx)
 
                     j_pad_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_unpad_offset += n_bas_j * ((l_j + 1) * (l_j + 2) / 2);
@@ -833,19 +839,16 @@ extern "C" {
             for (int i_group = 0; i_group < n_l_ctr_group; i_group++) {
                 const int l_i = l_of_group[i_group];
                 const int n_bas_i = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
-        
+
                 int j_cartesian_offset = 0;
                 int j_spherical_offset = 0;
                 for (int j_group = 0; j_group < n_l_ctr_group; j_group++) {
                     const int l_j = l_of_group[j_group];
                     const int n_bas_j = n_total_bas_of_group[j_group] - n_pad_bas_of_group[j_group];
 
-                    const dim3 threads(32, 32);
-                    const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
-                    copy_spherical_sph2cart<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-                                                                            l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
-                                                                            l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
-                                                                            d_ao_idx);
+                    auto threads = make_block(32, 32);
+                    auto blocks = make_grid((n_bas_i + 32 - 1) / 32, (n_bas_j + 32 - 1) / 32);
+                    LAUNCH_KERNEL((copy_spherical_sph2cart), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical, l_i, n_bas_i, i_cartesian_offset, i_spherical_offset, l_j, n_bas_j, j_cartesian_offset, j_spherical_offset, d_ao_idx)
 
                     j_cartesian_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_spherical_offset += n_bas_j * (l_j * 2 + 1);
@@ -859,20 +862,20 @@ extern "C" {
                 const int l_i = l_of_group[i_group];
                 const int n_bas = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
 
-                const dim3 threads(16, 16);
-                const dim3 blocks((n_ao_cartesian + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
+                auto threads = make_block(16, 16);
+                auto blocks = make_grid((n_ao_cartesian + 16 - 1) / 16, (n_bas + 16 - 1) / 16);
                 switch (l_i) {
-                    case  0: left_sph2cart_inplace< 0> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  1: left_sph2cart_inplace< 1> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  2: left_sph2cart_inplace< 2> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  3: left_sph2cart_inplace< 3> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  4: left_sph2cart_inplace< 4> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  5: left_sph2cart_inplace< 5> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  6: left_sph2cart_inplace< 6> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  7: left_sph2cart_inplace< 7> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  8: left_sph2cart_inplace< 8> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  9: left_sph2cart_inplace< 9> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case 10: left_sph2cart_inplace<10> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
+                    case  0: LAUNCH_KERNEL((left_sph2cart_inplace< 0>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  1: LAUNCH_KERNEL((left_sph2cart_inplace< 1>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  2: LAUNCH_KERNEL((left_sph2cart_inplace< 2>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  3: LAUNCH_KERNEL((left_sph2cart_inplace< 3>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  4: LAUNCH_KERNEL((left_sph2cart_inplace< 4>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  5: LAUNCH_KERNEL((left_sph2cart_inplace< 5>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  6: LAUNCH_KERNEL((left_sph2cart_inplace< 6>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  7: LAUNCH_KERNEL((left_sph2cart_inplace< 7>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  8: LAUNCH_KERNEL((left_sph2cart_inplace< 8>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  9: LAUNCH_KERNEL((left_sph2cart_inplace< 9>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case 10: LAUNCH_KERNEL((left_sph2cart_inplace<10>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
@@ -887,20 +890,20 @@ extern "C" {
                 const int l_i = l_of_group[i_group];
                 const int n_bas = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
 
-                const dim3 threads(16, 16);
-                const dim3 blocks((n_ao_cartesian + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
+                auto threads = make_block(16, 16);
+                auto blocks = make_grid((n_ao_cartesian + 16 - 1) / 16, (n_bas + 16 - 1) / 16);
                 switch (l_i) {
-                    case  0: right_sph2cart_inplace< 0> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  1: right_sph2cart_inplace< 1> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  2: right_sph2cart_inplace< 2> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  3: right_sph2cart_inplace< 3> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  4: right_sph2cart_inplace< 4> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  5: right_sph2cart_inplace< 5> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  6: right_sph2cart_inplace< 6> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  7: right_sph2cart_inplace< 7> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  8: right_sph2cart_inplace< 8> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case  9: right_sph2cart_inplace< 9> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
-                    case 10: right_sph2cart_inplace<10> <<<blocks, threads, 0, stream>>>(cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); break;
+                    case  0: LAUNCH_KERNEL((right_sph2cart_inplace< 0>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  1: LAUNCH_KERNEL((right_sph2cart_inplace< 1>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  2: LAUNCH_KERNEL((right_sph2cart_inplace< 2>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  3: LAUNCH_KERNEL((right_sph2cart_inplace< 3>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  4: LAUNCH_KERNEL((right_sph2cart_inplace< 4>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  5: LAUNCH_KERNEL((right_sph2cart_inplace< 5>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  6: LAUNCH_KERNEL((right_sph2cart_inplace< 6>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  7: LAUNCH_KERNEL((right_sph2cart_inplace< 7>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  8: LAUNCH_KERNEL((right_sph2cart_inplace< 8>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case  9: LAUNCH_KERNEL((right_sph2cart_inplace< 9>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
+                    case 10: LAUNCH_KERNEL((right_sph2cart_inplace<10>), blocks, threads, 0, stream, cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
@@ -915,19 +918,16 @@ extern "C" {
             for (int i_group = 0; i_group < n_l_ctr_group; i_group++) {
                 const int l_i = l_of_group[i_group];
                 const int n_bas_i = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
-        
+
                 int j_pad_offset = 0;
                 int j_unpad_offset = 0;
                 for (int j_group = 0; j_group < n_l_ctr_group; j_group++) {
                     const int l_j = l_of_group[j_group];
                     const int n_bas_j = n_total_bas_of_group[j_group] - n_pad_bas_of_group[j_group];
 
-                    const dim3 threads(32, 32);
-                    const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
-                    copy_cartesian_unpad_to_pad<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-                                                                                l_i, n_bas_i, i_pad_offset, i_unpad_offset,
-                                                                                l_j, n_bas_j, j_pad_offset, j_unpad_offset,
-                                                                                d_ao_idx);
+                    auto threads = make_block(32, 32);
+                    auto blocks = make_grid((n_bas_i + 32 - 1) / 32, (n_bas_j + 32 - 1) / 32);
+                    LAUNCH_KERNEL((copy_cartesian_unpad_to_pad), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical, l_i, n_bas_i, i_pad_offset, i_unpad_offset, l_j, n_bas_j, j_pad_offset, j_unpad_offset, d_ao_idx)
 
                     j_pad_offset += n_total_bas_of_group[j_group] * ((l_j + 1) * (l_j + 2) / 2);
                     j_unpad_offset += n_bas_j * ((l_j + 1) * (l_j + 2) / 2);
@@ -953,20 +953,20 @@ extern "C" {
                 const int l_i = l_of_group[i_group];
                 const int n_bas = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
 
-                const dim3 threads(16, 16);
-                const dim3 blocks((n_right + threads.x - 1) / threads.x, (n_bas + threads.y - 1) / threads.y);
+                auto threads = make_block(16, 16);
+                auto blocks = make_grid((n_right + 16 - 1) / 16, (n_bas + 16 - 1) / 16);
                 switch (l_i) {
-                    case  0: left_sph2cart< 0> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  1: left_sph2cart< 1> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  2: left_sph2cart< 2> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  3: left_sph2cart< 3> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  4: left_sph2cart< 4> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  5: left_sph2cart< 5> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  6: left_sph2cart< 6> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  7: left_sph2cart< 7> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  8: left_sph2cart< 8> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case  9: left_sph2cart< 9> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
-                    case 10: left_sph2cart<10> <<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); break;
+                    case  0: LAUNCH_KERNEL((left_sph2cart< 0>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  1: LAUNCH_KERNEL((left_sph2cart< 1>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  2: LAUNCH_KERNEL((left_sph2cart< 2>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  3: LAUNCH_KERNEL((left_sph2cart< 3>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  4: LAUNCH_KERNEL((left_sph2cart< 4>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  5: LAUNCH_KERNEL((left_sph2cart< 5>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  6: LAUNCH_KERNEL((left_sph2cart< 6>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  7: LAUNCH_KERNEL((left_sph2cart< 7>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  8: LAUNCH_KERNEL((left_sph2cart< 8>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case  9: LAUNCH_KERNEL((left_sph2cart< 9>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
+                    case 10: LAUNCH_KERNEL((left_sph2cart<10>), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx) break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_with_padding(), max_L = 10\n", l_i);
@@ -984,10 +984,10 @@ extern "C" {
                 const int n_bas = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
                 const int n_cartesian_of_l = (l_i + 1) * (l_i + 2) / 2;
 
-                const dim3 threads(16, 16);
-                const dim3 blocks((n_right + threads.x - 1) / threads.x, (n_bas * n_cartesian_of_l + threads.y - 1) / threads.y);
-                left_cart2cart<<<threads, blocks>>>(cartesian_matrix, spherical_matrix,
-                                                    n_right, n_bas * n_cartesian_of_l, i_pad_offset, i_unpad_offset, d_ao_idx);
+                auto threads = make_block(16, 16);
+                auto blocks = make_grid((n_right + 16 - 1) / 16, (n_bas * n_cartesian_of_l + 16 - 1) / 16);
+                LAUNCH_KERNEL((left_cart2cart), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix,
+                                n_right, n_bas * n_cartesian_of_l, i_pad_offset, i_unpad_offset, d_ao_idx);
 
                 i_pad_offset += n_total_bas_of_group[i_group] * n_cartesian_of_l;
                 i_unpad_offset += n_bas * n_cartesian_of_l;

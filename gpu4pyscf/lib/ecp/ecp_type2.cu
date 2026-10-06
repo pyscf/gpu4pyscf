@@ -17,9 +17,11 @@
 template <int order> __device__
 void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
                     const double *ci, const double *ai){
+    setup_context();
+
     double root = 0.0;
-    if (threadIdx.x < NGAUSS){
-        root = r128[threadIdx.x];
+    if (threadIdx_x < NGAUSS){
+        root = r128[threadIdx_x];
     }
     const double r = root - rca;
     const double r2 = r*r;
@@ -52,6 +54,7 @@ void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
 
 __device__
 void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, double *r){
+    setup_context();
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -66,7 +69,7 @@ void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, do
 
     // LC + (i+j+k) + (LI + LC) needs to be even
     // When i+j+k + LC is even
-    for (int n = threadIdx.x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim.x){
+    for (int n = threadIdx_x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim_x){
         const int i = n/(LI+1)/(LI+1);
         const int j = n/(LI+1)%(LI+1);
         const int k = n%(LI+1);
@@ -90,7 +93,7 @@ void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, do
     }
 
     // When i+j+k + LC is odd
-    for (int n = threadIdx.x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim.x){
+    for (int n = threadIdx_x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim_x){
         const int i = n/(LI+1)/(LI+1);
         const int j = n/(LI+1)%(LI+1);
         const int k = n%(LI+1);
@@ -115,6 +118,7 @@ void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, do
 
 template <int LI, int LC> __device__
 void type2_facs_omega(double* __restrict__ omega, double *r){
+    setup_context();
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -129,7 +133,7 @@ void type2_facs_omega(double* __restrict__ omega, double *r){
 
     // LC + (i+j+k) + (LI + LC) needs to be even
     // When i+j+k + LC is even
-    for (int n = threadIdx.x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim.x){
+    for (int n = threadIdx_x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim_x){
         const int i = n/(LI+1)/(LI+1);
         const int j = n/(LI+1)%(LI+1);
         const int k = n%(LI+1);
@@ -153,7 +157,7 @@ void type2_facs_omega(double* __restrict__ omega, double *r){
     }
 
     // When i+j+k + LC is odd
-    for (int n = threadIdx.x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim.x){
+    for (int n = threadIdx_x; n < (LI+1)*(LI+1)*(LI+1); n+=blockDim_x){
         const int i = n/(LI+1)/(LI+1);
         const int j = n/(LI+1)%(LI+1);
         const int k = n%(LI+1);
@@ -178,6 +182,8 @@ void type2_facs_omega(double* __restrict__ omega, double *r){
 
 __device__
 void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *rca, double *omega){
+    setup_context();
+
     const int LI1 = LI+1;
     const int nfi = LI1*(LI1+1)/2;
     const int LCC1 = (2*LC+1);
@@ -189,7 +195,7 @@ void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *r
     cache_fac(fi, LI, rca);
 
     // i,j,k,ijkmn->(i+j+k)pmn
-    for (int pmn = threadIdx.x; pmn < nfi*LIC1; pmn+=blockDim.x){
+    for (int pmn = threadIdx_x; pmn < nfi*LIC1; pmn+=blockDim_x){
         const int m = pmn/nfi;
         const int p = pmn%nfi;
 
@@ -228,6 +234,7 @@ void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *r
 
 template <int LI, int LC> __device__
 void type2_ang(double * __restrict__ facs, double *rca, double *omega){
+    setup_context();
     constexpr int LI1 = LI+1;
     constexpr int nfi = LI1*(LI1+1)/2;
     constexpr int LCC1 = (2*LC+1);
@@ -239,7 +246,7 @@ void type2_ang(double * __restrict__ facs, double *rca, double *omega){
     cache_fac<LI>(fi, rca);
 
     // i,j,k,ijkmn->(i+j+k)pmn
-    for (int pmn = threadIdx.x; pmn < nfi*LIC1; pmn+=blockDim.x){
+    for (int pmn = threadIdx_x; pmn < nfi*LIC1; pmn+=blockDim_x){
         const int m = pmn/nfi;
         const int p = pmn%nfi;
 
@@ -283,7 +290,24 @@ void type2_cart(double * __restrict__ gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    const int task_id = blockIdx.x;
+    constexpr int LI1 = LI+1;
+    constexpr int LJ1 = LJ+1;
+    constexpr int LIC1 = LI+LC+1;
+    constexpr int LJC1 = LJ+LC+1;
+    constexpr int LCC1 = (2*LC+1);
+
+    constexpr int BLKI = (LIC1+1)/2 * LCC1;
+    constexpr int BLKJ = (LJC1+1)/2 * LCC1;
+
+    constexpr int nfi = (LI+1) * (LI+2) / 2;
+    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
+    setup_context();
+    const int task_id = blockIdx_x;
+    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]); // up to 12600 Bytes
+    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
+    SHARED_ARRAY(double, rad_all, [(LI+LJ+1) * LIC1 * LJC1]);
+    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
+    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
     if (task_id >= ntasks){
         return;
     }
@@ -306,18 +330,6 @@ void type2_cart(double * __restrict__ gctr,
     rcb[1] = rc[1] - rj[1];
     rcb[2] = rc[2] - rj[2];
 
-    constexpr int LI1 = LI+1;
-    constexpr int LJ1 = LJ+1;
-    constexpr int LIC1 = LI+LC+1;
-    constexpr int LJC1 = LJ+LC+1;
-    constexpr int LCC1 = (2*LC+1);
-
-    constexpr int BLKI = (LIC1+1)/2 * LCC1;
-    constexpr int BLKJ = (LJC1+1)/2 * LCC1;
-
-    __shared__ double omegai[LI1*(LI1+1)*(LI1+2)/6 * BLKI];
-    __shared__ double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
-
     type2_facs_omega<LI, LC>(omegai, rca);
     type2_facs_omega<LJ, LC>(omegaj, rcb);
     __syncthreads();
@@ -337,7 +349,6 @@ void type2_cart(double * __restrict__ gctr,
     double radj[LJC1];
     type2_facs_rad<0>(radj, LJ+LC, npj, dcb, cj, aj);
 
-    __shared__ double rad_all[(LI+LJ+1) * LIC1 * LJC1];
     set_shared_memory(rad_all, (LI+LJ+1)*LIC1*LJC1);
 
     double ur = 0.0;
@@ -347,8 +358,8 @@ void type2_cart(double * __restrict__ gctr,
     }
 
     double root = 0.0;
-    if (threadIdx.x < NGAUSS){
-        root = r128[threadIdx.x];
+    if (threadIdx_x < NGAUSS){
+        root = r128[threadIdx_x];
     }
     for (int p = 0; p <= LI+LJ; p++){
         double *prad = rad_all + p*LIC1*LJC1;
@@ -359,12 +370,6 @@ void type2_cart(double * __restrict__ gctr,
         ur *= root;
     }
     __syncthreads();
-
-    constexpr int nfi = (LI+1) * (LI+2) / 2;
-    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-
-    __shared__ double angi[LI1*nfi*LIC1];
-    __shared__ double angj[LJ1*nfj*LJC1];
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
@@ -379,7 +384,7 @@ void type2_cart(double * __restrict__ gctr,
         type2_ang<LI, LC>(angi, rca, omegai+m);
         type2_ang<LJ, LC>(angj, rcb, omegaj+m);
         __syncthreads();
-        for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+        for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
             const int i = ij%nfi;
             const int j = ij/nfi;
             double s = 0;
@@ -404,7 +409,7 @@ void type2_cart(double * __restrict__ gctr,
 
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij%nfi;
         const int j = ij/nfi;
         double tmp = reg_gctr[ij/THREADS];
@@ -422,9 +427,12 @@ void type2_cart(double * __restrict__ gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env)
+                const int *atm, const int *bas, const double *env,
+                void *shm_mem)
 {
-    const int task_id = blockIdx.x;
+    setup_context();
+    const int task_id = blockIdx_x;
+    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }
@@ -432,8 +440,6 @@ void type2_cart(double * __restrict__ gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
-
-    extern __shared__ double smem[];
 
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
@@ -478,8 +484,8 @@ void type2_cart(double * __restrict__ gctr,
     type2_facs_rad<0>(radj, LJ+LC, npj, dcb, cj, aj);
 
     double root = 0.0;
-    if (threadIdx.x < NGAUSS){
-        root = r128[threadIdx.x];
+    if (threadIdx_x < NGAUSS){
+        root = r128[threadIdx_x];
     }
     double* rad_all = smem;
     set_shared_memory(rad_all, (LI+LJ+1)*(LI+LC+1)*(LJ+LC+1));
@@ -511,7 +517,7 @@ void type2_cart(double * __restrict__ gctr,
         type2_ang(angj, LJ, LC, rcb, omegaj+m);
         __syncthreads();
 
-        for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+        for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
             const int i = ij%nfi;
             const int j = ij/nfi;
             double s = 0;
@@ -540,7 +546,7 @@ void type2_cart(double * __restrict__ gctr,
     const int joff = ao_loc[jsh];
     double *gctr_ij = gctr + ioff + joff*nao;
     double *gctr_ji = gctr + joff + ioff*nao;
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij%nfi;
         const int j = ij/nfi;
         double tmp = reg_gctr[ij/THREADS];
