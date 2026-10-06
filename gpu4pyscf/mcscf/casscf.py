@@ -281,6 +281,7 @@ class _CASSCF(cpu_mc1step.CASSCF):
             callback = self.callback
 
         self.check_sanity()
+        assert self.frozen is None
         self.dump_flags()
         (self.converged, self.e_tot, self.e_cas, self.ci,
          self.mo_coeff, self.mo_energy) = kernel(
