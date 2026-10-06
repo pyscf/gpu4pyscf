@@ -36,7 +36,7 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.14 \
-          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && pip3 install MCFun pytest-xdist && source build.sh && pytest -n 4 --dist loadfile -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && pip3 install gpu4pyscf-libxc==0.9.0 MCFun pytest-xdist && source build.sh && pytest -n 4 --dist loadfile -m 'not slow and not benchmark and not special' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
 
   multi-gpu:
     runs-on: [self-hosted, Linux, X64, 2T4]
