@@ -31,6 +31,7 @@ XC_FAMILY_OEP     =     16
 XC_FAMILY_HYB_GGA =     32
 XC_FAMILY_HYB_MGGA=     64
 XC_FAMILY_HYB_LDA =    128
+XC_MAX_REFERENCES = 5
 
 class func_reference_type(ctypes.Structure):
     """
@@ -44,7 +45,13 @@ class func_params_type(ctypes.Structure):
     """
     Holds user defined parameters and their description.
     """
-    _fields_ = [("value", ctypes.c_double), ("description", ctypes.c_char_p)]
+    _fields_ = [
+        ("n", ctypes.c_int),
+        ("names", ctypes.POINTER(ctypes.c_char_p)),
+        ("descriptions", ctypes.POINTER(ctypes.c_char_p)),
+        ("values", ctypes.POINTER(ctypes.c_double)),
+        ("set", ctypes.c_void_p),
+    ]
 
 
 class xc_func_info_type(ctypes.Structure):
@@ -56,12 +63,10 @@ class xc_func_info_type(ctypes.Structure):
         ("kind", ctypes.c_int),
         ("name", ctypes.c_char_p),
         ("family", ctypes.c_int),
-        ("refs", ctypes.POINTER(func_reference_type)),
+        ("refs", ctypes.POINTER(func_reference_type) * XC_MAX_REFERENCES),
         ("flags", ctypes.c_int),
         ("dens_threshold", ctypes.c_double),
-        ("n_ext_params", ctypes.c_int),
-        ("ext_params", ctypes.POINTER(func_params_type)),
-        ("set_ext_params", ctypes.c_void_p),
+        ("ext_params", func_params_type),
         ("init", ctypes.c_void_p),
         ("end", ctypes.c_void_p),
         ("lda", ctypes.c_void_p),
@@ -158,8 +163,7 @@ class xc_dimensions(ctypes.Structure):
 
 class xc_func_type(ctypes.Structure):
     """
-    The primary xc_func_type used to hold all data pertaining to a given
-    LibXC functional
+    LibXC 7.1.2 functional layout. LibXC allocates and frees the object.
     """
     _fields_ = [
         ("info", ctypes.POINTER(xc_func_info_type)),  # const xc_func_info_type *info;
@@ -188,6 +192,16 @@ class xc_func_type(ctypes.Structure):
         ("sigma_threshold", ctypes.c_double),
         ("tau_threshold", ctypes.c_double)
     ]
+
+class xc_func_type_700(ctypes.Structure):
+    """GPU4PySCF's LibXC 7.0.0 fork, with params_size before the thresholds.
+
+    The fork reports 7.0.0 without a custom version suffix; upstream 7.0.0
+    does not have this field and is not covered by this declaration.
+    """
+    _fields_ = (xc_func_type._fields_[:-4]
+                + [("params_size", ctypes.c_int)]
+                + xc_func_type._fields_[-4:])
 
 class xc_lda_out_params(ctypes.Structure):
     """
