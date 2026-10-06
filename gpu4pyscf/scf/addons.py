@@ -216,7 +216,9 @@ def convert_to_ghf(mf, out=None, remove_df=False):
     if out.istype('GKS'):
         from gpu4pyscf.dft.numint2c import NumInt2C
         if not isinstance(out._numint, NumInt2C):
+            omega = out._numint.omega
             out._numint = NumInt2C()
+            out._numint.omega = omega
     return _update_mo_to_ghf_(mf, out)
 
 def _update_mo_to_uhf_(mf, mf1):
