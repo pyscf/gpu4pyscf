@@ -27,6 +27,11 @@ endif()
 
 set(CMAKE_C_STANDARD "99")
 set(CMAKE_CXX_STANDARD 17)
+if (USE_SYCL)
+  # NTTP templates (template <auto Kernel>) in the launch launcher require
+  # C++20; SYCL TUs are compiled with -x c++, so this applies only there.
+  set(CMAKE_CXX_STANDARD 20)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (USE_SYCL)

@@ -1050,7 +1050,7 @@ int GDFTgroup_grids(cudaStream_t stream, int* group_ids, const double* atom_coor
     }
     auto threads = make_block(NATOM_PER_BLOCK);
     auto blocks = make_grid((ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
-    LAUNCH_KERNEL_S(GDFTgroup_grids_kernel, blocks, threads, 0, stream,
+    LAUNCH_KERNEL(GDFTgroup_grids_kernel, blocks, threads, 0, ON_STREAM(stream),
                   group_ids, atom_coords, coords, natm, ngrids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

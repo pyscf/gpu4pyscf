@@ -53,11 +53,11 @@ static int GINTfill_int3c1e_ipip1_charge_contracted_tasks(double* output, const 
     // array lands in the scratch surface, which is sized per HW thread for the whole
     // device, so the waste costs gigabytes of device memory.
     switch (nrys_roots) {
-    case 2: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 3: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 4: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 5: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 6: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 4: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 5: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 6: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     default:
         fprintf(stderr, "nrys_roots = %d out of range\n", nrys_roots);
         return 1;
@@ -86,11 +86,11 @@ static int GINTfill_int3c1e_ipvip1_charge_contracted_tasks(double* output, const
     // array lands in the scratch surface, which is sized per HW thread for the whole
     // device, so the waste costs gigabytes of device memory.
     switch (nrys_roots) {
-    case 2: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 3: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 4: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 5: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 6: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 4: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 5: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 6: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     default:
         fprintf(stderr, "nrys_roots = %d out of range\n", nrys_roots);
         return 1;
@@ -119,11 +119,11 @@ static int GINTfill_int3c1e_ip1ip2_charge_contracted_tasks(double* output, const
     // array lands in the scratch surface, which is sized per HW thread for the whole
     // device, so the waste costs gigabytes of device memory.
     switch (nrys_roots) {
-    case 2: LAUNCH_KERNEL_S((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 3: LAUNCH_KERNEL_S((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 4: LAUNCH_KERNEL_S((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 5: LAUNCH_KERNEL_S((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 6: LAUNCH_KERNEL_S((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 4: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 5: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 6: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, ON_STREAM(stream), output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     default:
         fprintf(stderr, "nrys_roots = %d out of range\n", nrys_roots);
         return 1;
@@ -146,15 +146,15 @@ static int GINTfill_int3c1e_ipip2_density_contracted_tasks(double* output, const
 
     LAUNCH_CONFIG();
     switch (i_l + j_l) {
-    case  0: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 0>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
-    case  1: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 1>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
-    case  2: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 2>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
-    case  3: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 3>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
-    case  4: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 4>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
-    case  5: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 5>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
-    case  6: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 6>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
-    case  7: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 7>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
-    case  8: LAUNCH_KERNEL_S((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 8>), blocks, threads, 0, stream, output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  0: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 0>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  1: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 1>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  2: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 2>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  3: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 3>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  4: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 4>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  5: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 5>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  6: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 6>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  7: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 7>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
+    case  8: LAUNCH_KERNEL((GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 8>), blocks, threads, 0, ON_STREAM(stream), output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents) break;
     // Up to g + g = 8 now
     default:
         fprintf(stderr, "i_l + j_l = %d out of range\n", i_l + j_l);

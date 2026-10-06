@@ -669,7 +669,7 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
     auto threads = make_block(NG_PER_BLOCK, NSP_PER_BLOCK);
     auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
     LAUNCH_KERNEL_DYN( ft_aopair_deriv_kernel, blocks, threads, shm_size,
-            out, sigma, NULL, dm_vG, GvT, *envs, ngrids, shm_size,
+            out, sigma, nullptr, dm_vG, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
