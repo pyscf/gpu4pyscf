@@ -16,7 +16,7 @@ import pickle
 import numpy as np
 import unittest
 import pyscf
-from gpu4pyscf.dft import rks
+from gpu4pyscf.dft import rks, libxc
 try:
     from gpu4pyscf.dispersion import dftd3, dftd4
 except ImportError:
@@ -261,7 +261,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-6
 
     @unittest.skipIf(dftd4 is None, 'requires the dftd4 library')
-    @unittest.skipIf('HYB_MGGA_XC_COACH' not in dft.libxc.XC_CODES,
+    @unittest.skipIf('HYB_MGGA_XC_COACH' not in libxc.XC_CODES,
                      'COACH requires a recent LibXC')
     def test_nr_coach(self):
         # Reference: FunctionalCOACH/coach_pyscf.py at
