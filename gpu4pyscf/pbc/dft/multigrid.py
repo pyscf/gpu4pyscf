@@ -54,6 +54,7 @@ try:
     WARP_SIZE = libmgrid.MG_warp_size() if libmgrid is not None else 32
 except OSError:
     libmgrid = None
+    WARP_SIZE = 32
 
 PRIMBAS_ANG = 0
 PRIMBAS_EXP = 1
