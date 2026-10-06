@@ -108,7 +108,11 @@ class UKS(rks.KohnShamDFT, uhf.UHF):
     energy_elec = energy_elec
     energy_tot = hf.RHF.energy_tot
     init_guess_by_vsap = uks_cpu.UKS.init_guess_by_vsap
-    to_hf = NotImplemented
+
+    def to_hf(self):
+        '''Convert to UHF object.'''
+        from gpu4pyscf import scf
+        return self._transfer_attrs_(scf.UHF(self.mol))
 
     def Gradients(self):
         from gpu4pyscf.grad import uks as uks_grad
