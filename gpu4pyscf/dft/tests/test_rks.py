@@ -260,6 +260,41 @@ class KnownValues(unittest.TestCase):
         assert np.abs(test_energy - ref_energy) < 1e-7
         assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-6
 
+    @unittest.skipIf(dftd4 is None, 'requires the dftd4 library')
+    @unittest.skipIf('HYB_MGGA_XC_COACH' not in dft.libxc.XC_CODES,
+                     'COACH requires a recent LibXC')
+    def test_nr_coach(self):
+        # Reference: FunctionalCOACH/coach_pyscf.py at
+        # https://github.com/JiashuLiang/COACH/tree/bd18fffd84efa85731b3271d1c596b4cb73d9f81/FunctionalCOACH
+        # RKS benzene with the same basis and convergence threshold, using
+        # fresh RKS default grids in place of the reference builder's grids.
+        mol = gto.M(
+            atom='''C  1.3970000000  0.0000000000  0.0000000000
+                    C  0.6985000000  1.2098374891  0.0000000000
+                    C -0.6985000000  1.2098374891  0.0000000000
+                    C -1.3970000000  0.0000000000  0.0000000000
+                    C -0.6985000000 -1.2098374891  0.0000000000
+                    C  0.6985000000 -1.2098374891  0.0000000000
+                    H  2.4810000000  0.0000000000  0.0000000000
+                    H  1.2405000000  2.1486090268  0.0000000000
+                    H -1.2405000000  2.1486090268  0.0000000000
+                    H -2.4810000000  0.0000000000  0.0000000000
+                    H -1.2405000000 -2.1486090268  0.0000000000
+                    H  1.2405000000 -2.1486090268  0.0000000000''',
+            basis='def2-svpd', unit='Angstrom', verbose=0)
+        method = dft.RKS(mol)
+        method.xc = 'COACH'
+        method.conv_tol = 1e-10
+        # The reference uses slightly different rounded correlation constants;
+        # use its regression suite's cross-implementation energy tolerance.
+        self.assertAlmostEqual(method.kernel(), -231.97390824623758, delta=2e-6)
+        self.assertTrue(method.converged)
+        self.assertAlmostEqual(method.scf_summary['dispersion'],
+                               3.79735283856785e-6, delta=1e-12)
+        # COACH has no two-body D4 contribution (s6 = s8 = 0).
+        self.assertAlmostEqual(method.get_dispersion(with_3body=False), 0.,
+                               delta=1e-12)
+
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()
