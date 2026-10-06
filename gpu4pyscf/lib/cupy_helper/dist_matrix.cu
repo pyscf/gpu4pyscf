@@ -42,7 +42,7 @@ int dist_matrix(cudaStream_t stream, double *dist, const double *x, const double
     int ntiley = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntilex, ntiley);
-    LAUNCH_KERNEL(_calc_distances, blocks, threads, 0, ON_STREAM(stream),
+    LAUNCH_KERNEL(_calc_distances, blocks, threads, 0, stream,
                   dist, x, y, m, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

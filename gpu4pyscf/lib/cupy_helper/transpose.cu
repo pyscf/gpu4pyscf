@@ -129,7 +129,7 @@ int transpose_dsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
     int ntile = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntile, ntile);
-    LAUNCH_KERNEL(_transpose_dsum, blocks, threads, 0, ON_STREAM(stream),
+    LAUNCH_KERNEL(_transpose_dsum, blocks, threads, 0, stream,
                   a, n, counts, hermi);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -143,7 +143,7 @@ int transpose_zsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
     int ntile = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntile, ntile);
-    LAUNCH_KERNEL(_transpose_zsum, blocks, threads, 0, ON_STREAM(stream),
+    LAUNCH_KERNEL(_transpose_zsum, blocks, threads, 0, stream,
                   a, n, counts, hermi);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

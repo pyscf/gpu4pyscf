@@ -206,17 +206,38 @@ namespace gpu4pyscf_detail {
 // template parameter (C++20): it is a constant expression, so the device
 // lambda invokes it directly and SYCL never sees a function pointer.
 // Argument handling:
-//  * every argument is copied by value into a std::tuple on the host; an
-//    argument that is a pointer to a struct (PBCIntEnvVars*, etc.) is
-//    dereferenced into the tuple, so `*envs`/`dev_envs` hoists at call
-//    sites are unnecessary;
-//  * a stream argument is marked with ON_STREAM(stream) in the first
-//    kernel-argument slot; anything else goes to the kernel.
-struct stream_tag {
-    sycl::queue* q;
-};
-inline stream_tag on_stream(sycl::queue* q) { return {q}; }
-inline stream_tag on_stream(sycl::queue& q) { return {&q}; }
+//  * every argument is copied by value into a std::tuple on the host (so
+//    `*envs`-style dereferences are evaluated at the call site);
+//  * a stream/queue argument (`sycl::queue*` / `sycl::queue&`) anywhere in
+//    the pack selects the launch stream and is removed from the kernel call.
+//    No ON_STREAM() marker needed; kernels never legitimately take a
+//    queue as a parameter.
+template <typename T>
+struct _is_stream
+    : std::bool_constant<
+          std::is_same_v<std::decay_t<T>, sycl::queue> ||
+          std::is_same_v<std::decay_t<T>, sycl::queue*>> {};
+
+inline sycl::queue* _stream_ptr(sycl::queue& r) { return &r; }
+inline sycl::queue* _stream_ptr(sycl::queue* p) { return p; }
+
+template <typename... Args>
+inline sycl::queue* _pick_stream(Args&&... args) {
+    sycl::queue* q = sycl_get_queue();
+    auto scan = [&](auto&& v) { if constexpr (_is_stream<decltype(v)>::value) q = _stream_ptr(v); };
+    (scan(args), ...);
+    return q;
+}
+
+template <class Tuple, std::size_t... I>
+inline auto _filter_streams(const Tuple& t, std::index_sequence<I...>) {
+    return std::tuple_cat(
+        [ ] (const auto& v) {
+            using E = std::remove_cv_t<std::remove_reference_t<decltype(v)>>;
+            if constexpr (_is_stream<E>::value) return std::tuple{};
+            else return std::tuple{v};
+        }(std::get<I>(t)) ... );
+}
 
 template <class Tuple, auto Kernel, std::size_t... I>
 inline void _apply_call(const Tuple& t, std::index_sequence<I...>) {
@@ -229,60 +250,45 @@ inline void _apply_call_shm(const Tuple& t, char* shm, std::index_sequence<I...>
 }
 
 template <auto Kernel, typename... Args>
-inline void launch_submit(sycl::queue* q, sycl::range<3> grid,
+inline void launch_submit(sycl::range<3> grid,
                           sycl::range<3> block, Args... args) {
-    auto tup = std::make_tuple(args...);
+    sycl::queue* q = _pick_stream(args...);
+    auto tup_all = std::make_tuple(args...);
+    auto tup = _filter_streams(tup_all, std::index_sequence_for<Args...>{});
     q->parallel_for(sycl::nd_range<3>(grid * block, block),
         [tup](sycl::nd_item<3>) {
             _apply_call<decltype(tup), Kernel>(tup,
-                std::index_sequence_for<Args...>{});
+                std::make_index_sequence<std::tuple_size<decltype(tup)>::value>{});
         });
 }
 
 template <auto Kernel, typename... Args>
-inline void launch_dyn(sycl::queue* q, sycl::range<3> grid,
-                       sycl::range<3> block, std::size_t shm_size,
-                       Args... args) {
-    auto tup = std::make_tuple(args...);
+inline void launch_kernel(sycl::range<3> grid,
+                          sycl::range<3> block, std::size_t shm_size,
+                          Args... args) {
+    (void)shm_size;
+    launch_submit<Kernel>(grid, block, args...);
+}
+
+template <auto Kernel, typename... Args>
+inline void launch_kernel_dyn(sycl::range<3> grid,
+                              sycl::range<3> block, std::size_t shm_size,
+                              Args... args) {
+    sycl::queue* q = _pick_stream(args...);
+    auto tup_all = std::make_tuple(args...);
+    auto tup = _filter_streams(tup_all, std::index_sequence_for<Args...>{});
     q->submit([tup, grid, block, shm_size](sycl::handler& cgh) {
         sycl::local_accessor<char, 1> _dynshm(sycl::range<1>(shm_size), cgh);
         cgh.parallel_for(sycl::nd_range<3>(grid * block, block),
             [_dynshm, tup](sycl::nd_item<3>) {
                 char* shm = GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(_dynshm);
                 _apply_call_shm<decltype(tup), Kernel>(tup, shm,
-                    std::index_sequence_for<Args...>{});
+                    std::make_index_sequence<std::tuple_size<decltype(tup)>::value>{});
             });
     });
 }
 
-template <auto Kernel, typename... Args>
-inline void launch_kernel(sycl::range<3> grid, sycl::range<3> block,
-                          std::size_t shm_size, Args... args) {
-    (void)shm_size;
-    launch_submit<Kernel>(sycl_get_queue(), grid, block, args...);
-}
-template <auto Kernel, typename... Args>
-inline void launch_kernel(sycl::range<3> grid, sycl::range<3> block,
-                          std::size_t shm_size, stream_tag st, Args... args) {
-    (void)shm_size;
-    launch_submit<Kernel>(st.q, grid, block, args...);
-}
-
-template <auto Kernel, typename... Args>
-inline void launch_kernel_dyn(sycl::range<3> grid, sycl::range<3> block,
-                              std::size_t shm_size, Args... args) {
-    launch_dyn<Kernel>(sycl_get_queue(), grid, block, shm_size, args...);
-}
-template <auto Kernel, typename... Args>
-inline void launch_kernel_dyn(sycl::range<3> grid, sycl::range<3> block,
-                              std::size_t shm_size, stream_tag st,
-                              Args... args) {
-    launch_dyn<Kernel>(st.q, grid, block, shm_size, args...);
-}
-
 } // namespace gpu4pyscf_detail
-
-#define ON_STREAM(s) gpu4pyscf_detail::on_stream(s)
 
 #define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
     { gpu4pyscf_detail::launch_kernel<kernel>(grid, block, shm_size, __VA_ARGS__); }
@@ -309,35 +315,53 @@ inline dim3 make_block(
 
 namespace gpu4pyscf_detail {
 
-struct stream_tag {
-    cudaStream_t s;
-};
-inline stream_tag on_stream(cudaStream_t s) { return {s}; }
+// Auto-detect stream argument anywhere in the pack (kernel args never carry
+// a real stream, so the trait-vs-value match is unambiguous).
+template <typename T>
+struct _is_stream
+    : std::bool_constant<std::is_same_v<std::decay_t<T>, cudaStream_t>> {};
 
-template <class Kernel, typename... Rest>
-inline void launch_kernel(Kernel kernel, dim3 grid, dim3 block,
-                          std::size_t shm_size, Rest... rest) {
-    kernel<<<grid, block, shm_size, 0>>>(rest...);
+inline cudaStream_t _stream_ptr(cudaStream_t s) { return s; }
+
+template <typename... Args>
+inline cudaStream_t _pick_stream(Args&&... args) {
+    cudaStream_t s = 0;
+    auto scan = [&](auto&& v) { if constexpr (_is_stream<decltype(v)>::value) s = _stream_ptr(v); };
+    (scan(args), ...);
+    return s;
 }
-template <class Kernel, typename... Rest>
-inline void launch_kernel(Kernel kernel, dim3 grid, dim3 block,
-                          std::size_t shm_size, stream_tag st, Rest... rest) {
-    kernel<<<grid, block, shm_size, st.s>>>(rest...);
+
+template <class Tuple, std::size_t... I>
+inline auto _filter_streams(const Tuple& t, std::index_sequence<I...>) {
+    return std::tuple_cat(
+        [ ] (const auto& v) {
+            using E = std::remove_cv_t<std::remove_reference_t<decltype(v)>>;
+            if constexpr (_is_stream<E>::value) return std::tuple{};
+            else return std::tuple{v};
+        }(std::get<I>(t)) ... );
 }
-template <class Kernel, typename... Rest>
-inline void launch_kernel_dyn(Kernel kernel, dim3 grid, dim3 block,
-                              std::size_t shm_size, Rest... rest) {
-    kernel<<<grid, block, shm_size, 0>>>(rest..., nullptr);
+
+template <bool Dyn, class Kernel, typename... Args>
+inline void _launch_impl(Kernel kernel, dim3 grid, dim3 block,
+                         std::size_t shm_size, Args... args) {
+    cudaStream_t s = _pick_stream(args...);
+    auto tup = _filter_streams(std::make_tuple(args...), std::index_sequence_for<Args...>{});
+    std::apply([&](auto... a) {
+        if constexpr (Dyn) kernel<<<grid, block, shm_size, s>>>(a..., nullptr);
+        else kernel<<<grid, block, shm_size, s>>>(a...);
+    }, tup);
 }
-template <class Kernel, typename... Rest>
-inline void launch_kernel_dyn(Kernel kernel, dim3 grid, dim3 block,
-                              std::size_t shm_size, stream_tag st, Rest... rest) {
-    kernel<<<grid, block, shm_size, st.s>>>(rest..., nullptr);
+
+template <class Kernel, typename... Args>
+inline void launch_kernel(dim3 grid, dim3 block, std::size_t shm_size, Args... args) {
+    _launch_impl<false>(kernel, grid, block, shm_size, args...);
+}
+template <class Kernel, typename... Args>
+inline void launch_kernel_dyn(dim3 grid, dim3 block, std::size_t shm_size, Args... args) {
+    _launch_impl<true>(kernel, grid, block, shm_size, args...);
 }
 
 } // namespace gpu4pyscf_detail
-
-#define ON_STREAM(s) gpu4pyscf_detail::on_stream(s)
 
 #define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
     { gpu4pyscf_detail::launch_kernel(kernel, grid, block, shm_size, __VA_ARGS__); }

@@ -46,7 +46,7 @@ int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, in
 {
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ndiags);
-    LAUNCH_KERNEL(_block_diag, blocks, threads, 0, ON_STREAM(stream),
+    LAUNCH_KERNEL(_block_diag, blocks, threads, 0, stream,
                   out, m, n, diags, ndiags, offsets, rows, cols);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
