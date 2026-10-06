@@ -268,7 +268,7 @@ class KnownValues(unittest.TestCase):
         # https://github.com/JiashuLiang/COACH/tree/bd18fffd84efa85731b3271d1c596b4cb73d9f81/FunctionalCOACH
         # RKS benzene with the same basis and convergence threshold, using
         # fresh RKS default grids in place of the reference builder's grids.
-        mol = gto.M(
+        mol = pyscf.M(
             atom='''C  1.3970000000  0.0000000000  0.0000000000
                     C  0.6985000000  1.2098374891  0.0000000000
                     C -0.6985000000  1.2098374891  0.0000000000
@@ -282,7 +282,7 @@ class KnownValues(unittest.TestCase):
                     H -1.2405000000 -2.1486090268  0.0000000000
                     H  1.2405000000 -2.1486090268  0.0000000000''',
             basis='def2-svpd', unit='Angstrom', verbose=0)
-        method = dft.RKS(mol)
+        method = mol.RKS().to_gpu()
         method.xc = 'COACH'
         method.conv_tol = 1e-10
         # The reference uses slightly different rounded correlation constants;
