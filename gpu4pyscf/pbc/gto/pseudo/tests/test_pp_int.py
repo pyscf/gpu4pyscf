@@ -27,8 +27,9 @@ import unittest
 import numpy as np
 import cupy as cp
 import pyscf
-from pyscf.pbc.gto.pseudo.pp_int import (
-    fake_cell_vnl, _int_vnl, _contract_ppnl, get_pp_nl)
+from pyscf import lib
+from pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
+from gpu4pyscf.pbc.gto.pseudo import pp_int
 from packaging.version import Version
 
 
@@ -71,7 +72,6 @@ class TestGetPpNlGamma(unittest.TestCase):
     """Test get_pp_nl against CPU get_pp_nl, gamma point."""
 
     def _compare(self, cell, places=12):
-        from gpu4pyscf.pbc.gto.pseudo import pp_int
         cpu = get_pp_nl(cell)
         gpu = pp_int.get_pp_nl(cell)
         err = np.max(np.abs(cp.asnumpy(gpu) - np.asarray(cpu)))
@@ -91,7 +91,6 @@ class TestGetPpNlKpts(unittest.TestCase):
     """Test get_pp_nl against CPU get_pp_nl with non-zero k-points."""
 
     def _compare(self, cell, kpts, places=13):
-        from gpu4pyscf.pbc.gto.pseudo import pp_int
         cpu = get_pp_nl(cell, kpts)
         gpu = pp_int.get_pp_nl(cell, kpts)
         err = np.max(np.abs(cp.asnumpy(gpu) - np.asarray(cpu)))
@@ -190,7 +189,7 @@ He
         mf = cell.GHF().to_gpu().run()
         mf.with_soc = True
         e_tot = mf.kernel()
-        self.assertAlmostEqual(mf_ref.e_tot, mf.e_tot, 8)
+        self.assertAlmostEqual(mf_ref.e_tot, e_tot, 8)
 
 
 if __name__ == "__main__":

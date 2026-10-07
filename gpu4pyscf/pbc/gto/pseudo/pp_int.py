@@ -165,7 +165,7 @@ def get_pp_soc(cell, kpts=None):
 
         #:vl_soc += einsum('ktimp,tij,amn,ktjnq->kapq', ilp.conj(), kl_block, Lmm[l], ilp)
         radial = contract('nij,jknmq->iknmq', kl_block, ilp)
-        tmp = contract('mt,ikntq->iknmq', Lmn[l], radial)
+        tmp = contract('mt,ikntq->iknmq', Lmm[l], radial)
         ilp.imag *= -1 # ilp.conj() inplace
         contract('iknmp,iknmq->kpq', ilp, tmp, beta=1, out=vl_soc)
         radial = tmp = ilp = None
