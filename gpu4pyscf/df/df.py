@@ -341,11 +341,20 @@ class DF(lib.StreamObject):
 
     def reset(self, mol=None):
         '''Reset mol and clean up relevant attributes for scanner mode'''
+        geometry_changed = mol is not None
         if mol is not None:
             self.mol = mol
+        elif self.auxmol is not None:
+            # Scanners can modify ``self.mol`` in place and then call reset()
+            # without passing a replacement molecule. Compare the coordinates
+            # to the cached auxiliary molecule so that this invalidates stale
+            # geometry while ordinary cache-release resets preserve auxmol.
+            geometry_changed = not np.array_equal(
+                self.mol.atom_coords(), self.auxmol.atom_coords())
+        if geometry_changed:
             self.auxmol = None
-            self.intopt = None
-            self.j_engine = None
+        self.intopt = None
+        self.j_engine = None
         self._cderi = None
         self._cderi_idx = None
         self._cd_j2c = None
