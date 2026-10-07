@@ -98,6 +98,11 @@ When working against an editable install, recompile the libraries in place with
 > binary is a few hundred MB. Build one family (`rdna`/`cdna`) or a specific
 > `GPU_TARGET` to keep it small.
 
+The [HIP build CI](.github/workflows/hip_build.yml) compiles and links the native
+libraries on GitHub-hosted CPU runners using `USE_HIP=1 GPU_TARGET=all` in a
+pinned ROCm development container. This compiles all supported CDNA and RDNA
+targets in a single build and requires no AMD GPU or CuPy installation.
+
 Features
 --------
 
