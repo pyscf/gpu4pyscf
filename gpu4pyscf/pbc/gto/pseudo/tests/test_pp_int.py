@@ -17,8 +17,8 @@
 
 Validates:
 1. _contract_ppnl_gpu against CPU _contract_ppnl, gamma point
-2. get_pp_nl_gpu against CPU get_pp_nl, gamma point
-3. get_pp_nl_gpu against CPU get_pp_nl, non-zero k-points (single kpt
+2. get_pp_nl against CPU get_pp_nl, gamma point
+3. get_pp_nl against CPU get_pp_nl, non-zero k-points (single kpt
    and a k-mesh) — exercises the non-gamma branch of the GPU wrapper
 4. Multiple elements (C, Si, Fe) covering s/p/d/f projectors
 """
@@ -67,12 +67,12 @@ def setUpModule():
     )
 
 class TestGetPpNlGamma(unittest.TestCase):
-    """Test get_pp_nl_gpu against CPU get_pp_nl, gamma point."""
+    """Test get_pp_nl against CPU get_pp_nl, gamma point."""
 
     def _compare(self, cell, places=12):
-        from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+        from gpu4pyscf.pbc.gto.pseudo import pp_int
         cpu = get_pp_nl(cell)
-        gpu = get_pp_nl_gpu(cell)
+        gpu = pp_int.get_pp_nl(cell)
         err = np.max(np.abs(cp.asnumpy(gpu) - np.asarray(cpu)))
         self.assertAlmostEqual(err, 0, places, f"max|err|={err:.2e}")
 
@@ -87,12 +87,12 @@ class TestGetPpNlGamma(unittest.TestCase):
 
 
 class TestGetPpNlKpts(unittest.TestCase):
-    """Test get_pp_nl_gpu against CPU get_pp_nl with non-zero k-points."""
+    """Test get_pp_nl against CPU get_pp_nl with non-zero k-points."""
 
     def _compare(self, cell, kpts, places=13):
-        from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+        from gpu4pyscf.pbc.gto.pseudo import pp_int
         cpu = get_pp_nl(cell, kpts)
-        gpu = get_pp_nl_gpu(cell, kpts)
+        gpu = pp_int.get_pp_nl(cell, kpts)
         err = np.max(np.abs(cp.asnumpy(gpu) - np.asarray(cpu)))
         self.assertAlmostEqual(err, 0, places, f"max|err|={err:.2e}")
 

@@ -33,7 +33,7 @@ kern_map = {
     'int1e_r4_origi_ip2': ('PBCint1e_r4_origi_ip2', 3, (4, 1)),
 }
 
-def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
+def _int_vnl(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
     if intors is None:
         intors = ['int1e_ovlp', 'int1e_r2_origi', 'int1e_r4_origi']
 
@@ -56,8 +56,8 @@ def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
             int_ket(fakecell._bas[hl_dims > 1], intors[1]),
             int_ket(fakecell._bas[hl_dims > 2], intors[2])]
 
-def _sorted_fake_cell_vnl(cell):
-    fakecell, hl_blocks = fake_cell_vnl(cell)
+def _sorted_fake_cell_vnl(cell, type='scalar'):
+    fakecell, hl_blocks = fake_cell_vnl(cell, type)
     # GTH projectors are spherical even when the AO basis is Cartesian.
     fakecell.cart = False
 
@@ -73,7 +73,7 @@ def _sorted_fake_cell_vnl(cell):
     splits = np.append(0, counts).cumsum()
     return fakecell, hl_blocks, pattern, splits
 
-def get_pp_nl_gpu(cell, kpts=None):
+def get_pp_nl(cell, kpts=None):
     if kpts is None:
         kpts_lst = np.zeros((1, 3))
     else:
@@ -83,12 +83,13 @@ def get_pp_nl_gpu(cell, kpts=None):
     # pattern stores the unique [hl_dim, l] combinations
     fakecell, hl_blocks, pattern, splits = _sorted_fake_cell_vnl(cell)
 
-    ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
-
     is_gamma_point = gamma_point(kpts_lst)
     dtype = np.float64 if is_gamma_point else np.complex128
     nao = cell.nao
     ppnl = cp.zeros((nkpts, nao, nao), dtype=dtype)
+    if not hl_blocks:
+        return ppnl
+    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
 
     hl_offset = [0] * 3
     for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
@@ -108,3 +109,64 @@ def get_pp_nl_gpu(cell, kpts=None):
         ilp_conj = cp.conjugate(ilp, out=ilp)
         contract('iknlp,iknlq->kpq', ilp_conj, tmp, beta=1, out=ppnl)
     return ppnl
+
+def get_pp_soc(cell, kpts=None):
+    r'''Evaluates three GTH SOC integrals W_x, W_y, W_z in real-spherical GTO basis.
+
+    W_a = Im(<AO|\Delta V_l^{SO} |AO>)
+        = sum_{lijm} <AO|p_i^l,lm> k_ij^l Im(<p_j^l,lm|L_a|AO>)
+        = sum_{lijmm'} <AO|p_i^l,lm> k_ij^l Im(<lm|L_a|lm'>)<p_j^l,lm'|AO>
+
+    The SOC term in Hcore can be constructed as
+
+        H_SOC = i/2 * \sigma dot W
+
+    References:
+        [1] Hartwigsen, Goedecker, and Hutter, Phys. Rev. B 58, 3641 (1998).
+        [2] CP2K build_core_ppnl function in core_pnnl.F
+
+    Returns:
+        (nkpts,3,nao,nao) array for W_a. W_a is real and antisymmetric for
+        gamma point and complex for k-points.
+    '''
+    from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _angmom_matrix
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+    nkpts = len(kpts)
+
+    nao = cell.nao
+    vl_soc = np.zeros((nkpts, 3, nao, nao), dtype=np.complex128)
+    fakecell, kl_blocks, pattern, splits = _sorted_fake_cell_vnl(cell, type='soc')
+    if not kl_blocks:
+        return vl_soc
+    ppnl_half = _int_vnl(cell, fakecell, kl_blocks, kpts)
+
+    lmax = pattern[:,1].max()
+    Lmm = [cp.asarray(_angmom_matrix(l)) for l in range(lmax+1)]
+
+    kl_offset = [0] * 3
+    for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
+        kl_dim, l = pattern[ii]
+        if l == 0:
+            assert kl_dim.size == 0
+            continue
+
+        nd = 2 * l + 1
+        kl_block = np.stack(kl_blocks[i0:i1])
+        n_kl = len(kl_block)
+        ilp = np.empty((kl_dim, nkpts, n_kl, nd, nao), dtype=np.complex128)
+        for i in range(kl_dim):
+            p0 = kl_offset[i]
+            p1 = p0 + n_kl * nd
+            ilp[i] = ppnl_half[i][:,p0:p1].reshape(nkpts, n_kl, nd, nao)
+            kl_offset[i] = p1
+
+        #:vl_soc += einsum('ktimp,tij,amn,ktjnq->kapq', ilp.conj(), kl_block, Lmm[l], ilp)
+        radial = contract('nij,jknmq->iknmq', kl_block, ilp)
+        tmp = contract('mt,ikntq->iknmq', Lmn[l], radial)
+        ilp.imag *= -1 # ilp.conj() inplace
+        contract('iknmp,iknmq->kpq', ilp, tmp, beta=1, out=vl_soc)
+        radial = tmp = ilp = None
+    return vl_soc
