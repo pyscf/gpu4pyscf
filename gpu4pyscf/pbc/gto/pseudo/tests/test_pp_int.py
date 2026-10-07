@@ -29,6 +29,7 @@ import cupy as cp
 import pyscf
 from pyscf.pbc.gto.pseudo.pp_int import (
     fake_cell_vnl, _int_vnl, _contract_ppnl, get_pp_nl)
+from packaging.version import Version
 
 
 def setUpModule():
@@ -111,6 +112,85 @@ class TestGetPpNlKpts(unittest.TestCase):
     def test_iron_single_kpts(self):
         kpts = cell_fe.make_kpts([2, 5, 1])
         self._compare(cell_fe, kpts, places=11)
+
+
+pyscf_version = Version(pyscf.__version__)
+
+class KnownValues(unittest.TestCase):
+    @unittest.skipIf(pyscf_version < Version('2.15'), 'PP-SOC available in 2.15')
+    def test_pp_soc(self):
+        np.random.seed(4)
+        cell = pyscf.M(
+            atom = 'He  1.  .1  .3; He  .0  .8  1.1',
+            a = np.eye(3) * 4 + np.random.rand(3,3)*.5,
+            basis = { 'He': [[0, (0.8, 1.0)],
+                             [1, (1.2, 1.0)],
+                             [2, (0.9, 1.0)]]},
+            pseudo = '''
+He
+    2
+     0.40000000    3    -1.98934751    -0.75604821    0.95604821
+    2  SOC
+     0.29482550    3     1.23870466    .855         .3
+                                       .71         -1.1
+                                                    .9
+     0.32235865    2     2.25670239    -0.39677748
+                                        0.93894690
+                         0.15           0.12
+                                        0.25''')
+        kmesh = [3, 1, 4]
+        kpts = cell.make_kpts(kmesh)
+        dat = pp_int.get_pp_soc(cell, kpts).get()
+        assert abs(lib.fp(dat) - 1.0485888724761192) < 1e-12
+
+    @unittest.skipIf(pyscf_version < Version('2.15'), 'PP-SOC available in 2.15')
+    def test_pp_scalar_soc_mixed(self):
+        cell = pyscf.M(
+            a = '''
+            0.0 3.0 3.0
+            3.0 0.0 3.0
+            3.0 3.0 0.0''',
+            atom='''Pb 0.0 0.0 0.0
+            S 3.0 3.0 3.0
+            ''',
+            basis={
+                'Pb': 'DZVP-MOLOPT-PBE-GTH-q4',
+                'S': 'DZVP-MOLOPT-PBE-GTH-q6',
+            },
+            pseudo={
+                'Pb': 'GTH-SOC-PBE-q4',
+                'S': 'GTH-PBE-q6',
+            },
+        )
+        mf = cell.GHF().to_gpu()
+        mf.with_soc = True
+        h = mf.get_hcore().get()
+        self.assertAlmostEqual(lib.fp(h), 0.4445452615133345+0.011423142532064764j, 8)
+
+    @unittest.skipIf(pyscf_version < Version('2.15'), 'PP-SOC available in 2.15')
+    def test_with_soc_for_scalar_pp(self):
+        cell = pyscf.M(
+            a = '''
+            0.0 3.0 3.0
+            3.0 0.0 3.0
+            3.0 3.0 0.0''',
+            atom='''Pb 0.0 0.0 0.0
+            S 3.0 3.0 3.0
+            ''',
+            basis={
+                'Pb': 'DZVP-MOLOPT-PBE-GTH-q4',
+                'S': 'DZVP-MOLOPT-PBE-GTH-q6',
+            },
+            pseudo={
+                'Pb': 'GTH-PBE-q4',
+                'S': 'GTH-PBE-q6',
+            },
+        )
+        mf_ref = cell.RHF().to_gpu().run()
+        mf = cell.GHF().to_gpu().run()
+        mf.with_soc = True
+        e_tot = mf.kernel()
+        self.assertAlmostEqual(mf_ref.e_tot, mf.e_tot, 8)
 
 
 if __name__ == "__main__":
