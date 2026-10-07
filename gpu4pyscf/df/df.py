@@ -308,7 +308,8 @@ class DF(lib.StreamObject):
 
         if self._cderi is None:
             self.build()
-        mo_coeffs = [cupy.asarray(mo, dtype=cupy.float64)
+        # CuPy cannot copy non-contiguous array between devices.
+        mo_coeffs = [cupy.asarray(mo, dtype=cupy.float64, order='C')
                      for mo in mo_coeffs]
         ni, nj, nk, nl = [mo.shape[1] for mo in mo_coeffs]
         nij = ni * (ni + 1) // 2 if ij_compact else ni * nj
