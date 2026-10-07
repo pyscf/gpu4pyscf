@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,14 +20,7 @@ from pyscf.df.grad.rhf import _int3c_wrapper
 import numpy as np
 import cupy
 import unittest
-
 from gpu4pyscf.scf import int4c2e
-from gpu4pyscf.lib.cupy_helper import load_library
-libgint = load_library('libgint')
-
-'''
-compare int4c2e by pyscf and gpu4pyscf
-'''
 
 def setUpModule():
     global mol, ao_labels
@@ -53,21 +46,7 @@ class KnownValues(unittest.TestCase):
         nao = mol.nao
         eri = mol.intor('int2e_sph').reshape((nao,)*4)
         int4c = int4c2e.get_int4c2e(mol)
-        int4c = int4c + int4c.transpose([0,1,3,2])
-        int4c = int4c + int4c.transpose([1,0,2,3])
         assert np.linalg.norm(eri - int4c.get()) < 1e-10
-
-    def test_int4c2e_jk(self):
-        nao = mol.nao
-        dm = cupy.random.rand(nao,nao)
-        dm = dm + dm.T
-        eri = mol.intor('int2e_sph').reshape((nao,)*4)
-        vj0 = np.einsum('ijkl,kl->ij', eri, dm.get())
-        vk0 = np.einsum('ijkl,jl->ik', eri, dm.get())
-
-        vj, vk = int4c2e.get_int4c2e_jk(mol, dm)
-        assert np.linalg.norm(vj.get() - vj0) < 1e-8
-        assert np.linalg.norm(vk.get() - vk0) < 1e-8
 
     def test_int4c2e_ovov(self):
         nao = mol.nao

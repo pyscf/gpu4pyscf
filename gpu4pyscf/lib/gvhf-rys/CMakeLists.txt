@@ -16,6 +16,7 @@ add_library(gvhf_rys SHARED
   utils.c
   ejk_int3c2e_ip2.cu fill_int3c2e_ip1.cu
   e_int2c2e_ip2.cu
+  fill_int4c2e.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
