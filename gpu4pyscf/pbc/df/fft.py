@@ -132,7 +132,7 @@ def get_pp(mydf, kpts=None):
             pp = cell._pseudo[symb]
             p1 = 0
             for l, proj in enumerate(pp[5:]):
-                rl, nl, hl = proj
+                rl, nl, hl = proj[:3]
                 if nl > 0:
                     fakemol._bas[0,gto.ANG_OF] = l
                     fakemol._env[ptr+3] = .5*rl**2
@@ -155,7 +155,7 @@ def get_pp(mydf, kpts=None):
                 SPG_lm_aoGs = SPG_lmi.dot(aokG)
                 p1 = 0
                 for l, proj in enumerate(pp[5:]):
-                    rl, nl, hl = proj
+                    rl, nl, hl = proj[:3]
                     if nl > 0:
                         p0, p1 = p1, p1+nl*(l*2+1)
                         hl = cp.asarray(hl)

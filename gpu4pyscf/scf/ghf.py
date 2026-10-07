@@ -162,6 +162,8 @@ class GHF(hf.SCF):
         htmp = hf.get_hcore(mol)
         hcore = block_diag(htmp, htmp)
 
+        if self.with_soc and mol._pseudo:
+            raise NotImplementedError('GTH SOC requires periodic GHF/GKS')
         if self.with_soc and mol.has_ecp_soc():
             # The ECP SOC contribution = <|1j * s * U_SOC|>
             s = .5 * PauliMatrices

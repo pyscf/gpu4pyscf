@@ -1043,14 +1043,14 @@ def get_nuc(cell, kpts=None):
 def get_pp(cell, kpts=None):
     '''Get the periodic pseudopotential nuc-el ao matrix, with G=0 removed.
     '''
-    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     is_single_kpt = kpts is not None and kpts.ndim == 1
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp  = cp.asarray(pp2builder.get_pp_loc_part2())
     t1 = log.timer_debug1('get_pp_loc_part2', *t0)
-    vpp += cp.asarray(get_pp_nl_gpu(cell, kpts))
+    vpp += cp.asarray(get_pp_nl(cell, kpts))
     t1 = log.timer_debug1('get_pp_nl', *t1)
 
     vpp += get_pp_loc_part1(cell, kpts, with_pseudo=True, verbose=log)
