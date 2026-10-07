@@ -25,6 +25,10 @@ project (gpu4pyscf C CXX)
 # ---------------------------------------------------------------------------
 option(USE_HIP "Build GPU kernels with AMD HIP/ROCm instead of NVIDIA CUDA" OFF)
 if(USE_HIP)
+  # Set explicit targets before compiler detection so builds do not need a GPU.
+  if(DEFINED GPU_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "${GPU_ARCHITECTURES}")
+  endif()
   enable_language(HIP)
 endif()
 
@@ -34,12 +38,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # GPU architecture selection.
 if(USE_HIP)
-  # AMD GPU targets. Honour an explicit override -- either -DGPU_ARCHITECTURES=...
-  # or a pre-set CMAKE_HIP_ARCHITECTURES -- otherwise auto-detect the installed
-  # AMD GPU(s) with rocm_agent_enumerator. No specific gfx arch is hard-coded.
-  if(DEFINED GPU_ARCHITECTURES)
-    set(CMAKE_HIP_ARCHITECTURES "${GPU_ARCHITECTURES}")
-  endif()
+  # AMD GPU targets. Honour the explicit override set above or a pre-set
+  # CMAKE_HIP_ARCHITECTURES; otherwise auto-detect the installed AMD GPU(s)
+  # with rocm_agent_enumerator. No specific gfx arch is hard-coded.
   if(NOT CMAKE_HIP_ARCHITECTURES)
     find_program(ROCM_AGENT_ENUMERATOR NAMES rocm_agent_enumerator
                  HINTS ENV ROCM_PATH ENV HIP_PATH ENV ROCM_HOME PATH_SUFFIXES bin)
