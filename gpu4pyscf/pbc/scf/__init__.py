@@ -19,12 +19,21 @@ from .import hf
 from . import uhf
 from . import khf
 from . import kuhf
+from . import ghf
+from . import kghf
 
 rhf = hf
 krhf = khf
 
 KRHF = krhf.KRHF
 KUHF = kuhf.KUHF
+KGHF = kghf.KGHF
+
+def GHF(cell, *args, **kwargs):
+    '''Generalized HF at one k-point, or KGHF when kpts is supplied.'''
+    if 'kpts' in kwargs:
+        return KGHF(cell, *args, **kwargs)
+    return ghf.GHF(cell, *args, **kwargs)
 
 def RHF(cell, *args, **kwargs):
     if 'kpts' in kwargs:
