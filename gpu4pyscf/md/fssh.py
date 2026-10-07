@@ -527,6 +527,7 @@ class FSSH:
                 'seed': self.seed,
                 'states': self.states,
                 'coupling_method': self.coupling_method,
+                'ktdc_gap_tol': self.ktdc_gap_tol,
                 'extra_dump': list(self.extra_dump),
             })
 
@@ -591,6 +592,7 @@ class FSSH:
         self.decoherence = configuration['decoherence']
         self.alpha = configuration['alpha']
         self.coupling_method = configuration['coupling_method']
+        self.ktdc_gap_tol = configuration.get('ktdc_gap_tol', 1e-6)
         self.extra_dump = tuple(configuration['extra_dump'])
 
         self.cur_step = cur_step
@@ -693,7 +695,12 @@ class FSSH:
             np.random.rand(self.cur_step)
 
         position, velocity, coefficient = self._init_conditions(position, velocity, coefficient)
-        pes = self.evaluate_pes(position, self.cur_state, with_nacv=('nacv' in self.extra_dump))
+        with_nacv = 'nacv' in self.extra_dump
+        if with_nacv:
+            tddft = getattr(self, 'tddft', None)
+            if tddft and tddft.xy is None: # TDDFT was not Initialized
+                tddft(tddft.mol)
+        pes = self.evaluate_pes(position, self.cur_state, with_nacv=with_nacv)
         self._initialize_history(pes, velocity)
 
         if self.cur_step == 0:
