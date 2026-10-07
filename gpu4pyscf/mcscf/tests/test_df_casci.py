@@ -22,6 +22,7 @@ from pyscf import scf as cpu_scf
 
 from gpu4pyscf import mcscf
 from gpu4pyscf.mcscf import df as gpu_mcscf_df
+from packaging.version import Version
 
 
 class KnownValues(unittest.TestCase):
@@ -74,6 +75,7 @@ class KnownValues(unittest.TestCase):
         self.assertIs(mc_gpu.with_df, self.mf_rks_gpu.with_df)
         self.assertLess(abs(mc_gpu.kernel()[0] - mc_cpu.kernel()[0]), 1e-8)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'), 'to_gpu not supported')
     def test_conversions(self):
         ref = mcscf.DFCASCI(self.mf_gpu, 4, 4).kernel()[0]
 
@@ -93,6 +95,7 @@ class KnownValues(unittest.TestCase):
         mc_to_cpu.canonicalization = False
         self.assertLess(abs(mc_to_cpu.kernel()[0] - ref), 1e-8)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'), 'to_gpu not supported')
     def test_spin_penalty_unsupported(self):
         for cls in (mcscf.DFCASCI, mcscf.DFCASSCF):
             with self.subTest(cls=cls):
