@@ -195,7 +195,9 @@ class KnownValues(unittest.TestCase):
         g, hop, hdiag = nr.gen_g_hop(mo, mo_occ)
         mf_cpu = mf.to_cpu().newton()
         hop_ref = mf_cpu.gen_g_hop(mo.get(), mo_occ.get())[1]
-        self.assertAlmostEqual(abs(hop(dm1).get() - hop_ref(dm1.get())).max(), 0, 9)
+        dat = hop(dm1)
+        ref = cp.asarray(hop_ref(dm1.get()))
+        cp.testing.assert_allclose(dat, ref, rtol=1e-12, atol=1e-7)
 
     def test_with_df(self):
         mf = scf.RHF(h2o_z0).density_fit().newton().run()
