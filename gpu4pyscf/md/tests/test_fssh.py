@@ -189,8 +189,9 @@ H    0.444   1.381   0.000
         fssh.nsteps = 3
         fssh.kernel()
 
+        ref = energies
         energies = extract_energies(fssh.filename)
-        np.testing.assert_allclose(energies, uninterrupted, atol=2e-8, rtol=0)
+        assert abs(ref - energies).max() < 2e-8
 
     def test_fssh_td_ris(self):
         from gpu4pyscf.tdscf.ris import TDA
