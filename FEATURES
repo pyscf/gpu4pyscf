@@ -1,0 +1,113 @@
+* Hartree-Fock and Kohn-Sham DFT
+
+  - Restricted, restricted open-shell, unrestricted and generalized HF
+    (RHF, ROHF, UHF and GHF)
+  - Restricted, restricted open-shell, unrestricted and generalized Kohn-Sham
+    methods (RKS, ROKS, UKS and GKS)
+  - Direct SCF and density fitting
+  - Second-order SCF
+  - Fermi and Gaussian smearing
+  - LDA, GGA, meta-GGA, hybrid and range-separated hybrid functionals via LibXC
+  - VV10 nonlocal correlation, including analytical gradients and Hessians
+  - Multi-collinear functionals
+  - DFT+U
+  - Constrained DFT with analytical nuclear gradients
+  - DFT-D3 and DFT-D4 dispersion corrections
+  - Composite 3c methods, including B97-3c, r2SCAN-3c and wB97X-3c
+
+
+* TDDFT
+
+  - TDA and TDHF for RHF and UHF references
+  - TDA and TDDFT for RKS and UKS references
+  - Direct and density-fitted excited-state calculations
+  - Analytical TDA, TDHF and TDDFT nuclear gradients
+  - Spin-flip TDA/TDDFT with multi-collinear functionals, analytical gradients
+    and non-adiabatic coupling vectors
+  - TDDFT-ris excitation energies, analytical gradients and non-adiabatic
+    coupling vectors
+  - Ground-to-excited and excited-to-excited state non-adiabatic coupling
+    vectors for restricted references
+  - VV10 nonlocal correlation in TDDFT
+  - Linear-response PCM for TDDFT excitation energies, nuclear gradients
+    and derivative couplings
+
+
+* Post-HF methods (experimental)
+
+  - Restricted MP2
+  - Restricted and unrestricted density-fitted MP2
+  - Frozen-core and spin-component-scaled density-fitted MP2
+  - In-core restricted CCSD
+  - Density-fitted CASSCF
+
+
+* Analytical nuclear gradients and Hessians
+
+  - RHF, UHF, RKS and UKS nuclear gradients and Hessians
+  - Direct and density-fitting algorithms
+  - Range-separated hybrid functionals
+  - Effective core potential (ECP) contributions
+  - DFT grid response, including second-order grid response in Hessians
+  - VV10 nonlocal correlation contributions
+  - PCM analytical gradients and Hessians
+  - SMD gradients and semi-analytical Hessians
+
+
+* Extended systems with periodic boundary conditions
+
+  - RHF, UHF, RKS and UKS at the Gamma point and with k-point sampling
+  - All-electron and GTH pseudopotential calculations
+  - Gaussian density fitting for exact exchange matrix construction
+  - Multigrid integration for LDA, GGA and meta-GGA functionals, including
+    nuclear gradients and stress tensors
+  - Analytical nuclear gradients and stress tensors for HF and DFT using
+    Gaussian density fitting and RSJK/AFT algorithms
+  - Nuclear gradients and stress tensors with Becke grid response
+  - DFT+U and constrained DFT with analytical nuclear gradients
+  - Second-order SCF
+  - Fermi and Gaussian smearing
+  - Atom-resolved magnetic moment initial guesses
+  - Band structures and charge population analysis
+  - Geometry and lattice optimization through ASE
+  - Numerical Gamma-point Hessians and phonon modes
+
+
+* Solvent models and embedding
+
+  - C-PCM, COSMO, IEF-PCM and SS(V)PE
+  - SWIG and ISWIG surface discretization for PCM
+  - SMD implicit solvation
+  - QM/MM embedding with point charges
+  - Periodic QM/MM embedding (experimental)
+  - External electric fields
+
+
+* Properties and population analysis
+
+  - Molecular dipole and quadrupole moments
+  - Electron density, density gradients and kinetic energy density on grids
+  - CHELPG, ESP and RESP atomic charges
+  - MBIS and Hirshfeld atomic charges and multipoles
+  - C6 and C8 dispersion coefficients via Casimir-Polder integration
+  - Static polarizability (experimental)
+  - IR frequencies and intensities (experimental)
+  - Raman spectra (experimental)
+  - NMR shielding (experimental)
+  - ALMO-EDA2 energy decomposition analysis (experimental)
+
+
+* Geometry optimization and dynamics
+
+  - Molecular geometry optimization and transition-state searches through
+    geomeTRIC
+  - Excited-state geometry optimization with TDA/TDDFT and TDDFT-ris
+  - Minimum-energy crossing point searches
+  - ASE interface for molecular and periodic calculations
+  - Fewest-switches surface hopping with TDDFT and TDDFT-ris
+
+
+* Semi-empirical methods
+
+  - PM6 SCF, analytical nuclear gradients and geometry optimization
+  - Density matrix purification for PM6
