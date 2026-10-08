@@ -162,19 +162,15 @@ class KnownValues(unittest.TestCase):
 
         groups = 20
         As, Bs, Cs = generate_problems(groups)
-        res_Cs = Cs
 
         for i in range(groups):
-            Cs[i] = cupy.dot(As[i].T, Bs[i])
+            Cs[i] = cupy.dot(As[i], Bs[i].T)
 
-        grouped_dot(As, Bs, res_Cs)
-        res_Cs_2 = grouped_dot(As, Bs)
+        res_Cs = grouped_dot(As, Bs)
 
         res_Cs = cupy.concatenate(res_Cs, axis=None)
-        res_Cs_2 = cupy.concatenate(res_Cs, axis=None)
         ans_Cs = cupy.concatenate(Cs, axis=None)
         assert(cupy.linalg.norm(res_Cs - ans_Cs) < 1e-8)
-        assert(cupy.linalg.norm(res_Cs_2 - ans_Cs) < 1e-8)
 
     def test_grouped_gemm(self):
         dtype = cupy.float64
@@ -197,19 +193,15 @@ class KnownValues(unittest.TestCase):
 
         groups = 20
         As, Bs, Cs = generate_problems(groups)
-        res_Cs = Cs
 
         for i in range(groups):
             Cs[i] = cupy.dot(As[i].T, Bs[i])
 
-        grouped_gemm(As, Bs, res_Cs)
-        res_Cs_2 = grouped_gemm(As, Bs)
+        res_Cs = grouped_gemm(As, Bs)
 
         res_Cs = cupy.concatenate(res_Cs, axis=None)
-        res_Cs_2 = cupy.concatenate(res_Cs, axis=None)
         ans_Cs = cupy.concatenate(Cs, axis=None)
         assert(cupy.linalg.norm(res_Cs - ans_Cs) < 1e-8)
-        assert(cupy.linalg.norm(res_Cs_2 - ans_Cs) < 1e-8)
 
     def test_cart2sph(self):
         a_cart = cupy.random.rand(10,6,11)

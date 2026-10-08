@@ -68,8 +68,10 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
             v -= mo1 * level_shift
         v *= e_ai
         return v.reshape(-1, nov)
+    lindep = max(tol**2, 1e-14)
     mo1 = krylov(vind_vo, mo1base.reshape(-1, nov),
-                     tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
+                     tol=tol, max_cycle=max_cycle, lindep=lindep,
+                     hermi=hermi, verbose=log)
     log.timer('krylov solver in CPHF', *t0)
 
     mo1 = mo1.reshape(mo1base.shape)
@@ -146,8 +148,10 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
         v1a[:,occidxa] = 0
         v1b[:,occidxb] = 0
         return v.reshape(-1,nmoa*nocca+nmob*noccb)
+    lindep = max(tol**2, 1e-14)
     mo1 = krylov(vind_vo, mo1base.reshape(-1,nmoa*nocca+nmob*noccb),
-                     tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
+                     tol=tol, max_cycle=max_cycle, lindep=lindep,
+                     hermi=hermi, verbose=log)
 
     mo1 = mo1.reshape(mo1base.shape)
     mo1_a = mo1[:,:nmoa*nocca].reshape(nset,nmoa,nocca)

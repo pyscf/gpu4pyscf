@@ -741,8 +741,9 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         hs = s1mo_blk = h1mo_blk = None
 
         tol = mf.conv_tol_cpscf * (i1 - i0)
+        lindep = max(tol**2, 1e-14)
         raw_mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
-                         tol=tol, max_cycle=max_cycle, verbose=log)
+                         tol=tol, max_cycle=max_cycle, lindep=lindep, verbose=log)
         raw_mo1 = raw_mo1.reshape(i1-i0,3,nmo,nocc)
         raw_mo1[:,:,occidx] = mo1[:,:,occidx]
 
