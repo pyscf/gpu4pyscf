@@ -333,6 +333,17 @@ H    0.000000   -0.935307   -1.082500
         assert abs(test_energy - ref_energy) < 1e-9
         assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 2e-6
 
+    def test_damping_with_solvent(self):  # issue #939
+        for mf in (scf.RHF(mol).PCM(), scf.UHF(mol).PCM()):
+            dm = mf.get_init_guess()
+            h1e, s1e = mf.get_hcore(), mf.get_ovlp()
+            vhf = mf.get_veff(mol, dm)
+            f = mf.get_fock(h1e, s1e, vhf, dm)
+            f_last = f + 0.05 * cupy.eye(f.shape[-1])
+            f_damped = mf.get_fock(h1e, s1e, vhf, dm, cycle=0, diis_start_cycle=10,
+                                   damp_factor=0.6, fock_last=f_last)
+            assert abs(f_damped - (0.4 * f + 0.6 * f_last)).max() < 1e-10
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()
