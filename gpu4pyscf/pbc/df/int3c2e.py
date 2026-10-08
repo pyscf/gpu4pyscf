@@ -968,12 +968,14 @@ def _create_pair_recontractor(cell, bas_ij_batches, cart, bvk_ncells=1):
 
     pair_addresses = pair_addresses[:cderi_npairs.value].copy()
 
-    def recontract(batch_id, cderi, j3c):
-        """Scatter [primitive_pair, aux] data into shared CDERI.
+    def recontract(batch_id, cderi, j3c, pair_start=0):
+        """Scatter a contiguous [primitive_pair, aux] slice into shared CDERI.
         """
         assert j3c.dtype == cderi.dtype
         npair, naux = j3c.shape
         out_idx, out_offsets, coef = recontraction_params[batch_id]
+        # Keep absolute offsets into out_idx/coef; only the input rows are sliced.
+        out_offsets = out_offsets[pair_start:pair_start+npair+1]
         assert len(out_offsets) == npair + 1
         if j3c.dtype == np.float64:
             kern = libpbc.PBCrecontract_cderi
