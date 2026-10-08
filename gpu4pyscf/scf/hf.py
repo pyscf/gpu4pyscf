@@ -23,6 +23,7 @@ from pyscf import lib as pyscf_lib
 from pyscf.data.nist import HARTREE2EV
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
+from pyscf.lib import StreamObject
 from gpu4pyscf.gto.ecp import get_ecp
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
@@ -618,6 +619,110 @@ def init_guess_by_atom(mol):
     mo_occ = cupy.hstack(mo_occ)
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
+def init_guess_by_sad(mol, mf_template, unrestricted_spin_average=False):
+    '''
+        Generate initial guess density matrix from superposition of atomic density matrix.
+        The level of theory of atomic calculation is the same as mf_template,
+        except that we always render unrestricted calculation for one atom.
+
+        Reproducing Q-Chem SCF_GUESS AUTOSAD.
+    '''
+    from gpu4pyscf.scf.uhf import UHF
+    from gpu4pyscf.dft.rks import RKS
+    assert isinstance(mf_template, RHF) or isinstance(mf_template, UHF) # GHF not supported
+
+    from gpu4pyscf.qmmm.hirshfeld import charge_of_element, _neutral_atom_spin
+
+    elements = mol.elements
+    unique_elements = list(set(elements))
+
+    mf_per_element = {}
+    for element in unique_elements:
+        Z = charge_of_element(element)
+        assert 0 < Z and Z < len(_neutral_atom_spin)
+        spin = _neutral_atom_spin[Z - 1]
+        assert spin >= 0 # So extra electron is always put in alpha orbitals, and we can guarantee high spin configuration
+        charge = 0 # Only support neutral atoms for now
+
+        mol_atom = gto.M(
+            atom = f"{element} 0 0 0",
+            basis = mol.basis,
+            ecp = mol.ecp,
+            charge = charge,
+            spin = spin,
+            verbose = mol.verbose,
+        )
+
+        mf_atom = mf_template.copy()
+        for key, attr in mf_template.__dict__.items():
+            if isinstance(attr, StreamObject):
+                setattr(mf_atom, key, attr.copy())
+
+        if isinstance(mf_template, RKS):
+            mf_atom = mf_atom.to_uks()
+        elif isinstance(mf_template, RHF):
+            mf_atom = mf_atom.to_uhf()
+        assert isinstance(mf_atom, UHF)
+
+        mf_atom = mf_atom.reset(mol_atom)
+
+        mf_atom.conv_tol = 1e-10
+
+        mf_atom.kernel()
+        assert mf_atom.converged
+
+        mf_per_element[element] = mf_atom
+
+    dm0 = cupy.zeros((2, mol.nao, mol.nao))
+
+    nao_offset = 0
+    for i_atom in range(mol.natm):
+        element = elements[i_atom]
+        mf_atom = mf_per_element[element]
+        nao_atom = mf_atom.mol.nao
+
+        dm_atom = mf_atom.make_rdm1()
+        assert dm_atom.shape == (2, nao_atom, nao_atom)
+
+        assert not mf_atom.mol.cart, "Spherical averaging for Cartesian basis not supported yet"
+
+        ao_loc = mf_atom.mol.ao_loc_nr()
+        for i_bas in range(mf_atom.mol.nbas):
+            nctr_i = mf_atom.mol._bas[i_bas, gto.NCTR_OF]
+            li = mf_atom.mol._bas[i_bas, gto.ANG_OF]
+            nao_li = 2 * li + 1
+            iao_li = ao_loc[i_bas]
+            for j_bas in range(mf_atom.mol.nbas):
+                nctr_j = mf_atom.mol._bas[j_bas, gto.NCTR_OF]
+                lj = mf_atom.mol._bas[j_bas, gto.ANG_OF]
+                nao_lj = 2 * lj + 1
+                iao_lj = ao_loc[j_bas]
+
+                if li != lj:
+                    dm_atom[:, iao_li:iao_li + nao_li * nctr_i, iao_lj:iao_lj + nao_lj * nctr_j] = 0
+                else:
+                    for i_ctr in range(nctr_i):
+                        for j_ctr in range(nctr_j):
+                            for i_dm in range(2):
+                                dm_l_trace = float(cupy.trace(dm_atom[i_dm,
+                                                                      iao_li + i_ctr * nao_li : iao_li + (i_ctr + 1) * nao_li,
+                                                                      iao_lj + j_ctr * nao_lj : iao_lj + (j_ctr + 1) * nao_lj]))
+                                dm_atom[i_dm,
+                                        iao_li + i_ctr * nao_li : iao_li + (i_ctr + 1) * nao_li,
+                                        iao_lj + j_ctr * nao_lj : iao_lj + (j_ctr + 1) * nao_lj] = cupy.eye(nao_li) * (dm_l_trace / nao_li)
+
+        dm0[:, nao_offset:nao_offset + nao_atom, nao_offset:nao_offset + nao_atom] = dm_atom
+        nao_offset += nao_atom
+
+    if isinstance(mf_template, RHF):
+        dm0 = dm0[0] + dm0[1]
+    else:
+        if unrestricted_spin_average:
+            dm_averaged = (dm0[0] + dm0[1]) * 0.5
+            dm0[0] = dm0[1] = dm_averaged
+
+    return dm0
+
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
     def fn_init_guess(mf, mol=None, breaksym=None):
@@ -936,6 +1041,10 @@ class SCF(pyscf_lib.StreamObject):
     def init_guess_by_atom(self, mol=None):
         if mol is None: mol = self.mol
         return init_guess_by_atom(mol)
+
+    def init_guess_by_sad(self, mol=None):
+        if mol is None: mol = self.mol
+        return init_guess_by_sad(mol, self)
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
