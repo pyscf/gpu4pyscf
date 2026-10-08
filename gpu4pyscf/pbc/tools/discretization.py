@@ -26,12 +26,14 @@ def freeze_mesh(method, cell=None, mesh=None):
 
     mesh = np.asarray(mesh, dtype=np.int32)
     cell.mesh = mesh
-    objects = (
-        getattr(method, "_numint", None),
-        getattr(method, "with_df", None),
-        getattr(method, "grids", None),
-    )
-    for obj in objects:
+    for attr in ("_numint", "with_df", "grids"):
+        obj = getattr(method, attr, None)
         if obj is not None and hasattr(obj, "mesh"):
             obj.mesh = mesh
+
+    for attr in ('_scf', 'base'):
+        obj = getattr(method, attr, None)
+        if obj is not None:
+            freeze_mesh(obj, cell, mesh)
+
     return mesh

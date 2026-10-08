@@ -1905,4 +1905,31 @@ int ket_sph2sorted(double *out, double *input, double *recontract_coef,
     }
     return 0;
 }
+
+void get_orig_shell_idx(int *shell_idx, int *orig_bas, int orig_nbas,
+                        int *recontract_bas, int *recontraction_idx)
+{
+    int recon_sh = 0;
+    for (int orig_sh = 0; orig_sh < orig_nbas; ++orig_sh) {
+        int remaining_ctr = orig_bas[orig_sh * BAS_SLOTS + NCTR_OF];
+/* A recontract_bas row does not always correspond to one original shell. With
+ * decontract=False, a generally contracted shell is split into one
+ * segment-contracted shell per contraction.
+ *
+ * For example, two original shells with NCTR_OF = [2, 1] produce three
+ * recontract_bas rows, each with NCTR_OF = 1. Their original shell indices are
+ * [0, 0, 1], not [0, 1, 2]. */
+        while (remaining_ctr > 0) {
+            int *shell = recontract_bas + recon_sh * BAS_SLOTS;
+            int p0 = shell[PTR_PBAS_IDX];
+            int p1 = p0 + shell[NPRIM_OF];
+
+            for (int p = p0; p < p1; ++p) {
+                shell_idx[recontraction_idx[p]] = orig_sh;
+            }
+            remaining_ctr -= shell[NCTR_OF];
+            ++recon_sh;
+        }
+    }
+}
 }

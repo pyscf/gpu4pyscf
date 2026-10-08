@@ -459,7 +459,8 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None):
 
     wcoulG_0, wcoulG_1 = get_wcoulG(cell, Gv, omega=omega)
 
-    bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
+    bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+        _shl_pairs_for_derivative_kernel(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
@@ -562,7 +563,8 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(blksize, ngrids, 16384)
 
-    bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
+    bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+            _shl_pairs_for_derivative_kernel(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
@@ -693,7 +695,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     log.timer_debug1('get_ek_derivatives', *cpu0)
     return ek_sigma.get()
 
-def _generate_shl_pairs(ft_opt):
+def _shl_pairs_for_derivative_kernel(ft_opt):
     img_idx = ft_opt.img_idx
     img_offsets = ft_opt.img_offsets.get()
     img_counts = img_offsets[1:] - img_offsets[:-1]

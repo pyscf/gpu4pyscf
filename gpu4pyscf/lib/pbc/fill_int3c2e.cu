@@ -146,7 +146,7 @@ while (1) {
     while (img_not_processed > 0) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
                         rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
-        if (num_sub_tasks == 0) continue;
+        if (num_sub_tasks > 0) {
         if (!int3c2e_unrolled(out, omega, envs, img_pool, sub_task_idx, num_sub_tasks,
                               img_tile_size, ijk_tasks_info, c2s_pool,
                               shm_size, iprim, jprim, kprim, li, lj, lk,
@@ -954,7 +954,7 @@ while (1) {
                     }
                 }
             }
-        }
+        } }
     } // while (img_not_processed > 0)
     _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info,
                       (int *)shared_memory);
@@ -1101,10 +1101,13 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
                            uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                            int *img_idx, uint32_t *sp_img_offsets,
                            int *gout_stride_lookup, int *ao_pair_loc,
-                           int ao_pair_offset, int nao_pairs,
-                           int aux_offset, int nauxbas, int naux, int to_sph,
+                           int ao_pair_offset, int aux_offset,
+                           int nauxbas, int naux, int to_sph,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
+    if (nbatches_shl_pair == 0 || nbatches_ksh == 0) {
+        return 0;
+    }
     cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);

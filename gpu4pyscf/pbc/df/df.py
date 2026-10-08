@@ -58,6 +58,10 @@ class GDF(lib.StreamObject):
 
     _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'kmesh'})
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_cderi_to_save', '_cderi', '_cderip', '_cderi_idx', '_rsh_df'),
+        reset_state=True)
+
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
         self.nao = None
@@ -92,13 +96,10 @@ class GDF(lib.StreamObject):
             if isinstance(self._kpts, KPoints):
                 self.kpts = reset_kpts(self.kpts, cell)
             self.cell = cell
+            self.auxcell = None
         self._cderi = self._cderip = self._cderi_idx = None
         self._rsh_df = {}
         return self
-
-    __getstate__, __setstate__ = lib.generate_pickle_methods(
-        excludes=('_cderi_to_save', '_cderi', '_cderip', '_cderi_idx', '_rsh_df'),
-        reset_state=True)
 
     auxbasis = df_cpu.GDF.auxbasis
 
@@ -118,6 +119,7 @@ class GDF(lib.StreamObject):
     def build(self, j_only=None, kpts_band=None):
         warnings.warn(
             'PBC.df is currently experimental and subject to significant changes.')
+        self.reset()
         if j_only is not None:
             self._j_only = j_only
         assert kpts_band is None and self.kpts_band is None
@@ -145,7 +147,6 @@ class GDF(lib.StreamObject):
             cell, auxcell, kpts, self.kmesh, j_only=self._j_only, omega=self._omega,
             linear_dep_threshold=self.linear_dep_threshold, compress=True)
         ao_pair_mapping, diag_idx = self._cderi_idx
-        self._cderi_idx = asarray(ao_pair_mapping), asarray(diag_idx)
         logger.debug1(self, 'len(cderi)=%d len(ao_pair)=%d len(diag)=%d',
                       len(self._cderi), len(ao_pair_mapping), len(diag_idx))
         t1 = logger.timer_debug1(self, 'j3c', *t1)
@@ -294,25 +295,23 @@ class GDF(lib.StreamObject):
             aux_iter = lib.prange(0, naux, blksize)
 
         if unpack:
-            nao = self.nao
-            ao_pair_mapping, diag = self._cderi_idx
-            ao_pair_mapping = asarray(ao_pair_mapping)
-            rows, cols = divmod(ao_pair_mapping, nao)
-            buf_cderi = cp.zeros([blksize,nao,nao])
+            pair_address = cp.asarray(self._cderi_idx[0], dtype=np.int32)
+            expLk = cp.ones((1, 1), dtype=np.complex128)
+            def unpack_block(block):
+                return rsdf_builder._unpack_cderi_v2(
+                    block, pair_address, [0], [0], expLk, self.nao)[0]
 
         out2 = None
         for p0, p1 in aux_iter:
             out = asarray(cderi_sparse[p0:p1])
             if unpack:
-                out2 = buf_cderi[:p1-p0]
-                out2[:,cols,rows] = out2[:,rows,cols] = out
+                out2 = unpack_block(out)
             yield out2, out.T, 1
 
             if p0 == 0 and cell.dimension == 2:
                 out = asarray(self._cderip[0])
                 if unpack:
-                    out2 = buf_cderi[:1]
-                    out2[:,cols,rows] = out2[:,rows,cols] = out
+                    out2 = unpack_block(out)
                 yield out2, out.T, -1
 
     to_gpu = utils.to_gpu

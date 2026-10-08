@@ -574,7 +574,7 @@ C    -.3    .2     -.7''',
         j3c = j3c.dot(aux_coef)
         if decontract:
             recontract, ao_pair_counts, contracted_ao_pair_counts, pair_addresses = \
-                    int3c2e_bdiv._create_pair_recontraction(int3c2e_opt.mol, clone_context)
+                    int3c2e_bdiv._create_pair_recontractor(int3c2e_opt.mol, clone_context)
             j3c = recontract(0, j3c)
         else:
             pair_addresses = int3c2e_opt.pair_and_diag_indices()[0]

@@ -34,6 +34,8 @@ def get_Gv_base(cell, mesh=None):
 def get_Gv_weights(cell, mesh=None):
     '''Calculate G-vectors and weights.
 
+    This is the CuPy version for pyscf.pbc.gto.cell.get_Gv_weights
+
     Returns:
         Gv : (ngris, 3) ndarray of floats
             The array of G-vectors.
@@ -94,3 +96,16 @@ def get_SI(cell, Gv=None, mesh=None, atmlst=None):
     else:
         SI = cp.exp(-1j*coords.dot(cp.asarray(Gv).T))
     return SI
+
+def get_uniform_grids(cell, mesh=None, wrap_around=True):
+    '''CuPy version for pyscf.pbc.gto.cell.get_uniform_grids
+    '''
+    assert wrap_around
+    if mesh is None:
+        mesh = cell.mesh
+    freqs = [cp.fft.fftfreq(n) for n in mesh]
+    qv = cp.empty(tuple(mesh) + (3,))
+    qv[:,:,:,0] = freqs[0][:,None,None]
+    qv[:,:,:,1] = freqs[1][None,:,None]
+    qv[:,:,:,2] = freqs[2][None,None,:]
+    return np.dot(qv.reshape(-1, 3), cp.asarray(cell.lattice_vectors()))

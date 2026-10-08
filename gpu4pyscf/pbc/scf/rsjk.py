@@ -46,7 +46,7 @@ from gpu4pyscf.pbc.df.df_jk import _factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, double_translation_indices
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
-from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb
+from gpu4pyscf.pbc.tools.pbc import get_coulG, mesh_to_ke
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
@@ -462,7 +462,7 @@ class PBCJKMatrixOpt:
                 # Remove the G=0 contribution to match the output of FFTDF.get_jk().
                 wcoulG_SR_at_G0 = -np.pi / omega**2 / cell.vol / nkpts
                 if exxdiv == 'ewald':
-                    # probe_charge_sr_coulomb equals to -2*ewovrl.
+                    # pbctools.probe_charge_sr_coulomb equals to -2*ewovrl.
                     # This term rapidly decays to 0 for large k-mesh. In the
                     # FFTDF.get_jk based implementation, this contribution is
                     # included in the short-range part.
@@ -1137,7 +1137,8 @@ class PBCJKMatrixOpt:
         Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
         ngrids = len(Gv)
 
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = \
+                aft_jk._shl_pairs_for_derivative_kernel(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         shm_size = aft_jk._estimate_max_shm_size(cell, (1,0))
         log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d',
@@ -1145,7 +1146,7 @@ class PBCJKMatrixOpt:
 
         if exclude_dd_block:
             bas_ij_wo_dd, img_idx_wo_dd, shl_pair_offsets_wo_dd = \
-                    _generate_shl_pairs(ft_opt, self.dd_bas_idx)
+                    _shl_pairs_for_derivative_kernel(ft_opt, self.dd_bas_idx)
 
         def get_j():
             t0 = log.init_timer()
@@ -1571,12 +1572,26 @@ def _search_diffuse_pairs(cell, mesh):
     ft_opt = FTOpt(cell)
     ft_opt.rcut = cell.rcut / 2 # reduce accuracy for an estimation of ke_cutoff
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
-    pair_max = cp.zeros((cell.nbas, cell.nbas))
+    nao = cell.nao
+    pair_max = cp.zeros((nao, nao))
     for p0, p1 in lib.prange(0, ngrids, Gblksize):
         Gpq = ft_kern(Gv[p0:p1])
         _pair_max = cp.abs(Gpq[0]).max(axis=0)
-        _pair_max = condense('absmax', _pair_max, cell.ao_loc)
-        pair_max = cp.where(pair_max > _pair_max, pair_max, _pair_max)
+        pair_max = cp.maximum(pair_max, _pair_max)
+    pair_max = condense('max', pair_max, cell.ao_loc)
+
+    # Consider the Coulomb interactions with nuclear charge, the contributions
+    # from all G^2/2 > Ecut
+    # ~ sum 4*pi/G^2 * 4*pi*G^2 * exp(-G^2/(4*aij))
+    # ~= 1/vol * 32*pi^2*aij/Gmax exp(-Gmax^2/(4*aij))
+    # ~= 1e2/vol * aij/Gmax * exp(-Gmax^2/(4*aij))
+    exps = cp.asarray(extract_pgto_params(cell, 'compact')[0])
+    ke_cutoff = mesh_to_ke(cell.lattice_vectors(), mesh)
+    Gmax = (ke_cutoff.min()*2)**.5
+    aij = exps[:,None] * exps
+    fac = aij/Gmax * np.exp(-.25*Gmax**2/aij)
+    pair_max *= 1 + fac
+
     precision = cell.precision * max(1, 1e-2 * cell.vol)
     pair_mask = pair_max < precision
     return pair_mask
@@ -1939,7 +1954,7 @@ def _get_vk_wcoulG_and_SR(cell, kpt, kpts, exxdiv, mesh, Gv, Gv_weight,
     wcoulG_SR *= sr_factor * Gv_weight
     return wcoulG, wcoulG_SR
 
-def _generate_shl_pairs(ft_opt, dd_bas_idx):
+def _shl_pairs_for_derivative_kernel(ft_opt, dd_bas_idx):
     cell = ft_opt.cell
     bvk_ncells = len(ft_opt.bvkmesh_Ls)
     nbas = cell.nbas

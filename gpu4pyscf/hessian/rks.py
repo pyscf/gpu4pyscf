@@ -1494,6 +1494,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     mol = hessobj.mol
     mf = hessobj.base
     ni = numint.NumInt()
+    ni.omega = mf._numint.omega
     xctype = ni._xc_type(mf.xc)
 
     if hessobj.grids is not None:
@@ -3190,6 +3191,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     mol = hessobj.mol
     mf = hessobj.base
     ni = numint.NumInt()
+    ni.omega = mf._numint.omega
     xctype = ni._xc_type(mf.xc)
 
     if hessobj.grids is not None:

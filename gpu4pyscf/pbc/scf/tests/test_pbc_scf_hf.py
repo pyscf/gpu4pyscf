@@ -373,6 +373,28 @@ class KnownValues(unittest.TestCase):
         assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
         assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
 
+    def test_scanner(self):
+        cell1 = pbcgto.M(
+            a=np.eye(3)*4,
+            atom='H 0 0 0; H 0 0 1.', basis='gth-szv',
+            pseudo='gth-pbe', mesh=[7, 7, 7])
+
+        cell2 = cell1.set_geom_('H 0 0 0; H 0 0 1.5', inplace=False)
+        cell2.mesh = [15, 15, 15]
+
+        mf1 = scf.RHF(cell1).run()
+        mf_scanner = mf1.as_scanner()
+        mf_scanner(cell1)
+
+        e2 = mf_scanner(cell2)
+        assert np.array_equal(mf_scanner.with_df.mesh, [15, 15, 15])
+        mf2 = scf.RHF(cell2).run()
+        self.assertAlmostEqual(e2, mf2.e_tot, 9)
+
+        e1 = mf_scanner(cell1)
+        assert np.array_equal(mf_scanner.with_df.mesh, [7, 7, 7])
+        self.assertAlmostEqual(e1, mf1.e_tot, 9)
+
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")
     unittest.main()

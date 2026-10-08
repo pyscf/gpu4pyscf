@@ -16,12 +16,14 @@ import unittest
 import tempfile
 import numpy as np
 import cupy as cp
+import pyscf
 from pyscf.pbc import gto as pbcgto
 from pyscf.pbc.dft import UniformGrids
 from pyscf.lib import unpack_tril, temporary_env
 from gpu4pyscf.pbc import dft as pbcdft
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
+from packaging import version
 
 def setUpModule():
     global cell
@@ -133,7 +135,9 @@ class KnownValues(unittest.TestCase):
         i, j = divmod(ij, nao)
         naux = auxcell.nao
         out = cp.zeros((naux,nao,nao))
-        out[:,j,i] = out[:,i,j] = with_df._cderi[0]
+        cderi = cp.asarray(with_df._cderi[0])
+        out[:,i,j] = cderi
+        out[:,j,i] += cderi
         with _load3c(mf_ref.with_df._cderi, 'j3c', np.zeros((2,3))) as cderi:
             ref = unpack_tril(cderi[:])
         assert abs(out.get() - ref).max() < 1e-8
@@ -559,6 +563,32 @@ class KnownValues(unittest.TestCase):
         mf.rsjk = PBCJKMatrixOpt(cell, omega)
         mf.run()
         assert abs(mf.e_tot - ref) < 1e-9
+
+    @unittest.skipIf(version.parse(pyscf.__version__) < version.parse('2.12'),
+                     'cell.to_gpu not supported')
+    def test_mesh_in_scanner(self):
+        cell1 = pbcgto.M(
+            a=np.eye(3)*4,
+            atom='H 0 0 0; H 0 0 1.', basis='gth-szv',
+            pseudo='gth-pbe', mesh=[7, 7, 7])
+
+        cell2 = cell1.set_geom_('H 0 0 0; H 0 0 1.5', inplace=False)
+        cell2.mesh = [15, 15, 15]
+
+        # cell1.RKS().to_gpu() will trigger CPU FFTDF initializes
+        # with_df.mesh = cell.mesh. This assignment leads to an explicit
+        # override to mesh. cell2.mesh will not be read by the scanner. This
+        # problem is fixed in pyscf-2.15
+        mf1 = cell1.to_gpu().RKS(xc='camb3lyp').multigrid_numint().run()
+        mf_scanner = mf1.as_scanner()
+        mf_scanner(cell1)
+
+        e2 = mf_scanner(cell2)
+        mf2 = cell2.to_gpu().RKS(xc='camb3lyp').multigrid_numint().run()
+        self.assertAlmostEqual(e2, mf2.e_tot, 7)
+
+        e1 = mf_scanner(cell1)
+        self.assertAlmostEqual(e1, mf1.e_tot, 7)
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.rks")

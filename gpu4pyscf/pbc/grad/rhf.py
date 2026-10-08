@@ -25,6 +25,7 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import dist_matrix, asarray
 import gpu4pyscf.grad.rhf as mol_rhf
+from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -257,6 +258,7 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
     hermi = 1
 
     with_df = mf.with_df
+    with_df.reset() # release memory
     cell = with_df.cell
     auxcell = with_df.auxcell
     if auxcell is None:
@@ -277,8 +279,11 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
             fn = krhf._get_ejk_derivatives
         else:
             fn = kuhf._get_ejk_derivatives
-        rsdf_omega = _guess_omega(cell)
-        opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh).build()
+        rsdf_omega = max(abs(omega), _guess_omega(cell))
+        # DD responses are implemented for Gamma RHF and Gamma J-only.
+        opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh)
+        opt.cell = SortedCell.from_cell(cell, decontract=True, diffuse_cutoff=0.25)
+        opt.build(separate_dd=True)
         return fn(opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega,
                   linear_dep_threshold=with_df.linear_dep_threshold)
 
@@ -334,13 +339,13 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
             else:
                 kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut)
             rsdf_omega = 0.3
-            int3c2e_opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh).build()
+            opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh)
+            opt.cell = SortedCell.from_cell(cell, decontract=True, diffuse_cutoff=0.25)
+            opt.build(separate_dd=True)
             if is_rhf:
-                ejk_sigma = _get_ejk_derivatives(
-                    int3c2e_opt, dm, kpts, hermi, k_factor=0)
+                ejk_sigma = _get_ejk_derivatives(opt, dm, kpts, hermi, k_factor=0)
             else:
-                ejk_sigma = _get_ejk_derivatives(
-                    int3c2e_opt, dm[0]+dm[1], kpts, hermi, k_factor=0)
+                ejk_sigma = _get_ejk_derivatives(opt, dm[0]+dm[1], kpts, hermi, k_factor=0)
 
         if lr_factor != 0 or sr_factor != 0:
             with_rsjk = mf.rsjk

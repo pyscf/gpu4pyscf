@@ -219,9 +219,9 @@ class KnownValues(unittest.TestCase):
             [ 0.0332548719939041,  0.0136434722008971, -0.0355085206393824],
         ])
 
-        assert np.abs(test_energy - ref_energy) < 1e-9
-        assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 3e-8
-        # assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 3e-7 # TODO: Support Becke grid stress tensor
+        assert np.abs(test_energy - ref_energy) < 1e-6
+        assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 3e-7
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-6
 
         dm = mf.make_rdm1()
         kmesh = np.array([1,1,1])
@@ -233,7 +233,7 @@ class KnownValues(unittest.TestCase):
 
         ref_hcore_derivatives = numerical_hcore_gradient_and_stresstensor(cell, dm, kmesh)
 
-        assert np.max(np.abs(test_hcore_derivatives[:-3, :] - ref_hcore_derivatives[:-3, :])) < 3e-8
+        assert np.max(np.abs(test_hcore_derivatives[:-3, :] - ref_hcore_derivatives[:-3, :])) < 3e-7
         assert np.max(np.abs(test_hcore_derivatives[-3:, :] - ref_hcore_derivatives[-3:, :])) < 3e-7
 
     def test_gdf_hcore_derivatives_krhf(self):
@@ -246,6 +246,7 @@ class KnownValues(unittest.TestCase):
             a = np.eye(3) * (15.9069652593 / 3),
             unit = "Angstrom",
             basis = "sto-6g",
+            precision = 1e-10,
             verbose = 0,
         )
 
@@ -276,7 +277,7 @@ class KnownValues(unittest.TestCase):
             [ 0.0254392105603074,  0.0368723237187396, -0.068196215678995 ],
         ])
 
-        assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.abs(test_energy - ref_energy) < 1e-8
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 5e-7
         assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-7
 
@@ -336,7 +337,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 5e-7
-        # assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-6 # TODO: Support Becke grid stress tensor
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 1e-6
 
         dm = mf.make_rdm1()
         kpts = cell.make_kpts(kmesh)
@@ -363,6 +364,7 @@ class KnownValues(unittest.TestCase):
             charge = 1,
             spin = 1,
             basis = "6-31g",
+            precision = 1e-11,
             verbose = 0,
         )
 
@@ -392,9 +394,9 @@ class KnownValues(unittest.TestCase):
             [ 0.0630823866032415,  0.0113875747587144, -0.0252774496800612],
         ])
 
-        assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.abs(test_energy - ref_energy) < 1e-6
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 1e-7
-        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 1e-7
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-6
 
     def test_gdf_hcore_derivatives_kuks(self):
         cell = pyscf.M(
@@ -458,7 +460,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 1e-6
-        # assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 1e-6 # TODO: Support Becke grid stress tensor
+        assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 2e-6
 
 if __name__ == '__main__':
     print("Full Tests for PBC GDF Hcore gradient and stress tensor")

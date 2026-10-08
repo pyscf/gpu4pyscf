@@ -22,6 +22,7 @@ from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
 from gpu4pyscf.pbc.df import rsdf_builder
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 import pytest
 
 def test_gamma_point():
@@ -222,15 +223,12 @@ C    D
         dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(
             cell, auxcell, omega=-omega)
     cp.cuda.get_current_stream().synchronize()
-    assert abs(lib.fp(abs(dat[0])) - 3.25766577810573) < 1e-8
 
     nao = cell.nao
-    ij, diag = idx
-    i, j = divmod(ij, nao)
     naux = auxcell.nao
-    out = cp.zeros((naux,nao,nao))
-    out[:,j,i] = dat[0]
-    out[:,i,j] = dat[0]
+    out = rsdf_builder._unpack_cderi_v2(
+        dat[0], idx[0], [0], [0], cp.ones((1, 1), dtype=np.complex128), nao)[0]
+    assert abs(lib.fp(abs(out.get())) - -4.663003306619004) < 1e-8
 
     auxcell.omega = cell.omega = -omega
     cell.precision = 1e-10
@@ -291,7 +289,9 @@ C    D
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder._unpack_cderi_v2(
+            dat[kp], idx[0], np.where(kk_conserv == kp)[1],
+            conj_images_in_bvk_cell(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -320,7 +320,9 @@ def test_kpts_compressed1():
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder._unpack_cderi_v2(
+            dat[kp], idx[0], np.where(kk_conserv == kp)[1],
+            conj_images_in_bvk_cell(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -359,7 +361,9 @@ C  D
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder._unpack_cderi_v2(
+            dat[kp], idx[0], np.where(kk_conserv == kp)[1],
+            conj_images_in_bvk_cell(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -389,7 +393,9 @@ def test_kpts_compressed2():
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder._unpack_cderi_v2(
+            dat[kp], idx[0], np.where(kk_conserv == kp)[1],
+            conj_images_in_bvk_cell(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -499,7 +505,9 @@ C    D
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
 
-    out = rsdf_builder.unpack_cderi(dat[0], idx, 0, kk_conserv, expLk, nao)
+    out = rsdf_builder._unpack_cderi_v2(
+        dat[0], idx[0], np.where(kk_conserv == 0)[1],
+        conj_images_in_bvk_cell(kmesh), expLk, nao)
     for ki in range(nkpts):
         _ref = ref[ki, ki]
         assert abs(_ref - out[ki]).max() < 1e-11
@@ -672,7 +680,9 @@ def test_kpts_compressed_linear_dep():
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder._unpack_cderi_v2(
+            dat[kp], idx[0], np.where(kk_conserv == kp)[1],
+            conj_images_in_bvk_cell(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -683,3 +693,138 @@ def test_kpts_compressed_linear_dep():
             _dat = np.einsum('pij,plk->ijkl', out[ki], out[ki].conj(), optimize=True)
             print(ki, kj)
             assert abs(_ref - _dat).max() < 1e-8
+
+def test_diffuse_only():
+    cell = pyscf.M(
+        atom = 'He 1. .5 .5;C .1 1.3 2.1',
+        basis = {'He': [[0, [0.12, 1]]],
+                 'C' :[[0, [0.08, 1]]],},
+        a = np.eye(3) * 2.5,
+    )
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [1., 1.]], [0, [.5, 1.]]]
+    auxcell.build(False, False)
+
+    opt = rsdf_builder.SRInt3c2eOpt(cell, auxcell, 0.3)
+    opt.mesh = [7, 7, 7]
+    opt.build(separate_dd=True)
+    assert len(opt.img_idx) == 0
+
+    full, _ = build_cderi(cell, auxcell, int3c2e_opt=opt)
+    excluded, _ = build_cderi(cell, auxcell, exclude_dd=True, int3c2e_opt=opt)
+    eri = cp.einsum('pij,pkl->ijkl', full[0,0], full[0,0])
+    assert abs(lib.fp(eri.get()) - 0.002616152259096199) < 1e-10
+    assert cp.all(excluded[0,0] == 0)
+
+    kmesh = [3,2,1]
+    kpts = cell.make_kpts(kmesh)
+    opt = rsdf_builder.SRInt3c2eOpt(cell, auxcell, 0.3, kmesh)
+    opt.mesh = [7, 7, 7]
+    opt.build(separate_dd=True)
+    assert len(opt.img_idx) == 0
+
+    full, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh, int3c2e_opt=opt)
+    excluded, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh,
+                              exclude_dd=True, int3c2e_opt=opt)
+    eri = cp.einsum('pij,pkl->ijkl', full[0,0], full[0,0])
+    assert abs(lib.fp(eri.get()) - 0.002616152259096199) < 1e-10
+    assert cp.all(excluded[0,0] == 0)
+
+
+@pytest.mark.parametrize('cart', [False, True])
+@pytest.mark.parametrize('mode', ['gamma', 'j_only', 'kk'])
+@pytest.mark.parametrize('omega', [None, -.4])
+def test_general_contraction(cart, mode, omega):
+    # Include d functions and diffuse primitives in general contractions to
+    # exercise Cartesian/spherical conversion and compact/DD recontraction.
+    cell = pyscf.M(
+        atom='He .2 .3 .1; He 1.1 .8 1.4', unit='Bohr',
+        a=np.eye(3)*6, cart=cart, precision=1e-10, verbose=0,
+        basis=[[0, [2., .6, -.2], [.3, .4, .7], [.09, .2, .3]],
+               [2, [1.8, .7, .2], [.6, .3, -.4]]])
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [1., 1.]], [0, [.3, 1.]],
+                     [1, [.7, 1.]], [2, [.8, 1.]]]
+    auxcell.build()
+    if omega is not None:
+        cell.omega = auxcell.omega = omega
+    kmesh = [1, 1, 1] if mode == 'gamma' else [3, 1, 1]
+    kpts = cell.make_kpts(kmesh)
+    opt = rsdf_builder.SRInt3c2eOpt(cell, auxcell, .4, kmesh).build(separate_dd=True)
+    assert opt.cell.nao > cell.nao
+    assert opt.dd_ft_opt is not None
+    dat, negative = build_cderi(cell, auxcell, kpts, kmesh,
+                                j_only=mode == 'j_only', omega=omega, int3c2e_opt=opt)
+    assert negative is None
+    cpu = _RSGDFBuilder(cell, auxcell, kpts)
+    cpu.omega = .4
+    cpu.j2c_eig_always = True
+    with tempfile.NamedTemporaryFile() as tmpf:
+        cpu.make_j3c(tmpf.name, aosym='s1', j_only=mode == 'j_only')
+        for (ki, kj), value in dat.items():
+            assert value.shape[1:] == (cell.nao, cell.nao)
+            with _load3c(tmpf.name, 'j3c', kpts[[ki, kj]]) as cderi:
+                ref = cderi[:].reshape(-1, cell.nao, cell.nao)
+            # Metric eigenspaces may differ by unitary rotations.
+            eri = np.einsum('Lij,Lkl->ijkl', value.get().conj(), value.get())
+            expected = np.einsum('Lij,Lkl->ijkl', ref.conj(), ref)
+            np.testing.assert_allclose(eri, expected, atol=2e-8, rtol=1e-8)
+
+
+@pytest.mark.parametrize('gamma', [True, False])
+def test_general_contraction_gdf_jk(gamma):
+    from pyscf.pbc.df import GDF as CPU_GDF
+    from gpu4pyscf.pbc.df.df import GDF
+    cell = pyscf.M(
+        atom='He .2 .3 .1; He 1.1 .8 1.4', unit='Bohr',
+        a=np.eye(3)*6, precision=1e-10, verbose=0,
+        basis=[[0, [2., .6, -.2], [.3, .4, .7], [.09, .2, .3]],
+               [2, [1.8, .7, .2], [.6, .3, -.4]]])
+    kpts = cell.make_kpts([1, 1, 1] if gamma else [3, 1, 1])
+    auxbasis = [[0, [1., 1.]], [0, [.3, 1.]], [1, [.7, 1.]], [2, [.8, 1.]]]
+    gpu = GDF(cell, kpts)
+    gpu.auxbasis = auxbasis
+    gpu.is_gamma_point = gamma
+    cpu = CPU_GDF(cell, kpts)
+    cpu.auxbasis = auxbasis
+    rng = np.random.default_rng(41)
+    factor = rng.random((len(kpts), cell.nao, 3)) * .1
+    if not gamma:
+        factor[2] = factor[1]
+    dm = factor @ factor.transpose(0, 2, 1)
+    if gamma:
+        dm = dm[0]
+    vj, vk = gpu.get_jk(cp.asarray(dm), kpts=kpts)
+    refj, refk = cpu.get_jk(dm, kpts=kpts, exxdiv=None)
+    np.testing.assert_allclose(vj.get(), refj, atol=2e-8, rtol=1e-8)
+    np.testing.assert_allclose(vk.get(), refk, atol=2e-8, rtol=1e-8)
+
+def test_separate_dd_for_small_overlap():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': [[0, [2.0, 1.]]],
+               'C2': [[0, [1e3, 1.]]]},
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell
+    int3c2e_opt = rsdf_builder.SRInt3c2eOpt(cell, auxcell, omega=0.4).build(separate_dd=True)
+    omega = 0.3
+    with lib.temporary_env(rsdf_builder, PREFER_ED=False):
+        gpu_dat, dat_neg = build_cderi(cell, auxcell, int3c2e_opt=int3c2e_opt)
+
+    kpts = cell.make_kpts([1,1,1])
+    dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
+    dfbuilder.omega = omega
+    dfbuilder.j2c_eig_always = False
+    dfbuilder.fft_dd_block = True
+    dfbuilder.exclude_d_aux = True
+    naux = auxcell.nao
+    nao = cell.nao
+    with tempfile.NamedTemporaryFile() as tmpf:
+        dfbuilder.make_j3c(tmpf.name, aosym='s1')
+        with _load3c(tmpf.name, 'j3c', kpts[[0,0]]) as cderi:
+            ref = abs(cderi[:].reshape(naux,nao,nao))
+            dat = abs(gpu_dat[0,0].get())
+            assert abs(dat - ref).max() < 1e-8

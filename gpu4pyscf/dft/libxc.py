@@ -22,7 +22,7 @@ from ctypes import POINTER
 # Note: gpu4pyscf relies on pyscf.dft.libxc for parsing XC functionals (e.g. parse_xc),
 # which uses pyscf.scf.dispersion.parse_dft. The local gpu4pyscf.scf.dispersion.parse_dft is not used here.
 from pyscf.dft import libxc as libxc_cpu
-from gpu4pyscf.dft.libxc_structs import xc_func_type, xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
+from gpu4pyscf.dft.libxc_structs import xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.dft import libxc_structs
 
@@ -86,7 +86,14 @@ if _libxc is None:
     )
 
 _libxc.xc_version_string.restype = ctypes.c_char_p
-__version__ = _libxc.xc_version_string().decode() + ' (CUDA)'
+_libxc_version = _libxc.xc_version_string().decode()
+__version__ = _libxc_version + ' (CUDA)'
+# The packaged 7.0.0 fork inserts params_size before the four thresholds.
+# Select the layout before binding xc_func_alloc and the other C functions.
+if _libxc_version == '7.0.0':
+    xc_func_type = libxc_structs.xc_func_type_700
+else:
+    xc_func_type = libxc_structs.xc_func_type
 
 LDA_OUTPUT_LABELS = [
                 "zk",       # 1, 1
@@ -154,6 +161,11 @@ if _libxc is not None:
     _libxc.xc_func_free.argtypes = (_xc_func_p, )
     _libxc.xc_functional_get_name.argtypes = (ctypes.c_int, )
     _libxc.xc_functional_get_name.restype = ctypes.c_char_p
+    _libxc.xc_func_info_get_n_ext_params.argtypes = (ctypes.c_void_p, )
+    _libxc.xc_func_info_get_n_ext_params.restype = ctypes.c_int
+    _libxc.xc_func_info_get_ext_params_name.argtypes = (ctypes.c_void_p, ctypes.c_int)
+    _libxc.xc_func_info_get_ext_params_name.restype = ctypes.c_char_p
+    _libxc.xc_func_set_ext_params_name.argtypes = (_xc_func_p, ctypes.c_char_p, ctypes.c_double)
 
     nfunc = _libxc.xc_number_of_functionals()
     XC_IDS = np.zeros(nfunc, dtype=np.int32)
@@ -165,8 +177,23 @@ if _libxc is not None:
                     'Libxc for PySCF and GPU4PySCF incompatible'
 
 
+def _has_omega(func):
+    info = ctypes.cast(func.contents.info, ctypes.c_void_p)
+    n = _libxc.xc_func_info_get_n_ext_params(info)
+    return any(_libxc.xc_func_info_get_ext_params_name(info, i) == b'_omega'
+               for i in range(n))
+
+def _set_omega(func, omega):
+    '''Set the range-separation parameter as pyscf does in LIBXC_xc_func_set_params'''
+    if _has_omega(func):
+        _libxc.xc_func_set_ext_params_name(func, b'_omega', omega)
+    func_aux = ctypes.cast(func.contents.xc_func_type, POINTER(_xc_func_p))
+    for i in range(func.contents.n_func_aux):
+        if _has_omega(func_aux[i]):
+            _libxc.xc_func_set_ext_params_name(func_aux[i], b'_omega', omega)
+
 class XCfun:
-    def __init__(self, xc, spin):
+    def __init__(self, xc, spin, omega=0):
         self.spin = spin
         self._spin = 1 if spin == 'unpolarized' else 2
         if isinstance(xc, str):
@@ -187,6 +214,8 @@ class XCfun:
             ret = _libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
             if ret != 0:
                 raise RuntimeError('failed to initialize xc fun')
+            if omega != 0:
+                _set_omega(self.xc_func, omega)
 
             self.xc_func_sizes = {}
             for attr in dir(self.xc_func.contents.dim):
@@ -315,4 +344,3 @@ class XCfun:
             raise KeyError(f"Functional kind {self._family} not supported")
 
         return {k: v[0] for k, v in output.items() if v is not None}
-

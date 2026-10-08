@@ -640,6 +640,9 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int permutation_symmetry)
 {
+    if (nbatches_shl_pair == 0 || ngrids == 0) {
+        return 0;
+    }
     cudaFuncSetAttribute(ft_aopair_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NG_PER_BLOCK, NSP_PER_BLOCK);
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
@@ -661,6 +664,9 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int permutation_symmetry)
 {
+    if (nbatches_shl_pair == 0 || ngrids == 0) {
+        return 0;
+    }
     cudaFuncSetAttribute(ft_aopair_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NG_PER_BLOCK, NSP_PER_BLOCK);
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;

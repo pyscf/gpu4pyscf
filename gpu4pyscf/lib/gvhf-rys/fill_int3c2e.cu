@@ -909,7 +909,7 @@ while (1) {
 static __global__
 void cart2sph_kernel(double *out, double *input, PBCIntEnvVars envs,
                      uint32_t *bas_ij_idx, int *out_offsets, int *input_offsets,
-                     int naux, int nbas, int nao_sph, int pair_compressed)
+                     int naux, int nao_sph, int pair_compressed)
 
 {
     int pair_ij = blockIdx.x;
@@ -920,6 +920,7 @@ void cart2sph_kernel(double *out, double *input, PBCIntEnvVars envs,
     }
     int *bas = envs.bas;
     uint32_t bas_ij = bas_ij_idx[pair_ij];
+    int nbas = envs.nbas * envs.bvk_ncells;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     int li = bas[ish*BAS_SLOTS+ANG_OF];
@@ -1602,15 +1603,14 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
 
 int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
                      uint32_t *bas_ij_idx, int *out_offsets, int *input_offsets,
-                     int nshl_pair, int naux, int nbas, int nao_sph,
-                     int pair_compressed)
+                     int nshl_pair, int naux, int nao_sph, int pair_compressed)
 {
     constexpr int threads = 256;
     int aux_batches = (naux + threads - 1) / threads;
     dim3 blocks(nshl_pair, aux_batches);
     cart2sph_kernel<<<blocks, threads>>>(
             out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
-            naux, nbas, nao_sph, pair_compressed);
+            naux, nao_sph, pair_compressed);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_cart2sph kernel: %s\n", cudaGetErrorString(err));
