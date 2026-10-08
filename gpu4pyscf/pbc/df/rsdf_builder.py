@@ -286,12 +286,9 @@ def _guess_omega(cell, kmesh=None):
     return omega
 
 def _append_dd_cderi(opt, cderi, cd_j2c_cache, omega, recontract, kpts=None):
-    """Recontract real or complex DD integrals and merge their host columns."""
+    """Recontract real or complex DD integrals in bounded pair/G batches."""
     dd_ft_opt = opt.dd_ft_opt
     cell = opt.cell
-    eval_ft, pair_offsets = dd_ft_opt.ft_evaluator(
-        cart=cell.cell.cart, original_ao_order=False)
-    n_dd_pairs = int(pair_offsets[-1])
 
     real_output = kpts is None
     if real_output:
@@ -301,42 +298,99 @@ def _append_dd_cderi(opt, cderi, cd_j2c_cache, omega, recontract, kpts=None):
         dtype = np.complex128
 
     Gv, _, weights = cell.get_Gv_weights(opt.mesh)
-
+    naux_cart = cd_j2c_cache[0].shape[0]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
-    j3c_buf = cp.empty(n_dd_pairs*naux_max, dtype=dtype)
-
+    itemsize = np.dtype(dtype).itemsize
     mem_free = int(get_avail_mem(exclude_memory_pool=True) * .8)
-    Gblksize = min(len(Gv), mem_free // (16 * (n_dd_pairs + 2*naux_max)))
+
+    # Caching transformed auxiliary functions avoids repeating their FT and
+    # metric contraction for every pair batch. Fall back to recomputing them
+    # when the complete cache does not fit in the bounded memory budget.
+    aux_cache_size = len(Gv) * naux_max * np.dtype(np.complex128).itemsize # fourier needs complex128
+    cache_auxG = aux_cache_size < mem_free
+    reserved = aux_cache_size if cache_auxG else 0
+    batch_size = max(1, (mem_free - reserved) //
+                     (4 * itemsize * naux_max)) # max 25% occupy memory
+    eval_ft, pair_offsets = dd_ft_opt.ft_evaluator(
+        batch_size=batch_size, cart=cell.cell.cart,
+        original_ao_order=False)
+    max_pair_size = int(np.diff(pair_offsets).max(initial=0))
+    if max_pair_size == 0:
+        return
+
+    # FT batch boundaries follow whole kernel blocks. Recheck memory after
+    # creating the evaluator, then budget its actual pair block size and a
+    # second j3c-sized contraction temporary.
+    mem_free = int(get_avail_mem(exclude_memory_pool=True) * .8)
+    j3c_size = max_pair_size * naux_max
+    if cache_auxG and len(pair_offsets) == 2:
+        cache_auxG = False
+        reserved = 0
+    work_mem = mem_free - reserved
+    Gblksize = min(len(Gv), (work_mem - 2*j3c_size*itemsize) // # 2 for possible contract occupy mem
+                   (16 * (max_pair_size + 2*naux_cart + naux_max)))
+    # 16 * Gblksize * max_pair_size: for pair
+    # 32 * Gblksize * naux_cart: for aux
+    # 16 * Gblksize * naux_max: after fourier transform, output
+    if Gblksize < 1 and cache_auxG:
+        cache_auxG = False
+        work_mem = mem_free
+        Gblksize = min(len(Gv), (work_mem - 2*j3c_size*itemsize) //
+                       (16 * (max_pair_size + 2*naux_cart + naux_max)))
     if Gblksize < 1:
         raise RuntimeError('Insufficient GPU memory for diffuse-pair integrals')
 
+    logger.debug(cell, 'DD pairs = %d, pair batches = %d, max_pair_size = %d, '
+                 'Gblksize = %d, cache_auxG = %s', pair_offsets[-1],
+                 len(pair_offsets)-1, max_pair_size, Gblksize, cache_auxG)
+    j3c_buf = cp.empty(j3c_size, dtype=dtype)
+    ft_buf = cp.empty(max_pair_size*Gblksize, dtype=np.complex128)
     stream = cp.cuda.get_current_stream()
-    write_buf = empty_mapped(n_dd_pairs*naux_max, dtype=dtype)
+    write_buf = empty_mapped(j3c_size, dtype=dtype)
 
     for (kp, target), coeff, q in zip(cderi.items(), cd_j2c_cache, kpts):
         coulG = get_coulG(cell, k=q, Gv=Gv, omega=-omega, wrap_around=True)
         coulG *= weights
         coeff = asarray(coeff)
         naux = coeff.shape[1]
-        j3c = ndarray((n_dd_pairs, naux), dtype=dtype, buffer=j3c_buf)
-        j3c.fill(0.)
-        for g0, g1 in lib.prange(0, len(Gv), Gblksize):
-            Gk = Gv[g0:g1] + q
-            auxG = ft_ao.ft_ao(opt.auxcell, Gk).T
-            pqG = eval_ft(Gk)
-            auxG *= cp.asarray(coulG[g0:g1])
-            if real_output:
-                auxG = coeff.T.dot(auxG)
-                contract('pG,rG->pr', pqG.view(np.float64),
-                         auxG.view(np.float64), beta=1., out=j3c)
-            else:
-                auxG = coeff.T.dot(auxG.conj())
-                contract('pG,rG->pr', pqG, auxG, beta=1., out=j3c)
+        auxG_cache = None
+        if cache_auxG:
+            auxG_cache = []
+            for g0, g1 in lib.prange(0, len(Gv), Gblksize):
+                auxG = ft_ao.ft_ao(opt.auxcell, Gv[g0:g1] + q).T
+                auxG *= cp.asarray(coulG[g0:g1])
+                if not real_output:
+                    auxG.imag *= -1
+                auxG_cache.append(coeff.T.dot(auxG))
+                auxG = None
 
-        host_j3c = write_buf[:n_dd_pairs*naux].reshape(n_dd_pairs, naux)
-        j3c.get(out=host_j3c, stream=stream)
-        stream.synchronize()
-        recontract(-1, target, host_j3c)
+        for batch_id, (p0, p1) in enumerate(zip(pair_offsets[:-1], pair_offsets[1:])):
+            pair_size = p1 - p0
+            j3c = ndarray((pair_size, naux), dtype=dtype, buffer=j3c_buf)
+            j3c.fill(0.)
+            for g_id, (g0, g1) in enumerate(lib.prange(0, len(Gv), Gblksize)):
+                Gk = Gv[g0:g1] + q
+                pqG = eval_ft(Gk, batch_id, out=ft_buf)
+                if auxG_cache is not None:
+                    auxG = auxG_cache[g_id]
+                else:
+                    auxG = ft_ao.ft_ao(opt.auxcell, Gk).T
+                    auxG *= cp.asarray(coulG[g0:g1])
+                    if not real_output:
+                        auxG.imag *= -1
+                    auxG = coeff.T.dot(auxG)
+                if real_output:
+                    contract('pG,rG->pr', pqG.view(np.float64),
+                             auxG.view(np.float64), beta=1., out=j3c)
+                else:
+                    contract('pG,rG->pr', pqG, auxG, beta=1., out=j3c)
+                if auxG_cache is None:
+                    auxG = None
+
+            host_j3c = write_buf[:pair_size*naux].reshape(pair_size, naux)
+            j3c.get(out=host_j3c, stream=stream)
+            stream.synchronize()
+            recontract(-1, target, host_j3c, pair_start=p0)
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=None,
                                  linear_dep_threshold=LINEAR_DEP_THR,
