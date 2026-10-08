@@ -106,7 +106,8 @@ class SCFWithSolvent(_Solvation):
         if getattr(vhf, 'v_solvent', None) is None:
             vhf = self.get_veff(self.mol, dm_or_wfn)
         return super().get_fock(h1e, s1e, vhf+vhf.v_solvent, dm_or_wfn, cycle, diis,
-                                diis_start_cycle, level_shift_factor, damp_factor)
+                                diis_start_cycle, level_shift_factor, damp_factor,
+                                fock_last)
 
     def energy_elec(self, dm_or_wfn=None, h1e=None, vhf=None):
         if getattr(vhf, 'e_solvent', None) is None:
