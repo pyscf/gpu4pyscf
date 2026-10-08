@@ -29,7 +29,7 @@ from gpu4pyscf.scf import j_engine
 from gpu4pyscf.scf.jk import _VHFOpt, _check_rsh_factors
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib.cupy_helper import (
-    contract, transpose_sum, get_avail_mem, krylov, tag_array)
+    contract, transpose_sum, get_avail_mem, krylov, tag_array, DSOLVE_LINDEP)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess_gpu
@@ -304,7 +304,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         hs_a = hs_b = h1a_blk = h1b_blk = s1a_blk = s1b_blk = None
 
         tol = mf.conv_tol_cpscf * (i1 - i0)
-        lindep = max(tol**2, 1e-14)
+        lindep = min(tol**2, DSOLVE_LINDEP)
         raw_mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
                          tol=tol, max_cycle=max_cycle, lindep=lindep, verbose=log)
         raw_mo1a = mo1[:,:nmo*nocca].reshape(i1-i0,3,nmo,nocca)

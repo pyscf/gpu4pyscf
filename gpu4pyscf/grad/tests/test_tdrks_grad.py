@@ -231,7 +231,7 @@ class KnownValues(unittest.TestCase):
 
     @unittest.skipIf(num_devices > 1, '')
     def test_grad_tpss_tddft_singlet_cpu(self):
-        grad_gpu = _check_grad(mol, xc="tpss", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
+        grad_gpu = _check_grad(mol, xc="tpss", tol=1e-8, lindep=1.0e-6, tda=False, method="cpu")
         ref = np.array([[ 9.0982715347518e-16, -8.2522481347782e-15, 1.2438623581337e-01],
                         [-3.0852354366371e-16,  7.9273249578928e-02, -6.2192146000900e-02],
                         [ 2.8321252679217e-17, -7.9273249578919e-02, -6.2192146000896e-02]])

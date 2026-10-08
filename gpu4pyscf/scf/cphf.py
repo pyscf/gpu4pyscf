@@ -23,7 +23,7 @@ Restricted coupled pertubed Hartree-Fock solver
 import numpy
 import cupy
 from pyscf import lib
-from gpu4pyscf.lib.cupy_helper import krylov
+from gpu4pyscf.lib.cupy_helper import krylov, DSOLVE_LINDEP
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
@@ -72,7 +72,7 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
         return v.reshape(-1,nvir*nocc)
     
     x0 = mo10.reshape(-1,nvir*nocc) if mo10 is not None else None
-    lindep = max(tol**2, 1e-14)
+    lindep = min(tol**2, DSOLVE_LINDEP)
     mo1 = krylov(vind_vo, mo1base.reshape(-1,nvir*nocc), x0=x0,
                  tol=tol, max_cycle=max_cycle, lindep=lindep,
                  hermi=hermi, verbose=log)
@@ -124,7 +124,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
         return v.reshape(-1,nmo*nocc)
     
     x0 = mo10.reshape(-1,nmo*nocc) if mo10 is not None else None
-    lindep = max(tol**2, 1e-14)
+    lindep = min(tol**2, DSOLVE_LINDEP)
     mo1 = krylov(vind_vo, mo1base.reshape(-1,nmo*nocc), x0=x0,
                  tol=tol, max_cycle=max_cycle, lindep=lindep,
                  hermi=hermi, verbose=log)
