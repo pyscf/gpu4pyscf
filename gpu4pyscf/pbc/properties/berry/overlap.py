@@ -12,7 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Neighboring-k-point overlaps for Wannier-center calculations.'''
+'''
+Neighboring-k-point overlaps for Wannier-center calculations.
+Reference:
+PhysRevB.47.1651
+https://arxiv.org/abs/1202.1831v1
+https://github.com/pyscf/pyscf/blob/master/pyscf/pbc/tools/pywannier90.py
+'''
 
 import itertools
 import operator
@@ -74,8 +80,33 @@ def _periodic_axis_values(values, tol):
 
 
 class KPointMesh:
-    '''
-    Topology of a full, uniform Monkhorst-Pack mesh.
+    '''Topology of a full, uniform Monkhorst-Pack mesh.
+
+    Args:
+        cell : pyscf.pbc.gto.Cell
+            Periodic cell defining the reciprocal lattice.
+        kpts : array_like, shape (nkpts, 3)
+            Cartesian k-points in Bohr^-1. Their order is preserved.
+            Shifted meshes and points outside the first Brillouin zone
+            are allowed; symmetry-reduced KPoints objects are unsupported.
+        kmesh : array_like of int, shape (3,), optional
+            Number of sampled points along each reciprocal lattice vector.
+            Inferred from kpts if omitted.
+        tol : float
+            Tolerance in fractional reciprocal coordinates for identifying
+            mesh points and checking uniform spacing.
+
+    Attributes:
+        kpts : numpy.ndarray, shape (nkpts, 3)
+            Input Cartesian k-points in Bohr^-1.
+        scaled_kpts : numpy.ndarray, shape (nkpts, 3)
+            Input k-points in fractional reciprocal coordinates.
+        kmesh : numpy.ndarray, shape (3,)
+            Sampling mesh dimensions, not the phase-compatible BvK mesh.
+        addresses : numpy.ndarray, shape (nkpts, 3)
+            Integer mesh addresses, ordered by wrapped fractional coordinates.
+        index_by_address : dict
+            Map from a mesh-address tuple to the corresponding input index.
     '''
 
     def __init__(self, cell, kpts, kmesh=None, tol=1e-7):
@@ -138,7 +169,17 @@ class KPointMesh:
         self.index_by_address = index_by_address
 
     def neighbors(self, direction):
-        '''Return the +b neighbor index and reciprocal-lattice image shift.'''
+        '''Return neighbors along reciprocal axis direction (0, 1, or 2).
+
+        Returns:
+            neighbor_indices : numpy.ndarray of int, shape (nkpts,)
+                Indices into the original kpts array.
+            image_shifts : numpy.ndarray of int, shape (nkpts, 3)
+                Reciprocal-lattice shifts satisfying
+                kpts[neighbor_indices] + image_shifts @ reciprocal_vectors
+                = kpts + reciprocal_step(direction). Closing links retain
+                the reciprocal shift across the Brillouin-zone boundary.
+        '''
         direction = _direction_index(direction)
 
         neighbor_indices = np.empty(len(self.kpts), dtype=int)
@@ -160,7 +201,14 @@ class KPointMesh:
         return neighbor_indices, image_shifts
 
     def strings(self, direction):
-        '''Return k-point indices grouped into oriented closed strings.'''
+        '''Return oriented closed strings along axis direction (0, 1, or 2).
+
+        Returns:
+            numpy.ndarray of int, shape (nstrings, kmesh[direction])
+                Input k-point indices ordered along the positive reciprocal
+                direction. nstrings = nkpts / kmesh[direction]; rows follow
+                the lexicographic order of the two transverse mesh addresses.
+        '''
         direction = _direction_index(direction)
 
         transverse = [dim for dim in range(3) if dim != direction]
@@ -177,35 +225,68 @@ class KPointMesh:
         return np.asarray(strings, dtype=int)
 
     def reciprocal_step(self, direction):
+        '''Return the positive step along reciprocal axis 0, 1, or 2.
+
+        Returns:
+            numpy.ndarray, shape (3,)
+                Cartesian reciprocal vector divided by kmesh[direction],
+                in Bohr^-1.
+        '''
         direction = _direction_index(direction)
         return (np.asarray(self.cell.reciprocal_vectors())[direction] /
                 self.kmesh[direction])
 
 
 def periodic_ao_overlap(cell, kpt, neighbor_kpt):
-    '''Compute <f_mu,k | f_nu,k'> in the reference cell.
-    neighbor_kpt may lie outside the first Brillouin zone. This is needed
-    for the closing link, where it is k_0 + G rather than merely k_0.
+    '''Compute the overlap of cell-periodic Bloch AO factors.
+
+    Args:
+        cell : pyscf.pbc.gto.Cell
+            Periodic cell defining the AO basis.
+        kpt, neighbor_kpt : array_like, shape (3,)
+            Cartesian k-points in Bohr^-1. For a closing link,
+            neighbor_kpt must include the reciprocal-lattice image shift,
+            e.g. k_0 + G, rather than only the wrapped k_0.
+
+    Returns:
+        cupy.ndarray, shape (nao, nao)
+            Dimensionless overlap <f_mu,k | f_nu,k'> integrated over the
+            reference cell, with f_mu,k(r) = exp(-i k.r) phi_mu,k(r).
+            Rows belong to kpt and columns to neighbor_kpt.
     '''
     kpt = _asnumpy(kpt).reshape(3)
     neighbor_kpt = _asnumpy(neighbor_kpt).reshape(3)
-    bvk_mesh = _commensurate_bvk_mesh(cell, kpt[None])
-    ft_opt = ft_ao.FTOpt(cell, bvk_mesh)
-    ft_opt.permutation_symmetry = False
-    raw = ft_opt.gen_ft_kernel()(
-        (kpt - neighbor_kpt).reshape(1, 3),
-        q=np.zeros(3), kpts=kpt[None])[0, 0]
-
-    # ft_aopair follows the convention pywannier90.get_M_mat. 
-    # Its matrix is the Hermitian transpose of
-    # <f_mu,k | f_nu,k'> in the row/column convention used below.
-    return raw.conj().T
+    # Gv already contains the full momentum transfer, so q is zero.
+    return ft_ao.ft_aopair(
+        cell, (neighbor_kpt - kpt).reshape(1, 3),
+        kpti_kptj=np.asarray([kpt, neighbor_kpt]), q=np.zeros(3))[0]
 
 
-def build_mmn(cell, mo_coeff_kpts, kpts, kmesh, direction, batch_size=None,
-              topology=None):
-    '''
-    M_mn(k,b) = <u_mk | u_n,k+b>. (nkpts, nband, nband)
+def build_mmn(cell, mo_coeff_kpts, kpts, kmesh=None, topology=None):
+    '''Build M_mn(k,b) = <u_mk | u_n,k+b> for all three mesh directions.
+
+    Args:
+        cell : pyscf.pbc.gto.Cell
+            Three-dimensional periodic cell defining the AO basis.
+        mo_coeff_kpts : array_like, shape (nkpts, nao, nband)
+            Bloch orbital coefficients in the same k-point order as kpts.
+            Supply occupied orbitals for Berry phases and polarization.
+        kpts : array_like, shape (nkpts, 3)
+            Full uniform mesh in Cartesian coordinates, in Bohr^-1.
+            Shifted meshes must be compatible with a finite BvK supercell.
+        kmesh : array_like of int, shape (3,), optional
+            Sampling mesh dimensions. Inferred from kpts if omitted.
+        topology : KPointMesh, optional
+            Precomputed topology for the same cell and kpts. When supplied,
+            its kpts and kmesh are used.
+
+    Returns:
+        cupy.ndarray, shape (3, nkpts, nband, nband)
+            Dimensionless overlaps for b_d = reciprocal_vectors[d]/kmesh[d].
+            The first axis selects d = 0, 1, 2. Rows are bands at k and
+            columns are bands at its +b_d neighbor, including the reciprocal
+            image shift on closing links. All directions share one Fourier
+            transform and are held in GPU memory.
     '''
     if cell.dimension != 3:
         raise NotImplementedError(
@@ -223,37 +304,20 @@ def build_mmn(cell, mo_coeff_kpts, kpts, kmesh, direction, batch_size=None,
             'mo_coeff_kpts must have shape '
             f'({nkpts}, {cell.nao}, nband); got {mo_coeff_kpts.shape}')
 
-    neighbor_indices = topology.neighbors(direction)[0]
-    neighbor_indices_gpu = cp.asarray(neighbor_indices)
-    reciprocal_step = topology.reciprocal_step(direction)
-    Gv = (-reciprocal_step).reshape(1, 3)
-
-    if batch_size is None:
-        batch_size = nkpts
-    if batch_size < 1:
-        raise ValueError(f'batch_size must be positive, got {batch_size}')
+    neighbor_indices = cp.asarray(np.asarray([
+        topology.neighbors(direction)[0] for direction in range(3)]))
+    reciprocal_steps = np.asarray([
+        topology.reciprocal_step(direction) for direction in range(3)])
 
     bvk_mesh = _commensurate_bvk_mesh(cell, kpts, kmesh)
     ft_opt = ft_ao.FTOpt(cell, bvk_mesh)
     ft_opt.permutation_symmetry = False
     ft_kernel = ft_opt.gen_ft_kernel()
 
-    overlaps = cp.empty(
-        (nkpts, mo_coeff_kpts.shape[2], mo_coeff_kpts.shape[2]),
-        dtype=cp.complex128)
-
-    for p0 in range(0, nkpts, batch_size):
-        p1 = min(p0 + batch_size, nkpts)
-        raw = ft_kernel(
-            Gv, q=np.zeros(3), kpts=kpts[p0:p1])[:, 0] # Gv (-b) avoids the boundray G problem.
-        s_ao = raw.conj().transpose(0, 2, 1)
-        neighbors = neighbor_indices_gpu[p0:p1]
-
-        coeff_left = mo_coeff_kpts[p0:p1]
-        coeff_right = mo_coeff_kpts[neighbors]
-        tmp = cp.matmul(s_ao, coeff_right)
-        overlaps[p0:p1] = cp.matmul(
-            coeff_left.conj().transpose(0, 2, 1), tmp)
-
-        del raw, s_ao, coeff_left, coeff_right, tmp
-    return overlaps
+    # With k_j = k and Gv = -b, raw[k,d] is <f_mu,k+b | f_nu,k>.
+    # Its adjoint gives the forward link while sharing kpts for all directions.
+    raw = ft_kernel(-reciprocal_steps, q=np.zeros(3), kpts=kpts)
+    s_ao = raw.conj().transpose(1, 0, 3, 2)
+    return cp.matmul(
+        mo_coeff_kpts.conj().transpose(0, 2, 1)[None],
+        cp.matmul(s_ao, mo_coeff_kpts[neighbor_indices]))

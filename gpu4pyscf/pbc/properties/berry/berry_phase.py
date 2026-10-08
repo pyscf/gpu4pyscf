@@ -12,7 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Berry (Zak) phases and Wannier centers from neighboring-k-point overlaps.'''
+'''
+Berry (Zak) phases and Wannier centers from neighboring-k-point overlaps.
+Reference:
+PhysRevB.47.1651
+https://arxiv.org/abs/1202.1831v1
+https://github.com/pyscf/pyscf/blob/master/pyscf/pbc/tools/pywannier90.py
+'''
+
 
 import numpy as np
 import cupy as cp
@@ -43,7 +50,23 @@ def _check_singular_values(singular_values, singular_tol):
 
 
 def unitary_part(overlaps, singular_tol=1e-10):
-    '''Return the unitary polar factor of a batch of overlap matrices.'''
+    '''Return the unitary polar factors of overlap matrices.
+
+    Args:
+        overlaps : array_like, shape (..., nband, nband)
+            Dimensionless square overlap matrices.
+        singular_tol : float
+            Minimum allowed singular value.
+
+    Returns:
+        cupy.ndarray, same shape as overlaps
+            U @ Vh for each SVD overlaps = U @ diag(s) @ Vh. Replacing the
+            singular values by one removes the nonunitary part of each link.
+
+    Raises:
+        numpy.linalg.LinAlgError
+            A singular value is non-finite or smaller than singular_tol.
+    '''
     overlaps = cp.asarray(overlaps)
 
     if overlaps.shape[-1] == 0:
@@ -66,12 +89,28 @@ def _unitary_eigenvalues(matrices):
 
 
 def berry_phase(overlaps, strings, singular_tol=None):
-    '''
-    Compute the many-band Berry (Zak) phase for each closed k-point string.
-    The phase is accumulated as sum(arg(det(M_k))) and wrapped only after
-    completing a string. Returns principal phases in [-pi, pi). 
-    An optional singular_tol checks near-singular links without computing
-    Wilson-loop eigenvectors.
+    '''Compute the many-band Berry (Zak) phase of each closed k-point string.
+
+    Args:
+        overlaps : cupy.ndarray, shape (nkpts, nband, nband)
+            Dimensionless links M(k,b) = <u_mk | u_n,k+b> for one direction.
+            Closing links must include the reciprocal-lattice image shift.
+        strings : numpy.ndarray of int, shape (nstrings, nlinks)
+            Indices into overlaps, ordered along each closed string.
+        singular_tol : float or None
+            Optional minimum overlap singular value. None skips the SVD
+            check; exactly singular determinants are always rejected.
+
+    Returns:
+        cupy.ndarray, shape (nstrings,)
+            Principal phases in radians in [-pi, pi). Each phase is
+            sum_k arg(det(M(k,b))), wrapped after completing the string.
+            No transverse unwrapping or Wilson-loop eigensolve is performed.
+
+    Raises:
+        numpy.linalg.LinAlgError
+            A determinant is singular or non-finite, or an overlap fails
+            the optional singular-value check.
     '''
     if overlaps.shape[1] == 0:
         return cp.zeros(strings.shape[0])
@@ -88,14 +127,31 @@ def berry_phase(overlaps, strings, singular_tol=None):
 
 
 def hybrid_wannier_centers(overlaps, strings, singular_tol=1e-10):
-    '''Compute hybrid Wannier centers from Wilson-loop eigenphases.
+    '''Compute hybrid Wannier centers from unitary Wilson-loop eigenphases.
+
+    Args:
+        overlaps : cupy.ndarray, shape (nkpts, noccupied, noccupied)
+            Dimensionless occupied-band links for one reciprocal direction,
+            including the reciprocal image shift on each closing link.
+        strings : numpy.ndarray of int, shape (nstrings, nlinks)
+            Overlap indices ordered along each closed k-point string.
+        singular_tol : float
+            Minimum allowed overlap singular value before unitarization.
 
     Returns:
-        centers : cupy.ndarray, **individual phases** as each band
-            Fractional centers in [0, 1) with shape
-            (nstring, noccupied).
-        phases : cupy.ndarray, **overall phases**, sum of all bands
-            The determinant Berry phase for each string in [-pi, pi).
+        centers : cupy.ndarray, shape (nstrings, noccupied)
+            Dimensionless fractional centers in [0, 1) along the corresponding
+            direct-lattice vector, given by -arg(lambda)/(2*pi) modulo one.
+            Values are sorted per string; columns do not track bands between
+            strings. These are hybrid centers, localized along one direction.
+        phases : cupy.ndarray, shape (nstrings,)
+            Principal determinant Berry phases in radians in [-pi, pi).
+            These describe the full occupied subspace, not individual bands.
+
+    Notes:
+        The center spectrum is invariant under unitary rotations of occupied
+        orbitals at each k-point. Non-finite or near-singular overlap singular
+        values raise numpy.linalg.LinAlgError.
     '''
 
     nstrings = strings.shape[0]
@@ -121,11 +177,29 @@ def hybrid_wannier_centers(overlaps, strings, singular_tol=1e-10):
 
 
 def diagonal_wannier_centers(overlaps, strings, overlap_tol=1e-12):
-    '''Compute band-resolved centers in an externally fixed Wannier gauge.
+    '''Compute band-resolved centers in an externally localized Wannier gauge.
 
-    This formula is intended for overlaps already rotated by a localized
-    Wannier gauge U(k). Without such a gauge, individual centers are not
-    physical; use hybrid_wannier_centers instead.
+    Args:
+        overlaps : cupy.ndarray, shape (nkpts, noccupied, noccupied)
+            Dimensionless links already rotated as U(k)^dagger M(k,b) U(k+b)
+            by a localized Wannier gauge, including closing-link image shifts.
+        strings : numpy.ndarray of int, shape (nstrings, nlinks)
+            Overlap indices ordered along each closed k-point string.
+        overlap_tol : float
+            Minimum allowed magnitude of a diagonal overlap.
+
+    Returns:
+        cupy.ndarray, shape (nstrings, noccupied)
+            Fractional centers -sum_k arg(M_nn(k,b))/(2*pi) modulo one,
+            in [0, 1) along the corresponding direct-lattice vector. The
+            supplied band order is preserved; no transverse unwrapping occurs.
+
+    Notes:
+        This function does not construct or verify localization of the gauge.
+        Without a localized gauge, individual centers are not physical; use
+        hybrid_wannier_centers for gauge-invariant center spectra. On a finite
+        mesh the diagonal estimator need not equal the Wilson-loop estimator.
+        A diagonal magnitude below overlap_tol raises numpy.linalg.LinAlgError.
     '''
 
     diagonal = cp.diagonal(overlaps, axis1=1, axis2=2)

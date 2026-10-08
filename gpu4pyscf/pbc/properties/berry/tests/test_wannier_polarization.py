@@ -21,7 +21,7 @@ from unittest import mock
 import numpy as np
 import cupy as cp
 from pyscf.data import nist
-from pyscf.pbc import gto, scf
+from pyscf.pbc import dft, gto, scf
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from gpu4pyscf.pbc.properties import berry
 from gpu4pyscf.pbc.properties.berry import polarization as polarization_lib
@@ -49,9 +49,11 @@ class KnownValues(unittest.TestCase):
             cp.eye(cell.nao), (len(kpts), cell.nao, cell.nao)).copy()
         mo_occ = cp.zeros((len(kpts), cell.nao))
         mo_occ[:, 0] = 2.
-        return SimpleNamespace(
-            cell=cell, kpts=kpts,
-            mo_coeff=mo_coeff, mo_occ=mo_occ, converged=True)
+        mf = scf.KRHF(cell, kpts=kpts)
+        mf.mo_coeff = mo_coeff
+        mf.mo_occ = mo_occ
+        mf.converged = True
+        return mf
 
     def test_kpoint_mesh_boundary_images(self):
         cell = gto.Cell(
@@ -144,10 +146,10 @@ class KnownValues(unittest.TestCase):
             rng.standard_normal((len(kpts), cell.nao, cell.nao)) +
             1j * rng.standard_normal((len(kpts), cell.nao, cell.nao)))
 
-        for direction in range(3):
-            value = berry.build_mmn(
-                cell, cp.asarray(coeff), kpts, kmesh, direction,
-                topology=topology)
+        values = berry.build_mmn(
+            cell, cp.asarray(coeff), kpts, kmesh, topology=topology)
+        self.assertEqual(values.shape, (3, len(kpts), cell.nao, cell.nao))
+        for direction, value in enumerate(values):
             neighbors, shifts = topology.neighbors(direction)
             reference = np.empty_like(cp.asnumpy(value))
             for k, neighbor in enumerate(neighbors):
@@ -158,6 +160,10 @@ class KnownValues(unittest.TestCase):
                     kpti_kptj=np.asarray([neighbor_image, kpts[k]]),
                     q=np.zeros(3))[0]
                 s_ao = raw.conj().T
+                np.testing.assert_allclose(
+                    cp.asnumpy(berry.periodic_ao_overlap(
+                        cell, kpts[k], neighbor_image)),
+                    s_ao, atol=2e-9, rtol=2e-9)
                 reference[k] = (
                     coeff[k].conj().T @ s_ao @ coeff[neighbor])
             np.testing.assert_allclose(
@@ -176,13 +182,10 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts(kmesh)
         coeff = cp.broadcast_to(cp.eye(2), (len(kpts), 2, 2))
         gauge = cp.broadcast_to(cp.eye(2), (len(kpts), 2, 2))
-        mf = SimpleNamespace(
-            cell=cell,
-            kpts=kpts,
-            mo_coeff=coeff,
-            mo_occ=cp.full((len(kpts), 2), 2.),
-            converged=True,
-        )
+        mf = scf.KRHF(cell, kpts=kpts)
+        mf.mo_coeff = coeff
+        mf.mo_occ = cp.full((len(kpts), 2), 2.)
+        mf.converged = True
         overlaps = cp.asarray([
             [[np.exp(-.2j), .35], [.1j, np.exp(-.5j)]],
             [[np.exp(-.25j), -.2j], [.15, np.exp(-.45j)]],
@@ -191,7 +194,8 @@ class KnownValues(unittest.TestCase):
         target = (
             'gpu4pyscf.pbc.properties.berry.polarization.'
             'build_mmn')
-        with mock.patch(target, return_value=overlaps):
+        with mock.patch(
+                target, return_value=cp.broadcast_to(overlaps, (3,) + overlaps.shape)):
             result = berry.eval_wannier_centers(
                 mf, kmesh=kmesh, method='diagonal',
                 wannier_gauge=gauge)
@@ -317,12 +321,8 @@ class KnownValues(unittest.TestCase):
 
         topology = berry.KPointMesh(cell, kpts, kmesh)
         coeff_gpu = cp.asarray(coeff)
-        positive_links = [
-            cp.asnumpy(berry.build_mmn(
-                cell, coeff_gpu, kpts, kmesh, direction,
-                topology=topology))
-            for direction in range(3)
-        ]
+        positive_links = cp.asnumpy(berry.build_mmn(
+            cell, coeff_gpu, kpts, kmesh, topology=topology))
         scaled_kpts = cell.get_scaled_kpts(kpts)
         gpu_mmn = np.empty_like(reference)
 
@@ -375,13 +375,10 @@ class KnownValues(unittest.TestCase):
         overlap = np.asarray(
             cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
         coeff = (1. / np.sqrt(overlap[:, 0, 0])).reshape(-1, 1, 1)
-        mf = SimpleNamespace(
-            cell=cell,
-            kpts=kpts,
-            mo_coeff=cp.asarray(coeff),
-            mo_occ=cp.full((len(kpts), 1), 2.),
-            converged=True,
-        )
+        mf = scf.KRHF(cell, kpts=kpts)
+        mf.mo_coeff = cp.asarray(coeff)
+        mf.mo_occ = cp.full((len(kpts), 1), 2.)
+        mf.converged = True
 
         result = berry.eval_polarization(
             mf, kmesh=kmesh, return_details=True)
@@ -416,7 +413,8 @@ class KnownValues(unittest.TestCase):
         np.testing.assert_array_equal(_commensurate_bvk_mesh(cell, kpts, kmesh), [4, 1, 2])
         rng = np.random.default_rng(31)
         coeff = rng.normal(size=(4, 2, 2)) + 1j * rng.normal(size=(4, 2, 2))
-        for direction in range(3):
+        values = berry.build_mmn(cell, coeff, kpts, kmesh)
+        for direction, value in enumerate(values):
             neighbors, shifts = topology.neighbors(direction)
             reference = []
             for k, neighbor in enumerate(neighbors):
@@ -428,13 +426,11 @@ class KnownValues(unittest.TestCase):
                 ref = np.einsum('nu,vm,uv->nm',
                                 coeff[neighbor].T.conj(), coeff[k], raw).conj().T
                 reference.append(ref)
-                if k == 0:
-                    np.testing.assert_allclose(
-                        cp.asnumpy(berry.periodic_ao_overlap(cell, kpts[k], image)),
-                        raw.conj().T, atol=2e-9, rtol=2e-9)
-            for batch in (1, 3, None):
-                value = berry.build_mmn(cell, coeff, kpts, kmesh, direction, batch)
-                np.testing.assert_allclose(cp.asnumpy(value), reference, atol=2e-9, rtol=2e-9)
+                np.testing.assert_allclose(
+                    cp.asnumpy(berry.periodic_ao_overlap(cell, kpts[k], image)),
+                    raw.conj().T, atol=2e-9, rtol=2e-9)
+            np.testing.assert_allclose(
+                cp.asnumpy(value), reference, atol=2e-9, rtol=2e-9)
 
     def test_invalid_mesh_and_bvk_inputs(self):
         mf = self._mock_mf()
@@ -454,7 +450,8 @@ class KnownValues(unittest.TestCase):
         principal = np.pi * np.asarray([.9, -.9, -.8, .8])
         overlaps = cp.asarray(np.exp(1j * principal)[:, None, None])
         target = 'gpu4pyscf.pbc.properties.berry.polarization.build_mmn'
-        with mock.patch(target, return_value=overlaps):
+        with mock.patch(
+                target, return_value=cp.broadcast_to(overlaps, (3,) + overlaps.shape)):
             with mock.patch.object(np.linalg, 'eigvals',
                                    side_effect=AssertionError('no Wilson solve')):
                 with mock.patch.object(cp.linalg, 'slogdet', wraps=cp.linalg.slogdet) as slogdet:
