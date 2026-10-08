@@ -16,6 +16,8 @@ import os
 import sys
 import time
 import platform
+import ctypes
+from ctypes.util import find_library
 import h5py
 import functools
 import cupy
@@ -28,12 +30,25 @@ from pyscf.lib import parameters as param
 __all__ = ['load_library', 'format_sys_info', 'to_cpu']
 
 @functools.lru_cache
-def load_library(libname):
-    try:
-        _loaderpath = os.path.dirname(__file__)
-        return numpy.ctypeslib.load_library(libname, _loaderpath)
-    except OSError:
-        raise
+def load_library(libname, paths=None):
+    if paths is None:
+        loaderpath = os.path.dirname(__file__)
+        paths = [loaderpath]
+
+    if libname[:3] != 'lib':
+        libname = 'lib' + libname
+
+    for directory in paths:
+        try:
+            return numpy.ctypeslib.load_library(libname, directory)
+        except OSError:
+            pass
+
+    path = find_library(libname[3:])
+    if path is not None:
+        return ctypes.CDLL(path)
+
+    raise OSError(f'Unable to load {libname}')
 
 class _OmniObject:
     '''Class with default attributes. When accessing an attribute that is not

@@ -12,10 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import numpy as np
 import ctypes
-import ctypes.util
 import cupy
 import copy
 from ctypes import POINTER
@@ -23,12 +21,8 @@ from ctypes import POINTER
 # which uses pyscf.scf.dispersion.parse_dft. The local gpu4pyscf.scf.dispersion.parse_dft is not used here.
 from pyscf.dft import libxc as libxc_cpu
 from gpu4pyscf.dft.libxc_structs import xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
-from gpu4pyscf.lib.cupy_helper import load_library
+from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.dft import libxc_structs
-
-import site
-path_list = [os.path.abspath(os.path.join(__file__, '..', '..', '..'))] + site.getsitepackages()
-path_list.append(site.USER_SITE)    # Search for the directory where user-specific packages are installed
 
 # monkey patch libxc reference due to a bug in nvcc
 __reference__ = 'unable to decode the reference due to https://github.com/NVIDIA/cuda-python/issues/29'
@@ -38,13 +32,7 @@ is_nlc           = libxc_cpu.is_nlc
 is_hybrid_xc     = libxc_cpu.is_hybrid_xc
 test_deriv_order = libxc_cpu.test_deriv_order
 
-for path in path_list:
-    libxc_path = os.path.abspath(os.path.join(path, 'gpu4pyscf', 'lib', 'deps', 'lib'))
-    try:
-        _libxc = np.ctypeslib.load_library('libxc', libxc_path)
-        break
-    except Exception:
-        _libxc = None
+_libxc = load_library('libxc', paths=['gpu4pyscf/lib/deps/lib'])
 
 libgdft = load_library('libgdft')
 libgdft.GDFT_xc_lda.argtypes = (
@@ -74,16 +62,6 @@ libgdft.GDFT_xc_mgga.argtypes = (
     ctypes.c_void_p,
     POINTER(xc_mgga_out_params),
     POINTER(xc_mgga_out_params))
-
-if _libxc is None:
-    import warnings
-    warnings.warn(
-        "Cannot find installed libXC. DFT modules may not work.\n \
-        You can install libXC by \n \
-        `pip3 install gpu4pyscf-libxc-cuda11x` \n \
-        OR \n \
-        `pip3 install gpu4pyscf-libxc-cuda12x`"
-    )
 
 _libxc.xc_version_string.restype = ctypes.c_char_p
 _libxc_version = _libxc.xc_version_string().decode()

@@ -16,13 +16,13 @@
 import numpy as np
 import cupy
 import ctypes
-from ctypes.util import find_library
 from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
 from cupy.cuda import device
 
-libcusolver = find_library('cusolver')
-libcusolver = ctypes.CDLL(libcusolver)
+from gpu4pyscf.lib.utils import load_library
+
+libcusolver = load_library('libcusolver', paths=['nvidia/cusolver/lib'])
 
 # workspace size (lwork) provided by the cusolver*_bufferSize is an 32-bit
 # integer. For arrays above this dimension, the workspace size would overflow.
