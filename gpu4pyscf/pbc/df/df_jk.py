@@ -138,7 +138,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     t0 = (logger.process_clock(), logger.perf_counter())
     assert kpts_band is None or kpts_band is kpts
     assert mydf.has_kpts(kpts)
-    if mydf._cderi is None:
+    # J-only integrals omit the k-point pairs required for exchange.
+    if mydf._cderi is None or mydf._j_only:
         mydf.build(j_only=False, kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_k_kpts', *t0)
 
