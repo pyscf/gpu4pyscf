@@ -468,13 +468,20 @@ def left_solve_K_SSVPE(surface, _intermediates, right_vector, conv_tol = 1e-10, 
     return solution
 
 def from_cpu(method):
-    # The solvent setter also assigns dielectric constants.
     out = lib.to_gpu(method, out=PCM(method.mol))
+    out.reset()
     out.eps = method.eps
     out.eps_optical = getattr(method, 'eps_optical', None)
     return out
 
 class PCM(lib.StreamObject):
+    '''PCM with optional dielectric overrides.
+
+    Attributes ``eps`` and ``eps_optical`` can be overwritten.
+
+    Changing ``solvent`` preserves overrides. Setting them to ``None`` can
+    restore its default.
+    '''
 
     solvent = ''
     eps_optical = None
@@ -502,9 +509,8 @@ class PCM(lib.StreamObject):
         self.r_probe = 0.0
         self.radii_table = None
         self.lebedev_order = 29
-        self._intermediates = {}
         self.lowmem_intermediate_storage = False
-        self.eps = 78.3553
+        self.eps = None
         self.solvent = solvent or ''
         self.surface_discretization_method = "SWIG"
 
@@ -519,20 +525,25 @@ class PCM(lib.StreamObject):
         self.e = None
         self.v = None
         self.v_grids_n = None
+        self._intermediates = {}
 
     def __setattr__(self, key, val):
-        if key == 'solvent' and val:
+        if key == 'solvent':
             val = self._set_solvent(val)
         super().__setattr__(key, val)
+        if key in ('solvent', 'eps', 'eps_optical'):
+            self.reset()
 
     def _set_solvent(self, solvent):
-        name = resolve_solvent_name(solvent)
-        descriptors = solvent_db[name]
-        self.eps = descriptors[5]
-        self.eps_optical = descriptors[0]**2
-        if getattr(self, '_intermediates', None):
-            self.reset()
-        return name
+        return resolve_solvent_name(solvent)
+
+    def get_eps(self):
+        '''Return the static dielectric constant.'''
+        if self.eps is not None:
+            return self.eps
+        if self.solvent:
+            return solvent_db[self.solvent][5]
+        return EPS_WATER
 
     def get_eps_optical(self):
         '''The optical (high-frequency) dielectric constant of the solvent.
@@ -543,13 +554,15 @@ class PCM(lib.StreamObject):
         '''
         if self.eps_optical is not None:
             return self.eps_optical
-        # .eps is None in the SMD model when eps is taken from solvent_db
-        if self.eps is not None and abs(self.eps - EPS_WATER) > 1e-6:
+        if self.solvent:
+            return solvent_db[self.solvent][0]**2
+        eps = self.get_eps()
+        if abs(eps - EPS_WATER) > 1e-6:
             logger.warn(self, 'eps_optical was not specified for eps=%g. The '
                         'optical dielectric constant of water (%g) is applied '
                         'in the non-equilibrium solvation. Please set '
                         '.eps_optical to the square of the refractive index of '
-                        'the solvent in use.', self.eps, EPS_OPTICAL_WATER)
+                        'the solvent in use.', eps, EPS_OPTICAL_WATER)
         return EPS_OPTICAL_WATER
 
     def dump_flags(self, verbose=None):
@@ -557,8 +570,8 @@ class PCM(lib.StreamObject):
         logger.info(self, 'lebedev_order = %s (%d grids per sphere)',
                     self.lebedev_order, LEBEDEV_ORDER[self.lebedev_order])
         logger.info(self, 'solvent = %s', self.solvent)
-        logger.info(self, 'eps_optical = %s', self.eps_optical)
-        logger.info(self, 'eps = %s'          , self.eps)
+        logger.info(self, 'eps_optical = %s', self.get_eps_optical())
+        logger.info(self, 'eps = %s', self.get_eps())
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
         logger.debug2(self, 'radii_table %s', self.radii_table)
@@ -579,7 +592,7 @@ class PCM(lib.StreamObject):
                                    surface_discretization_method = self.surface_discretization_method)
         self._intermediates = {}
 
-        epsilon = self.eps
+        epsilon = self.get_eps()
         inf = float('inf')
         if self.method.upper() in ['C-PCM', 'CPCM']:
             f_epsilon = (epsilon-1.)/epsilon if epsilon != inf else 1.0
@@ -798,6 +811,9 @@ class PCM(lib.StreamObject):
         self._intermediates = None
         self.surface = None
         self.intopt = None
+        self.e = None
+        self.v = None
+        self.v_grids_n = None
         self.frozen_dm0_for_finite_difference_without_response = None
         return self
 
@@ -870,6 +886,7 @@ class PCM(lib.StreamObject):
     def to_cpu(self):
         from pyscf.solvent.pcm import PCM
         out = utils.to_cpu(self, PCM(self.mol))
-        out.eps = self.eps
-        out.eps_optical = self.eps_optical
+        out.reset()
+        out.eps = self.get_eps()
+        out.eps_optical = self.get_eps_optical()
         return out

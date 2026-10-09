@@ -1767,7 +1767,7 @@ def cuest_build_pcmintplan(mol, cuest_handle, oeintplan_handle, with_solvent):
     nuclear_charges = np.asarray(mol.atom_charges(), dtype = np.float64)
     zeta = XI[n_lebedev_grid_point]
     zeta_per_atom = [zeta] * mol.natm
-    epsilon = float(with_solvent.eps)
+    epsilon = float(with_solvent.get_eps())
 
     pcmintplan_handle = ce.cuestPCMIntPlanHandle()
     cuest_check('Create PCMIntPlan Workspace Query',
@@ -4294,7 +4294,7 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
         self.method = with_solvent.method
         self.lebedev_order = with_solvent.lebedev_order
         self.radii_table = with_solvent.radii_table
-        self.eps = with_solvent.eps
+        self.eps = with_solvent.get_eps()
         self.surface_discretization_method = with_solvent.surface_discretization_method
 
         self._locked_keys = [

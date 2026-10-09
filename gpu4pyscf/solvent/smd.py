@@ -81,7 +81,7 @@ except OSError:
 def get_cds_legacy(smdobj):
     mol = smdobj.mol
     natm = mol.natm
-    solvent_descriptors = smdobj.solvent_descriptors or solvent_db[smdobj.solvent]
+    solvent_descriptors = smdobj.get_solvent_descriptors()
     soln, _, sola, solb, solg, _, solc, solh = solvent_descriptors
     #symbols = [mol.atom_s(ia) for ia in range(mol.natm)]
     charges = np.asarray(mol.atom_charges(), dtype=np.int32, order='F')
@@ -121,11 +121,15 @@ def get_cds_legacy(smdobj):
 
 def from_cpu(method):
     out = lib.to_gpu(method, out=SMD(method.mol, method.solvent))
+    out.reset()
     # Older PySCF stores the solvent name in the _solvent attribute.
     out.__dict__.pop('_solvent', None)
     return out
 
 class SMD(lib.StreamObject):
+    '''SMD with optional overrides of the selected solvent's parameters.
+    '''
+
     eps_optical = None
     to_gpu = utils.to_gpu
     device = utils.device
@@ -169,23 +173,39 @@ class SMD(lib.StreamObject):
         self.e_cds = None
 
     def __setattr__(self, key, val):
-        if key == 'solvent' and val:
+        if key == 'solvent':
             val = self._set_solvent(val)
+        elif key == 'solvent_descriptors' and val is not None:
+            if len(val) != 8:
+                raise ValueError('SMD solvent_descriptors must contain eight values')
+            val = tuple(val)
         super().__setattr__(key, val)
+        if (key in ('solvent', 'solvent_descriptors', 'eps', 'eps_optical')
+                and '_intermediates' in self.__dict__):
+            self.reset()
 
     def _set_solvent(self, solvent):
-        name = resolve_solvent_name(solvent)
-        if getattr(self, '_intermediates', None) or getattr(self, 'e_cds', None) is not None:
-            self.reset()
-        return name
+        return resolve_solvent_name(solvent)
+
+    def get_solvent_descriptors(self):
+        '''Return custom descriptors, or the selected solvent's database values.'''
+        if self.solvent_descriptors is not None:
+            return self.solvent_descriptors
+        if not self.solvent:
+            raise ValueError('SMD requires a solvent name or solvent_descriptors')
+        return tuple(solvent_db[self.solvent])
+
+    def get_eps(self):
+        '''Return the static dielectric constant.'''
+        if self.eps is not None:
+            return self.eps
+        return self.get_solvent_descriptors()[5]
 
     def get_eps_optical(self):
-        """Return the optical dielectric constant, defaulting to n**2."""
+        '''The optical (high-frequency) dielectric constant of the solvent.'''
         if self.eps_optical is not None:
             return self.eps_optical
-        n = (self.solvent_descriptors or solvent_db[self.solvent])[0]
-        if not n:
-            return pcm.PCM.get_eps_optical(self)
+        n = self.get_solvent_descriptors()[0]
         return n**2
 
     @property
@@ -194,11 +214,7 @@ class SMD(lib.StreamObject):
 
     @sol_desc.setter
     def sol_desc(self, values):
-        '''
-        format of sol desc
-        [n, n25, alpha, beta, gamma, epsilon, phi, psi]
-        '''
-        assert len(values) == 8
+        '''Assign custom descriptors, or None to restore database defaults.'''
         self.solvent_descriptors = values
 
     @property
@@ -212,13 +228,19 @@ class SMD(lib.StreamObject):
         self.sasa_ng = LEBEDEV_ORDER[x]
 
     def dump_flags(self, verbose=None):
-        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
-        n, _, alpha, beta, gamma, eps, phi, psi = solvent_descriptors
+        solvent_descriptors = self.get_solvent_descriptors()
+        n, _, alpha, beta, gamma, _, phi, psi = solvent_descriptors
         logger.info(self, '******** %s ********', self.__class__)
         logger.info(self, 'solvent = %s', self.solvent)
-        logger.info(self, 'eps_optical = %s', self.eps_optical)
+        logger.info(self, 'eps_optical = %s (%s)', self.get_eps_optical(),
+                    'override' if self.eps_optical is not None else 'default')
         logger.info(self, 'sasa_ng = %s', self.sasa_ng)
-        logger.info(self, 'eps = %s'   , self.eps or eps)
+        logger.info(self, 'eps = %s (%s)', self.get_eps(),
+                    'override' if self.eps is not None else 'default')
+        logger.info(self, 'solvent descriptors = %s',
+                    'custom' if self.solvent_descriptors is not None else 'database')
+        logger.info(self, 'CDS treatment = %s',
+                    'water' if self.solvent == 'water' else 'non-water')
         logger.info(self, 'frozen = %s', self.frozen)
         logger.info(self, '---------- SMD solvent descriptors -------')
         logger.info(self, f'n     = {n}')
@@ -232,7 +254,7 @@ class SMD(lib.StreamObject):
         return self
 
     def build(self, ng=None):
-        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
+        solvent_descriptors = self.get_solvent_descriptors()
         if self.radii_table is None:
             radii_table = smd_radii(solvent_descriptors[2])
         else:
@@ -250,7 +272,7 @@ class SMD(lib.StreamObject):
         F, A = pcm.get_F_A(self.surface)
         D, S = pcm.get_D_S(self.surface, with_S=True, with_D=True)
 
-        epsilon = self.eps or solvent_descriptors[5]
+        epsilon = self.get_eps()
         f_epsilon = (epsilon - 1.0)/(epsilon + 1.0) if epsilon != float('inf') else 1.
         DA = D*A
         DAS = cupy.dot(DA, S)
@@ -336,13 +358,14 @@ class SMD(lib.StreamObject):
     def to_cpu(self):
         from pyscf.solvent.smd import SMD
         out = utils.to_cpu(self, SMD(self.mol))
+        out.reset()
         if hasattr(out, 'lebedev_order'):
             out.lebedev_order = self.lebedev_order
         out.solvent = self.solvent
         if self.solvent_descriptors is not None:
             out.solvent_descriptors = self.solvent_descriptors
-        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
-        out.eps = self.eps or solvent_descriptors[5]
+        solvent_descriptors = self.get_solvent_descriptors()
+        out.eps = self.eps
         out.eps_optical = self.eps_optical
         if self.radii_table is None:
             out.radii_table = smd_radii(solvent_descriptors[2])
