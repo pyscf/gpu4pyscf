@@ -25,7 +25,7 @@ from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, get_avail_mem, empty_aligned)
+    contract, asarray, tag_array, ndarray, get_avail_mem, empty_aligned)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.df.int3c2e import (
@@ -44,6 +44,42 @@ from gpu4pyscf.pbc.grad.krks_stress import (
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.lib.kpts_helper import (
     kk_adapted_iter, conj_images_in_bvk_cell)
+
+
+def _real_gamma_dm(dm, kpts, bvk_ncells, tol=1e-12):
+    if len(kpts) != 1 or not is_zero(kpts) or bvk_ncells != 1:
+        return None
+
+    def real_part(a):
+        a = asarray(a)[:,0]
+        if cp.iscomplexobj(a) and a.size:
+            imag_max = float(cp.max(cp.abs(a.imag)).get())
+            real_max = float(cp.max(cp.abs(a.real)).get())
+            if imag_max > tol * max(1., real_max):
+                return None
+        return asarray(a.real)
+
+    dm_gamma = real_part(dm)
+    if dm_gamma is None:
+        return None
+    # Handle special attributes
+    if hasattr(dm, 'mo_coeff'):
+        mo_coeff = real_part(dm.mo_coeff)
+        if mo_coeff is None:
+            return None
+        return tag_array(dm_gamma, mo_coeff=mo_coeff,
+                         mo_occ=asarray(dm.mo_occ)[:,0])
+    if hasattr(dm, 'factor_l'):
+        factor_l = real_part(dm.factor_l)
+        factor_r = None
+        if dm.factor_r is not None:
+            factor_r = real_part(dm.factor_r)
+            if factor_r is None:
+                return None
+        if factor_l is None:
+            return None
+        return tag_array(dm_gamma, factor_l=factor_l, factor_r=factor_r)
+    return dm_gamma
 
 
 def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
@@ -79,6 +115,37 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
+
+    dm_gamma = (_real_gamma_dm(dm, kpts, bvk_ncells)
+                if hermi == 1 and j_factor == 0 else None)
+    # use both real and rhf implementations, the memroy usage is mapped to 1/4 of the original
+    if dm_gamma is not None:
+        # Exchange has no cross-spin term. Process one spin at a time so that
+        # only one (aux,occ,occ) tensor resides on the device.
+        log.info('Evaluate real Gamma-point exchange one spin at a time')
+        ejk_sigma = np.zeros((cell.natm+3, 3))
+        for spin in range(2):
+            dm_spin = asarray(dm_gamma[spin])
+            if not cp.any(dm_spin):
+                continue
+            if hasattr(dm_gamma, 'mo_coeff'):
+                dm_spin = tag_array(
+                    dm_spin, mo_coeff=dm_gamma.mo_coeff[spin],
+                    mo_occ=dm_gamma.mo_occ[spin])
+            elif hasattr(dm_gamma, 'factor_l'):
+                dm_spin = tag_array(
+                    dm_spin, factor_l=dm_gamma.factor_l[spin],
+                    factor_r=None if dm_gamma.factor_r is None
+                    else dm_gamma.factor_r[spin])
+            # RHF uses half the UHF exchange prefactor.
+            ejk_sigma += rhf._get_ejk_derivatives(
+                int3c2e_opt, dm_spin, hermi, 0, 2*k_factor, exxdiv,
+                omega, verbose, linear_dep_threshold)
+            if spin == 0:
+                # RHF budgets against driver-visible free memory. Return its
+                # released work buffers to CUDA before sizing the beta spin.
+                cp.get_default_memory_pool().free_all_blocks()
+        return ejk_sigma
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
     # transform to the AO order in sorted_cell
