@@ -190,7 +190,6 @@ class KnownValues(unittest.TestCase):
         mo_occ = cp.zeros((2,nao))
         mo_occ[0,:5] = 1
         mo_occ[1,:4] = 1
-        nocc, nvir = 5, nao-5
         nr = mf.newton()
         g, hop, hdiag = nr.gen_g_hop(mo, mo_occ)
         dm1 = cp.random.random(g.size)
