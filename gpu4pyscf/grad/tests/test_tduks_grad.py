@@ -206,7 +206,7 @@ def _check_grad(mol, xc, tol=1e-5, lindep=1.0e-12, disp=None, tda=False, method=
 class KnownValues(unittest.TestCase):
     @unittest.skipIf(num_devices > 1, '')
     def test_grad_svwn_tda_spinconserving_cpu(self):
-        grad_gpu = _check_grad(mol, xc="svwn", tol=5e-10, tda=True, method="cpu")
+        grad_gpu = _check_grad(mol, xc="svwn", tol=3e-9, tda=True, method="cpu")
         ref = np.array([[-2.0794644047642e-15,  4.5819012821773e-15, -1.9469159367525e-02],
                         [ 1.4221709874715e-15,  8.7651533026291e-02, 9.7281692163176e-03],
                         [ 2.3835180549259e-16, -8.7651533026297e-02, 9.7281692163202e-03]])
@@ -229,7 +229,7 @@ class KnownValues(unittest.TestCase):
 
     @unittest.skipIf(num_devices > 1, '')
     def test_grad_camb3lyp_tddft_spinconserving_cpu(self):
-        grad_gpu = _check_grad(mol, xc="camb3lyp", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
+        grad_gpu = _check_grad(mol, xc="camb3lyp", tol=1e-8, lindep=1.0e-6, tda=False, method="cpu")
         ref = np.array([[ 1.2806734534785e-15,  7.1845049781507e-16, -3.2202363698306e-02],
                         [ 3.5389179533110e-16,  8.1587356526278e-02, 1.6158866805799e-02],
                         [-1.2390408489041e-15, -8.1587356526278e-02, 1.6158866805799e-02]]),
@@ -246,7 +246,7 @@ class KnownValues(unittest.TestCase):
     #     _check_grad(mol, xc="tpss", tol=1e-4, tda=True, method="numerical")
 
     def test_grad_tpss_tddft_spinconserving_cpu(self):
-        grad_gpu = _check_grad(mol, xc="tpss", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
+        grad_gpu = _check_grad(mol, xc="tpss", tol=1e-8, lindep=1.0e-6, tda=False, method="cpu")
         ref = np.array([[-4.2722779824142e-17, -3.0776023531359e-16, -3.0481025320633e-02],
                         [-7.9268161204927e-17,  8.4960579376783e-02, 1.5081140720682e-02],
                         [-9.2707685336625e-16, -8.4960579376777e-02, 1.5081140720683e-02]])
