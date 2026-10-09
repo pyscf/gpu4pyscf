@@ -15,9 +15,9 @@
 '''
 Berry (Zak) phases and Wannier centers from neighboring-k-point overlaps.
 Reference:
-PhysRevB.47.1651
-https://arxiv.org/abs/1202.1831v1
-https://github.com/pyscf/pyscf/blob/master/pyscf/pbc/tools/pywannier90.py
+- tutorial: https://arxiv.org/abs/1202.1831v1
+- working equations: PhysRevB.47.1651, PhysRevB.89.155114
+- reference codes: https://github.com/pyscf/pyscf/blob/master/pyscf/pbc/tools/pywannier90.py
 '''
 
 
