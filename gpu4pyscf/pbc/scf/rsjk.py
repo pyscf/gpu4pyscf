@@ -840,7 +840,8 @@ class PBCJKMatrixOpt:
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
 
         avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .8)
-        blksize = int(avail_mem/(nao**2*bvk_ncells*16*2)) // 32 * 32
+        # Reserve space for ft_kern
+        blksize = int(avail_mem/(nao1**2*bvk_ncells*16*3)) // 32 * 32
         if blksize == 0:
             raise RuntimeError('Insufficient GPU memory')
         blksize = min(blksize, ngrids)
