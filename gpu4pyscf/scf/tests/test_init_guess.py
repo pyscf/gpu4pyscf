@@ -48,6 +48,13 @@ def get_qchem_autosad_guess_energy(mf, dm0):
 class KnownValues(unittest.TestCase):
     # Attention: Do not use STO or any other minimal basis for testing, they will hide potential bugs.
 
+    # Note on Q-Chem reference:
+    # 1. Q-Chem doesn't copy all parameters for molecular calculation to atomic calculation, in particular:
+    #    The density fitting is not turned on in atomic calculation, which causes a 1e-6 level of error.
+    #    The DFT grid is always SG1 for atomic calculation (Henry not able to reproduce SG1 exactly), which causes a 1e-3 level of error.
+    # 2. Q-Chem default basis for 6-31g and cc-pvdz are slightly different from BSE basis, which also causes a 1e-6 level of error.
+    #    So we use BASIS GEN and copy the BSE basis for Q-Chem input.
+
     def test_sad_guess_rhf(self):
         mol = pyscf.M(
             atom = """
@@ -69,7 +76,7 @@ class KnownValues(unittest.TestCase):
         # JOBTYPE              sp
         # METHOD               HF
         # SCF_GUESS            AUTOSAD
-        # BASIS                cc-pvdz
+        # BASIS                GEN
         # ECP                  def2-ecp
         # RI_J                 true
         # RI_K                 true
@@ -88,9 +95,9 @@ class KnownValues(unittest.TestCase):
         # BECKE_SHIFT          UNSHIFTED
         # !SCF_PRINT            2
         # $end
-        ref_guess_energy = -89.6672455721
+        ref_guess_energy = -89.6672456210
 
-        assert abs(test_guess_energy - ref_guess_energy) < 5e-6
+        assert abs(test_guess_energy - ref_guess_energy) < 3e-6
 
     def test_sad_guess_rhf_direct(self):
         mol = pyscf.M(
@@ -115,9 +122,9 @@ class KnownValues(unittest.TestCase):
         # RI_J                 true
         # RI_K                 true
         # AUX_BASIS            RIJK-def2-TZVP
-        ref_guess_energy = -76.7151836021
+        ref_guess_energy = -76.7151843245
 
-        assert abs(test_guess_energy - ref_guess_energy) < 2e-6
+        assert abs(test_guess_energy - ref_guess_energy) < 1e-7
 
     def test_sad_guess_rks(self):
         mol = pyscf.M(
@@ -141,9 +148,7 @@ class KnownValues(unittest.TestCase):
 
         test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
 
-        # # The following value is from Q-Chem. Since we cannot control the grid setup in Q-Chem atomic calculation
-        # # (it always uses SG1, can Henry cannot figure out how to reproduce it exactly), the atomic calculation
-        # # result is quite off.
+        # # The following value is from Q-Chem. Off because of the different grid for atomic calculation.
         # ref_guess_energy = -151.1607143427
         # # As a result, we do not check against Q-Chem value, we made a consistency test.
         ref_guess_energy = -151.16046138557607
@@ -169,9 +174,7 @@ class KnownValues(unittest.TestCase):
 
         test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
 
-        # # The following value is from Q-Chem. Since we cannot control the grid setup in Q-Chem atomic calculation
-        # # (it always uses SG1, can Henry cannot figure out how to reproduce it exactly), the atomic calculation
-        # # result is quite off.
+        # # The following value is from Q-Chem. Off because of the different grid for atomic calculation.
         # ref_guess_energy = -146.3329001918
         # # As a result, we do not check against Q-Chem value, we made a consistency test.
         ref_guess_energy = -146.33290480934588
@@ -251,9 +254,7 @@ class KnownValues(unittest.TestCase):
 
         test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
 
-        # # The following value is from Q-Chem. Since we cannot control the grid setup in Q-Chem atomic calculation
-        # # (it always uses SG1, can Henry cannot figure out how to reproduce it exactly), the atomic calculation
-        # # result is quite off.
+        # # The following value is from Q-Chem. Off because of the different grid for atomic calculation.
         # ref_guess_energy = -74.9178805257
         # # As a result, we do not check against Q-Chem value, we made a consistency test.
         ref_guess_energy = -74.9206587667209
@@ -287,9 +288,7 @@ class KnownValues(unittest.TestCase):
         # RI_K                 true
         # AUX_BASIS            RIJK-def2-TZVP
 
-        # # The following value is from Q-Chem. Since we cannot control the grid setup in Q-Chem atomic calculation
-        # # (it always uses SG1, can Henry cannot figure out how to reproduce it exactly), the atomic calculation
-        # # result is quite off.
+        # # The following value is from Q-Chem. Off because of the different grid for atomic calculation.
         # ref_guess_energy = -596.0625315683
         # # As a result, we do not check against Q-Chem value, we made a consistency test.
         ref_guess_energy = -596.0618708861276
