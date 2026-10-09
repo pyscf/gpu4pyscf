@@ -32,7 +32,7 @@ is_nlc           = libxc_cpu.is_nlc
 is_hybrid_xc     = libxc_cpu.is_hybrid_xc
 test_deriv_order = libxc_cpu.test_deriv_order
 
-_libxc = load_library('libxc', paths=['gpu4pyscf/lib/deps/lib'])
+_libxc = load_library('libxc', path='gpu4pyscf/lib/deps/lib')
 
 libgdft = load_library('libgdft')
 libgdft.GDFT_xc_lda.argtypes = (
