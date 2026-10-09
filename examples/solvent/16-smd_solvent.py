@@ -32,9 +32,16 @@ mf.grids.atom_grid = (99,590)
 e_gas = mf.kernel()
 print('total energy in gas phase:', e_gas)
 
-# Names are case-insensitive; aliases such as 'DMSO', 'THF', and 'MeCN' work.
-# The existing .SMD(solvent='water') keyword is also supported.
+# PCM can be initialized with a solvent name
+# - A solvent name sets both eps and the optical dielectric constant used by TDDFT.
+# - Names are case-insensitive: Names such as 'DMSO', 'THF', and 'MeCN' all work.
+# - Also support kwarg "solvent", such as mf.SMD(solvent='water')
 mf = mf.SMD('water')   # Add SMD model to the mean-field object
+
+# Assign a solvent name to with_solvent attribute will update both eps and
+# optical dielectric constant
+mf.with_solvent.solvent = 'water'
+
 mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids,
 # Assigning mf.with_solvent.solvent also changes solvents and clears caches.
 e_smd = mf.kernel()

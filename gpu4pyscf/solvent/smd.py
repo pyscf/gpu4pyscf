@@ -120,18 +120,12 @@ def get_cds_legacy(smdobj):
     return gcds.value / hartree2kcal, dcds
 
 def from_cpu(method):
-    # Older PySCF stores the name in _solvent. Initialize the public name
-    # before any GPU logging or calculation, and discard the legacy copy.
     out = lib.to_gpu(method, out=SMD(method.mol, method.solvent))
+    # Older PySCF stores the solvent name in the _solvent attribute.
     out.__dict__.pop('_solvent', None)
     return out
 
 class SMD(lib.StreamObject):
-    """SMD with solvent names and abbreviations from the PySCF database.
-
-    Names are case-insensitive and ignore spaces and hyphens. The default
-    solvent is water; custom descriptors can be supplied through sol_desc.
-    """
     eps_optical = None
     to_gpu = utils.to_gpu
     device = utils.device
@@ -345,11 +339,9 @@ class SMD(lib.StreamObject):
         if hasattr(out, 'lebedev_order'):
             out.lebedev_order = self.lebedev_order
         out.solvent = self.solvent
-        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
-        # PySCF 2.8's solvent setter overwrites descriptors, radii and eps.
-        # Restore the GPU settings after assigning the solvent name.
         if self.solvent_descriptors is not None:
             out.solvent_descriptors = self.solvent_descriptors
+        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
         out.eps = self.eps or solvent_descriptors[5]
         out.eps_optical = self.eps_optical
         if self.radii_table is None:

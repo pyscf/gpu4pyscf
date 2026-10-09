@@ -29,13 +29,23 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 mol = pyscf.M(atom=atom, basis='def2-tzvpp')
 mf = rks.RKS(mol, xc='B3LYP').density_fit()
-# A solvent name sets both eps and the optical dielectric constant used by TDDFT.
-mf = mf.PCM('water')
+mf = mf.SMD()   # Add PCM model to the mean-field object
 mf.grids.atom_grid = (99,590)
 mf.with_solvent.lebedev_order = 29  # 302 Lebedev grids
 mf.with_solvent.method = 'IEF-PCM'   # Can be C-PCM, SS(V)PE, COSMO
 mf.with_solvent.eps = 78.3553        # Dielectric constant
 mf.kernel()
+
+# PCM can be initialized with a solvent name
+# - A solvent name sets both eps and the optical dielectric constant used by TDDFT.
+# - Names are case-insensitive: Names such as 'DMSO', 'THF', and 'MeCN' all work.
+# - Also support kwarg "solvent", such as mf.PCM(solvent='water')
+# - Default solvent is 'water'
+mf = mf.PCM('water')
+
+# Assign a solvent name to with_solvent attribute will update both eps and
+# optical dielectric constant
+mf.with_solvent.solvent = 'water'
 
 gradobj = mf.nuc_grad_method()
 f = gradobj.kernel()

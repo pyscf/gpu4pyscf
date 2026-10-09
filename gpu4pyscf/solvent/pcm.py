@@ -24,6 +24,7 @@ from cupyx.scipy.special import erf
 from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid
+from pyscf.dft.LebedevGrid import LEBEDEV_ORDER, MakeAngularGrid
 from pyscf.data import radii
 from pyscf.data.elements import is_ghost_atom
 from pyscf.data.elements import charge as charge_of_element
@@ -36,7 +37,13 @@ from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
 from cupyx.scipy.linalg import lu_factor, lu_solve
 from cupyx.scipy.sparse.linalg import LinearOperator, gmres, minres
 
-libdft = lib.load_library('libdft')
+# Static (zero-frequency) dielectric constant of water at 298 K
+EPS_WATER = 78.3553
+
+# Optical (high-frequency) dielectric constant of water, roughly the square of
+# its refractive index. See the QChem manual, the non-equilibrium PCM section.
+EPS_OPTICAL_WATER = 1.78
+
 try:
     libsolvent = load_library('libsolvent')
 except OSError:
@@ -128,9 +135,7 @@ def switch_h(x):
 
 def gen_surface(mol, ng=302, rad=modified_Bondi, surface_discretization_method = "SWIG"):
     '''J. Phys. Chem. A 1999, 103, 11060-11079'''
-    unit_sphere = numpy.empty((ng,4))
-    libdft.MakeAngularGrid(unit_sphere.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ng))
-    unit_sphere = cupy.asarray(unit_sphere)
+    unit_sphere = cupy.asarray(MakeAngularGrid(ng))
 
     natm = natm_without_ghost(mol)
     if natm != mol.natm:
@@ -463,21 +468,17 @@ def left_solve_K_SSVPE(surface, _intermediates, right_vector, conv_tol = 1e-10, 
     return solution
 
 def from_cpu(method):
-    # The solvent setter also assigns dielectric constants. Restore explicit
-    # overrides after the generic converter has copied all attributes.
+    # The solvent setter also assigns dielectric constants.
     out = lib.to_gpu(method, out=PCM(method.mol))
     out.eps = method.eps
     out.eps_optical = getattr(method, 'eps_optical', None)
     return out
 
 class PCM(lib.StreamObject):
-    """PCM with optional solvent names from the PySCF database.
 
-    Assigning solvent sets eps and eps_optical; either may be overridden
-    afterwards. Names and abbreviations are case-insensitive.
-    """
     solvent = ''
     eps_optical = None
+
     from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {
@@ -519,14 +520,6 @@ class PCM(lib.StreamObject):
         self.v = None
         self.v_grids_n = None
 
-    def to_cpu(self):
-        from pyscf.solvent.pcm import PCM
-        # Initialize CPU-only attributes (e.g. atom_radii in PySCF 2.8).
-        out = utils.to_cpu(self, PCM(self.mol))
-        out.eps = self.eps
-        out.eps_optical = self.eps_optical
-        return out
-
     def __setattr__(self, key, val):
         if key == 'solvent' and val:
             val = self._set_solvent(val)
@@ -542,20 +535,27 @@ class PCM(lib.StreamObject):
         return name
 
     def get_eps_optical(self):
-        """Return the optical dielectric constant for non-equilibrium solvation."""
+        '''The optical (high-frequency) dielectric constant of the solvent.
+
+        Only the fast, electronic part of the solvent polarization follows a
+        vertical excitation. Its response is governed by the optical dielectric
+        constant rather than the static one (see .equilibrium_solvation).
+        '''
         if self.eps_optical is not None:
             return self.eps_optical
-        if self.eps is not None and abs(self.eps - 78.3553) > 1e-6:
-            logger.warn(self, 'eps_optical was not specified for eps=%g. '
-                        'Using the optical dielectric constant of water (1.78). '
-                        'Set eps_optical to the solvent refractive index squared.',
-                        self.eps)
-        return 1.78
+        # .eps is None in the SMD model when eps is taken from solvent_db
+        if self.eps is not None and abs(self.eps - EPS_WATER) > 1e-6:
+            logger.warn(self, 'eps_optical was not specified for eps=%g. The '
+                        'optical dielectric constant of water (%g) is applied '
+                        'in the non-equilibrium solvation. Please set '
+                        '.eps_optical to the square of the refractive index of '
+                        'the solvent in use.', self.eps, EPS_OPTICAL_WATER)
+        return EPS_OPTICAL_WATER
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
         logger.info(self, 'lebedev_order = %s (%d grids per sphere)',
-                    self.lebedev_order, gen_grid.LEBEDEV_ORDER[self.lebedev_order])
+                    self.lebedev_order, LEBEDEV_ORDER[self.lebedev_order])
         logger.info(self, 'solvent = %s', self.solvent)
         logger.info(self, 'eps_optical = %s', self.eps_optical)
         logger.info(self, 'eps = %s'          , self.eps)
@@ -573,7 +573,7 @@ class PCM(lib.StreamObject):
             self.radii_table = vdw_scale * modified_Bondi + self.r_probe
         mol = self.mol
         if ng is None:
-            ng = gen_grid.LEBEDEV_ORDER[self.lebedev_order]
+            ng = LEBEDEV_ORDER[self.lebedev_order]
 
         self.surface = gen_surface(mol, rad=self.radii_table, ng=ng,
                                    surface_discretization_method = self.surface_discretization_method)
@@ -866,3 +866,10 @@ class PCM(lib.StreamObject):
                 return left_solve_K_SSVPE(self.surface, self._intermediates, right_vector, self.conv_tol)
             else:
                 raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
+
+    def to_cpu(self):
+        from pyscf.solvent.pcm import PCM
+        out = utils.to_cpu(self, PCM(self.mol))
+        out.eps = self.eps
+        out.eps_optical = self.eps_optical
+        return out

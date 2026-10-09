@@ -31,7 +31,7 @@ def make_tdscf_object(tda_method, equilibrium_solvation=False):
     with_solvent.equilibrium_solvation = equilibrium_solvation
     if not equilibrium_solvation:
         # The vertical excitation is a fast process, applying non-equilibrium
-        # solvation with the optical dielectric constant of the solvent
+        # solvation with optical dielectric constant eps=1.78
         # TODO: reset() can be skipped. Most intermeidates can be reused.
         with_solvent.reset()
         with_solvent.eps = with_solvent.get_eps_optical()
@@ -106,7 +106,7 @@ class WithSolventTDSCF:
         # The redistributed surface charge is computed by solving
         #     K^{-1} R (dm_response)
         # using a different dielectric constant. The optical dielectric constant
-        # is the solvent refractive index squared (approximately 1.78 for water).
+        # (eps=1.78, see QChem manual) is a suitable choice for the excited state.
         #
         # In the case of excited state gradients, it is mostly used in the
         # geometry optimization or molecular dynamics. The excited state is

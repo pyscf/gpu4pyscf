@@ -23,7 +23,7 @@ from gpu4pyscf import scf, dft, solvent
 from gpu4pyscf.solvent import pcm
 
 def setUpModule():
-    global mol, mol0, epsilon, lebedev_order
+    global mol, epsilon, lebedev_order
     mol = gto.Mole()
     mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -33,15 +33,14 @@ H       0.7570000000     0.0000000000    -0.4696000000
     mol.basis = 'sto3g'
     mol.output = '/dev/null'
     mol.build(verbose=0)
-    mol0 = mol.copy()
     mol.nelectron = mol.nao * 2
     epsilon = 35.9
     lebedev_order = 3
 
 def tearDownModule():
-    global mol, mol0
+    global mol
     mol.stdout.close()
-    del mol, mol0
+    del mol
 
 def _energy_with_solvent(mf, method):
     cm = pcm.PCM(mol)
@@ -346,37 +345,68 @@ H    0.000000   -0.935307   -1.082500
                                    damp_factor=0.6, fock_last=f_last)
             assert abs(f_damped - (0.4 * f + 0.6 * f_last)).max() < 1e-10
 
+class NamedSolvent(unittest.TestCase):
     def test_solvent_name(self):
-        # pyscf/pyscf#3413
-        cm = pcm.PCM(mol0, 'TOLUENE')
+        # issue #3413
+        cm = pcm.PCM(mol, 'toluene')
         self.assertEqual(cm.solvent, 'toluene')
         self.assertAlmostEqual(cm.eps, 2.3741, 12)
         self.assertAlmostEqual(cm.eps_optical, 1.4961**2, 12)
         self.assertAlmostEqual(cm.get_eps_optical(), 1.4961**2, 12)
 
+    def test_default_solvent(self):
+        cm = pcm.PCM(mol)
+        self.assertEqual(cm.solvent, '')
+        self.assertAlmostEqual(cm.eps, 78.3553, 12)
+        self.assertIsNone(cm.eps_optical)
+
+    def test_water_matches_default_eps(self):
+        # Naming water must not change eps away from the default
+        cm = pcm.PCM(mol, 'water')
+        self.assertAlmostEqual(cm.eps, ddcosmo.EPS_WATER, 12)
+
+    def test_assign_solvent(self):
+        cm = pcm.PCM(mol)
+        cm.solvent = 'acetonitrile'
+        self.assertAlmostEqual(cm.eps, 35.688, 12)
+        self.assertAlmostEqual(cm.eps_optical, 1.3442**2, 12)
+        # eps and eps_optical can be overwritten afterwards
+        cm.eps = 35.9
+        self.assertAlmostEqual(cm.eps, 35.9, 12)
+        self.assertEqual(cm.solvent, 'acetonitrile')
+
+    def test_solvent_name_matching(self):
+        for name, ref in (('Water', 'water'),
+                          ('DMSO', 'dimethylsulfoxide'),
+                          ('thf', 'tetrahydrofuran'),
+                          ('hexane', 'n-hexane'),
+                          ('N,N-DiMethylFormamide', 'N,N-dimethylformamide'),
+                          ('carbontetrachloride', 'carbon tetrachloride')):
+            self.assertEqual(pcm.PCM(mol, name).solvent, ref)
+
     def test_unknown_solvent(self):
-        self.assertRaises(RuntimeError, pcm.PCM, mol0, 'unobtainium')
+        self.assertRaises(RuntimeError, pcm.PCM, mol, 'unobtainium')
 
     def test_solvent_energy(self):
-        cm = pcm.PCM(mol0, 'Acetonitrile')
+        cm = pcm.PCM(mol, 'acetonitrile')
         cm.lebedev_order = 29
-        e_tot = scf.RHF(mol0).PCM(cm).kernel()
+        e_tot = scf.RHF(mol).PCM(cm).kernel()
 
-        cm_ref = pcm.PCM(mol0)
+        cm_ref = pcm.PCM(mol)
         cm_ref.eps = 35.688
         cm_ref.lebedev_order = 29
-        e_ref = scf.RHF(mol0).PCM(cm_ref).kernel()
+        e_ref = scf.RHF(mol).PCM(cm_ref).kernel()
         self.assertAlmostEqual(e_tot, e_ref, 12)
 
     def test_solvent_name_in_constructor(self):
-        e_tot = scf.RHF(mol0).PCM('acetonitrile').kernel()
-        e_ref = scf.RHF(mol0).PCM(pcm.PCM(mol0, 'acetonitrile')).kernel()
+        e_tot = scf.RHF(mol).PCM('acetonitrile').kernel()
+        e_ref = scf.RHF(mol).PCM(pcm.PCM(mol, 'acetonitrile')).kernel()
         self.assertAlmostEqual(e_tot, e_ref, 12)
-        e_ref = solvent.PCM(scf.RHF(mol0), 'acetonitrile').kernel()
+        e_ref = solvent.PCM(scf.RHF(mol), 'acetonitrile').kernel()
         self.assertAlmostEqual(e_tot, e_ref, 12)
 
     def test_solvent_updated_after_build(self):
-        cm = pcm.PCM(mol0, 'water')
+        cm = pcm.PCM(mol, 'water')
         cm.build()
         f_epsilon = cm._intermediates['f_epsilon']
         cm.solvent = 'toluene'
