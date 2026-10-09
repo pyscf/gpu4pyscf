@@ -30,7 +30,6 @@ __all__ = ['load_library', 'format_sys_info', 'to_cpu']
 
 @functools.lru_cache
 def load_library(libname, path=None):
-    lib = None
     if path is None:
         loaderpath = os.path.dirname(__file__)
         return numpy.ctypeslib.load_library(libname, loaderpath)
