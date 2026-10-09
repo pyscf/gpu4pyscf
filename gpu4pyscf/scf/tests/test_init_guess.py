@@ -43,6 +43,10 @@ def get_qchem_autosad_guess_energy(mf, dm0):
         else:
             e += 0.5 * float(cp.einsum('uij,uji->', dm0, vk).real)
 
+    # Another likely bug, the guess step energy misses the solvent energy.
+    if hasattr(mf, 'with_solvent'):
+        e -= mf.with_solvent.e
+
     return e
 
 class KnownValues(unittest.TestCase):
@@ -53,6 +57,7 @@ class KnownValues(unittest.TestCase):
     #    The density fitting is not turned on in atomic calculation, which causes a 1e-6 level of error.
     #    The DFT grid is always SG1 for atomic calculation (Henry not able to reproduce SG1 exactly), which causes a 1e-3 level of error.
     # 2. Q-Chem default basis for 6-31g and cc-pvdz are slightly different from BSE basis, which also causes a 1e-6 level of error.
+    #    The difference in guess energy is much more significant than the final SCF energy.
     #    So we use BASIS GEN and copy the BSE basis for Q-Chem input.
 
     def test_sad_guess_rhf(self):
@@ -294,6 +299,79 @@ class KnownValues(unittest.TestCase):
         ref_guess_energy = -596.0618708861276
 
         assert abs(test_guess_energy - ref_guess_energy) < 1e-7
+
+    def test_sad_guess_rhf_ghost(self):
+        mol = pyscf.M(
+            atom = """
+                O   0.00000000   0.00000000   0.00000000
+                H   0.94361690   0.00000000   0.26468890
+                H  -0.47180845   0.81719736   0.26468890
+                GHOST:H  -0.47180845  -0.81719736   0.26468890
+            """,
+            basis = "def2-svp",
+            charge = 0,
+            verbose = 0,
+        )
+
+        mf = RHF(mol)
+
+        dm0 = mf.init_guess_by_sad()
+
+        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+
+        ref_guess_energy = -75.7944143470
+
+        assert abs(test_guess_energy - ref_guess_energy) < 2e-7
+
+        # Direct above, DF below
+
+        mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
+
+        dm0 = mf.init_guess_by_sad()
+
+        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+
+        ref_guess_energy = -67.1808492499
+
+        assert abs(test_guess_energy - ref_guess_energy) < 2e-5
+
+    def test_sad_guess_rhf_pcm(self):
+        mol = pyscf.M(
+            atom = """
+                H      1.0686     -0.1411      1.0408
+                C      0.5979      0.0151      0.0688
+                H      1.2687      0.2002     -0.7717
+                O     -0.5960     -0.0151     -0.0686
+            """,
+            basis = "def2-svp",
+            verbose = 4,
+        )
+
+        mf = RHF(mol).PCM()
+        mf.with_solvent.method = "IEF-PCM"
+        mf.with_solvent.eps = 80.0
+
+        dm0 = mf.init_guess_by_sad()
+
+        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+
+        ### Add the following
+        # $rem
+        # SOLVENT_METHOD       PCM
+        # $end
+
+        # $pcm
+        # Theory IEFPCM
+        # HeavyPoints 302
+        # HPoints 302
+        # $end
+
+        # $solvent
+        #    Dielectric 80.0
+        # $end
+        ref_guess_energy = -114.0059265428
+
+        assert abs(test_guess_energy - ref_guess_energy) < 2e-7
 
 if __name__ == "__main__":
     print("Full Tests for initial guess")

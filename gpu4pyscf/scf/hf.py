@@ -639,6 +639,9 @@ def init_guess_by_sad(mol, mf_template, unrestricted_spin_average=False):
     mf_per_element = {}
     for element in unique_elements:
         Z = charge_of_element(element)
+        if Z == 0: # Ghost atom
+            mf_per_element[element] = None
+            continue
         assert 0 < Z and Z < len(_neutral_atom_spin)
         spin = _neutral_atom_spin[Z - 1]
         assert spin >= 0 # So extra electron is always put in alpha orbitals, and we can guarantee high spin configuration
@@ -664,6 +667,9 @@ def init_guess_by_sad(mol, mf_template, unrestricted_spin_average=False):
             mf_atom = mf_atom.to_uhf()
         assert isinstance(mf_atom, UHF)
 
+        if hasattr(mf_atom, 'with_solvent'):
+            mf_atom = mf_atom.undo_solvent()
+
         mf_atom = mf_atom.reset(mol_atom)
 
         mf_atom.conv_tol = 1e-10
@@ -679,6 +685,8 @@ def init_guess_by_sad(mol, mf_template, unrestricted_spin_average=False):
     for i_atom in range(mol.natm):
         element = elements[i_atom]
         mf_atom = mf_per_element[element]
+        if mf_atom is None: # Ghost atom
+            continue # Keep corresponding block of density matrix zero.
         nao_atom = mf_atom.mol.nao
 
         dm_atom = mf_atom.make_rdm1()
