@@ -32,9 +32,11 @@ mf.grids.atom_grid = (99,590)
 e_gas = mf.kernel()
 print('total energy in gas phase:', e_gas)
 
-mf = mf.SMD()   # Add SMD model to the mean-field object
+# Names are case-insensitive; aliases such as 'DMSO', 'THF', and 'MeCN' work.
+# The existing .SMD(solvent='water') keyword is also supported.
+mf = mf.SMD('water')   # Add SMD model to the mean-field object
 mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids,
-mf.with_solvent.solvent = 'water' # Has to be a string, lookup the solvent name from https://comp.chem.umn.edu/solvation/mnsddb.pdf
+# Assigning mf.with_solvent.solvent also changes solvents and clears caches.
 e_smd = mf.kernel()
 print('total energy in water:', e_smd)
 

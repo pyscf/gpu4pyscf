@@ -18,11 +18,12 @@ import pyscf
 import pytest
 import cupy
 from pyscf import gto
-from gpu4pyscf import scf, dft
+from pyscf.solvent import ddcosmo
+from gpu4pyscf import scf, dft, solvent
 from gpu4pyscf.solvent import pcm
 
 def setUpModule():
-    global mol, epsilon, lebedev_order
+    global mol, mol0, epsilon, lebedev_order
     mol = gto.Mole()
     mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -32,14 +33,15 @@ H       0.7570000000     0.0000000000    -0.4696000000
     mol.basis = 'sto3g'
     mol.output = '/dev/null'
     mol.build(verbose=0)
+    mol0 = mol.copy()
     mol.nelectron = mol.nao * 2
     epsilon = 35.9
     lebedev_order = 3
 
 def tearDownModule():
-    global mol
+    global mol, mol0
     mol.stdout.close()
-    del mol
+    del mol, mol0
 
 def _energy_with_solvent(mf, method):
     cm = pcm.PCM(mol)
@@ -343,6 +345,47 @@ H    0.000000   -0.935307   -1.082500
             f_damped = mf.get_fock(h1e, s1e, vhf, dm, cycle=0, diis_start_cycle=10,
                                    damp_factor=0.6, fock_last=f_last)
             assert abs(f_damped - (0.4 * f + 0.6 * f_last)).max() < 1e-10
+
+    def test_solvent_name(self):
+        # pyscf/pyscf#3413
+        cm = pcm.PCM(mol0, 'TOLUENE')
+        self.assertEqual(cm.solvent, 'toluene')
+        self.assertAlmostEqual(cm.eps, 2.3741, 12)
+        self.assertAlmostEqual(cm.eps_optical, 1.4961**2, 12)
+        self.assertAlmostEqual(cm.get_eps_optical(), 1.4961**2, 12)
+
+    def test_unknown_solvent(self):
+        self.assertRaises(RuntimeError, pcm.PCM, mol0, 'unobtainium')
+
+    def test_solvent_energy(self):
+        cm = pcm.PCM(mol0, 'Acetonitrile')
+        cm.lebedev_order = 29
+        e_tot = scf.RHF(mol0).PCM(cm).kernel()
+
+        cm_ref = pcm.PCM(mol0)
+        cm_ref.eps = 35.688
+        cm_ref.lebedev_order = 29
+        e_ref = scf.RHF(mol0).PCM(cm_ref).kernel()
+        self.assertAlmostEqual(e_tot, e_ref, 12)
+
+    def test_solvent_name_in_constructor(self):
+        e_tot = scf.RHF(mol0).PCM('acetonitrile').kernel()
+        e_ref = scf.RHF(mol0).PCM(pcm.PCM(mol0, 'acetonitrile')).kernel()
+        self.assertAlmostEqual(e_tot, e_ref, 12)
+        e_ref = solvent.PCM(scf.RHF(mol0), 'acetonitrile').kernel()
+        self.assertAlmostEqual(e_tot, e_ref, 12)
+
+    def test_solvent_updated_after_build(self):
+        cm = pcm.PCM(mol0, 'water')
+        cm.build()
+        f_epsilon = cm._intermediates['f_epsilon']
+        cm.solvent = 'toluene'
+        # The intermediates were computed for water. They have to be discarded.
+        self.assertFalse(cm._intermediates)
+        cm.build()
+        self.assertNotAlmostEqual(cm._intermediates['f_epsilon'], f_epsilon, 6)
+        eps = cm.eps
+        self.assertAlmostEqual(cm._intermediates['f_epsilon'], (eps-1)/eps, 12)
 
 if __name__ == "__main__":
     print("Full Tests for PCMs")

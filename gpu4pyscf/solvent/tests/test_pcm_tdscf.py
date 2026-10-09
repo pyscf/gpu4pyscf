@@ -39,6 +39,13 @@ class KnownValues(unittest.TestCase):
     def tearDownClass(cls):
         cls.mol.stdout.close()
 
+    def test_eps_optical_from_solvent_name(self):
+        # The solvent name determines eps and eps_optical (issue #867).
+        mf = self.mol.RHF().to_gpu().PCM('toluene')
+        self.assertAlmostEqual(mf.with_solvent.eps, 2.3741, 12)
+        td = mf.TDA(equilibrium_solvation=False)
+        self.assertAlmostEqual(td.with_solvent.eps, 1.4961**2, 12)
+
     def test_hf_CPCM(self):
         """
         $rem

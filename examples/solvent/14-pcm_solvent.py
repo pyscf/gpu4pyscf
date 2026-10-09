@@ -29,7 +29,8 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 mol = pyscf.M(atom=atom, basis='def2-tzvpp')
 mf = rks.RKS(mol, xc='B3LYP').density_fit()
-mf = mf.PCM()
+# A solvent name sets both eps and the optical dielectric constant used by TDDFT.
+mf = mf.PCM('water')
 mf.grids.atom_grid = (99,590)
 mf.with_solvent.lebedev_order = 29  # 302 Lebedev grids
 mf.with_solvent.method = 'IEF-PCM'   # Can be C-PCM, SS(V)PE, COSMO

@@ -28,9 +28,10 @@ from pyscf.data import radii
 from pyscf.data.elements import is_ghost_atom
 from pyscf.data.elements import charge as charge_of_element
 from gpu4pyscf.solvent import _attach_solvent
+from gpu4pyscf.solvent._solvent_data import solvent_db, resolve_solvent_name
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
-from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
 from cupyx.scipy.linalg import lu_factor, lu_solve
 from cupyx.scipy.sparse.linalg import LinearOperator, gmres, minres
@@ -43,6 +44,8 @@ except OSError:
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def pcm_for_scf(mf, solvent_obj=None, dm=None):
+    if isinstance(solvent_obj, str):
+        solvent_obj = PCM(mf.mol, solvent_obj)
     if solvent_obj is None:
         solvent_obj = PCM(mf.mol)
     return _attach_solvent._for_scf(mf, solvent_obj, dm)
@@ -459,19 +462,34 @@ def left_solve_K_SSVPE(surface, _intermediates, right_vector, conv_tol = 1e-10, 
     solution = solution.reshape(right_vector.shape)
     return solution
 
+def from_cpu(method):
+    # The solvent setter also assigns dielectric constants. Restore explicit
+    # overrides after the generic converter has copied all attributes.
+    out = lib.to_gpu(method, out=PCM(method.mol))
+    out.eps = method.eps
+    out.eps_optical = getattr(method, 'eps_optical', None)
+    return out
+
 class PCM(lib.StreamObject):
-    from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
+    """PCM with optional solvent names from the PySCF database.
+
+    Assigning solvent sets eps and eps_optical; either may be overridden
+    afterwards. Names and abbreviations are case-insensitive.
+    """
+    solvent = ''
+    eps_optical = None
+    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
-        'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
+        'solvent', 'eps', 'eps_optical', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'frozen_dm0_for_finite_difference_without_response',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n',
         'lowmem_intermediate_storage', 'surface_discretization_method',
     }
 
-    def __init__(self, mol):
+    def __init__(self, mol, solvent=None):
         self.mol = mol
         self.stdout = mol.stdout
         self.verbose = mol.verbose
@@ -486,6 +504,7 @@ class PCM(lib.StreamObject):
         self._intermediates = {}
         self.lowmem_intermediate_storage = False
         self.eps = 78.3553
+        self.solvent = solvent or ''
         self.surface_discretization_method = "SWIG"
 
         self.max_cycle = 20
@@ -500,10 +519,45 @@ class PCM(lib.StreamObject):
         self.v = None
         self.v_grids_n = None
 
+    def to_cpu(self):
+        from pyscf.solvent.pcm import PCM
+        # Initialize CPU-only attributes (e.g. atom_radii in PySCF 2.8).
+        out = utils.to_cpu(self, PCM(self.mol))
+        out.eps = self.eps
+        out.eps_optical = self.eps_optical
+        return out
+
+    def __setattr__(self, key, val):
+        if key == 'solvent' and val:
+            val = self._set_solvent(val)
+        super().__setattr__(key, val)
+
+    def _set_solvent(self, solvent):
+        name = resolve_solvent_name(solvent)
+        descriptors = solvent_db[name]
+        self.eps = descriptors[5]
+        self.eps_optical = descriptors[0]**2
+        if getattr(self, '_intermediates', None):
+            self.reset()
+        return name
+
+    def get_eps_optical(self):
+        """Return the optical dielectric constant for non-equilibrium solvation."""
+        if self.eps_optical is not None:
+            return self.eps_optical
+        if self.eps is not None and abs(self.eps - 78.3553) > 1e-6:
+            logger.warn(self, 'eps_optical was not specified for eps=%g. '
+                        'Using the optical dielectric constant of water (1.78). '
+                        'Set eps_optical to the solvent refractive index squared.',
+                        self.eps)
+        return 1.78
+
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
         logger.info(self, 'lebedev_order = %s (%d grids per sphere)',
                     self.lebedev_order, gen_grid.LEBEDEV_ORDER[self.lebedev_order])
+        logger.info(self, 'solvent = %s', self.solvent)
+        logger.info(self, 'eps_optical = %s', self.eps_optical)
         logger.info(self, 'eps = %s'          , self.eps)
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
