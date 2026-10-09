@@ -1,4 +1,4 @@
-# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,17 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-'''
-This example demonstrates the FSSH simualtion with Tully model
-'''
-
-import numpy as np
-import pyscf
-from gpu4pyscf.md.fssh_tully import FSSH_Tully
-
-fssh = FSSH_Tully(model='sac',mass=2000)
-fssh.cur_state = 0
-fssh.decoherence = 'none'
-fssh.nsteps = 300
-fssh.kernel(np.array([[-10]]), np.array([[20/2000]]) , np.array([1.0,0.0]))
+from .df import DFCASCI, DFCASSCF

@@ -20,6 +20,7 @@ import pyscf
 from pyscf import lib, gto
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 from pyscf.pbc.df import fft as fft_cpu
+from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.pbc.scf import rsjk
@@ -1272,3 +1273,25 @@ def test_q_cond():
         assert cp.array_equal(pair_kl, v[3])
         assert cp.array_equal(q_cond, v[4])
         assert cp.array_equal(s_estimator, v[5])
+
+# issue 846
+def test_lr_jk_contracted_basis():
+    cell = pyscf.M(atom='He 0 0 0', a=np.eye(3)*5,
+                   basis=('aug-cc-pvdz', [[2, [.4, 1.]]]), verbose=0)
+    kpts = cell.make_kpts([2,1,1])
+    omega = .3
+    jk_opt = rsjk.PBCJKMatrixOpt(cell, omega)
+    jk_opt.mesh = [13]*3
+    jk_opt.exclude_dd_block = False
+    jk_opt.build(kpts)
+    overlap = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    dm = overlap * .1
+    dat = jk_opt._get_j_lr(dm, hermi=1, kpts=kpts).get()
+
+    with cell.with_range_coulomb(omega):
+        ref = aft_cpu.AFTDF(cell, kpts).set(mesh=[13]*3).get_jk(
+            dm, hermi=1, kpts=kpts, with_k=False)[0]
+    charge = np.einsum('kij,kji->', overlap, dm) / len(kpts)
+    # The short-range engine includes the finite G=0 contribution.
+    ref -= np.pi / omega**2 / cell.vol * charge * overlap
+    assert abs(dat - ref).max() < 1e-8
