@@ -21,7 +21,7 @@ from gpu4pyscf.dft.uks import UKS
 from gpu4pyscf.scf.hf import RHF
 from gpu4pyscf.scf.uhf import UHF
 
-def get_qchem_autosad_guess_energy(mf, dm0):
+def get_qchem_sad_guess_energy(mf, dm0):
     mol = mf.mol
 
     mf.max_cycle = 0
@@ -74,7 +74,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         ### Reference Q-Chem input
         # $rem
@@ -121,7 +121,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         ### Remove the following
         # RI_J                 true
@@ -151,7 +151,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         # # The following value is from Q-Chem. Off because of the different grid for atomic calculation.
         # ref_guess_energy = -151.1607143427
@@ -177,7 +177,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         # # The following value is from Q-Chem. Off because of the different grid for atomic calculation.
         # ref_guess_energy = -146.3329001918
@@ -231,7 +231,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         ### Add the following
         # UNRESTRICTED         true
@@ -257,7 +257,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         # # The following value is from Q-Chem. Off because of the different grid for atomic calculation.
         # ref_guess_energy = -74.9178805257
@@ -283,7 +283,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         ### Add the following
         # ECP_FIT              False
@@ -317,7 +317,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         ref_guess_energy = -75.7944143470
 
@@ -329,7 +329,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         ref_guess_energy = -67.1808492499
 
@@ -344,7 +344,7 @@ class KnownValues(unittest.TestCase):
                 O     -0.5960     -0.0151     -0.0686
             """,
             basis = "def2-svp",
-            verbose = 4,
+            verbose = 0,
         )
 
         mf = RHF(mol).PCM()
@@ -353,7 +353,7 @@ class KnownValues(unittest.TestCase):
 
         dm0 = mf.init_guess_by_sad()
 
-        test_guess_energy = get_qchem_autosad_guess_energy(mf, dm0)
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         ### Add the following
         # $rem
@@ -372,6 +372,109 @@ class KnownValues(unittest.TestCase):
         ref_guess_energy = -114.0059265428
 
         assert abs(test_guess_energy - ref_guess_energy) < 2e-7
+
+    def test_sad_hf_guess_rhf(self):
+        mol = pyscf.M(
+            atom = """
+                H      1.2001      0.0363      0.8431
+                C      0.7031      0.0083     -0.1305
+                H      0.9877      0.8943     -0.7114
+                H      1.0155     -0.8918     -0.6742
+                O     -0.6582     -0.0067      0.1730
+                H     -1.1326     -0.0311     -0.6482
+            """,
+            basis = "cc-pvdz", # nctr != 1
+            verbose = 0,
+        )
+
+        mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
+
+        dm0 = mf.init_guess_by_sad_hf()
+
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
+
+        ### Modify the following
+        # SCF_GUESS            SAD
+        # BASIS                cc-pvdz
+        ref_guess_energy = -100.6465454190
+
+        assert abs(test_guess_energy - ref_guess_energy) < 3e-5
+
+    def test_sad_hf_guess_rks(self):
+        mol = pyscf.M(
+            atom = """
+                H      1.2001      0.0363      0.8431
+                C      0.7031      0.0083     -0.1305
+                H      0.9877      0.8943     -0.7114
+                H      1.0155     -0.8918     -0.6742
+                O     -0.6582     -0.0067      0.1730
+                H     -1.1326     -0.0311     -0.6482
+            """,
+            basis = "cc-pvdz", # nctr != 1
+            verbose = 0,
+        )
+
+        mf = RKS(mol, xc = "wB97MV")
+        mf.grids.atom_grid = (99,590)
+        mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        mf.grids.prune = None
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.nlcgrids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        mf.nlcgrids.prune = None
+        mf.nlcgrids.radii_adjust = None
+
+        dm0 = mf.init_guess_by_sad_hf()
+
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
+
+        ### Modify the following
+        # SCF_GUESS            SAD
+        # BASIS                cc-pvdz
+        ref_guess_energy = -115.8971071820
+
+        assert abs(test_guess_energy - ref_guess_energy) < 2e-7
+
+    def test_sad_hf_guess_uks(self):
+        mol = pyscf.M(
+            atom = """
+                O 0 0 1
+                O 0 1.2 1
+            """,
+            basis = "def2-tzvp",
+            spin = 2,
+            verbose = 0,
+        )
+
+        mf = UKS(mol, xc = "r2scan")
+        mf.grids.atom_grid = (99,590)
+        mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        mf.grids.prune = None
+        mf.grids.radii_adjust = None
+
+        dm0 = mf.init_guess_by_sad_hf()
+
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
+
+        ref_guess_energy = -150.5207824299
+
+        assert abs(test_guess_energy - ref_guess_energy) < 4e-7
+
+        # Direct above, DF below
+
+        mf = UKS(mol, xc = "r2scan").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99,590)
+        mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        mf.grids.prune = None
+        mf.grids.radii_adjust = None
+
+        dm0 = mf.init_guess_by_sad_hf()
+
+        test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
+
+        ref_guess_energy = -150.5208015220
+
+        assert abs(test_guess_energy - ref_guess_energy) < 3e-5
 
 if __name__ == "__main__":
     print("Full Tests for initial guess")

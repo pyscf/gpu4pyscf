@@ -619,16 +619,23 @@ def init_guess_by_atom(mol):
     mo_occ = cupy.hstack(mo_occ)
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
-def init_guess_by_sad(mol, mf_template, unrestricted_spin_average=False):
+def _init_guess_by_sad(mol, mf_template, uhf_for_atom=False):
     '''
         Generate initial guess density matrix from superposition of atomic density matrix.
-        The level of theory of atomic calculation is the same as mf_template,
-        except that we always render unrestricted calculation for one atom.
 
-        Reproducing Q-Chem SCF_GUESS AUTOSAD.
+        If uhf_for_atom is True,
+        The level of theory of atomic calculation is the same as mf_template,
+        except that we always render unrestricted calculation for one atom in vacuum.
+        It reproduces Q-Chem SCF_GUESS AUTOSAD.
+
+        If uhf_for_atom is False,
+        The level of theory of atomic calculation is UHF (in vacuum).
+        The basis / ecp / auxiliary basis (if applicable) are keeped.
+        It reproduces Q-Chem SCF_GUESS SAD.
     '''
     from gpu4pyscf.scf.uhf import UHF
     from gpu4pyscf.dft.rks import RKS
+    from gpu4pyscf.dft.uks import UKS
     assert isinstance(mf_template, RHF) or isinstance(mf_template, UHF) # GHF not supported
 
     from gpu4pyscf.qmmm.hirshfeld import charge_of_element, _neutral_atom_spin
@@ -666,6 +673,10 @@ def init_guess_by_sad(mol, mf_template, unrestricted_spin_average=False):
         elif isinstance(mf_template, RHF):
             mf_atom = mf_atom.to_uhf()
         assert isinstance(mf_atom, UHF)
+
+        if uhf_for_atom:
+            mf_atom = mf_atom.to_uhf()
+        assert not isinstance(mf_atom, UKS)
 
         if hasattr(mf_atom, 'with_solvent'):
             mf_atom = mf_atom.undo_solvent()
@@ -725,11 +736,19 @@ def init_guess_by_sad(mol, mf_template, unrestricted_spin_average=False):
     if isinstance(mf_template, RHF):
         dm0 = dm0[0] + dm0[1]
     else:
-        if unrestricted_spin_average:
+        if uhf_for_atom: # Reproduce Q-Chem SCF_GUESS SAD behavior
             dm_averaged = (dm0[0] + dm0[1]) * 0.5
             dm0[0] = dm0[1] = dm_averaged
 
+    mf_template.reset(mol)
+
     return dm0
+
+def init_guess_by_sad(mol, mf_template):
+    return _init_guess_by_sad(mol, mf_template, uhf_for_atom=False)
+
+def init_guess_by_sad_hf(mol, mf_template):
+    return _init_guess_by_sad(mol, mf_template, uhf_for_atom=True)
 
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
@@ -1053,6 +1072,10 @@ class SCF(pyscf_lib.StreamObject):
     def init_guess_by_sad(self, mol=None):
         if mol is None: mol = self.mol
         return init_guess_by_sad(mol, self)
+
+    def init_guess_by_sad_hf(self, mol=None):
+        if mol is None: mol = self.mol
+        return init_guess_by_sad_hf(mol, self)
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
