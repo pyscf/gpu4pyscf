@@ -21,7 +21,7 @@ try:
     from gpu4pyscf.dispersion import dftd3, dftd4
 except ImportError:
     dftd3 = dftd4 = None
-from package.version import Version
+from packaging.version import Version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000

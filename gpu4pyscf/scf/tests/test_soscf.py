@@ -195,8 +195,8 @@ class KnownValues(unittest.TestCase):
         dm1 = cp.random.random(g.size)
         mf_cpu = mf.to_cpu().newton()
         hop_ref = mf_cpu.gen_g_hop(mo.get(), mo_occ.get())[1]
-        dat = hop(dm1)
-        ref = cp.asarray(hop_ref(dm1.get()))
+        dat = hop(dm1).get()
+        ref = hop_ref(dm1.get())
         self.assertAlmostEqual(abs(dat - ref).max(), 0, 8)
 
     def test_with_df(self):
