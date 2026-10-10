@@ -22,6 +22,7 @@ sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
 yum install -y openblas-devel
 
 # Compile wheels
+export GPU4PYSCF_BUILD_CUDA_WHEEL=1
 rm -rf /gpu4pyscf/wheelhouse
 for PYBIN in /opt/python/cp311-cp311/bin; do
     rm -rf /gpu4pyscf/build
@@ -34,4 +35,3 @@ for PYBIN in /opt/python/cp311-cp311/bin; do
     rm -rf /gpu4pyscf/tmp/*.whl
 done
 rm -rf /gpu4pyscf/tmp
-

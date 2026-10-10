@@ -182,22 +182,23 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(nr.kernel(), eref, 9)
 
     def test_uks_gen_g_hop(self):
-        mf = dft.UKS(h2o_z0)
+        mf = dft.UKS(h2o_z1)
         mf.grids.build()
         mf.xc = 'hse06'
-        nao = h2o_z0.nao_nr()
-        mo = cp.random.random((2, nao,nao))
+        nao = h2o_z1.nao_nr()
+        cp.random.seed(2)
+        mo = cp.random.random((2, nao,nao)) - 0.4
         mo_occ = cp.zeros((2,nao))
-        mo_occ[:,:5] = 1
-        nocc, nvir = 5, nao-5
-        dm1 = cp.random.random(nvir*nocc*2)
+        mo_occ[0,:5] = 1
+        mo_occ[1,:4] = 1
         nr = mf.newton()
         g, hop, hdiag = nr.gen_g_hop(mo, mo_occ)
+        dm1 = cp.random.random(g.size)
         mf_cpu = mf.to_cpu().newton()
         hop_ref = mf_cpu.gen_g_hop(mo.get(), mo_occ.get())[1]
-        dat = hop(dm1)
-        ref = cp.asarray(hop_ref(dm1.get()))
-        cp.testing.assert_allclose(dat, ref, rtol=1e-12, atol=1e-7)
+        dat = hop(dm1).get()
+        ref = hop_ref(dm1.get())
+        self.assertAlmostEqual(abs(dat - ref).max(), 0, 9)
 
     def test_with_df(self):
         mf = scf.RHF(h2o_z0).density_fit().newton().run()
