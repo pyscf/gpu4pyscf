@@ -529,11 +529,12 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
             vmata_dm_tmp = cupy.empty([3,3,nao_non0])
             vmatb_dm_tmp = cupy.empty([3,3,nao_non0])
+            wv = cupy.empty((2, 3, 4, weight.size))
             for ia in range(_sorted_mol.natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
-                wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
-                wv+= contract('xbyg,sxg->bsyg', wf[1], dR_rho1b)
+                contract('xbyg,sxg->bsyg', wf[0], dR_rho1a, out=wv)
+                contract('xbyg,sxg->bsyg', wf[1], dR_rho1b, beta=1, out=wv)
                 wv[:,:,0] *= .5
                 wva, wvb = wv
                 for i in range(3):
@@ -600,11 +601,12 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
             wf = weight * fxc
+            wv = cupy.empty((2, 3, 5, weight.size))
             for ia in range(_sorted_mol.natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
-                wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
-                wv+= contract('xbyg,sxg->bsyg', wf[1], dR_rho1b)
+                contract('xbyg,sxg->bsyg', wf[0], dR_rho1a, out=wv)
+                contract('xbyg,sxg->bsyg', wf[1], dR_rho1b, beta=1, out=wv)
                 wv[:,:,0] *= .5
                 wv[:,:,4] *= .5  # for the factor 1/2 in tau
                 wva, wvb = wv
