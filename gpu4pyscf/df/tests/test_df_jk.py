@@ -211,6 +211,35 @@ H       4.224    0.640    0.837
         assert abs(ref[0] - vj.get()).max() < 1e-11
         assert abs(vk_ref - vk.get()).max() < 1e-11
 
+    def test_get_k_with_omega(self):
+        mol = pyscf.M(
+            atom = """
+                He 0 0 0
+                Ne 1 1 1
+            """,
+            basis = "6-31g",
+            verbose = 0,
+        )
+
+        mf = mol.RKS(xc = "wB97X").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+
+        dm0 = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+        dm0 = (dm0 + dm0.conj().T) / 2
+
+        ni = mf._numint
+        hermi = 1
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+
+        vk_ref = mf.get_k(mol, dm0, hermi)
+        vk_ref *= hyb
+        vklr = mf.get_k(mol, dm0, hermi, omega=abs(omega))
+        vklr *= (alpha - hyb)
+        vk_ref += vklr
+
+        vk_test = mf.get_k(mol, dm0, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb)
+
+        assert cp.max(cp.abs(vk_ref - vk_test)) < 1e-12
+
 if __name__ == "__main__":
     print("Full Tests for DF JK")
     unittest.main()

@@ -14,3 +14,4 @@
 
 from gpu4pyscf.pbc import scf
 from gpu4pyscf.pbc import dft
+from gpu4pyscf.pbc import properties

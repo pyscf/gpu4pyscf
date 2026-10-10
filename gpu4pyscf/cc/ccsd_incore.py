@@ -161,7 +161,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     bas_pair_cache = {k: [cp.asarray(x) for x in v]
                       for k, v in vhfopt.bas_pair_cache.items()}
 
-    mo = mol.apply_C_dot(mycc.mo_coeff)
+    mo = mol.apply_C_dot(mycc.mo_coeff[:,mycc.get_frozen_mask()])
     orbo = cupy.asarray(mo[:,:nocc])
     orbv = cupy.asarray(mo[:,nocc:])
     t1po = orbv.dot(cupy.asarray(t1).T)

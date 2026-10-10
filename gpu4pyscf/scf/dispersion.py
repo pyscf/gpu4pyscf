@@ -51,6 +51,12 @@ _white_list = {
     'b97m-d3bj': ('b97m-v', False, 'd3bj'),
     'wb97x-d3bj': ('wb97x-v', False, 'd3bj'),
     'wb97x-3c': ('wb97x-v', False, 'd4:wb97x-3c'),
+    # CF22D is parameterized together with its D3 (zero-damping) dispersion
+    # correction, so it is enabled by default. The cf22d damping parameters
+    # are shipped with simple-dftd3 (>=1.2.1) under zero damping.
+    'cf22d': ('cf22d', '', 'd3zero'),
+    # COACH combines VV10 with an ATM-only D4 correction.
+    'coach': ('coach', '', 'd4:coach'),
     'b97m-d4': ('b97m_v', False, 'd4:b97m'),
     'wb97m-d4': ('wb97m_v', False, 'd4:wb97m'),
     'wb97x-d4': ('wb97x_v', False, 'd4:wb97x'),
@@ -90,7 +96,7 @@ def parse_dft(xc_code):
         warnings.warn('''
 You are seeing this warning because `wb97x-d4` may produce different results from other packages.
 PySCF currently evaluates the XC functional using `wb97x`, following the behavior of PySCF
-v2.13 and earlier releases. This differs from the DFT-D4 recommendation, which uses wb97x_v and 
+v2.13 and earlier releases. This differs from the DFT-D4 recommendation, which uses wb97x_v and
 replaces the VV10 part with the D4 dispersion correction.
 
 To use the DFT-D4 recommended convention, set
@@ -250,6 +256,24 @@ def check_disp(mf, disp=None):
         raise ValueError(f"Unknown dispersion version {disp_version}.")
     return True
 
+def _make_d4_model(mol, method, with_3body):
+    '''Construct a D4 model with the same parameters for all derivatives.'''
+    from gpu4pyscf.dispersion import dftd4
+
+    if method.lower() == 'coach':
+        # D4_PARAMS in the COACH authors' reference implementation:
+        # https://github.com/JiashuLiang/COACH/blob/main/FunctionalCOACH/coach_pyscf.py
+        # Reference: J. Liang and M. Head-Gordon, "Reaching for the performance
+        # limit of hybrid density functional theory for molecular chemistry" (2026)
+        #
+        # Initialize with a known method, then replace all damping parameters.
+        model = dftd4.DFTD4Dispersion(mol, xc='hf', atm=with_3body)
+        model.set_param(s6=0.0, s8=0.0, s9=float(with_3body),
+                        a1=0.215, a2=5.8, alp=16.0)
+        return model
+    return dftd4.DFTD4Dispersion(mol, xc=method, atm=with_3body)
+
+
 def get_dispersion(mf, disp=None, with_3body=None, verbose=None):
     '''
     Calculate the dispersion correction energy.
@@ -282,7 +306,7 @@ def get_dispersion(mf, disp=None, with_3body=None, verbose=None):
     if disp is None:
         disp = getattr(mf, 'disp', None)
 
-    from gpu4pyscf.dispersion import dftd3, dftd4
+    from gpu4pyscf.dispersion import dftd3
 
     dft_method = getattr(mf, 'xc', 'hf')
     method, disp_version, disp_with_3body = parse_disp(dft_method, disp)
@@ -305,7 +329,7 @@ def get_dispersion(mf, disp=None, with_3body=None, verbose=None):
     elif disp_version[:2].upper() == 'D4':
         logger.info(mf, "Calc dispersion correction with DFTD4.")
         logger.info(mf, f"Parameters: xc={method}, atm={with_3body}")
-        d4_model = dftd4.DFTD4Dispersion(mol, xc=method, atm=with_3body)
+        d4_model = _make_d4_model(mol, method, with_3body)
         res = d4_model.get_dispersion()
         e_d4 = res.get('energy')
         mf.scf_summary['dispersion'] = e_d4

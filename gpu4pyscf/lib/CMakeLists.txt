@@ -13,19 +13,21 @@
 # limitations under the License.
 
 cmake_minimum_required (VERSION 3.21 FATAL_ERROR) # Required by Libxc 7.1.2
-project (gpu4pyscf C CXX CUDA Fortran)
+project (gpu4pyscf C CXX Fortran)
 
 set(CMAKE_C_STANDARD "99")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Set architectures before enabling CUDA, which otherwise initializes its own default.
 # For better performance on A100, the option
 # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
 if(DEFINED CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
-else()
+elseif(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real;90-real")
 endif()
+enable_language(CUDA)
 message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 
 if (NOT CMAKE_BUILD_TYPE)
