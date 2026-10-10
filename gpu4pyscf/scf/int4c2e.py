@@ -72,8 +72,10 @@ def _ao2mo_general(vhfopt, mo_coeffs, omega=None):
     swap_kl = nmo2 > nmo3
     if swap_ij:
         idx = [idx[1], idx[0], idx[2], idx[3]]
+        nmo1, nmo0 = nmo0, nmo1
     if swap_kl:
         idx = [idx[0], idx[1], idx[3], idx[2]]
+        nmo3, nmo2 = nmo2, nmo3
     mo_coeffs = [mo_coeffs[i] for i in idx]
 
     uniq_l = mol.uniq_l_ctr[:,0]

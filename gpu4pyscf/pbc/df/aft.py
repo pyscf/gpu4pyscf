@@ -225,6 +225,8 @@ class AFTDF(lib.StreamObject):
         The tensors returned by this function is different to the one in PySCF CPU version
         '''
         cell = self.cell
+        if isinstance(cell, SortedGTO):
+            cell = cell.cell
         if mesh is None:
             mesh = self.mesh
         if bvk_kmesh is None:

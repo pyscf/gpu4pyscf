@@ -12,13 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from gpu4pyscf.fci.direct_spin1 import FCI
-from gpu4pyscf.fci.direct_spin1 import FCISolver
-
-
-def solver(mol=None, singlet=False, symm=None):
-    if singlet:
-        raise NotImplementedError('GPU spin-adapted FCI is not implemented')
-    if symm or (symm is None and mol is not None and mol.symmetry):
-        raise NotImplementedError('GPU symmetry-adapted FCI is not implemented')
-    return FCISolver(mol)
+from gpu4pyscf.pbc.properties.berry.berry_phase import (
+    berry_phase,
+    diagonal_wannier_centers,
+    hybrid_wannier_centers,
+    unitary_part,
+)
+from gpu4pyscf.pbc.properties.berry.overlap import (
+    KPointMesh,
+    build_mmn,
+    periodic_ao_overlap,
+)
+from gpu4pyscf.pbc.properties.berry.polarization import (
+    PolarizationResult,
+    WannierCenterResult,
+    electronic_polarization,
+    eval_berry_phase,
+    eval_polarization,
+    eval_wannier_centers,
+    ionic_polarization,
+    polarization_difference,
+    polarization_quantum,
+    unwrap_polarization,
+)
