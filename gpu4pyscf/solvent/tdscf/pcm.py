@@ -31,10 +31,10 @@ def make_tdscf_object(tda_method, equilibrium_solvation=False):
     with_solvent.equilibrium_solvation = equilibrium_solvation
     if not equilibrium_solvation:
         # The vertical excitation is a fast process, applying non-equilibrium
-        # solvation with optical dielectric constant eps=1.78
+        # solvation with the solvent's optical dielectric constant
         # TODO: reset() can be skipped. Most intermeidates can be reused.
         with_solvent.reset()
-        with_solvent.eps = 1.78
+        with_solvent.eps = with_solvent.get_eps_optical()
         with_solvent.build()
     name = (tda_method._scf.with_solvent.__class__.__name__
             + tda_method.__class__.__name__)
@@ -118,13 +118,13 @@ class WithSolventTDSCF:
             # Solvent with optical dielectric constant, for evaluating the
             # response of the fast solvent part
             with_solvent = self.with_solvent
-            logger.info(mol, 'TDDFT non-equilibrium solvation with eps=%g', with_solvent.eps)
+            logger.info(mol, 'TDDFT non-equilibrium solvation with eps=%g', with_solvent.get_eps())
         else:
             # Solvent with zero-frequency dielectric constant. The ground state
             # solvent is utilized to ensure the same eps are used in the
             # gradients of excited state.
             with_solvent = self._scf.with_solvent
-            logger.info(mol, 'TDDFT equilibrium solvation with eps=%g', with_solvent.eps)
+            logger.info(mol, 'TDDFT equilibrium solvation with eps=%g', with_solvent.get_eps())
 
         # vind computes the response in gas-phase
         vind = self._scf.undo_solvent().gen_response(

@@ -327,6 +327,38 @@ H -0.646 -0.464 -0.804
                                damp_factor=0.6, fock_last=f_last)
         assert abs(f_damped - (0.4 * f + 0.6 * f_last)).max() < 1e-10
 
+class OpticalDielectric(unittest.TestCase):
+    def test_eps_optical_from_solvent_db(self):
+        # issue #3372
+        for solvent in ('water', 'toluene', 'methanol', 'tetrahydrofuran'):
+            smdobj = smd.SMD(mol, solvent=solvent)
+            n = smd.solvent_db[solvent][0]
+            self.assertAlmostEqual(smdobj.get_eps_optical(), n**2, 12)
+
+    def test_eps_optical_from_sol_desc(self):
+        smdobj = smd.SMD(mol)
+        smdobj.sol_desc = smd.solvent_db['toluene']
+        self.assertAlmostEqual(smdobj.get_eps_optical(), 1.4961**2, 12)
+
+    def test_eps_optical_overwrite(self):
+        smdobj = smd.SMD(mol, solvent='toluene')
+        smdobj.eps_optical = 1.78
+        self.assertAlmostEqual(smdobj.get_eps_optical(), 1.78, 12)
+
+    def test_solvent_name_matching(self):
+        for name, ref in (('Water', 'water'),
+                          ('THF', 'tetrahydrofuran'),
+                          ('hexane', 'n-hexane')):
+            self.assertEqual(smd.SMD(mol, solvent=name).solvent, ref)
+            self.assertEqual(scf.RHF(mol).SMD(name).with_solvent.solvent, ref)
+
+    def test_eps_optical_from_solvent_name_matching(self):
+        smdobj = smd.SMD(mol, solvent='DMSO')
+        self.assertEqual(smdobj.solvent, 'dimethylsulfoxide')
+        n = smd.solvent_db['dimethylsulfoxide'][0]
+        self.assertAlmostEqual(smdobj.get_eps_optical(), n**2, 12)
+
+
 if __name__ == "__main__":
     print("Full Tests for SMDs")
     unittest.main()
