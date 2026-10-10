@@ -186,7 +186,8 @@ class KnownValues(unittest.TestCase):
         mf.grids.build()
         mf.xc = 'hse06'
         nao = h2o_z1.nao_nr()
-        mo = cp.random.random((2, nao,nao))
+        cp.random.seed(2)
+        mo = cp.random.random((2, nao,nao)) - 0.4
         mo_occ = cp.zeros((2,nao))
         mo_occ[0,:5] = 1
         mo_occ[1,:4] = 1
@@ -197,7 +198,7 @@ class KnownValues(unittest.TestCase):
         hop_ref = mf_cpu.gen_g_hop(mo.get(), mo_occ.get())[1]
         dat = hop(dm1).get()
         ref = hop_ref(dm1.get())
-        self.assertAlmostEqual(abs(dat - ref).max(), 0, 8)
+        self.assertAlmostEqual(abs(dat - ref).max(), 0, 9)
 
     def test_with_df(self):
         mf = scf.RHF(h2o_z0).density_fit().newton().run()
