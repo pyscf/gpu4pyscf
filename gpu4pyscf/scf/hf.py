@@ -676,7 +676,7 @@ def _init_guess_by_sad(mol, mf_template, uhf_for_atom=False):
 
         if uhf_for_atom:
             mf_atom = mf_atom.to_uhf()
-        assert not isinstance(mf_atom, UKS)
+            assert not isinstance(mf_atom, UKS)
 
         if hasattr(mf_atom, 'with_solvent'):
             mf_atom = mf_atom.undo_solvent()
