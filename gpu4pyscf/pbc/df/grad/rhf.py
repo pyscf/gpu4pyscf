@@ -467,9 +467,18 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
+        # moved here
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+        head = pool[-1:]
+        task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
         l_ctr_aux_offsets = _counts_to_offsets(auxcell.l_ctr_counts)
         # Split auxbasis in the unit cell. A large aux_batch can overflow the POOL_SIZE
         aux_batch_size = POOL_SIZE // bvk_ncells // 8
+        mem_free = get_avail_mem(exclude_memory_pool=True)
+        aux_batch_size = min(aux_batch_size, int(mem_free*.4/(n_compact_pairs*8)))
+        if aux_batch_size < np.diff(aux_loc).max():
+            raise RuntimeError('Insufficient GPU memory for one auxiliary shell')
         l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
             l_ctr_aux_offsets, auxcell.uniq_l_ctr, aux_batch_size)
 
@@ -487,15 +496,17 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
 
         assert cell.natm == auxcell.natm
         ejk_sigma_sr = cp.zeros([cell.natm+3, 3])
-        workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
-        head = pool[-1:]
-        task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
         int3c2e_envs = int3c2e_opt.int3c2e_envs
         kern = libpbc.PBCsr_ejk_int3c2e_deriv
         aux0 = aux1 = 0
         max_aux_batch = int(np.diff(aux_loc[ksh_offsets_cpu]).max())
         buf = cp.empty(n_compact_pairs*max_aux_batch)
+        mem_free = get_avail_mem(exclude_memory_pool=True)
+        # Two AO buffers plus contraction output and contiguous input copies.
+        unit = (3*nao*nao + nao*nocc) * 8 # buf1,buf2, two contract
+        blksize = min(blksize, max_aux_batch, int(mem_free*.5/unit))
+        if blksize < 1:
+            raise RuntimeError('Insufficient GPU memory for SR derivative buffers')
         buf1 = cp.empty((blksize, nao, nao))
         buf2 = cp.empty((blksize, nao, nao))
         for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
