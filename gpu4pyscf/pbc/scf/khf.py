@@ -27,7 +27,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
 from pyscf.pbc import tools
-from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs
+from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs, member
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
@@ -40,6 +40,11 @@ from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+
+def _check_kpts(kpts):
+    if len(member(np.zeros(3), kpts)) == 0:
+        raise NotImplementedError(
+            'GPU PBC SCF requires k-point sampling to include the Gamma point')
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -361,6 +366,8 @@ class KSCF(pbchf.SCF):
             self.kpts = self.__dict__.pop('kpts')
 
         kpts = self.kpts
+        _check_kpts(kpts)
+
         with_df = self.with_df
         if len(kpts) > 1 and getattr(with_df, '_j_only', False):
             logger.warn(self, 'df.j_only cannot be used with k-point HF')
