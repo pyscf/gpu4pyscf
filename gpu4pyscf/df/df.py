@@ -172,7 +172,10 @@ class DF(lib.StreamObject):
 
         with self.range_coulomb(omega, lr_factor, sr_factor) as dfobj:
             if getattr(dfobj, '_rsh_parameters', None):
-                assert dfobj._rsh_parameters == (omega, lr_factor, sr_factor)
+                if omega is None or omega == 0:
+                    assert dfobj._rsh_parameters == (None, lr_factor, sr_factor) or dfobj._rsh_parameters == (0, lr_factor, sr_factor)
+                else:
+                    assert dfobj._rsh_parameters == (omega, lr_factor, sr_factor)
             if with_j and (omega is not None and omega != 0):
                 raise RuntimeError(
                     'Cannot compute J matrix with a range-separated Coulomb operator. '
