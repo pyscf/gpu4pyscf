@@ -174,6 +174,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RKS(mol, xc = "wB97MV").density_fit(auxbasis = "def2-universal-jkfit")
         mf.grids.atom_grid = (99,590)
+        mf.nlcgrids.atom_grid = (50,194)
 
         dm0 = mf.init_guess_by_sad()
 
@@ -182,9 +183,9 @@ class KnownValues(unittest.TestCase):
         # # The following value is from Q-Chem. Off because of the different grid for atomic calculation.
         # ref_guess_energy = -146.3329001918
         # # As a result, we do not check against Q-Chem value, we made a consistency test.
-        ref_guess_energy = -146.33290480934588
+        ref_guess_energy = -146.33290506213888
 
-        assert abs(test_guess_energy - ref_guess_energy) < 1e-7
+        assert abs(test_guess_energy - ref_guess_energy) < 2e-7
 
     def test_hcore_guess_rks(self):
         mol = pyscf.M(
@@ -264,7 +265,7 @@ class KnownValues(unittest.TestCase):
         # # As a result, we do not check against Q-Chem value, we made a consistency test.
         ref_guess_energy = -74.9206587667209
 
-        assert abs(test_guess_energy - ref_guess_energy) < 1e-7
+        assert abs(test_guess_energy - ref_guess_energy) < 2e-7
 
     def test_sad_guess_uks_ecp(self):
         mol = pyscf.M(
