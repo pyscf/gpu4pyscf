@@ -55,26 +55,26 @@ libgdft.GDFTdot_aow_ao_sparse.restype = ctypes.c_int
 
 def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=None,
             non0tab=None, out=None, verbose=None, ctr_offsets_slice=None, gdftopt=None,
-            transpose=True):
-    ''' Evaluate ao values with mol and given coords.
-        Calculate all AO values by default if shell indices is not given.
+            transpose=True, screening_info=None):
+    '''Evaluate AO values on the given coordinates.
+
+    Args:
+        mol: regular mol object or gdftopt._sorted_mol.
 
     Kwargs:
-        mol: can be regular mol object or sorted mol.
-            mol has to be consistent with gdftopt if given.
-
-        Note: The following arguments are for sorted mol only.
-        shls_slice :       shell indices to be evaluated.
-        ao_loc_slice:      offset address of AO corresponding to shells.
-                           controls the output of each shell.
-        ctr_offsets_slice: offsets of contraction patterns.
-                           Each contraction pattern is evaluated as a batch.
+        shls_slice: Not supported.
+        nao_slice, ao_loc_slice, ctr_offsets_slice:
+            Unused legacy arguments
+        screening_info: Internal grid-screening metadata.
 
     Returns:
         ao (out): comp x nao_slice x ngrids, ao is in C-contiguous.
             comp x ngrids x nao_slice if tranpose, be compatiable with PySCF.
             The order of AO values is the AO direction is consistent with mol.
     '''
+    if shls_slice is not None:
+        raise NotImplementedError('shls_slice is not supported by GPU eval_ao')
+
     if gdftopt is None:
         gdftopt = _GDFTOpt.from_mol(mol)
 
@@ -84,17 +84,15 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
 
     _sorted_mol = opt._sorted_mol
 
-    if shls_slice is None:
-        shls_slice = cupy.arange(_sorted_mol.nbas, dtype=np.int32)
+    if screening_info is None:
+        shls_idx = cupy.arange(_sorted_mol.nbas, dtype=np.int32)
         ctr_offsets = opt.l_ctr_offsets
         ctr_offsets_slice = opt.l_ctr_offsets
         ao_loc_slice = cupy.asarray(_sorted_mol.ao_loc_nr())
         nao_slice = _sorted_mol.nao
     else:
-        assert mol is gdftopt._sorted_mol, "slice evaluation of mol is not supported"
-        assert ao_loc_slice is not None
-        assert nao_slice is not None
-        assert ctr_offsets_slice is not None
+        assert mol is gdftopt._sorted_mol
+        nao_slice, shls_idx, ao_loc_slice, ctr_offsets_slice = screening_info
         ctr_offsets = opt.l_ctr_offsets
 
     nctr = ctr_offsets.size - 1
@@ -110,7 +108,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.c_int(deriv), ctypes.c_int(_sorted_mol.cart),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
-        ctypes.cast(shls_slice.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shls_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(ao_loc_slice.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao_slice),
         ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
@@ -2062,10 +2060,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
 
         ao_mask = eval_ao(
             _sorted_mol, coords, deriv,
-            nao_slice=len(idx),
-            shls_slice=non0shl_idx,
-            ao_loc_slice=ao_loc_slice,
-            ctr_offsets_slice=ctr_offsets_slice,
+            screening_info=(nao_sub, non0shl_idx, ao_loc_slice, ctr_offsets_slice),
             gdftopt=opt,
             transpose=False,
             out=cupy.ndarray((comp,nao_sub,ip1-ip0), memptr=buf.data))
@@ -2118,10 +2113,7 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
 
         ao_mask = eval_ao(
             _sorted_mol, coords, deriv,
-            nao_slice=len(idx),
-            shls_slice=non0shl_idx,
-            ao_loc_slice=ao_loc_slice,
-            ctr_offsets_slice=ctr_offsets_slice,
+            screening_info=(len(idx), non0shl_idx, ao_loc_slice, ctr_offsets_slice),
             gdftopt=opt,
             transpose=False
         )
