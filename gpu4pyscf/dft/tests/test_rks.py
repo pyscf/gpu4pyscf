@@ -21,6 +21,7 @@ try:
     from gpu4pyscf.dispersion import dftd3, dftd4
 except ImportError:
     dftd3 = dftd4 = None
+from packaging.version import Version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -261,8 +262,8 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-6
 
     @unittest.skipIf(dftd4 is None, 'requires the dftd4 library')
-    @unittest.skipIf('HYB_MGGA_XC_COACH' not in libxc.XC_CODES,
-                     'COACH requires a recent LibXC')
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.15'), 'require libxc 7.1 in pyscf')
+    @unittest.skipIf('HYB_MGGA_XC_COACH' not in libxc.XC_CODES, 'COACH requires a recent LibXC')
     def test_nr_coach(self):
         # Reference: FunctionalCOACH/coach_pyscf.py at
         # https://github.com/JiashuLiang/COACH/tree/bd18fffd84efa85731b3271d1c596b4cb73d9f81/FunctionalCOACH

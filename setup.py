@@ -112,12 +112,12 @@ except ImportError:
     pass
 
 if 'sdist' in sys.argv:
-    # The sdist release
     package_name = NAME
     CUDA_VERSION = '12x'
 else:
     CUDA_VERSION = get_cuda_version()
-    package_name = NAME + '-cuda' + CUDA_VERSION
+    if os.getenv('GPU4PYSCF_BUILD_CUDA_WHEEL'):
+        package_name = NAME + '-cuda' + CUDA_VERSION
 
 setup(
     name=package_name,
