@@ -324,8 +324,6 @@ class KnownValues(unittest.TestCase):
         chg = mf.analyze()[0][1]
         self.assertAlmostEqual(lib.fp(chg), -0.0705568646397904, 5)
 
-        f
-
     def test_initial_guess_tag(self):
         mf = mol.RHF().to_gpu()
         s = mf.get_ovlp()
