@@ -56,7 +56,7 @@ from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
-from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from gpu4pyscf.pbc.dft import multigrid as multigrid_v1
 
 libmgrid = load_library('libmgrid_v3')
@@ -1679,7 +1679,7 @@ def get_pp(ni, kpts=None):
     vpp = _inverse_wannier_transform_fock(ni, vpp, kpts)
     t1 = log.timer_debug1("vpploc", *t0)
 
-    vppnl = get_pp_nl_gpu(cell, kpts)
+    vppnl = get_pp_nl(cell, kpts)
     if kpts is None or is_zero(kpts):
         vpp += vppnl[0].real
     else:

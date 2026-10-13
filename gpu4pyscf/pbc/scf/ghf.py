@@ -27,6 +27,7 @@ from gpu4pyscf.scf import ghf as mol_ghf
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc.df import GDF
+from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_soc
 
 
 def _block_diag(a, b=None):
@@ -190,6 +191,11 @@ class GHF(pbchf.SCF):
         if cell is None: cell = self.cell
         if kpt is None: kpt = self.kpt
         h = _block_diag(pbchf.SCF.get_hcore(self, cell, kpt))
+        if self.with_soc and cell._pseudo:
+            vl_soc = get_pp_soc(cell, kpt)
+            s = .5 * cp.asarray(lib.PauliMatrices)
+            vl_soc = cp.einsum('sxy,kspq->kxpyq', 1j * s, vl_soc)
+            h = h + vl_soc.reshape(h.shape)
         if self.with_soc and cell.has_ecp_soc():
             raise NotImplementedError('ECP in PBC SCF')
         return h
