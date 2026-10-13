@@ -260,12 +260,13 @@ class GHF(hf.SCF):
         '''
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        assert s is None
-        s = hf.SCF.get_ovlp(self, mol)
-        nao = s.shape[0]
+        if s is None: s = self.get_ovlp()
+        assert s.shape == dm.shape
+        nao = s.shape[0] // 2
+        s = s[:nao,:nao]
         dma = dm[:nao,:nao]
         dmb = dm[nao:,nao:]
-        return uhf.UHF.mulliken_pop(self, mol, cp.stack((dma,dmb)), s, verbose)
+        return uhf.UHF.mulliken_pop(self, mol, np.stack((dma,dmb)), s, verbose)
 
     def to_cpu(self):
         mf = ghf_cpu.GHF(self.mol)
