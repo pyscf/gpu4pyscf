@@ -18,7 +18,6 @@ import pyscf
 import pytest
 import cupy
 from pyscf import gto
-from pyscf.solvent import ddcosmo
 from gpu4pyscf import scf, dft, solvent
 from gpu4pyscf.solvent import pcm
 
@@ -362,7 +361,7 @@ class NamedSolvent(unittest.TestCase):
     def test_water_matches_default_eps(self):
         # Naming water must not change eps away from the default
         cm = pcm.PCM(mol, 'water')
-        self.assertAlmostEqual(cm.get_eps(), ddcosmo.EPS_WATER, 12)
+        self.assertAlmostEqual(cm.get_eps(), pcm.EPS_WATER, 12)
 
     def test_assign_solvent(self):
         cm = pcm.PCM(mol)

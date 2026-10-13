@@ -365,7 +365,8 @@ class SMD(lib.StreamObject):
         if self.solvent_descriptors is not None:
             out.solvent_descriptors = self.solvent_descriptors
         solvent_descriptors = self.get_solvent_descriptors()
-        out.eps = self.eps
+        # Older PySCF requires a numeric dielectric constant.
+        out.eps = self.eps if hasattr(out, 'get_eps') else self.get_eps()
         out.eps_optical = self.eps_optical
         if self.radii_table is None:
             out.radii_table = smd_radii(solvent_descriptors[2])
