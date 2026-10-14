@@ -361,9 +361,11 @@ class UHF(hf.SCF):
         return hf_cpu.init_guess_by_mod_huckel(mol)
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
-        dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
+        if not isinstance(key, str):
+            return key
+        dm = super().get_init_guess(mol, key, **kwargs)
         if self.verbose >= logger.DEBUG1:
-            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp()).real
+            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp(mol)).real
             logger.debug1(self, 'Nelec from initial guess = %s', nelec)
         return dm
 

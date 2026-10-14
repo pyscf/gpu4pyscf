@@ -151,10 +151,22 @@ class GHF(hf.SCF):
         raise NotImplementedError('Solvent models are not implemented for GHF.')
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
-        dm = hf.RHF.get_init_guess(self, mol, key, **kwargs)
+        if not isinstance(key, str):
+            return key
+        if mol is None:
+            mol = self.mol
         key = key.lower()
-        if key != 'hcore' and key != '1e':
+        if key in ('qchem_sad', 'qchem_autosad', 'sad_frac_occ'):
+            raise NotImplementedError('%s initial guess for GHF' % key)
+
+        dm = super().get_init_guess(mol, key, **kwargs)
+        nao = mol.nao
+        if dm.shape == (nao, nao):
             dm = _from_rhf_init_dm(dm)
+        elif dm.shape == (2, nao, nao):
+            dm = tag_array(block_diag(dm[0], dm[1]),
+                           mo_coeff=block_diag(*dm.mo_coeff),
+                           mo_occ=cp.hstack(dm.mo_occ))
         return dm
 
     def get_hcore(self, mol=None):
