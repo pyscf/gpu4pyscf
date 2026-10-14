@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
 import numpy as np
 import cupy as cp
 import pyscf, gpu4pyscf
@@ -20,6 +21,8 @@ from gpu4pyscf.dft.rks import RKS
 from gpu4pyscf.dft.uks import UKS
 from gpu4pyscf.scf.hf import RHF
 from gpu4pyscf.scf.uhf import UHF
+from pyscf import gto
+from gpu4pyscf.scf import hf, rohf, ghf
 
 def get_qchem_sad_guess_energy(mf, dm0):
     mol = mf.mol
@@ -476,6 +479,99 @@ class KnownValues(unittest.TestCase):
         ref_guess_energy = -150.5208015220
 
         assert abs(test_guess_energy - ref_guess_energy) < 3e-5
+
+    def test_minao_heavy_atom_fallback(self):
+        mol = pyscf.M(atom='O 0 0 0; O 0 0 1.2', basis='cc-pvdz', verbose=0)
+        ref = hf.init_guess_by_atom(mol)
+        with mock.patch.object(hf, 'MINAO_MAX_Z', 1):
+            dm = hf.init_guess_by_minao(mol)
+        assert abs(ref - dm).max().get() < 1e-14
+
+    def test_minao_high_spin_rhf(self):
+        mol = pyscf.M(atom='O 0 0 0; O 0 0 1.2', basis='cc-pvdz', verbose=0)
+        mf = mol.RHF().to_gpu()
+        dm1 = mf.get_init_guess(key='minao')
+        dm2 = mf.get_init_guess(key='minao_high_spin')
+        assert abs(dm1 - dm2).max().get() < 1e-14
+
+    def _check_direct_high_spin_guess(self, mf, name):
+        method = getattr(mf, 'init_guess_by_' + name)
+        dm = method(high_spin=True)
+        reference = mf.get_init_guess(key=name+'_high_spin')
+        cp.testing.assert_allclose(dm, reference, atol=1e-12)
+        cp.testing.assert_allclose(dm.mo_coeff, reference.mo_coeff, atol=1e-12)
+        cp.testing.assert_allclose(dm.mo_occ, reference.mo_occ, atol=1e-12)
+        ordinary = method(high_spin=False)
+        cp.testing.assert_allclose(ordinary, mf.get_init_guess(key=name), atol=1e-12)
+
+    def _check_high_spin_rohf_density_fitting(self, key):
+        mol = pyscf.M(atom='O 0 0 0; O 0 0 1', basis='cc-pvdz', spin=2, verbose=0)
+        mf = rohf.ROHF(mol).density_fit(auxbasis='weigend')
+        self._check_direct_high_spin_guess(mf, key.split('_')[0])
+        dm = mf.get_init_guess(key=key)
+        self.assertEqual(dm.shape, (2, mol.nao, mol.nao))
+        self.assertEqual(dm.mo_coeff.ndim, 2)
+        self.assertEqual(dm.mo_occ.ndim, 1)
+        # Fractional O occupations must survive conversion of ROHF tags.
+        self.assertTrue(bool(cp.any((dm.mo_occ > 1) & (dm.mo_occ < 2))))
+        cp.testing.assert_allclose(mf.make_rdm1(dm.mo_coeff, dm.mo_occ), dm, atol=1e-12)
+        veff = mf.get_veff(mol, dm)
+        plain_dm = cp.array(dm)  # Strip tags to exercise density-based J/K.
+        self.assertFalse(hasattr(plain_dm, 'mo_coeff'))
+        reference = mf.get_veff(mol, plain_dm)
+        cp.testing.assert_allclose(veff, reference, atol=1e-9, rtol=1e-9)
+
+
+    def test_minao_high_spin_rohf_density_fitting(self):
+        self._check_high_spin_rohf_density_fitting('minao_high_spin')
+
+    def test_atom_high_spin_rohf_density_fitting(self):
+        self._check_high_spin_rohf_density_fitting('atom_high_spin')
+
+    def test_minao_high_spin_uhf(self):
+        mol = pyscf.M(atom='O 0 0 0; H 0 0 1', basis='cc-pvdz', spin=1, verbose=0)
+        self._check_direct_high_spin_guess(UHF(mol), 'minao')
+        dm = UHF(mol).get_init_guess(key='minao_high_spin')
+        reference = hf.init_guess_by_minao(mol, high_spin=True)
+        self.assertEqual(dm.shape, (2, mol.nao, mol.nao))
+        self.assertEqual(dm.mo_coeff.ndim, 3)
+        self.assertEqual(dm.mo_occ.ndim, 2)
+        # Aligned O and H atomic spins differ from the molecular doublet.
+        cp.testing.assert_allclose(dm.mo_occ.sum(axis=1), cp.array([6, 3]), atol=1e-12)
+        cp.testing.assert_allclose(dm, reference, atol=1e-12)
+        c, occ = dm.mo_coeff, dm.mo_occ
+        cp.testing.assert_allclose(dm, (c*occ[:, None]) @ c.transpose(0, 2, 1), atol=1e-12)
+
+    def test_minao_high_spin_ghf(self):
+        mol = pyscf.M(atom='O 0 0 0; H 0 0 1', basis='cc-pvdz', spin=1, verbose=0)
+        self._check_direct_high_spin_guess(ghf.GHF(mol), 'minao')
+        dm = ghf.GHF(mol).get_init_guess(key='minao_high_spin')
+        reference = hf.init_guess_by_minao(mol, high_spin=True)
+        nao = mol.nao
+        self.assertEqual(dm.shape, (2*nao, 2*nao))
+        self.assertEqual(dm.mo_coeff.ndim, 2)
+        self.assertEqual(dm.mo_occ.ndim, 1)
+        cp.testing.assert_allclose(dm[:nao, :nao], reference[0], atol=1e-12)
+        cp.testing.assert_allclose(dm[nao:, nao:], reference[1], atol=1e-12)
+        cp.testing.assert_allclose(dm[:nao, nao:], 0, atol=1e-12)
+        cp.testing.assert_allclose(dm[nao:, :nao], 0, atol=1e-12)
+        cp.testing.assert_allclose(dm, (dm.mo_coeff*dm.mo_occ) @ dm.mo_coeff.T, atol=1e-12)
+
+    def test_atom_high_spin_direct_uhf(self):
+        mol = gto.M(atom='O 0 0 0; H 0 0 1', basis='cc-pvdz', spin=1, verbose=0)
+        self._check_direct_high_spin_guess(UHF(mol), 'atom')
+
+    def test_atom_high_spin_direct_ghf(self):
+        mol = gto.M(atom='O 0 0 0; H 0 0 1', basis='cc-pvdz', spin=1, verbose=0)
+        self._check_direct_high_spin_guess(ghf.GHF(mol), 'atom')
+
+    def test_rohf_spin_averaged_guess_tags(self):
+        mol = gto.M(atom='O 0 0 0; H 0 0 1', basis='cc-pvdz', spin=1, verbose=0)
+        mf = rohf.ROHF(mol).density_fit(auxbasis='weigend')
+        dm = mf.init_guess_by_minao()
+        cp.testing.assert_allclose(dm[0], dm[1], atol=1e-12)
+        cp.testing.assert_allclose(dm, mf.make_rdm1(dm.mo_coeff, dm.mo_occ), atol=1e-12)
+        cp.testing.assert_allclose(mf.get_veff(mol, dm), mf.get_veff(mol, cp.array(dm)), atol=1e-9)
 
 if __name__ == "__main__":
     print("Full Tests for initial guess")

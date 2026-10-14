@@ -220,11 +220,8 @@ class GHF(pbchf.SCF):
         dm = mol_ghf.GHF.get_init_guess(self, cell, key)
         return pbchf.normalize_dm_(self, dm, s1e)
 
-    def init_guess_by_minao(self, mol=None):
-        return mol_ghf._from_rhf_init_dm(mol_hf.SCF.init_guess_by_minao(self, mol))
-
-    def init_guess_by_atom(self, mol=None):
-        return mol_ghf._from_rhf_init_dm(mol_hf.SCF.init_guess_by_atom(self, mol))
+    init_guess_by_minao = mol_ghf.GHF.init_guess_by_minao
+    init_guess_by_atom = mol_ghf.GHF.init_guess_by_atom
 
     def init_guess_by_1e(self, mol=None):
         if mol is None: mol = self.mol

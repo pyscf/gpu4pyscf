@@ -127,16 +127,14 @@ class KGHF(khf.KSCF):
     smearing = NotImplemented
     _transfer_attrs_ = ghf.GHF._transfer_attrs_
 
-    init_guess_by_minao = _cast_mol_init_guess(mol_hf.init_guess_by_minao)
-    init_guess_by_atom = _cast_mol_init_guess(mol_hf.init_guess_by_atom)
+    init_guess_by_minao = khf._cast_mol_init_guess(mol_ghf.GHF.init_guess_by_minao)
+    init_guess_by_atom = khf._cast_mol_init_guess(mol_ghf.GHF.init_guess_by_atom)
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         assert isinstance(key, str)
         key = key.lower()
         if cell is None: cell = self.cell
-        dm = mol_ghf.GHF.get_init_guess(self, cell, key)
-        if key in ('minao_high_spin', 'atom_high_spin'):
-            dm = khf._expand_dm_kpts(dm, len(self.kpts))
+        dm = mol_hf.SCF.get_init_guess(self, cell, key)
         nkpts = len(self.kpts)
         assert dm.ndim == 3 and len(dm) == nkpts
 

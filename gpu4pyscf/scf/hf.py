@@ -424,6 +424,9 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
             mo_e[idx] = e
     return mo_e, mo
 
+# ANO basis data end at Cm (Z=96); heavier atoms use atomic HF for the guess.
+MINAO_MAX_Z = 96
+
 def init_guess_by_minao(mol, high_spin=False):
     '''Generate initial guess density matrix based on ANO basis, then project
     the density matrix to the basis set defined by ``mol``
@@ -534,7 +537,7 @@ def init_guess_by_minao(mol, high_spin=False):
 
         if symb not in atm_conf:
             i0, i1 = aoslice[ia,:2]
-            if gto.charge(symb) > 96:
+            if gto.charge(symb) > MINAO_MAX_Z:
                 logger.debug(mol, 'MINAO initial guess is not available for %s. '
                              'Using atomic HF instead.', symb)
                 atom = mol.copy()
@@ -1074,13 +1077,13 @@ class SCF(pyscf_lib.StreamObject):
 
     smearing = smearing
 
-    def init_guess_by_minao(self, mol=None):
+    def init_guess_by_minao(self, mol=None, high_spin=False):
         if mol is None: mol = self.mol
-        return init_guess_by_minao(mol)
+        return init_guess_by_minao(mol, high_spin)
 
-    def init_guess_by_atom(self, mol=None):
+    def init_guess_by_atom(self, mol=None, high_spin=False):
         if mol is None: mol = self.mol
-        return init_guess_by_atom(mol)
+        return init_guess_by_atom(mol, high_spin)
 
     def init_guess_by_sad(self, mol=None):
         if mol is None: mol = self.mol
@@ -1126,9 +1129,9 @@ class SCF(pyscf_lib.StreamObject):
         logger.info(self, 'Initial guess from %s', key)
 
         if key == 'minao_high_spin':
-            dm = init_guess_by_minao(mol, high_spin=True)
+            dm = self.init_guess_by_minao(mol, high_spin=True)
         elif key == 'atom_high_spin':
-            dm = init_guess_by_atom(mol, high_spin=True)
+            dm = self.init_guess_by_atom(mol, high_spin=True)
         elif key == 'qchem_sad':
             return _init_guess_by_qchem_sad(mol, self, uhf_for_atom=False)
         elif key == 'qchem_autosad':
@@ -1319,15 +1322,11 @@ class RHF(SCF):
 
     energy_elec = energy_elec
 
-    def get_init_guess(self, mol=None, key='minao', **kwargs):
-        if not isinstance(key, str):
-            return key
-        dm = SCF.get_init_guess(self, mol, key, **kwargs)
-        if key.lower() in ('minao_high_spin', 'atom_high_spin'):
-            logger.info(self, 'High spin for RHF, averaged')
-            dm = tag_array(dm[0]+dm[1], mo_coeff=dm.mo_coeff[0],
-                             mo_occ=dm.mo_occ[0]+dm.mo_occ[1])
-        return dm
+    def init_guess_by_minao(self, mol=None, high_spin=False):
+        return SCF.init_guess_by_minao(self, mol, high_spin=False)
+
+    def init_guess_by_atom(self, mol=None, high_spin=False):
+        return SCF.init_guess_by_atom(self, mol, high_spin=False)
 
     def spin_square(self, mo_coeff=None, s=None):
         '''Spin square and multiplicity of a RHF determinant'''

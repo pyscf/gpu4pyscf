@@ -101,8 +101,6 @@ class ROHF(hf.RHF):
     get_occ = hf.return_cupy_array(rohf_cpu.ROHF.get_occ)
     get_hcore = hf.RHF.get_hcore
     get_ovlp = hf.RHF.get_ovlp
-    init_guess_by_minao      = hf.return_cupy_array(rohf_cpu.ROHF.init_guess_by_minao)
-    init_guess_by_atom       = hf.return_cupy_array(rohf_cpu.ROHF.init_guess_by_atom)
     init_guess_by_huckel     = hf.return_cupy_array(rohf_cpu.ROHF.init_guess_by_huckel)
     init_guess_by_mod_huckel = hf.return_cupy_array(rohf_cpu.ROHF.init_guess_by_mod_huckel)
     init_guess_by_1e         = hf.return_cupy_array(rohf_cpu.ROHF.init_guess_by_1e)
@@ -116,17 +114,24 @@ class ROHF(hf.RHF):
 
     canonicalize = canonicalize
 
-    def get_init_guess(self, mol=None, key='minao', **kwargs):
-        if not isinstance(key, str):
-            return key
+    def init_guess_by_minao(self, mol=None, high_spin=False):
+        dm = hf.SCF.init_guess_by_minao(self, mol, high_spin=high_spin)
+        if high_spin:
+            return tag_array(dm, mo_coeff=dm.mo_coeff[0],
+                             mo_occ=dm.mo_occ[0]+dm.mo_occ[1])
+        # Explicit spin occupations preserve the spin-averaged atomic guess.
+        return tag_array(cupy.stack([dm*.5, dm*.5]), mo_coeff=dm.mo_coeff,
+                         mo_occ=cupy.stack([dm.mo_occ*.5, dm.mo_occ*.5]))
 
-        # Bypass RHF's spin sum: ROHF needs separate alpha/beta densities.
-        dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
-        key = key.lower()
-        if key in ('minao_high_spin', 'atom_high_spin'):
-            dm = tag_array(dm, mo_coeff=dm.mo_coeff[0],
-                           mo_occ=dm.mo_occ[0]+dm.mo_occ[1])
-        return dm
+    def init_guess_by_atom(self, mol=None, high_spin=False):
+        dm = hf.SCF.init_guess_by_atom(self, mol, high_spin=high_spin)
+        if high_spin:
+            return tag_array(dm, mo_coeff=dm.mo_coeff[0],
+                             mo_occ=dm.mo_occ[0]+dm.mo_occ[1])
+        return tag_array(cupy.stack([dm*.5, dm*.5]), mo_coeff=dm.mo_coeff,
+                         mo_occ=cupy.stack([dm.mo_occ*.5, dm.mo_occ*.5]))
+
+    get_init_guess = hf.SCF.get_init_guess
 
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         '''One-particle density matrix from shared spatial orbitals.

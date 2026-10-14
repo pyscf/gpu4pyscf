@@ -235,10 +235,10 @@ def _expand_dm_kpts(dm, nkpts):
 
 def _cast_mol_init_guess(fn):
     @functools.wraps(fn)
-    def fn_init_guess(mf, cell=None, kpts=None):
+    def fn_init_guess(mf, cell=None, kpts=None, **kwargs):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
-        dm = fn(mf, cell)
+        dm = fn(mf, cell, **kwargs)
         return _expand_dm_kpts(dm, len(kpts))
     return fn_init_guess
 
@@ -292,14 +292,12 @@ class KUHF(khf.KSCF):
         key = key.lower()
         if cell is None: cell = self.cell
         dm = mol_hf.SCF.get_init_guess(self, cell, key)
-        if key in ('minao_high_spin', 'atom_high_spin'):
-            dm = _expand_dm_kpts(dm, len(self.kpts))
         nkpts = len(self.kpts)
         assert dm.ndim == 4 and dm.shape[:2] == (2, nkpts)
 
         if s1e is None:
             s1e = self.get_ovlp(cell)
-        ne = cp.einsum('xkij,kji->x', cp.asarray(dm) s1e).real.get()
+        ne = cp.einsum('xkij,kji->x', cp.asarray(dm), s1e).real.get()
         nelec = self.nelec
         if any(abs(ne - nelec) > 0.01*nkpts):
             logger.debug(self, 'Big error detected in the electron number '

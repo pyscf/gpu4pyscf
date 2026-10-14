@@ -256,10 +256,10 @@ def _expand_dm_kpts(dm, nkpts):
 
 def _cast_mol_init_guess(fn):
     @functools.wraps(fn)
-    def fn_init_guess(mf, cell=None, kpts=None):
+    def fn_init_guess(mf, cell=None, kpts=None, **kwargs):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
-        dm = fn(mf, cell)
+        dm = fn(mf, cell, **kwargs)
         return _expand_dm_kpts(dm, len(kpts))
     return fn_init_guess
 
@@ -655,8 +655,8 @@ class KSCF(pbchf.SCF):
         return e, c
 
     get_init_guess = NotImplemented
-    init_guess_by_minao = _cast_mol_init_guess(pbchf.SCF.init_guess_by_minao)
-    init_guess_by_atom = _cast_mol_init_guess(pbchf.SCF.init_guess_by_atom)
+    init_guess_by_minao = _cast_mol_init_guess(pbchf.RHF.init_guess_by_minao)
+    init_guess_by_atom = _cast_mol_init_guess(pbchf.RHF.init_guess_by_atom)
     init_guess_by_1e = NotImplemented
     init_guess_by_huckel = NotImplemented
     init_guess_by_mod_huckel = NotImplemented
@@ -731,9 +731,7 @@ class KRHF(KSCF):
         key = key.lower()
         if cell is None: cell = self.cell
         kpts = self.kpts
-        dm = mol_hf.SCF.get_init_guess(self, cell, key)
-        if key in ('minao_high_spin', 'atom_high_spin'):
-            dm = _expand_dm_kpts(dm, len(kpts))
+        dm = mol_hf.RHF.get_init_guess(self, cell, key)
         nkpts = len(kpts)
         assert dm.ndim == 3 and len(dm) == nkpts
 

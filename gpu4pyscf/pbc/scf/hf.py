@@ -390,6 +390,9 @@ class RHF(SCF):
     newton = mol_hf.RHF.newton
     canonicalize = mol_hf.RHF.canonicalize
 
+    init_guess_by_minao = mol_hf.RHF.init_guess_by_minao
+    init_guess_by_atom = mol_hf.RHF.init_guess_by_atom
+
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         assert isinstance(key, str)
         if cell is None: cell = self.cell
