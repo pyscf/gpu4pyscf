@@ -15,7 +15,7 @@
 from gpu4pyscf.solvent import pcm, smd
 
 def PCM(method_or_mol, solvent_obj=None, dm=None):
-    '''Initialize PCM model.
+    '''Initialize PCM with a solvent object or a solvent name.
 
     Examples:
 
@@ -29,6 +29,8 @@ def PCM(method_or_mol, solvent_obj=None, dm=None):
     from gpu4pyscf import scf
 
     if isinstance(method_or_mol, gto.mole.Mole):
+        if isinstance(solvent_obj, str):
+            return pcm.PCM(method_or_mol, solvent_obj)
         return pcm.PCM(method_or_mol)
     elif isinstance(method_or_mol, scf.hf.SCF):
         return pcm.pcm_for_scf(method_or_mol, solvent_obj, dm)
@@ -36,22 +38,23 @@ def PCM(method_or_mol, solvent_obj=None, dm=None):
         raise NotImplementedError(f'PCM model does not support {method_or_mol}')
 
 def SMD(method_or_mol, solvent_obj=None, dm=None, solvent='water'):
-    '''Initialize SMD model.
+    '''Initialize SMD with a solvent object or a solvent name.
 
     Examples:
 
-    >>> mf = PCM(scf.RHF(mol))
+    >>> mf = SMD(scf.RHF(mol), 'DMSO')
     >>> mf.kernel()
-    >>> sol = PCM(mol)
-    >>> mc = PCM(CASCI(mf, 6, 6), sol)
-    >>> mc.kernel()
+    >>> sol = SMD(mol, 'toluene')
+    >>> mf = SMD(scf.RHF(mol), sol)
     '''
     from pyscf import gto
     from gpu4pyscf import scf
 
     if isinstance(method_or_mol, gto.mole.Mole):
+        if isinstance(solvent_obj, str):
+            solvent = solvent_obj
         return smd.SMD(method_or_mol, solvent=solvent)
     elif isinstance(method_or_mol, scf.hf.SCF):
-        return smd.smd_for_scf(method_or_mol, solvent_obj, dm)
+        return smd.smd_for_scf(method_or_mol, solvent_obj, dm, solvent=solvent)
     else:
         raise NotImplementedError(f'SMD model does not support {method_or_mol}')

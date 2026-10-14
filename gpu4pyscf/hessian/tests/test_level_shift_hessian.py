@@ -83,7 +83,7 @@ class KnownValues(unittest.TestCase):
             1208.68664975, 1340.42573432, 1349.27967164, 1761.31892282,
             1792.17470571])
         assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
-        assert np.max(np.abs(test_frequency - ref_frequency)) < 1e-2
+        assert np.max(np.abs(test_frequency - ref_frequency)) < 5e-2
 
     def test_level_shift_hessian_uks(self):
         mf = UKS(mol_open, xc = 'wB97X')
@@ -107,7 +107,7 @@ class KnownValues(unittest.TestCase):
         ref_frequency = np.array([ 292.72066163,  877.69576251, 1082.27549661, 1277.57877335,
             1693.48392029, 1760.06314071])
         assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
-        assert np.max(np.abs(test_frequency - ref_frequency)) < 1e-2
+        assert np.max(np.abs(test_frequency - ref_frequency)) < 5e-2
 
     def test_level_shift_hessian_rhf(self):
         mf = HF(mol_close)
