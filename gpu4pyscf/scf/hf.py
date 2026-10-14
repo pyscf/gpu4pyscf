@@ -424,7 +424,7 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
             mo_e[idx] = e
     return mo_e, mo
 
-def init_guess_by_minao(mol):
+def init_guess_by_minao(mol, high_spin=False):
     '''Generate initial guess density matrix based on ANO basis, then project
     the density matrix to the basis set defined by ``mol``
 
@@ -432,11 +432,21 @@ def init_guess_by_minao(mol):
     This function returns block diagonal density matrix associated with each atom.
     While the function in PySCF projects the density matrix into the full space of atomic basis
 
+    Args:
+        high_spin : bool
+            Use ground-state atomic configurations and Hund occupations, with
+            equal occupations within each magnetic multiplet. The two spins
+            share projected ANO orbitals. Neutral atomic spins are aligned;
+            the density is not rescaled to the molecular charge or spin.
+
     Returns:
-        Density matrix, 2D ndarray
+        Tagged CuPy density, shape (nao, nao), or (2, nao, nao) if high_spin.
     '''
     from pyscf.scf import atom_hf
     from pyscf.scf import addons
+    from pyscf.data import elements
+    configuration = (elements.CONFIGURATION if high_spin
+                     else elements.NRSRHF_CONFIGURATION)
 
     def minao_basis(symb, nelec_ecp):
         occ = []
@@ -450,7 +460,7 @@ def init_guess_by_minao(mol):
         coreshl = gto.ecp.core_configuration(nelec_ecp, atom_symbol=stdsymb)
         # coreshl = (0,0,0,0)  # it keeps all core electrons in the initial guess
         for l in range(4):
-            ndocc, frac = atom_hf.frac_occ(stdsymb, l)
+            ndocc, frac = atom_hf.frac_occ(stdsymb, l, configuration)
             if ndocc >= coreshl[l]:
                 degen = l * 2 + 1
                 occ_l = [2, ]*(ndocc-coreshl[l]) + [frac, ]
@@ -479,7 +489,7 @@ def init_guess_by_minao(mol):
             occ4ecp = []
             for l in range(4):
                 nbas_l = sum((len(bas[1]) - 1) for bas in basis4ecp[l])
-                ndocc, frac = atom_hf.frac_occ(stdsymb, l)
+                ndocc, frac = atom_hf.frac_occ(stdsymb, l, configuration)
                 ndocc -= coreshl[l]
                 assert ndocc <= nbas_l
 
@@ -515,7 +525,7 @@ def init_guess_by_minao(mol):
     if any(gto.charge(mol.atom_symbol(ia)) > 96 for ia in range(mol.natm)):
         logger.info(mol, 'MINAO initial guess is not available for super-heavy '
                     'elements. "atom" initial guess is used.')
-        return init_guess_by_atom(mol)
+        return init_guess_by_atom(mol, method='high_spin' if high_spin else 'rhf')
 
     nelec_ecp_dic = {mol.atom_symbol(ia): mol.atom_nelec_core(ia)
                           for ia in range(mol.natm)}
@@ -548,36 +558,62 @@ def init_guess_by_minao(mol):
             mo_occ.append(cupy.zeros(0))
             continue
 
-        if symb not in atm_conf:
+        i0, i1 = aoslice[ia,:2]
+        # A built molecule may decontract only some atoms of the same element.
+        key = (symb, mol._bas[i0:i1,1:].tobytes())
+        if key not in atm_conf:
             nelec_ecp = mol.atom_nelec_core(ia)
             occ, basis = minao_basis(symb, nelec_ecp)
             mol1._atm, mol1._bas, mol1._env = mol1.make_env(
                 [mol._atom[ia]], {symb: basis}, [])
-            i0, i1 = aoslice[ia,:2]
             mol2._bas = mol._bas[i0:i1]
             s22 = mol2.intor_symmetric('int1e_ovlp')
             s21 = gto.mole.intor_cross('int1e_ovlp', mol2, mol1)
             c = pyscf_lib.cho_solve(s22, s21, strict_sym_pos=False)
             c = cupy.asarray(c[:,occ>0], order='C')
             occ = cupy.asarray(occ[occ>0], order='C')
-            atm_conf[symb] = occ, c, (c*occ).dot(c.conj().T)
+            atm_conf[key] = occ, c, (c*occ).dot(c.conj().T)
 
-        occ, c, d = atm_conf[symb]
+        occ, c, d = atm_conf[key]
         dm[p0:p1,p0:p1] = d
         mo_coeff.append(c)
         mo_occ.append(occ)
 
     mo_coeff = block_diag(mo_coeff)
     mo_occ = cupy.hstack(mo_occ)
+    if high_spin:
+        occ = cupy.stack((cupy.minimum(mo_occ, 1), cupy.maximum(mo_occ-1, 0)))
+        coeff = cupy.stack((mo_coeff, mo_coeff))
+        dm = cupy.stack([(mo_coeff*n).dot(mo_coeff.conj().T) for n in occ])
+        return tag_array(dm, mo_coeff=coeff, mo_occ=occ)
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
-def init_guess_by_atom(mol):
+def init_guess_by_atom(mol, method='rhf'):
     '''Generate initial guess density matrix from superposition of atomic HF
-    density matrix.  The atomic HF is occupancy averaged RHF
+    density matrices. By default, use occupation-averaged atomic RHF.
+
+    Args:
+        method : str
+            'rhf' retains the existing occupation-averaged atomic RHF guess.
+            'high_spin' optimizes separate alpha/beta atomic HF orbitals under
+            spherical symmetry, with Hund occupations of ground configurations.
+            'uhf_average' uses Psi4-style high-spin fractional atomic UHF, then
+            returns the spin-summed density. Atomic HF runs on the CPU, even
+            for a molecular DFT calculation, without density fitting.
 
     Returns:
-        Density matrix, 2D ndarray
+        Tagged CuPy density, shape (2, nao, nao) for 'high_spin', otherwise
+        (nao, nao). Neutral atomic populations are not rescaled.
     '''
+    if method in ('high_spin', 'uhf_average'):
+        from gpu4pyscf.scf.atom_hf import atomic_uhf_orbitals
+        c, occ = atomic_uhf_orbitals(mol, spherical=method == 'high_spin')
+        c, occ = asarray(c), asarray(occ)
+        dm = cupy.stack([(cs*ns).dot(cs.conj().T) for cs, ns in zip(c, occ)])
+        dm = tag_array(dm, mo_coeff=c, mo_occ=occ)
+        return dm if method == 'high_spin' else _sum_spin_guess(dm)
+    if method != 'rhf':
+        raise ValueError(f'Unknown atomic guess method: {method}')
     from pyscf.scf import atom_hf
     atm_scf = atom_hf.get_atm_nrhf(mol)
     aoslice = mol.aoslice_by_atom()
@@ -749,6 +785,11 @@ def init_guess_by_sad(mol, mf_template):
 
 def init_guess_by_sad_hf(mol, mf_template):
     return _init_guess_by_sad(mol, mf_template, uhf_for_atom=True)
+
+def _sum_spin_guess(dm):
+    return tag_array(dm[0] + dm[1],
+                     mo_coeff=cupy.hstack(tuple(dm.mo_coeff)),
+                     mo_occ=cupy.hstack(tuple(dm.mo_occ)))
 
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
@@ -974,7 +1015,6 @@ class SCF(pyscf_lib.StreamObject):
     init_guess_by_mod_huckel = _cast_rhf_init_guess(hf_cpu.SCF.init_guess_by_mod_huckel)
     init_guess_by_chkfile    = return_cupy_array(hf_cpu.SCF.init_guess_by_chkfile)
     from_chk                 = return_cupy_array(hf_cpu.SCF.from_chk)
-    get_init_guess           = hf_cpu.SCF.get_init_guess
     make_rdm2                = NotImplemented
     energy_elec              = NotImplemented
     energy_tot               = energy_tot
@@ -1076,6 +1116,41 @@ class SCF(pyscf_lib.StreamObject):
     def init_guess_by_sad_hf(self, mol=None):
         if mol is None: mol = self.mol
         return init_guess_by_sad_hf(mol, self)
+
+    def get_init_guess(self, mol=None, key='minao', **kwargs):
+        '''Build an initial density, including three optional SAD variants.
+
+        Set mf.init_guess to 'minao_high_spin', 'atom_high_spin', or
+        'atom_uhf_average' to use them in kernel(). The first two preserve
+        aligned neutral-atom spin populations for UHF/UKS, even when different
+        from the molecular spin. Restricted methods use their spin sum.
+        'atom_uhf_average' spin-averages atomic UHF densities and scales the
+        common spatial density to molecular alpha/beta populations for UHF.
+        Existing 'minao' and 'atom' behavior is unchanged. See the module-level
+        init_guess_by_minao and init_guess_by_atom for atomic conventions.
+        '''
+        if not isinstance(key, str) or key.lower() not in (
+                'minao_high_spin', 'atom_high_spin', 'atom_uhf_average'):
+            return hf_cpu.SCF.get_init_guess(self, mol, key, **kwargs)
+        from gpu4pyscf.scf import uhf, rohf
+        if isinstance(self, rohf.ROHF) or not isinstance(self, (RHF, uhf.UHF)):
+            raise NotImplementedError('These SAD variants require RHF/RKS or UHF/UKS')
+        if mol is None:
+            mol = self.mol
+        key = key.lower()
+        logger.info(self, 'Initial guess from %s', key)
+        if key == 'minao_high_spin':
+            dm = init_guess_by_minao(mol, high_spin=True)
+        elif key == 'atom_high_spin':
+            dm = init_guess_by_atom(mol, method='high_spin')
+        else:
+            dm = init_guess_by_atom(mol, method='uhf_average')
+            if isinstance(self, uhf.UHF):
+                return uhf._scale_rhf_guess(self, mol, dm)
+            return dm
+        if isinstance(self, uhf.UHF):
+            return dm
+        return _sum_spin_guess(dm)
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
