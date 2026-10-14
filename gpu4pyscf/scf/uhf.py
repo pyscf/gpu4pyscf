@@ -183,37 +183,33 @@ def _cast_rhf_init_guess(fn):
     def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None):
         if mol is None: mol = mf.mol
         dm = fn(mf, mol)
-        return _scale_rhf_guess(mf, mol, dm, breaksym)
+        assert dm.ndim == 2
+
+        neleca, nelecb = mf.nelec
+        ne = neleca + nelecb
+        fac_a = neleca / ne
+        fac_b = nelecb / ne
+        if breaksym is None: breaksym = mf.init_guess_breaksym
+        if breaksym and mol.spin == 0 and neleca != 1:
+            fac_a = (neleca+1) / ne
+            fac_b = (neleca-1) / ne
+        if hasattr(dm, 'mo_coeff'):
+            scale = ne / dm.mo_occ.sum()
+            idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
+            mo_coeff = cupy.repeat(asarray(dm.mo_coeff[None,:,idx]), 2, axis=0)
+            mo_occ = cupy.repeat(asarray(dm.mo_occ[None,idx]), 2, axis=0)
+            mo_occ[0] *= fac_a * scale
+            mo_occ[1] *= fac_b * scale
+            dm = cupy.repeat(asarray(dm[None]), 2, axis=0)
+            dm[0] *= fac_a * scale
+            dm[1] *= fac_b * scale
+            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        else:
+            dm = cupy.repeat(asarray(dm[None]), 2, axis=0)
+            dm[0] *= fac_a
+            dm[1] *= fac_b
+        return dm
     return uhf_from_rhf_init_guess
-
-def _scale_rhf_guess(mf, mol, dm, breaksym=None):
-    """Split a spin-summed density using the existing UHF guess convention."""
-    assert dm.ndim == 2
-
-    neleca, nelecb = mf.nelec
-    ne = neleca + nelecb
-    fac_a = neleca / ne
-    fac_b = nelecb / ne
-    if breaksym is None: breaksym = mf.init_guess_breaksym
-    if breaksym and mol.spin == 0 and neleca != 1:
-        fac_a = (neleca+1) / ne
-        fac_b = (neleca-1) / ne
-    if hasattr(dm, 'mo_coeff'):
-        scale = ne / dm.mo_occ.sum()
-        idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
-        mo_coeff = cupy.repeat(asarray(dm.mo_coeff[None,:,idx]), 2, axis=0)
-        mo_occ = cupy.repeat(asarray(dm.mo_occ[None,idx]), 2, axis=0)
-        mo_occ[0] *= fac_a * scale
-        mo_occ[1] *= fac_b * scale
-        dm = cupy.repeat(asarray(dm[None]), 2, axis=0)
-        dm[0] *= fac_a * scale
-        dm[1] *= fac_b * scale
-        dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
-    else:
-        dm = cupy.repeat(asarray(dm[None]), 2, axis=0)
-        dm[0] *= fac_a
-        dm[1] *= fac_b
-    return dm
 
 def _trace_ecoul(vj, ddm, dm_last, vhf_last):
     ecoul = None
