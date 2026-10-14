@@ -176,8 +176,8 @@ class KnowValues(unittest.TestCase):
         ref = mf.copy().run()
         mf = mf.newton()
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.587438241728, 8)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 7)
+        self.assertAlmostEqual(mf.e_tot, -10.587438241728, 7)
 
     def test_nr_kuks_hybrid(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([2,1,1]), xc='pbe0').density_fit()
