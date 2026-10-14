@@ -14,60 +14,215 @@
 
 import unittest
 import numpy as np
+import cupy as cp
 from pyscf.pbc import gto, dft
 from gpu4pyscf.pbc import dft as gpu_dft
+from gpu4pyscf.pbc import scf as gpu_scf
+try:
+    import mcfun
+except ImportError:
+    mcfun = None
 
+
+def setUpModule():
+    global cell
+    cell = gto.Cell()
+    cell.a = '''0.      1.7834  1.7834
+                1.7834  0.      1.7834
+                1.7834  1.7834  0.    '''
+    cell.atom = 'He 0.,  0.,  0.; H 0.8917,  0.8917,  0.8917'
+    cell.basis = [[0, [2, 1]], [1, [.5, 1]]]
+    cell.spin = 1
+    cell.precision = 1e-10
+    cell.verbose = 0
+    cell.build()
 
 class KnownValues(unittest.TestCase):
     def test_collinear_gks_gga(self):
-        # Adapted from pyscf/pbc/dft/test/test_gks.py. Use matching uniform
-        # grids and a live CPU reference instead of its atom-grid energy.
-        cell = gto.M(
-            a=[[0, 1.7834, 1.7834], [1.7834, 0, 1.7834],
-               [1.7834, 1.7834, 0]],
-            atom='He 0 0 0; H .8917 .8917 .8917',
-            basis=[[0, [2, 1]], [1, [.5, 1]]], spin=1,
-            mesh=[21]*3, precision=1e-10, verbose=0)
-        ref = dft.GKS(cell, xc='pbe')
-        ref.grids = dft.gen_grid.UniformGrids(cell)
+        mf = gpu_dft.GKS(cell)
+        mf.xc = 'pbe'
+        mf.collinear = 'col'
+        mf.run()
+
+        ref = dft.GKS(cell, xc=mf.xc)
         ref.collinear = 'col'
-        ref.run(conv_tol=1e-10)
-        mf = gpu_dft.GKS(cell, xc='pbe')
-        mf.collinear = 'col'
-        mf.run(dm0=ref.make_rdm1(), conv_tol=1e-10)
-        self.assertTrue(ref.converged and mf.converged)
-        self.assertAlmostEqual(mf.e_tot, ref.e_tot, delta=1e-7)
-        dm = mf.make_rdm1()
-        vref = ref.get_veff(dm=dm.get())
-        v = mf.get_veff(dm=dm)
-        np.testing.assert_allclose(v.get(), vref, atol=1e-7, rtol=0)
-        self.assertAlmostEqual(float(v.exc), float(vref.exc), delta=1e-7)
+        self.assertAlmostEqual(
+            mf.e_tot, ref.energy_tot(dm=mf.make_rdm1().get()), delta=1e-8)
 
-    def test_kgks_matches_krks(self):
-        # Adapted from pyscf/pbc/dft/test/test_kgks.py: test_KGKS.
-        # A smaller closed-shell He cell keeps the k-mesh regression cheap.
-        cell = gto.M(
-            unit='B', a=np.eye(3)*4, mesh=[21]*3, precision=1e-10,
-            atom='He 1.5 2 1.5; He 2 2 2.5',
-            basis={'He': [[0, (.8, 1.)], [0, (1., 1.)], [0, (1.2, 1.)]]},
-            verbose=0)
-        kpts = cell.make_kpts([2, 1, 1])
-        ref = dft.KRKS(cell, kpts, xc='lda,vwn').run(
-            init_guess='hcore', conv_tol=1e-10)
-        mf = gpu_dft.KGKS(cell, kpts, xc='lda,vwn')
-        mf.collinear = 'col'
-        mf.run(init_guess='hcore', conv_tol=1e-10)
-        self.assertTrue(ref.converged and mf.converged)
-        self.assertAlmostEqual(mf.e_tot, ref.e_tot, delta=1e-7)
-        # Also check the complex k-point effective potential against CPU KGKS.
-        gref = dft.KGKS(cell, kpts, xc=mf.xc)
-        gref.collinear = 'col'
-        dm = mf.make_rdm1()
-        vref = gref.get_veff(dm=dm.get())
-        v = mf.get_veff(dm=dm)
-        np.testing.assert_allclose(v.get(), vref, atol=1e-7, rtol=0)
-        self.assertAlmostEqual(float(v.exc), float(vref.exc), delta=1e-7)
+    def test_mcol_gks_gga(self):
+        mf = gpu_dft.GKS(cell).density_fit()
+        mf.xc = 'pbe'
+        mf.collinear = 'mcol'
+        mf._numint.spin_samples = 6
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.7331713336996268, 7)
 
+    def test_ncol_x2c_gks_lda(self):
+        mf = gpu_dft.GKS(cell).x2c()
+        mf.xc = 'lda,vwn'
+        mf.collinear = 'ncol'
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.6093309656369732, 7)
+
+    def test_mcol_x2c_gks_lda(self):
+        mf = gpu_dft.GKS(cell).x2c()
+        mf.xc = 'lda,vwn'
+        mf._numint.spin_samples = 50
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.6093309656369732, 6)
+
+    def test_KGKS(self):
+        cell = gto.Cell()
+        cell.unit = 'A'
+        cell.atom = 'C 0.,  0.,  0.; C 0.8917,  0.8917,  0.8917'
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+
+        cell.basis = 'gth-dzvp'
+        cell.pseudo = 'gth-pade'
+        cell.verbose = 0
+        cell.mesh = [29] * 3
+        cell.precision = 1e-10
+        cell.build()
+        kpts = cell.make_kpts([2, 1, 1], wrap_around=True)
+        # In the absence of off diagonal blocks in the spin space, dft.KGKS should reproduce the dft.KRKS results
+        # Reference from dft.KRKS
+        # mf = dft.KRKS(cell, kpts)
+        # mf.xc = 'lda'
+        # mf.conv_tol = 1e-10
+        # e_ref = mf.kernel() # -10.38125412115097
+        # self.assertAlmostEqual(e_ref, -10.38125412115097, 8)
+        mf = gpu_dft.KGKS(cell, kpts)
+        mf.xc = 'lda'
+        mf.conv_tol = 1e-10
+        e_kgks = mf.kernel()
+        self.assertAlmostEqual(e_kgks, -10.38125412115097, 8)
+
+    def test_veff_vs_cpu(self):
+        cell = gto.Cell()
+        cell.unit = 'A'
+        cell.atom = 'C 0.,  0.,  0.; C 0.8917,  0.8917,  0.8917'
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+
+        cell.basis = 'gth-dzvp'
+        cell.pseudo = 'gth-pade'
+        cell.verbose = 0
+        cell.mesh = [29] * 3
+        cell.precision = 1e-10
+        cell.build()
+        kpts = cell.make_kpts([2, 1, 1], wrap_around=True)
+        mf = gpu_dft.KGKS(cell, kpts)
+        n2c = cell.nao * 2
+        rng = np.random.default_rng(1)
+        c = (rng.random((len(kpts), n2c, cell.nelectron))
+             + 1j*rng.random((len(kpts), n2c, cell.nelectron)))
+        # Positive-semidefinite densities keep the spin densities physical.
+        dm = (c @ c.swapaxes(-1, -2).conj()) / n2c
+        mf.xc = 'pbe'
+        mf.collinear = 'col'
+        ref = mf.to_cpu().get_veff(cell, dm)
+        dat = mf.get_veff(cell, cp.asarray(dm)).get()
+        self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
+
+    def test_collinear_kgks_lda(self):
+        cell = gto.Cell()
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+        cell.atom = 'He 0.,  0.,  0.; H 0.8917,  0.8917,  0.8917'
+        cell.basis = [[0, [2, 1]], [1, [.5, 1]]]
+        cell.spin = 1
+        cell.build()
+        mf = gpu_dft.KGKS(cell, kpts=cell.make_kpts([3,1,1]))
+        mf.xc = 'lda,vwn'
+        mf.collinear = 'col'
+        mf.run()
+
+        ref = dft.KGKS(cell, mf.kpts, xc=mf.xc)
+        ref.collinear = 'col'
+        self.assertAlmostEqual(
+            mf.e_tot, ref.energy_tot(dm=mf.make_rdm1().get()), delta=1e-8)
+
+    def test_collinear_kgks_gga(self):
+        cell = gto.Cell()
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+        cell.atom = 'He 0.,  0.,  0.; H 0.8917,  0.8917,  0.8917'
+        cell.basis = [[0, [2, 1]], [1, [.5, 1]]]
+        cell.spin = 1
+        cell.build()
+        mf = gpu_dft.KGKS(cell, kpts=cell.make_kpts([2,1,1]))
+        mf.xc = 'pbe'
+        mf.collinear = 'col'
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -1.6373456924395708, 7)
+
+    @unittest.skipIf(mcfun is None, "mcfun library not found.")
+    def test_mcol_kgks_gga(self):
+        cell = gto.Cell()
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+        cell.atom = 'He 0.,  0.,  0.; H 0.8917,  0.8917,  0.8917'
+        cell.basis = [[0, [2, 1]], [1, [.5, 1]]]
+        cell.spin = 1
+        cell.build()
+        mf = gpu_dft.KGKS(cell, kpts=cell.make_kpts([2,1,1])).density_fit()
+        mf.xc = 'pbe'
+        mf.collinear = 'mcol'
+        mf._numint.spin_samples = 6
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -1.6312141891350893, 5)
+
+    def test_ncol_x2c_kgks_lda(self):
+        cell = gto.Cell()
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+        cell.atom = 'He 0.,  0.,  0.; H 0.8917,  0.8917,  0.8917'
+        cell.basis = [[0, [2, 1]], [1, [.5, 1]]]
+        cell.spin = 1
+        cell.build()
+        mf = gpu_dft.KGKS(cell, kpts=cell.make_kpts([2,1,1])).x2c()
+        mf.xc = 'lda,vwn'
+        mf.collinear = 'ncol'
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -1.533809531603591, 6)
+
+    @unittest.skipIf(mcfun is None, "mcfun library not found.")
+    def test_mcol_x2c_kgks_lda(self):
+        cell = gto.Cell()
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+        cell.atom = 'He 0.,  0.,  0.; H 0.8917,  0.8917,  0.8917'
+        cell.basis = [[0, [2, 1]], [1, [.5, 1]]]
+        cell.spin = 1
+        cell.build()
+        mf = gpu_dft.KGKS(cell, kpts=cell.make_kpts([2,1,1])).x2c()
+        mf.xc = 'lda,vwn'
+        mf.collinear = 'mcol'
+        mf._numint.spin_samples = 50
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -1.533809531603591, 6)
+
+    def test_to_hf(self):
+        mf = gpu_dft.KGKS(cell).density_fit()
+        mf.with_df._j_only = True
+        a_hf = mf.to_hf()
+        self.assertTrue(a_hf.with_df._j_only)
+        self.assertTrue(isinstance(a_hf, gpu_scf.kghf.KGHF))
+
+        mf = gpu_dft.KGKS(cell, kpts=cell.make_kpts([2,1,1])).density_fit()
+        mf.with_df._j_only = True
+        a_hf = mf.to_hf()
+        self.assertTrue(not a_hf.with_df._j_only)
+        self.assertTrue(isinstance(a_hf, gpu_scf.kghf.KGHF))
 
 if __name__ == '__main__':
+    print("Full Tests for GKS")
     unittest.main()
