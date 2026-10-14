@@ -84,12 +84,14 @@ class UHF(pbchf.SCF):
         return mo_energy, mo_coeff
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
+        assert isinstance(key, str)
         if cell is None:
             cell = self.cell
+        dm = mol_uhf.UHF.get_init_guess(self, cell, key)
+
         if s1e is None:
             s1e = self.get_ovlp(cell)
-        dm = cp.asarray(mol_uhf.UHF.get_init_guess(self, cell, key))
-        ne = cp.einsum('xij,ji->x', dm, s1e).real.get()
+        ne = cp.einsum('xij,ji->x', cp.asarray(dm), s1e).real.get()
         nelec = self.nelec
         if any(abs(ne - nelec) > 0.01):
             logger.debug(self, 'Big error detected in the electron number '

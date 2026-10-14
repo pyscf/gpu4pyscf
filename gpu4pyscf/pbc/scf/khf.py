@@ -241,23 +241,26 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
             mo_energy[k,idx] = e
     return mo_energy, mo_coeff
 
+def _expand_dm_kpts(dm, nkpts):
+    """Repeat a molecular density and its orbital tags over k-points."""
+    assert dm.ndim == 2
+    if hasattr(dm, 'mo_coeff'):
+        idx = cp.where(dm.mo_occ > 0)[0]
+        mo_coeff = cp.repeat(asarray(dm.mo_coeff)[None,:,idx], nkpts, axis=0)
+        mo_occ = cp.repeat(asarray(dm.mo_occ)[None,idx], nkpts, axis=0)
+        dm = cp.repeat(asarray(dm[None]), nkpts, axis=0)
+        dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+    else:
+        dm = cp.repeat(asarray(dm[None]), nkpts, axis=0)
+    return dm
+
 def _cast_mol_init_guess(fn):
     @functools.wraps(fn)
     def fn_init_guess(mf, cell=None, kpts=None):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
         dm = fn(mf, cell)
-        assert dm.ndim == 2
-        nkpts = len(kpts)
-        if hasattr(dm, 'mo_coeff'):
-            idx = np.where(cp.asnumpy(dm.mo_occ) > 0)[0]
-            mo_coeff = cp.repeat(asarray(dm.mo_coeff[None,:,idx]), nkpts, axis=0)
-            mo_occ = cp.repeat(asarray(dm.mo_occ[None,idx]), nkpts, axis=0)
-            dm = cp.repeat(asarray(dm[None]), nkpts, axis=0)
-            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        else:
-            dm = cp.repeat(asarray(dm[None]), nkpts, axis=0)
-        return dm
+        return _expand_dm_kpts(dm, len(kpts))
     return fn_init_guess
 
 def get_rho(mf, dm=None, grids=None, kpts=None):
@@ -724,13 +727,18 @@ class KRHF(KSCF):
         return _get_veff(self, cell, dm_kpts, dm_last, vhf_last, hermi, kpts, kpts_band)
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
+        assert isinstance(key, str)
+        key = key.lower()
+        if cell is None: cell = self.cell
         kpts = self.kpts
-        if s1e is None:
-            s1e = self.get_ovlp(cell, kpts)
         dm = mol_hf.SCF.get_init_guess(self, cell, key)
+        if key in ('minao_high_spin', 'atom_high_spin'):
+            dm = _expand_dm_kpts(dm, len(kpts))
         nkpts = len(kpts)
         assert dm.ndim == 3 and len(dm) == nkpts
 
+        if s1e is None:
+            s1e = self.get_ovlp(cell, kpts)
         ne = float(cp.einsum('kij,kji->', dm, s1e).real)
         # FIXME: consider the fractional num_electron or not? This maybe
         # relate to the charged system.

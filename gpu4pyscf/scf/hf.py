@@ -1322,7 +1322,7 @@ class RHF(SCF):
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         if not isinstance(key, str):
             return key
-        dm = super().get_init_guess(mol, key, **kwargs)
+        dm = SCF.get_init_guess(self, mol, key, **kwargs)
         if key.lower() in ('minao_high_spin', 'atom_high_spin'):
             logger.info(self, 'High spin for RHF, averaged')
             dm = tag_array(dm[0]+dm[1], mo_coeff=dm.mo_coeff[0],

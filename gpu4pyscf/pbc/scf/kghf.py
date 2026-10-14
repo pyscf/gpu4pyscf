@@ -118,7 +118,6 @@ class KGHF(khf.KSCF):
     get_bands = kghf_cpu.KGHF.get_bands
     get_jk = get_jk
     get_occ = get_occ
-    get_init_guess = khf.KRHF.get_init_guess
     init_guess_by_1e = khf.KRHF.init_guess_by_1e
     init_guess_by_huckel = khf._cast_mol_init_guess(ghf.GHF.init_guess_by_huckel)
     init_guess_by_mod_huckel = khf._cast_mol_init_guess(ghf.GHF.init_guess_by_mod_huckel)
@@ -130,6 +129,28 @@ class KGHF(khf.KSCF):
 
     init_guess_by_minao = _cast_mol_init_guess(mol_hf.init_guess_by_minao)
     init_guess_by_atom = _cast_mol_init_guess(mol_hf.init_guess_by_atom)
+
+    def get_init_guess(self, cell=None, key='minao', s1e=None):
+        assert isinstance(key, str)
+        key = key.lower()
+        if cell is None: cell = self.cell
+        dm = mol_ghf.GHF.get_init_guess(self, cell, key)
+        if key in ('minao_high_spin', 'atom_high_spin'):
+            dm = khf._expand_dm_kpts(dm, len(self.kpts))
+        nkpts = len(self.kpts)
+        assert dm.ndim == 3 and len(dm) == nkpts
+
+        if s1e is None:
+            s1e = self.get_ovlp(cell, self.kpts)
+        ne = float(cp.einsum('kij,kji->', dm, s1e).real)
+        nelectron = float(cell.tot_electrons(nkpts))
+        if abs(ne - nelectron) > 0.01*nkpts:
+            logger.debug(self, 'Normalizing initial guess from %g to %g electrons per cell',
+                         ne/nkpts, nelectron/nkpts)
+            dm *= nelectron / ne
+            if hasattr(dm, 'mo_coeff'):
+                dm.mo_occ *= nelectron / ne
+        return dm
 
     def init_guess_by_chkfile(self, chkfile=None, project=None, kpts=None):
         '''Read periodic HF/KS orbitals into a spin-AO density on kpts.

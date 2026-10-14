@@ -156,10 +156,7 @@ class GHF(hf.SCF):
         if mol is None:
             mol = self.mol
         key = key.lower()
-        if key in ('qchem_sad', 'qchem_autosad', 'sad_frac_occ'):
-            raise NotImplementedError('%s initial guess for GHF' % key)
-
-        dm = super().get_init_guess(mol, key, **kwargs)
+        dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
         nao = mol.nao
         if dm.shape == (nao, nao):
             dm = _from_rhf_init_dm(dm)
