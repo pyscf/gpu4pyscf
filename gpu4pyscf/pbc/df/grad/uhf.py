@@ -23,7 +23,7 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, ndarray, get_avail_mem, empty_aligned)
+    contract, asarray, tag_array, ndarray, get_avail_mem, empty_aligned)
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern, get_ao_pair_loc
 from gpu4pyscf.df.grad.rhf import factorize_dm
@@ -35,6 +35,7 @@ from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.df.rsdf_builder import LINEAR_DEP_THR
 from gpu4pyscf.pbc.df.grad.rhf import (
     _gen_metric_solver, _get_ej_derivatives,
+    _get_ejk_derivatives as _get_rhf_ejk_derivatives,
     indexed_scale, symmetric_scatter)
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
@@ -65,6 +66,25 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     assert bvk_ncells == 1, 'Gamma derivatives require a one-cell BvK mesh'
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
+
+    if hermi == 1 and j_factor == 0:
+        # Process one spin at a time so only for exchange.
+        log.info('Evaluate Gamma-point exchange one spin at a time')
+        ejk_sigma = np.zeros((cell.natm+3, 3))
+        for spin in range(2):
+            dm_spin = asarray(dm[spin])
+            if hasattr(dm, 'mo_coeff'):
+                dm_spin = tag_array(
+                    dm_spin, mo_coeff=asarray(dm.mo_coeff[spin]),
+                    mo_occ=asarray(dm.mo_occ[spin]))
+
+            # RHF applies half the unrestricted exchange prefactor.
+            ejk_sigma += _get_rhf_ejk_derivatives(
+                int3c2e_opt, dm_spin, hermi, 0, 2*k_factor, exxdiv,
+                omega, verbose, linear_dep_threshold)
+            if spin == 0:
+                cp.get_default_memory_pool().free_all_blocks()
+        return ejk_sigma
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
     # transform to the AO order in sorted_cell
