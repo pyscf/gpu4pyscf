@@ -19,6 +19,7 @@ import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, cholesky, eigh, transpose_sum, get_avail_mem)
 from gpu4pyscf.df.grad.rhf import (
@@ -144,15 +145,13 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
         l_ctr_aux_offsets, auxmol.uniq_l_ctr, batch_size)
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
-    l_ctr_aux_counts = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
+    aux_offsets = aux_loc[ksh_offsets_cpu]
 
     if j_factor is not None:
         dms = contract('npi,nqi->npq', dm_factor_l, dm_factor_r)
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libvhf_rys.sum_ejk_int3c2e_ip1
-    l = np.arange(laux+1)
-    nf = (l + 1) * (l + 2) // 2
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
     buf1 = cp.empty((blksize, nao, nao))
@@ -160,8 +159,9 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     buf2 = cp.empty((blksize, nocc if hermi == 1 else nao, nao))
     ejk = cp.zeros((mol.natm, 3))
     ejk_aux = cp.zeros((mol.natm, 3))
-    for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
-        naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
+    aux_splits = splits_by_blocksize(aux_offsets, batch_size)
+    for kbatch, kend in zip(aux_splits[:-1], aux_splits[1:]):
+        naux_in_batch = aux_offsets[kend] - aux_offsets[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -197,7 +197,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
             ctypes.byref(int3c2e_envs),
             ctypes.c_int(shm_size_max),
             ctypes.c_int(len(shl_pair_offsets) - 1),
-            ctypes.c_int(1),
+            ctypes.c_int(kend-kbatch),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
@@ -572,11 +572,9 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
         l_ctr_aux_offsets, auxmol.uniq_l_ctr, batch_size)
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
-    l_ctr_aux_counts = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
+    aux_offsets = aux_loc[ksh_offsets_cpu]
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    l = np.arange(laux+1)
-    nf = (l + 1) * (l + 2) // 2
     aux0 = aux1 = 0
     buf1 = cp.empty((blksize, nao, nao))
     buf2 = cp.empty((blksize, nao, nao))
@@ -589,8 +587,9 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
         ejk = cp.zeros((n_dm, mol.natm, 3))
         buf = cp.empty((n_dm*nao_pair*batch_size))
 
-    for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
-        naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
+    aux_splits = splits_by_blocksize(aux_offsets, batch_size)
+    for kbatch, kend in zip(aux_splits[:-1], aux_splits[1:]):
+        naux_in_batch = aux_offsets[kend] - aux_offsets[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         if sum_results:
             compressed = ndarray((nao_pair, naux_in_batch), buffer=buf3)
@@ -636,7 +635,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             ctypes.byref(int3c2e_envs),
             ctypes.c_int(shm_size_max),
             ctypes.c_int(len(shl_pair_offsets) - 1),
-            ctypes.c_int(1),
+            ctypes.c_int(kend-kbatch),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
