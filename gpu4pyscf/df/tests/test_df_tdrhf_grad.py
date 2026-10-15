@@ -301,6 +301,16 @@ class KnownValues(unittest.TestCase):
             ref *= .5
             assert abs(ejk[i] - ref).max() < 5e-11
 
+        # Vary the auxiliary and orbital contraction partitions for fixed DMs.
+        for jfac in (None, j_factor):
+            with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: 16000000)):
+                ref_mem = _jk_energies_per_atom(opt, dm, j_factor=jfac, k_factor=k_factor)
+            for memory in (4500000, 2500000):
+                with self.subTest(j_factor=jfac, memory=memory):
+                    with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: memory)):
+                        ejk_mem = _jk_energies_per_atom(opt, dm, j_factor=jfac, k_factor=k_factor)
+                    np.testing.assert_allclose(ejk_mem, ref_mem, atol=1e-12, rtol=0)
+
         ref = ejk
         dm = cp.vstack([dm]*4)
         j_factor = j_factor * 4

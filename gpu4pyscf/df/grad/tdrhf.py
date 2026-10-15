@@ -16,10 +16,11 @@ import warnings
 import ctypes
 import numpy as np
 import cupy as cp
+from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, transpose_sum, get_avail_mem)
+    contract, asarray, ndarray, cholesky, eigh, transpose_sum, get_avail_mem)
 from gpu4pyscf.df.grad.rhf import (
     _split_l_ctr_pattern, get_ao_pair_loc, libvhf_rys, Int3c2eOpt, int2c2e,
     int3c2e_scheme, _gen_metric_solver, _factorize_dm)
@@ -481,23 +482,39 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
     tmp = None
 
     j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
+    # Factor C M^-1 C.T as A A.T, following df.df._decompose_j2c,
+    # while retaining the derivative builder's explicit CD/ED selection.
     if mol.omega <= 0 and not auxmol.mol.cart:
-        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
+        decompose_j2c = 'CD'
+        try:
+            cd_low = cholesky(j2c)
+            aux_coeff = solve_triangular(
+                cd_low, aux_coeff.T, lower=True, overwrite_b=True).T
+            cd_low = None
+        except RuntimeError:
+            decompose_j2c = 'ED'
     else:
-        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
-    j2c = aux_coeff = None
+        decompose_j2c = 'ED'
+    if decompose_j2c == 'ED':
+        w, v = eigh(j2c)
+        idx = cp.where(w > df.LINEAR_DEP_THR)[0]
+        aux_coeff = aux_coeff.dot(v[:,idx] / cp.sqrt(w[idx]))
+        w = v = idx = None
     for i in range(n_dm):
-        j3c_o2o1[i] = contract('uv,vij->uij', metric, j3c_o2o1[i])
-        j3c_o1o2[i] = contract('uv,vij->uij', metric, j3c_o1o2[i])
+        tmp = contract('up,uij->pij', aux_coeff, j3c_o2o1[i])
+        j3c_o2o1[i] = contract('up,pij->uij', aux_coeff, tmp)
+        tmp = contract('up,uij->pij', aux_coeff, j3c_o1o2[i])
+        j3c_o1o2[i] = contract('up,pij->uij', aux_coeff, tmp)
+    j2c = tmp = None
     cp.get_default_memory_pool().free_all_blocks()
 
     if j_factor is not None:
         j_factor = cp.asarray(j_factor)
-        auxvec1 = cp.einsum('uv,nv->nu', metric, auxvec1)
-        auxvec2 = cp.einsum('uv,nv->nu', metric, auxvec2)
+        auxvec1 = aux_coeff.dot(aux_coeff.T.dot(auxvec1.T)).T
+        auxvec2 = aux_coeff.dot(aux_coeff.T.dot(auxvec2.T)).T
         auxvec1_jfac = j_factor[:,None] * auxvec1
         auxvec2_jfac = j_factor[:,None] * auxvec2
-    metric = None
+    aux_coeff = None
 
     # (d/dX P|Q) contributions
     if sum_results:
