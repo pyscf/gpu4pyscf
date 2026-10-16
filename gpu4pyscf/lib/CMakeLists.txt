@@ -342,7 +342,7 @@ if(BUILD_EXCHCXX)
     message(STATUS "ExchCXX: not found -- building from source (~35 min)")
     ExternalProject_Add(ExchCXX
       GIT_REPOSITORY    https://github.com/abagusetty/ExchCXX.git
-      GIT_TAG           d7ed4af53ce0499da62d38e54e100713ee565e8f
+      GIT_TAG           1274182f28624fd173d758051605908827ebe9a4
       UPDATE_DISCONNECTED ON
       PREFIX            ${PROJECT_BINARY_DIR}/deps
       INSTALL_DIR       ${PROJECT_SOURCE_DIR}/deps
