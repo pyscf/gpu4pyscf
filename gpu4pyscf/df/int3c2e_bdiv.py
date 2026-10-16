@@ -34,7 +34,7 @@ from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedMole, RysIntEnvVars, PBCIntEnvVars,
-    extract_pgto_params, groupby)
+    extract_pgto_params, groupby, _split_l_ctr_groups)
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, _cache_q_cond_and_non0pairs,
     _check_rsh_factors, SHM_SIZE, libvhf_rys)
@@ -175,8 +175,11 @@ class Int3c2eOpt:
                 bas_ij_cache = {k: v for k, v in mol.iter_pair_by_l(self.bas_ij_cache)}
             else:
                 bas_ij_cache = self.bas_ij_cache
+            # Bound pair work alongside the auxiliary-shell task subdivision.
+            pair_batch_size = np.minimum(nsp_per_block[0]*4,
+                                         np.maximum(nsp_per_block[0]//4, 16))
             bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-                bas_ij_cache, nsp_per_block[0]*4)
+                bas_ij_cache, pair_batch_size)
             ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], bas_ij_cache, cart)
             nao_pair = ao_pair_loc[-1].get()
 
@@ -210,6 +213,10 @@ class Int3c2eOpt:
             uniq_l_ctr_aux = auxmol.uniq_l_ctr
             aux_loc = auxmol.ao_loc
             if aux_batch_size is None:
+                # Follow df.j_engine_3c2e.Int3c2eOpt.contract_auxvec's 16-shell tasks.
+                uniq_l_ctr_aux, aux_counts = _split_l_ctr_groups(
+                    auxmol.uniq_l_ctr, auxmol.l_ctr_counts, [16]*(laux+1))
+                l_ctr_aux_offsets = np.append(0, np.cumsum(aux_counts))
                 ksh_offsets_cpu = l_ctr_aux_offsets
                 aux_splits = [0, len(ksh_offsets_cpu)-1]
             else:
@@ -785,8 +792,11 @@ def _int3c2e_ip1_evaluator(int3c2e_opt, scheme, batch_size,
     laux = auxmol.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
+    # Bound serial work in each derivative-integral task.
+    pair_batch_size = np.minimum(nsp_per_block[0]*4,
+                                 np.maximum(nsp_per_block[0]//4, 16))
     bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-        int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
+        int3c2e_opt.bas_ij_cache, pair_batch_size)
     ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
     nao_pair = int(ao_pair_loc[-1].get())
 

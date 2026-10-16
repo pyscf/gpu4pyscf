@@ -188,8 +188,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
+        # Bound serial work in each derivative-integral task.
+        pair_batch_size = np.minimum(nsp_per_block[0]*4,
+                                     np.maximum(nsp_per_block[0]//4, 16))
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-            int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
+            int3c2e_opt.bas_ij_cache, pair_batch_size)
         ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
 
         l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
@@ -586,8 +589,11 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
+        # Bound serial work in each derivative-integral task.
+        pair_batch_size = np.minimum(nsp_per_block[0]*4,
+                                     np.maximum(nsp_per_block[0]//4, 16))
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-            int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
+            int3c2e_opt.bas_ij_cache, pair_batch_size)
         ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
         ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
