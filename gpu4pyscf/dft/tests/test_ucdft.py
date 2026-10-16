@@ -188,7 +188,6 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(float(lumo), 0.049445292477, 6)
         self.assertAlmostEqual(float(v_lagrange[0]), 0.288396, delta=1e-4)
 
-    @pytest.mark.slow
     def test_canonical_mo_energy(self):
         mf = self.output_lagrange_nested_cons2_minao['mf']
         mo_energy, mo_coeff = mf.get_canonical_mo()
