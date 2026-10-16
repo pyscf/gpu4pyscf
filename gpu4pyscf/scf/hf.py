@@ -424,9 +424,6 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
             mo_e[idx] = e
     return mo_e, mo
 
-# ANO basis data end at Cm (Z=96); heavier atoms use atomic HF for the guess.
-MINAO_MAX_Z = 96
-
 def init_guess_by_minao(mol, high_spin=False):
     '''Generate initial guess density matrix based on ANO basis, then project
     the density matrix to the basis set defined by ``mol``
@@ -442,6 +439,105 @@ def init_guess_by_minao(mol, high_spin=False):
     Returns:
         Density matrix, a tagged CuPy array, shape (nao, nao), or (2, nao, nao) if high_spin.
     '''
+    atm_conf = _atomic_minao_configs(mol)
+    magmom = None
+    if high_spin:
+        magmom = [1] * mol.natm
+    return _build_sad_dm(mol, atm_conf, magmom)
+
+def _infer_spin_orientation(mol, bond_threshold=2.5):
+    """Infer atomic spin orientations by a nearest-neighbor AFM walk.
+
+    Only elements in the B and N columns, and the 3d, 4d and 5d transition-metals
+    are considered. Other atoms remain zero.
+
+    Returns a list of -1, 0 or 1 in molecular atom order.
+    """
+    magmom = [0] * mol.natm
+    coords = mol.atom_coords()
+    dist = np.linalg.norm(coords[:,None] - coords, axis=2)
+    Z = [gto.charge(a[0]) for a in mol._atom]
+    mag_elements = [
+        5, 13, 31, 49, 81,  # B column
+        7, 15, 33, 51, 83,  # N column
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # 3d
+        39, 40, 41, 42, 43, 44, 45, 46, 47, 48,  # 4d
+        71, 72, 73, 74, 75, 76, 77, 78, 79, 80]  # 5d
+
+    remaining = np.where(np.isin(Z, mag_elements))[0].tolist()
+    while remaining:
+        current = remaining.pop(0)
+        magmom[current] = 1
+        while remaining:
+            nearest = int(np.argmin(dist[current, remaining]))
+            ia = remaining[nearest]
+            if dist[current, ia] >= bond_threshold:
+                break
+            magmom[ia] = -magmom[current]
+            current = remaining.pop(nearest)
+    return magmom
+
+def _build_sad_dm(mol, atm_conf, magmom=None):
+    """Build a superposition-of-atomic-densities (SAD) initial guess.
+
+    Args:
+        mol :
+            Mole or Cell instance
+        atm_conf : dict
+            Maps atom symbols to spin-summed (occ, c, dm)
+        magmom : sequence or None
+            One spin orientation per atom: 1 for alpha-aligned high spin,
+            -1 for beta-aligned high spin, or 0 for equal spin populations.
+            None assembles a spin-summed density without splitting occupations.
+
+    Returns:
+        A tagged density matrix with atom-diagonal blocks.
+    """
+    if magmom is not None:
+        assert len(magmom) == mol.natm
+
+    atm_dms = []
+    for ia in range(mol.natm):
+        element = mol.atom_symbol(ia)
+        if magmom is None:
+            atm_dms.append(atm_conf[element])
+            continue
+
+        occ, c, dm = atm_conf[element]
+        if magmom[ia] == 0:
+            occ_a = occ_b = occ * .5
+            dm_a = dm_b = dm * .5
+        else:
+            occ_a = cupy.minimum(occ, 1.)
+            occ_b = occ - occ_a
+            dm_a = (c * occ_a).dot(c.conj().T)
+            dm_b = dm - dm_a
+            if magmom[ia] == -1:
+                occ_a, occ_b = occ_b, occ_a
+                dm_a, dm_b = dm_b, dm_a
+        atm_dms.append(((occ_a, occ_b), (c, c), (dm_a, dm_b)))
+
+    if magmom is None: # spin-summed dm
+        dm = block_diag([d for _, _, d in atm_dms])
+        mo_coeff = block_diag([c for _, c, _ in atm_dms])
+        mo_occ = cupy.hstack([o for o, _, _ in atm_dms])
+    else:
+        dm_a = block_diag([d for _, _, d[0] in atm_dms])
+        dm_b = block_diag([d for _, _, d[1] in atm_dms])
+        mo_a = block_diag([c for _, c[0], _ in atm_dms])
+        mo_b = block_diag([c for _, c[1], _ in atm_dms])
+        occ_a = cupy.hstack([o for o[0], _, _ in atm_dms])
+        occ_b = cupy.hstack([o for o[1], _, _ in atm_dms])
+        dm = cp.stack([dm_a, dm_b])
+        mo_coeff = cp.stack([mo_a, mo_b])
+        mo_occ = cp.stack([occ_a, occ_b])
+    return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+
+def _atomic_minao_configs(mol, max_z=96):
+    """Return unique atom-symbol -> (occ, c, dm) MINAO configurations on the GPU.
+
+    Atoms with nuclear charge above max_z are handled using atomic HF.
+    """
     from pyscf.scf import atom_hf
 
     def minao_basis(symb, nelec_ecp):
@@ -522,68 +618,46 @@ def init_guess_by_minao(mol, high_spin=False):
     mol2 = mol.copy()
 
     aoslice = mol.aoslice_by_atom()
-    atm_dms = []
     # Preallocate a buffer in cupy memory pool for small arrays held in atm_conf
     workspace = cupy.empty(50**2*12)
     workspace = None # noqa: F841
+
     atm_conf = {}
+    heavy_atoms = [i for i, a in enumerate(mol._atom) if gto.charge(a[0]) > max_z]
+    if heavy_atoms:
+        logger.debug(mol, 'MINAO initial guess is not available for %s. '
+                     'Using atomic HF instead.', heavy_atoms)
+        fake_mol = mol.copy()
+        fake_mol.atom = [mol._atom[ia] for ia in heavy_atoms]
+        fake_mol.unit = 'Bohr'
+        fake_mol.spin = None
+        fake_mol.build(False, False)
+        atm_conf = _atomic_hf_configs(fake_mol)
+
     for ia, (p0, p1) in enumerate(aoslice[:,2:]):
         symb = mol.atom_symbol(ia)
+        if symb in atm_conf:
+            continue
         if gto.is_ghost_atom(symb) or p0 == p1:
             n = p1 - p0
-            atm_dms.append((cupy.zeros(0), cupy.zeros((n, 0)),
-                            cupy.zeros((n, n))))
+            atm_conf[symb] = (cupy.zeros(0), cupy.zeros((n, 0)),
+                             cupy.zeros((n, n)))
             continue
 
-        if symb not in atm_conf:
-            i0, i1 = aoslice[ia,:2]
-            if gto.charge(symb) > MINAO_MAX_Z:
-                logger.debug(mol, 'MINAO initial guess is not available for %s. '
-                             'Using atomic HF instead.', symb)
-                atom = mol.copy()
-                atom.atom = atom._atom = [mol._atom[ia]]
-                atom._atm = mol._atm[ia:ia+1].copy()
-                atom._bas = mol._bas[i0:i1].copy()
-                atom._ecpbas = mol._ecpbas[mol._ecpbas[:,0] == ia].copy()
-                atom._bas[:,0] = 0
-                atom._ecpbas[:,0] = 0
-                atom._nelectron = atom._nao = None
-                atom.charge = 0
-                atom.spin = atom.nelectron % 2
-                _, _, c, occ = atom_hf.get_atm_nrhf(atom)[symb]
-                if mol.cart:
-                    c = atom.cart2sph_coeff().dot(c)
-            else:
-                nelec_ecp = mol.atom_nelec_core(ia)
-                occ, basis = minao_basis(symb, nelec_ecp)
-                mol1._atm, mol1._bas, mol1._env = mol1.make_env(
-                    [mol._atom[ia]], {symb: basis}, [])
-                mol2._bas = mol._bas[i0:i1]
-                s22 = mol2.intor_symmetric('int1e_ovlp')
-                s21 = gto.mole.intor_cross('int1e_ovlp', mol2, mol1)
-                c = pyscf_lib.cho_solve(s22, s21, strict_sym_pos=False)
-            c = cupy.asarray(c[:,occ>0], order='C')
-            occ = cupy.asarray(occ[occ>0], order='C')
-            atm_conf[symb] = occ, c, (c*occ).dot(c.conj().T)
+        i0, i1 = aoslice[ia,:2]
+        nelec_ecp = mol.atom_nelec_core(ia)
+        occ, basis = minao_basis(symb, nelec_ecp)
+        mol1._atm, mol1._bas, mol1._env = mol1.make_env(
+            [mol._atom[ia]], {symb: basis}, [])
+        mol2._bas = mol._bas[i0:i1]
+        s22 = mol2.intor_symmetric('int1e_ovlp')
+        s21 = gto.mole.intor_cross('int1e_ovlp', mol2, mol1)
+        c = pyscf_lib.cho_solve(s22, s21, strict_sym_pos=False)
+        c = cupy.asarray(c[:,occ>0], order='C')
+        occ = cupy.asarray(occ[occ>0], order='C')
+        atm_conf[symb] = occ, c, (c*occ).dot(c.conj().T)
 
-        atm_dms.append(atm_conf[symb])
-
-    return _concat_atomic_dms(atm_dms, high_spin=high_spin)
-
-def _concat_atomic_dms(atm_dms, high_spin=False):
-    dm = block_diag([d for _, _, d in atm_dms])
-    mo_coeff = block_diag([c for _, c, _ in atm_dms])
-    mo_occ = cupy.hstack([o for o, _, _ in atm_dms])
-    if high_spin:
-        occ_a = cupy.minimum(mo_occ   , 1.)
-        occ_b = mo_occ - occ_a
-        dm_a = (mo_coeff * occ_a).dot(mo_coeff.conj().T)
-        dm_b = dm - dm_a
-        dm = cupy.stack([dm_a, dm_b])
-        mo_occ = cupy.stack([occ_a, occ_b])
-        mo_coeff = cupy.stack([mo_coeff, mo_coeff])
-
-    return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+    return atm_conf
 
 def init_guess_by_atom(mol, high_spin=False):
     '''Generate initial guess density matrix from superposition of atomic HF
@@ -596,6 +670,18 @@ def init_guess_by_atom(mol, high_spin=False):
     Returns:
         Density matrix, a tagged CuPy array, shape (nao, nao), or (2, nao, nao) if high_spin.
     '''
+    atm_conf = _atomic_hf_configs(mol, high_spin=high_spin)
+    magmom = None
+    if high_spin:
+        magmom = [1] * mol.natm
+    return _build_sad_dm(mol, atm_conf, magmom)
+
+def _atomic_hf_configs(mol, high_spin=False):
+    """Return unique atom-symbol -> (occ, c, dm) atomic HF configurations on the GPU.
+
+    high_spin selects the atomic ground-state configuration. Occupations and
+    densities are spin-summed; spin splitting is performed during assembly.
+    """
     from pyscf.scf import atom_hf
     from pyscf.data import elements
 
@@ -609,32 +695,28 @@ def init_guess_by_atom(mol, high_spin=False):
         c2s_l = [gto.cart2sph(l, normalized='sp') for l in range(5)]
 
     atm_conf = {}
-    atm_dms = []
-    mo_coeff = []
-    mo_occ = []
     for ia in range(mol.natm):
         symb = key = mol.atom_symbol(ia)
-        if key not in atm_conf:
-            if symb not in atm_scf:
-                symb = mol.atom_pure_symbol(ia)
-            if symb in atm_scf:
-                e_hf, e, c, occ = atm_scf[symb]
-                c = asarray(c[:,occ>0])
-                occ = asarray(occ[occ>0])
-                if mol.cart:
-                    b0, b1 = aoslice[:2]
-                    c2s = [c2s_l[l] for l in ls[b0:b1]]
-                    c2s = asarray(scipy.linalg.block_diag(*c2s))
-                    c = c2s.dot(c)
-            else:  # symb's basis is not specified in the input
-                nao_atm = aoslice[ia,3] - aoslice[ia,2]
-                c = cupy.zeros((nao_atm, 0))
-                occ = cupy.zeros(0)
-            atm_conf[key] = occ, c, (c*occ).dot(c.conj().T)
+        if key in atm_conf:
+            continue
+        if symb not in atm_scf:
+            symb = mol.atom_pure_symbol(ia)
+        if symb in atm_scf:
+            e_hf, e, c, occ = atm_scf[symb]
+            c = asarray(c[:,occ>0])
+            occ = asarray(occ[occ>0])
+            if mol.cart:
+                b0, b1 = aoslice[ia,:2]
+                c2s = [c2s_l[l] for l in ls[b0:b1]]
+                c2s = asarray(scipy.linalg.block_diag(*c2s))
+                c = c2s.dot(c)
+        else:  # symb's basis is not specified in the input
+            nao_atm = aoslice[ia,3] - aoslice[ia,2]
+            c = cupy.zeros((nao_atm, 0))
+            occ = cupy.zeros(0)
+        atm_conf[key] = occ, c, (c*occ).dot(c.conj().T)
 
-        atm_dms.append(atm_conf[key])
-
-    return _concat_atomic_dms(atm_dms, high_spin=high_spin)
+    return atm_conf
 
 def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False):
     '''

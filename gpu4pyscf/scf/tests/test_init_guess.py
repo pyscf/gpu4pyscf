@@ -481,11 +481,43 @@ class KnownValues(unittest.TestCase):
         assert abs(test_guess_energy - ref_guess_energy) < 3e-5
 
     def test_minao_heavy_atom_fallback(self):
-        mol = pyscf.M(atom='O 0 0 0; O 0 0 1.2', basis='cc-pvdz', verbose=0)
-        ref = hf.init_guess_by_atom(mol)
-        with mock.patch.object(hf, 'MINAO_MAX_Z', 1):
-            dm = hf.init_guess_by_minao(mol)
-        assert abs(ref - dm).max().get() < 1e-14
+        mol = pyscf.M(atom='H 0 0 0; O 0 0 1; O 0 0 2; N 0 0 3',
+                      basis='cc-pvdz', verbose=0)
+        ordinary = hf._atomic_minao_configs(mol)
+        reference = hf._atomic_hf_configs(mol)
+        # A single call handles both unique fallback elements, excluding H.
+        with mock.patch.object(hf, '_atomic_hf_configs', wraps=hf._atomic_hf_configs) as atomic_hf:
+            configs = hf._atomic_minao_configs(mol, max_z=1)
+        atomic_hf.assert_called_once()
+        atom_mol = atomic_hf.call_args.args[0]
+        self.assertEqual(atom_mol.elements, ['O', 'O', 'N'])
+        np.testing.assert_allclose(atom_mol.atom_coords(), mol.atom_coords()[[1, 2, 3]])
+        self.assertEqual(mol.natm, 4)
+        self.assertEqual(set(configs), {'H', 'O', 'N'})
+        cp.testing.assert_allclose(configs['H'][2], ordinary['H'][2], atol=1e-12)
+        cp.testing.assert_allclose(configs['O'][2], reference['O'][2], atol=1e-12)
+        cp.testing.assert_allclose(configs['N'][2], reference['N'][2], atol=1e-12)
+
+    def test_minao_heavy_atom_fallback_ecp(self):
+        mol = pyscf.M(atom='H 0 0 0; Cu1 0 0 2; H 0 0 4; Cu2 0 0 6',
+                      basis={'H': 'cc-pvdz', 'Cu': 'lanl2dz'}, ecp={'Cu': 'lanl2dz'},
+                      verbose=0)
+        original_atm = mol._atm.copy()
+        original_bas = mol._bas.copy()
+        original_ecpbas = mol._ecpbas.copy()
+        reference = hf._atomic_hf_configs(mol)
+        with mock.patch.object(hf, '_atomic_hf_configs', wraps=hf._atomic_hf_configs) as atomic_hf:
+            configs = hf._atomic_minao_configs(mol, max_z=1)
+        atom_mol = atomic_hf.call_args.args[0]
+        self.assertEqual(atom_mol.natm, 2)
+        np.testing.assert_array_equal(np.unique(atom_mol._bas[:, gto.ATOM_OF]), [0, 1])
+        np.testing.assert_array_equal(np.unique(atom_mol._ecpbas[:, gto.ATOM_OF]), [0, 1])
+        self.assertEqual(atom_mol.nelectron, 38)
+        cp.testing.assert_allclose(configs['Cu1'][2], reference['Cu1'][2], atol=1e-10)
+        cp.testing.assert_allclose(configs['Cu2'][2], reference['Cu2'][2], atol=1e-10)
+        np.testing.assert_array_equal(mol._atm, original_atm)
+        np.testing.assert_array_equal(mol._bas, original_bas)
+        np.testing.assert_array_equal(mol._ecpbas, original_ecpbas)
 
     def test_minao_high_spin_rhf(self):
         mol = pyscf.M(atom='O 0 0 0; O 0 0 1.2', basis='cc-pvdz', verbose=0)
@@ -572,6 +604,102 @@ class KnownValues(unittest.TestCase):
         cp.testing.assert_allclose(dm[0], dm[1], atol=1e-12)
         cp.testing.assert_allclose(dm, mf.make_rdm1(dm.mo_coeff, dm.mo_occ), atol=1e-12)
         cp.testing.assert_allclose(mf.get_veff(mol, dm), mf.get_veff(mol, cp.array(dm)), atol=1e-9)
+
+    def _check_unique_atomic_configs(self, get_configs, get_guess):
+        mol = pyscf.M(atom='H 0 0 1; O 0 0 0; H 0 1 0; ghost-H 0 0 3',
+                      basis='cc-pvdz', verbose=0)
+        configs = get_configs(mol)
+        self.assertEqual(set(configs), {mol.atom_symbol(i) for i in range(mol.natm)})
+        self.assertEqual(len(configs), 3)
+        dm = get_guess(mol)
+        expected = cp.zeros_like(dm)
+        for ia, (_, _, p0, p1) in enumerate(mol.aoslice_by_atom()):
+            occ, c, atomic_dm = configs[mol.atom_symbol(ia)]
+            self.assertIsInstance(occ, cp.ndarray)
+            self.assertIsInstance(c, cp.ndarray)
+            self.assertIsInstance(atomic_dm, cp.ndarray)
+            self.assertEqual(c.shape, (p1-p0, occ.size))
+            cp.testing.assert_allclose(atomic_dm, (c*occ) @ c.T, atol=1e-12)
+            expected[p0:p1, p0:p1] = atomic_dm
+        cp.testing.assert_allclose(dm, expected, atol=1e-10)
+        occ, c, atomic_dm = configs[mol.atom_symbol(3)]
+        self.assertEqual(occ.size, 0)
+        cp.testing.assert_array_equal(atomic_dm, 0)
+
+    def test_unique_minao_configs(self):
+        self._check_unique_atomic_configs(hf._atomic_minao_configs, hf.init_guess_by_minao)
+
+    def test_unique_hf_configs(self):
+        self._check_unique_atomic_configs(hf._atomic_hf_configs, hf.init_guess_by_atom)
+
+    def test_atomic_dms_mixed_spin_orientations(self):
+        mol = pyscf.M(atom='O 0 0 0; O 0 0 2; O 0 0 4; ghost-O 0 0 6',
+                      basis='cc-pvdz', verbose=0)
+        configs = hf._atomic_minao_configs(mol)
+        original = tuple(x.copy() for x in configs['O'])
+        summed_atoms = hf._build_sad_dm(mol, configs)
+        self.assertIs(summed_atoms[0], configs['O'])
+        self.assertIs(summed_atoms[1], configs['O'])
+        summed = hf._concat_atomic_dms(summed_atoms)
+        aligned = hf.init_guess_by_minao(mol, high_spin=True)
+        atoms = hf._build_sad_dm(mol, configs, [1, 0, -1, 0])
+        dm = hf._concat_atomic_dms(atoms)
+        cp.testing.assert_allclose(dm.sum(axis=0), summed, atol=1e-12)
+        # Each O keeps its total occupation but has spin +2, 0, or -2.
+        cp.testing.assert_allclose(atoms[0][0].sum(axis=1), cp.array([5, 3]), atol=1e-12)
+        cp.testing.assert_allclose(atoms[1][0].sum(axis=1), cp.array([4, 4]), atol=1e-12)
+        cp.testing.assert_allclose(atoms[2][0].sum(axis=1), cp.array([3, 5]), atol=1e-12)
+        for ia, (_, _, p0, p1) in enumerate(mol.aoslice_by_atom()):
+            if ia == 0:
+                expected = aligned[:, p0:p1, p0:p1]
+            elif ia == 2:
+                expected = aligned[::-1, p0:p1, p0:p1]
+            else:
+                expected = cp.stack([summed[p0:p1, p0:p1]*.5]*2)
+            cp.testing.assert_allclose(dm[:, p0:p1, p0:p1], expected, atol=1e-12)
+        c, occ = dm.mo_coeff, dm.mo_occ
+        cp.testing.assert_allclose(dm, (c*occ[:, None]) @ c.transpose(0, 2, 1), atol=1e-12)
+        self.assertEqual(atoms[3][0].shape, (2, 0))
+        for actual, expected in zip(configs['O'], original):
+            cp.testing.assert_array_equal(actual, expected)
+
+    def test_atomic_dms_invalid_magmoms(self):
+        mol = pyscf.M(atom='H 0 0 0; H 0 0 1', basis='cc-pvdz', verbose=0)
+        configs = hf._atomic_minao_configs(mol)
+        with self.assertRaises(ValueError):
+            hf._build_sad_dm(mol, configs, [1])
+        with self.assertRaises(ValueError):
+            hf._build_sad_dm(mol, configs, [1, 2])
+
+    def test_afm_magmom_nearest_neighbor(self):
+        mol = pyscf.M(atom='B 0 0 0; B 4 0 0; B 2 0 0; C .1 0 0; ghost-B 1 0 0',
+                      basis={'default': [[0, [1., 1.]]]}, unit='Bohr', spin=None, verbose=0)
+        # Visit atoms 0 -> 2 -> 1, ignoring nearer C and ghost centers.
+        self.assertEqual(hf._infer_spin_orientation(mol), [1, 1, -1, 0, 0])
+
+    def test_afm_magmom_disconnected_chains(self):
+        mol = pyscf.M(atom='N 0 0 0; N 2 0 0; N 10 0 0; N 12 0 0; N 20 0 0',
+                      basis='sto-3g', unit='Bohr', spin=None, verbose=0)
+        self.assertEqual(hf._infer_spin_orientation(mol), [1, -1, 1, -1, 1])
+
+    def test_afm_magmom_threshold(self):
+        mol = pyscf.M(atom='N 0 0 0; N 2.5 0 0', basis='sto-3g',
+                      unit='Bohr', verbose=0)
+        self.assertEqual(hf._infer_spin_orientation(mol), [1, 1])
+        self.assertEqual(hf._infer_spin_orientation(mol, bond_threshold=2.6), [1, -1])
+
+    def test_afm_magmom_elements(self):
+        selected = ([5, 7, 13, 15, 31, 33, 49, 51, 81, 83]
+                    + list(range(21, 31)) + list(range(39, 49)) + list(range(71, 81)))
+        excluded = [1, 4, 6, 8, 12, 14, 16, 20, 32, 34, 38, 50, 52, 70, 82, 84]
+        atoms = [(z, (i*10., 0, 0)) for i, z in enumerate(selected+excluded)]
+        mol = pyscf.M(atom=atoms, basis={'default': [[0, [1., 1.]]]},
+                      unit='Bohr', spin=None, verbose=0)
+        self.assertEqual(hf._infer_spin_orientation(mol), [1]*len(selected)+[0]*len(excluded))
+
+    def test_afm_magmom_no_selected_atoms(self):
+        mol = pyscf.M(atom='H 0 0 0; H 0 0 1', basis='sto-3g', verbose=0)
+        self.assertEqual(hf._infer_spin_orientation(mol), [0, 0])
 
 if __name__ == "__main__":
     print("Full Tests for initial guess")
