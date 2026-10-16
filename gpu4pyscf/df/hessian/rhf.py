@@ -27,6 +27,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib.cupy_helper import (
     contract, ndarray, transpose_sum, get_avail_mem, empty_mapped, fill_symmetric)
 from gpu4pyscf.df.int3c2e_bdiv import (
@@ -199,7 +200,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
         ksh_offsets_cpu = l_ctr_aux_offsets
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
         aux_offsets = aux_loc[ksh_offsets_cpu]
-        num_aux_batches = len(aux_offsets) - 1
+        # Keep device tasks small enough to distribute, retaining the existing
+        # group boundaries that define the auxiliary function ordering.
+        aux_batch_size = min(batch_size, max(np.diff(aux_offsets).max(),
+                                             (naux+num_devices-1)//num_devices))
+        aux_splits = splits_by_blocksize(aux_offsets, aux_batch_size)
+        num_aux_batches = len(aux_splits) - 1
 
         # (20|0)(0|0)(0|00) + (10|1)(0|0)(0|00)
         int3c2e_envs = int3c2e_opt.int3c2e_envs
@@ -208,10 +214,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
         buf = cp.empty((nao_pair*batch_size))
         buf2 = cp.empty((blksize, nao, nao))
         buf1 = cp.empty((blksize, nao, nocc))
-        for kbatch in aux_batch_iter:
-            if kbatch >= num_aux_batches:
+        # Distribute packed auxiliary tiles through the existing device iterator.
+        for batch_id in aux_batch_iter:
+            if batch_id >= num_aux_batches:
                 break
-            naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
+            kbatch, kend = aux_splits[batch_id:batch_id+2]
+            naux_in_batch = aux_offsets[kend] - aux_offsets[kbatch]
             aux0 = aux1 = aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
             compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
             for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -237,7 +245,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
                 ctypes.byref(int3c2e_envs),
                 ctypes.c_int(shm_size_max),
                 ctypes.c_int(len(shl_pair_offsets) - 1),
-                ctypes.c_int(1),
+                ctypes.c_int(kend-kbatch),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),

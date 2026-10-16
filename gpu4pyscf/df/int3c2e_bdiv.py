@@ -216,7 +216,7 @@ class Int3c2eOpt:
                 l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
                     l_ctr_aux_offsets, uniq_l_ctr_aux, aux_batch_size)
                 ksh_offsets_cpu = l_ctr_aux_offsets
-                aux_splits = range(len(ksh_offsets_cpu))
+                aux_splits = splits_by_blocksize(aux_loc[ksh_offsets_cpu], aux_batch_size)
             aux_offsets = aux_loc[ksh_offsets_cpu[aux_splits]]
             if reorder_aux:
                 aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
@@ -800,7 +800,7 @@ def _int3c2e_ip1_evaluator(int3c2e_opt, scheme, batch_size,
 
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
-    aux_splits = range(len(ksh_offsets_cpu))
+    aux_splits = splits_by_blocksize(aux_loc[ksh_offsets_cpu], batch_size)
     aux_offsets = aux_loc[ksh_offsets_cpu[aux_splits]]
     kern = getattr(libvhf_rys, kern)
     int3c2e_envs = int3c2e_opt.int3c2e_envs
@@ -823,7 +823,7 @@ def _int3c2e_ip1_evaluator(int3c2e_opt, scheme, batch_size,
             ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
             ctypes.c_int(shm_size_max),
             ctypes.c_int(len(shl_pair_offsets) - 1),
-            ctypes.c_int(1),
+            ctypes.c_int(aux_split1 - aux_split0),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(ksh_offsets_gpu[aux_split0:].data.ptr, ctypes.c_void_p),
