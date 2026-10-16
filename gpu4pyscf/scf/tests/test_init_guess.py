@@ -663,7 +663,7 @@ class KnownValues(unittest.TestCase):
         for actual, expected in zip(configs['O'], original):
             cp.testing.assert_array_equal(actual, expected)
 
-    def test_atomic_dms_invalid_magmoms(self):
+    def test_atomic_dms_invalid_spin_signs(self):
         mol = pyscf.M(atom='H 0 0 0; H 0 0 1', basis='cc-pvdz', verbose=0)
         configs = hf._atomic_minao_configs(mol)
         with self.assertRaises(ValueError):
@@ -671,35 +671,35 @@ class KnownValues(unittest.TestCase):
         with self.assertRaises(ValueError):
             hf._build_sad_dm(mol, configs, [1, 2])
 
-    def test_afm_magmom_nearest_neighbor(self):
+    def test_afm_spin_signs_nearest_neighbor(self):
         mol = pyscf.M(atom='B 0 0 0; B 4 0 0; B 2 0 0; C .1 0 0; ghost-B 1 0 0',
                       basis={'default': [[0, [1., 1.]]]}, unit='Bohr', spin=None, verbose=0)
         # Visit atoms 0 -> 2 -> 1, ignoring nearer C and ghost centers.
-        self.assertEqual(hf._infer_spin_orientation(mol), [1, 1, -1, 0, 0])
+        self.assertEqual(hf._infer_afm_spin_signs(mol, threshold=2.5), [1, 1, -1, 0, 0])
 
-    def test_afm_magmom_disconnected_chains(self):
+    def test_afm_spin_signs_disconnected_chains(self):
         mol = pyscf.M(atom='N 0 0 0; N 2 0 0; N 10 0 0; N 12 0 0; N 20 0 0',
                       basis='sto-3g', unit='Bohr', spin=None, verbose=0)
-        self.assertEqual(hf._infer_spin_orientation(mol), [1, -1, 1, -1, 1])
+        self.assertEqual(hf._infer_afm_spin_signs(mol, threshold=2.5), [1, -1, 1, -1, 1])
 
-    def test_afm_magmom_threshold(self):
+    def test_afm_spin_signs_threshold(self):
         mol = pyscf.M(atom='N 0 0 0; N 2.5 0 0', basis='sto-3g',
                       unit='Bohr', verbose=0)
-        self.assertEqual(hf._infer_spin_orientation(mol), [1, 1])
-        self.assertEqual(hf._infer_spin_orientation(mol, bond_threshold=2.6), [1, -1])
+        self.assertEqual(hf._infer_afm_spin_signs(mol, threshold=2.5), [1, 1])
+        self.assertEqual(hf._infer_afm_spin_signs(mol, threshold=2.6), [1, -1])
 
-    def test_afm_magmom_elements(self):
+    def test_afm_spin_signs_elements(self):
         selected = ([5, 7, 13, 15, 31, 33, 49, 51, 81, 83]
                     + list(range(21, 31)) + list(range(39, 49)) + list(range(71, 81)))
         excluded = [1, 4, 6, 8, 12, 14, 16, 20, 32, 34, 38, 50, 52, 70, 82, 84]
         atoms = [(z, (i*10., 0, 0)) for i, z in enumerate(selected+excluded)]
         mol = pyscf.M(atom=atoms, basis={'default': [[0, [1., 1.]]]},
                       unit='Bohr', spin=None, verbose=0)
-        self.assertEqual(hf._infer_spin_orientation(mol), [1]*len(selected)+[0]*len(excluded))
+        self.assertEqual(hf._infer_afm_spin_signs(mol, threshold=2.5), [1]*len(selected)+[0]*len(excluded))
 
-    def test_afm_magmom_no_selected_atoms(self):
+    def test_afm_spin_signs_no_selected_atoms(self):
         mol = pyscf.M(atom='H 0 0 0; H 0 0 1', basis='sto-3g', verbose=0)
-        self.assertEqual(hf._infer_spin_orientation(mol), [0, 0])
+        self.assertEqual(hf._infer_afm_spin_signs(mol, threshold=2.5), [0, 0])
 
 if __name__ == "__main__":
     print("Full Tests for initial guess")

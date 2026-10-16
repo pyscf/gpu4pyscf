@@ -440,44 +440,86 @@ def init_guess_by_minao(mol, high_spin=False):
         Density matrix, a tagged CuPy array, shape (nao, nao), or (2, nao, nao) if high_spin.
     '''
     atm_conf = _atomic_minao_configs(mol)
-    magmom = None
+    spin_signs = None
     if high_spin:
-        magmom = [1] * mol.natm
-    return _build_sad_dm(mol, atm_conf, magmom)
+        spin_signs = [1] * mol.natm
+    return _build_sad_dm(mol, atm_conf, spin_signs)
 
-def _infer_spin_orientation(mol, bond_threshold=2.5):
-    """Infer atomic spin orientations by a nearest-neighbor AFM walk.
+def _infer_afm_spin_signs(mol, threshold=5., mag_elements=None):
+    """Infer atomic spin signs by a nearest-neighbor AFM walk.
 
-    Only elements in the B and N columns, and the 3d, 4d and 5d transition-metals
-    are considered. Other atoms remain zero.
+    Only elements in the B and N columns, and the 3d, 4d and 5d
+    transition-metals are considered. Other atoms remain zero.
 
     Returns a list of -1, 0 or 1 in molecular atom order.
     """
-    magmom = [0] * mol.natm
+    spin_signs = [0] * mol.natm
     coords = mol.atom_coords()
     dist = np.linalg.norm(coords[:,None] - coords, axis=2)
     Z = [gto.charge(a[0]) for a in mol._atom]
-    mag_elements = [
-        5, 13, 31, 49, 81,  # B column
-        7, 15, 33, 51, 83,  # N column
-        21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # 3d
-        39, 40, 41, 42, 43, 44, 45, 46, 47, 48,  # 4d
-        71, 72, 73, 74, 75, 76, 77, 78, 79, 80]  # 5d
+    if mag_elements is None:
+        mag_elements = [
+            5, 13, 31, 49, 81,  # B column
+            7, 15, 33, 51, 83,  # N column
+            21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # 3d
+            39, 40, 41, 42, 43, 44, 45, 46, 47, 48,  # 4d
+            71, 72, 73, 74, 75, 76, 77, 78, 79, 80]  # 5d
 
     remaining = np.where(np.isin(Z, mag_elements))[0].tolist()
     while remaining:
         current = remaining.pop(0)
-        magmom[current] = 1
+        spin_signs[current] = 1
         while remaining:
             nearest = int(np.argmin(dist[current, remaining]))
             ia = remaining[nearest]
-            if dist[current, ia] >= bond_threshold:
+            if dist[current, ia] >= threshold:
                 break
-            magmom[ia] = -magmom[current]
+            spin_signs[ia] = -spin_signs[current]
             current = remaining.pop(nearest)
-    return magmom
 
-def _build_sad_dm(mol, atm_conf, magmom=None):
+    if sum(spin_signs) < 0:
+        spin_signs = [-x for x in spin_signs]
+    return spin_signs
+
+def _infer_fm_cluster_spin_signs(mol, threshold=5., mag_elements=None):
+    """Infer atomic spin signs by a nearest-neighbor FM cluster walk.
+
+    Only elements in the B and N columns, and the 3d, 4d and 5d
+    transition-metals are considered. Other atoms remain zero.
+
+    Returns a list of -1, 0 or 1 in molecular atom order.
+    """
+    spin_signs = [0] * mol.natm
+    coords = mol.atom_coords()
+    dist = np.linalg.norm(coords[:,None] - coords, axis=2)
+    Z = [gto.charge(a[0]) for a in mol._atom]
+    if mag_elements is None:
+        mag_elements = [
+            5, 13, 31, 49, 81,  # B column
+            7, 15, 33, 51, 83,  # N column
+            21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # 3d
+            39, 40, 41, 42, 43, 44, 45, 46, 47, 48,  # 4d
+            71, 72, 73, 74, 75, 76, 77, 78, 79, 80]  # 5d
+
+    remaining = np.where(np.isin(Z, mag_elements))[0].tolist()
+    spin_sign = 1
+    while remaining:
+        current = remaining.pop(0)
+        spin_signs[current] = spin_sign
+        while remaining:
+            nearest = int(np.argmin(dist[current, remaining]))
+            ia = remaining[nearest]
+            if dist[current, ia] >= threshold:
+                break
+            spin_signs[ia] = spin_sign
+            current = remaining.pop(nearest)
+        spin_sign = -spin_sign
+
+    if sum(spin_signs) < 0:
+        spin_signs = [-x for x in spin_signs]
+    return spin_signs
+
+def _build_sad_dm(mol, atm_conf, spin_signs=None):
     """Build a superposition-of-atomic-densities (SAD) initial guess.
 
     Args:
@@ -485,26 +527,26 @@ def _build_sad_dm(mol, atm_conf, magmom=None):
             Mole or Cell instance
         atm_conf : dict
             Maps atom symbols to spin-summed (occ, c, dm)
-        magmom : sequence or None
-            One spin orientation per atom: 1 for alpha-aligned high spin,
+        spin_signs : sequence or None
+            One spin sign per atom: 1 for alpha-aligned high spin,
             -1 for beta-aligned high spin, or 0 for equal spin populations.
             None assembles a spin-summed density without splitting occupations.
 
     Returns:
         A tagged density matrix with atom-diagonal blocks.
     """
-    if magmom is not None:
-        assert len(magmom) == mol.natm
+    if spin_signs is not None:
+        assert len(spin_signs) == mol.natm
 
     atm_dms = []
     for ia in range(mol.natm):
         element = mol.atom_symbol(ia)
-        if magmom is None:
+        if spin_signs is None:
             atm_dms.append(atm_conf[element])
             continue
 
         occ, c, dm = atm_conf[element]
-        if magmom[ia] == 0:
+        if spin_signs[ia] == 0:
             occ_a = occ_b = occ * .5
             dm_a = dm_b = dm * .5
         else:
@@ -512,12 +554,12 @@ def _build_sad_dm(mol, atm_conf, magmom=None):
             occ_b = occ - occ_a
             dm_a = (c * occ_a).dot(c.conj().T)
             dm_b = dm - dm_a
-            if magmom[ia] == -1:
+            if spin_signs[ia] == -1:
                 occ_a, occ_b = occ_b, occ_a
                 dm_a, dm_b = dm_b, dm_a
         atm_dms.append(((occ_a, occ_b), (c, c), (dm_a, dm_b)))
 
-    if magmom is None: # spin-summed dm
+    if spin_signs is None: # spin-summed dm
         dm = block_diag([d for _, _, d in atm_dms])
         mo_coeff = block_diag([c for _, c, _ in atm_dms])
         mo_occ = cupy.hstack([o for o, _, _ in atm_dms])
@@ -528,9 +570,9 @@ def _build_sad_dm(mol, atm_conf, magmom=None):
         mo_b = block_diag([c[1] for _, c, _ in atm_dms])
         occ_a = cupy.hstack([o[0] for o, _, _ in atm_dms])
         occ_b = cupy.hstack([o[1] for o, _, _ in atm_dms])
-        dm = cp.stack([dm_a, dm_b])
-        mo_coeff = cp.stack([mo_a, mo_b])
-        mo_occ = cp.stack([occ_a, occ_b])
+        dm = cupy.stack([dm_a, dm_b])
+        mo_coeff = cupy.stack([mo_a, mo_b])
+        mo_occ = cupy.stack([occ_a, occ_b])
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
 def _atomic_minao_configs(mol, max_z=96):
@@ -671,10 +713,10 @@ def init_guess_by_atom(mol, high_spin=False):
         Density matrix, a tagged CuPy array, shape (nao, nao), or (2, nao, nao) if high_spin.
     '''
     atm_conf = _atomic_hf_configs(mol, high_spin=high_spin)
-    magmom = None
+    spin_signs = None
     if high_spin:
-        magmom = [1] * mol.natm
-    return _build_sad_dm(mol, atm_conf, magmom)
+        spin_signs = [1] * mol.natm
+    return _build_sad_dm(mol, atm_conf, spin_signs)
 
 def _atomic_hf_configs(mol, high_spin=False):
     """Return unique atom-symbol -> (occ, c, dm) atomic HF configurations on the GPU.
