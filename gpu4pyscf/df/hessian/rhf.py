@@ -40,6 +40,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian.rhf import _hcore_energy, _aggregate_to_atoms
 from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.gto.mole import _split_l_ctr_groups
 
 num_devices = multi_gpu.num_devices
 
@@ -595,7 +596,10 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
             int3c2e_opt.bas_ij_cache, pair_batch_size)
         ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
-        ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+        # Split auxbasis into small batches for load balance
+        _, aux_counts = _split_l_ctr_groups(
+            auxmol.uniq_l_ctr, auxmol.l_ctr_counts, [16]*(laux+1))
+        ksh_offsets_cpu = np.append(0, np.cumsum(aux_counts))
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
 
         int3c2e_envs = int3c2e_opt.int3c2e_envs

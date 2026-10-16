@@ -417,7 +417,10 @@ class Int3c2eOpt:
             self.bas_ij_cache, nsp_per_block[0]*4)
         gout_stride = cp.asarray(gout_stride, dtype=np.int32)
 
-        l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+        # Split auxbasis into small batches for load balance
+        _, aux_counts = _split_l_ctr_groups(
+            auxmol.uniq_l_ctr, auxmol.l_ctr_counts, [16]*(laux+1))
+        l_ctr_aux_offsets = np.append(0, np.cumsum(aux_counts))
         ksh_offsets = cp.asarray(l_ctr_aux_offsets + mol.nbas, dtype=np.int32)
         log.debug1('sp_blocks = %d, ksh_blocks = %d, shm_size = %d B',
                    len(shl_pair_offsets)-1, len(ksh_offsets)-1, shm_size_max)
