@@ -27,6 +27,10 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#ifdef USE_SYCL
+#include <optional>
+#include <sycl_device.hpp>
+#endif
 
 // double2 component access. sycl::double2 exposes .x()/.y() methods,
 // CUDA double2 exposes .x/.y fields.
@@ -58,31 +62,14 @@ struct gpu4pyscf_dim3 {
 #define TABLE_BIND(cname, sname) \
     auto cname = sname.get()
 #define TABLE_FILL(cname, sname, src, bytes) \
-    CONSTANT_MEMCPY(sname, src, bytes)
+    cudaMemcpyToSymbol(sname, src, bytes)
 #else
 #define TABLE_DEFINE(type, sname, cname, N) \
     __constant__ type cname[N]
 #define TABLE_BIND(cname, sname) \
     (void)0
 #define TABLE_FILL(cname, sname, src, bytes) \
-    CONSTANT_MEMCPY(cname, src, bytes)
-#endif
-
-// Host-pinned buffer address mapping. SYCL uses USM (buffers directly
-// accessible from device); CUDA maps the pinned allocation. Call sites
-// must return int for the error path.
-#ifdef USE_SYCL
-#define MAP_PINNED_PTR(type, dev, host) type *dev = (host)
-#else
-#define MAP_PINNED_PTR(type, dev, host) \
-    type *dev; \
-    { \
-        cudaError_t _err = cudaHostGetDevicePointer(&dev, host, 0); \
-        if (_err != cudaSuccess) { \
-            fprintf(stderr, "address mapping error %s\n", cudaGetErrorString(_err)); \
-            return 1; \
-        } \
-    }
+    cudaMemcpyToSymbol(cname, src, bytes)
 #endif
 
 #ifdef USE_SYCL
@@ -137,9 +124,9 @@ struct gpu4pyscf_dim3 {
 #endif
 
 
-// Shared / local memory declaration.
-// Usage: SHARED_ARRAY(double, tile, [16][16]);
-// CUDA: __shared__ double tile[16][16];
+// Static shared / local memory declaration, arrays and scalars alike.
+// Usage: SHARED_ARRAY(double, tile, [16][16]);  SHARED_ARRAY(int, ntasks);
+// CUDA: __shared__ double tile[16][16];          __shared__ int ntasks;
 // SYCL: group local memory reference bound to `item` from setup_context().
 #ifdef USE_SYCL
 #define SHARED_ARRAY(type, name, ...) \
@@ -171,30 +158,6 @@ struct gpu4pyscf_dim3 {
 #else
 #define DYNAMIC_SHARED_PTR(type, name, ...) \
     extern __shared__ type name[]
-#endif
-
-// Scalar shared / local variable (one value per work-group, e.g. a block
-// counter). Usage: SHARED_SCALAR(int, ntasks); then use `ntasks` as an int.
-// CUDA: __shared__ int ntasks;
-// SYCL: int-sized group-local slot bound to `item` from setup_context().
-#ifdef USE_SYCL
-#define SHARED_SCALAR(type, name) \
-    using _sms_##name##_t = type[1]; \
-    _sms_##name##_t& _sms_##name##_arr = *sycl::ext::oneapi::group_local_memory_for_overwrite<_sms_##name##_t>(item.get_group()); \
-    type &name = _sms_##name##_arr[0]
-#else
-#define SHARED_SCALAR(type, name) __shared__ type name
-#endif
-
-// Host-to-constant-memory copy. Usage:
-//   CONSTANT_MEMCPY(c_table, h_table, N*sizeof(Entry));
-// CUDA: cudaMemcpyToSymbol. SYCL: queue memcpy into the device_global.
-#ifdef USE_SYCL
-#define CONSTANT_MEMCPY(dst, src, bytes) \
-    sycl_get_queue()->memcpy(dst, src, bytes).wait()
-#else
-#define CONSTANT_MEMCPY(dst, src, bytes) \
-    cudaMemcpyToSymbol(dst, src, bytes)
 #endif
 
 #ifdef USE_SYCL
@@ -270,56 +233,94 @@ consteval bool _kernel_takes_shm(std::index_sequence<I...>) {
     return requires(char* shm) { Kernel(std::get<I>(std::declval<Tuple>())..., shm); };
 }
 
-template <auto Kernel, typename... Args>
+// Record a rejected launch so cudaGetLastError() reports it at the call site.
+inline void _launch_error(const char *what, const char *kernel) {
+    snprintf(gpu4pyscf_last_launch_error_msg,
+             sizeof(gpu4pyscf_last_launch_error_msg), "%s [%s]", what, kernel);
+    gpu4pyscf_last_launch_error = cudaErrorInvalidConfiguration;
+    fprintf(stderr, "LAUNCH_KERNEL error: %s\n", gpu4pyscf_last_launch_error_msg);
+}
+
+// shm_size is the dynamic shared memory in BYTES (CUDA's third <<<>>>
+// argument): pass n * sizeof(T), never an element count. Rejects sizes the
+// device cannot provide; the per-device limit is cached per thread.
+inline bool _shm_bytes_ok(sycl::queue &q, std::size_t shm_bytes, const char *kernel) {
+    if (shm_bytes == 0) return true;
+    static thread_local std::optional<sycl::device> dev;
+    static thread_local std::size_t limit = 0;
+    sycl::device d = q.get_device();
+    if (!dev || !(*dev == d)) {
+        dev = d;
+        limit = d.get_info<sycl::info::device::local_mem_size>();
+    }
+    if (shm_bytes <= limit) return true;
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "dynamic shared memory of %zu bytes exceeds the %zu-byte work-group "
+             "limit (shm_size is in BYTES: n*sizeof(T))", shm_bytes, limit);
+    _launch_error(msg, kernel);
+    return false;
+}
+
+template <auto Kernel, typename ShmT, typename... Args>
 inline void launch_kernel(sycl::range<3> grid,
-                          sycl::range<3> block, std::size_t shm_size,
+                          sycl::range<3> block, ShmT shm_arg,
                           Args... args) {
+    static_assert(std::is_integral_v<ShmT>,
+                  "LAUNCH_KERNEL: shm_size must be an integer byte count");
+    if constexpr (std::is_signed_v<ShmT>) {
+        if (shm_arg < 0) {
+            _launch_error("negative dynamic shared memory size", __PRETTY_FUNCTION__);
+            return;
+        }
+    }
+    const std::size_t shm_size = static_cast<std::size_t>(shm_arg);
     namespace syclexp = sycl::ext::oneapi::experimental;
     sycl::queue* q = _pick_stream(args...);
+    if (!_shm_bytes_ok(*q, shm_size, __PRETTY_FUNCTION__)) return;
     auto tup_all = std::make_tuple(args...);
     auto tup = _filter_streams(tup_all, std::index_sequence_for<Args...>{});
     constexpr bool with_shm =
         _kernel_takes_shm<Kernel, decltype(tup)>(
             std::make_index_sequence<std::tuple_size<decltype(tup)>::value>{});
-    const sycl::nd_range<3> ndr(grid * block, block);
-    if constexpr (with_shm) {
-        // shm_size is in BYTES, matching the CUDA <<<..., shm_bytes, ...>>>
-        // convention. Legacy trailing pointer receives nullptr; the kernel
-        // body aliases scratch memory via DYNAMIC_SHARED_PTR.
-        syclexp::launch_config cfg{
-            ndr, syclexp::properties{syclexp::work_group_scratch_size{shm_size}}};
-        syclexp::nd_launch(*q, cfg,
-            [tup](sycl::nd_item<3>) {
-                _apply_call_shm<decltype(tup), Kernel>(tup, static_cast<char*>(nullptr),
-                    std::make_index_sequence<std::tuple_size<decltype(tup)>::value>{});
-            });
-    } else {
-        if (shm_size == 0) {
-            q->parallel_for(ndr,
-                [tup](sycl::nd_item<3>) {
-                    _apply_call<decltype(tup), Kernel>(tup,
-                        std::make_index_sequence<std::tuple_size<decltype(tup)>::value>{});
-                });
-        } else {
+    try {
+        const sycl::nd_range<3> ndr(grid * block, block);
+        if constexpr (with_shm) {
+            // shm_size is in BYTES, matching the CUDA <<<..., shm_bytes, ...>>>
+            // convention. Legacy trailing pointer receives nullptr; the kernel
+            // body aliases scratch memory via DYNAMIC_SHARED_PTR.
             syclexp::launch_config cfg{
                 ndr, syclexp::properties{syclexp::work_group_scratch_size{shm_size}}};
             syclexp::nd_launch(*q, cfg,
                 [tup](sycl::nd_item<3>) {
-                    _apply_call<decltype(tup), Kernel>(tup,
+                    _apply_call_shm<decltype(tup), Kernel>(tup, static_cast<char*>(nullptr),
                         std::make_index_sequence<std::tuple_size<decltype(tup)>::value>{});
                 });
+        } else {
+            if (shm_size == 0) {
+                q->parallel_for(ndr,
+                    [tup](sycl::nd_item<3>) {
+                        _apply_call<decltype(tup), Kernel>(tup,
+                            std::make_index_sequence<std::tuple_size<decltype(tup)>::value>{});
+                    });
+            } else {
+                syclexp::launch_config cfg{
+                    ndr, syclexp::properties{syclexp::work_group_scratch_size{shm_size}}};
+                syclexp::nd_launch(*q, cfg,
+                    [tup](sycl::nd_item<3>) {
+                        _apply_call<decltype(tup), Kernel>(tup,
+                            std::make_index_sequence<std::tuple_size<decltype(tup)>::value>{});
+                    });
+            }
         }
+    } catch (const sycl::exception &e) {
+        _launch_error(e.what(), __PRETTY_FUNCTION__);
     }
 }
 
 } // namespace gpu4pyscf_detail
 
 #define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
-    { gpu4pyscf_detail::launch_kernel<kernel>(grid, block, shm_size, __VA_ARGS__); }
-// Legacy alias: dynamic-smem kernels are detected automatically.  Expands
-// to the detail call directly so locally-defined LAUNCH_KERNEL macros (e.g.
-// in unrolled_ejk_int3c2e_ip1.cu) cannot shadow it.
-#define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, ...) \
     { gpu4pyscf_detail::launch_kernel<kernel>(grid, block, shm_size, __VA_ARGS__); }
 
 #else
@@ -368,9 +369,20 @@ inline auto _filter_streams(const Tuple& t, std::index_sequence<I...>) {
         }(std::get<I>(t)) ... );
 }
 
-template <class Kernel, typename... Args>
+// shm_size is the dynamic shared memory in BYTES: pass n * sizeof(T).
+template <class Kernel, typename ShmT, typename... Args>
 inline void launch_kernel(Kernel kernel, dim3 grid, dim3 block,
-                          std::size_t shm_size, Args... args) {
+                          ShmT shm_arg, Args... args) {
+    static_assert(std::is_integral_v<ShmT>,
+                  "LAUNCH_KERNEL: shm_size must be an integer byte count");
+    if constexpr (std::is_signed_v<ShmT>) {
+        if (shm_arg < 0) {
+            fprintf(stderr, "LAUNCH_KERNEL error: negative dynamic shared memory size [%s]\n",
+                    __PRETTY_FUNCTION__);
+            return;
+        }
+    }
+    const std::size_t shm_size = static_cast<std::size_t>(shm_arg);
     cudaStream_t s = _pick_stream(args...);
     auto tup = _filter_streams(std::make_tuple(args...), std::index_sequence_for<Args...>{});
     std::apply([&](auto... a) {
@@ -386,11 +398,6 @@ inline void launch_kernel(Kernel kernel, dim3 grid, dim3 block,
 } // namespace gpu4pyscf_detail
 
 #define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
-    { gpu4pyscf_detail::launch_kernel(kernel, grid, block, shm_size, __VA_ARGS__); }
-// Legacy alias: dynamic-smem kernels are detected automatically.  Expands
-// to the detail call directly so locally-defined LAUNCH_KERNEL macros (e.g.
-// in unrolled_ejk_int3c2e_ip1.cu) cannot shadow it.
-#define LAUNCH_KERNEL_DYN(kernel, grid, block, shm_size, ...) \
     { gpu4pyscf_detail::launch_kernel(kernel, grid, block, shm_size, __VA_ARGS__); }
 
 #endif

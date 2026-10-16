@@ -141,7 +141,7 @@ class _DFHF:
             vk *= sr_factor
 
         if lr_factor != sr_factor:
-            vklr = self.get_jk(mol, dm, hermi, False, True, omega=omega)[1]
+            vklr = self.get_jk(mol, dm, hermi, False, True, omega=abs(omega))[1]
             vklr *= lr_factor - sr_factor
             vk += vklr
         return vk

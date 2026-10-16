@@ -37,16 +37,16 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         uint32_t *pool, int *head, int nf, int reserved_shm_size)
 {
     setup_context();
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, ish);
-    SHARED_SCALAR(int, jsh);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [3]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
@@ -364,18 +364,18 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         int reserved_shm_size)
 {
     setup_context();
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, ish);
-    SHARED_SCALAR(int, jsh);
-    SHARED_SCALAR(int, i0);
-    SHARED_SCALAR(int, j0);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
@@ -779,18 +779,18 @@ void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                              int dd_cache_size, int nf, int reserved_shm_size)
 {
     setup_context();
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, ish);
-    SHARED_SCALAR(int, jsh);
-    SHARED_SCALAR(int, i0);
-    SHARED_SCALAR(int, j0);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
@@ -1253,18 +1253,18 @@ void rys_ejk_ip1_sum_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                             int dd_cache_size, int nf, int reserved_shm_size)
 {
     setup_context();
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, ish);
-    SHARED_SCALAR(int, jsh);
-    SHARED_SCALAR(int, i0);
-    SHARED_SCALAR(int, j0);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
@@ -1737,19 +1737,19 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         int ij_prims = iprim * jprim;
         int reserved_shm_size = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         int buflen = reserved_shm_size + ij_prims;
-
+        buflen *= sizeof(double);
         auto blocks = make_grid(workers, 1);
         auto threads = make_block(quartets_per_block, gout_stride);
-        int shm_bytes = buflen * sizeof(double);
-        if (shm_bytes > 48000) {
-            cudaError_t err = cudaFuncSetAttribute(rys_vjk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
+        if (buflen > 48000) {
+            cudaFuncSetAttribute(rys_vjk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_bytes,
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
                         cudaGetErrorString(err));
                 return 1;
             }
         }
-        LAUNCH_KERNEL_DYN( rys_vjk_ip1_kernel, blocks, threads, shm_bytes,
+        LAUNCH_KERNEL( rys_vjk_ip1_kernel, blocks, threads, buflen,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, nf,
             reserved_shm_size);
@@ -1833,20 +1833,19 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
-        buflen = reserved_shm_size + ij_prims;
-
+        buflen = (reserved_shm_size + ij_prims)*sizeof(double);
         auto blocks = make_grid(workers, 1);
         auto threads = make_block(quartets_per_block, gout_stride);
-        int shm_bytes = buflen * sizeof(double);
-        if (shm_bytes > 48000) {
-            cudaError_t err = cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
+        if (buflen > 48000) {
+            cudaFuncSetAttribute(rys_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_bytes,
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
                         cudaGetErrorString(err));
                 return 1;
             }
         }
-        LAUNCH_KERNEL_DYN( rys_ejk_ip1_kernel, blocks, threads, shm_bytes,
+        LAUNCH_KERNEL( rys_ejk_ip1_kernel, blocks, threads, buflen,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, dd_pool, nf,
             reserved_shm_size);
@@ -1921,13 +1920,15 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
     int ij_prims = iprim * jprim;
     int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
     int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
-    buflen = reserved_shm_size + ij_prims;
-    if (buflen*(int)sizeof(double) > 48000) {
-        cudaError_t err = cudaFuncSetAttribute(rys_ejk_ip1_multidm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                             buflen*sizeof(double));
+    buflen = (reserved_shm_size + ij_prims)*sizeof(double);
+        auto blocks = make_grid(workers, 1);
+        auto threads = make_block(quartets_per_block, gout_stride);
+    if (buflen > 48000) {
+        cudaFuncSetAttribute(rys_ejk_ip1_multidm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+        cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
-            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n",
-                    (int)(buflen*sizeof(double)), cudaGetErrorString(err));
+            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                    cudaGetErrorString(err));
             return 1;
         }
     }
@@ -1946,10 +1947,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
                 jk.k_factor = 1.; // ensure not dropping by schwarz screening
             }
         }
-
-        auto blocks = make_grid(workers, 1);
-        auto threads = make_block(quartets_per_block, gout_stride);
-        LAUNCH_KERNEL_DYN( rys_ejk_ip1_multidm_kernel, blocks, threads, buflen*sizeof(double),
+        LAUNCH_KERNEL( rys_ejk_ip1_multidm_kernel, blocks, threads, buflen,
             envs, jk, bounds, j_factor+n, k_factor+n, dm1+n*nao2, dm2+n*nao2,
             q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
             pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size);
@@ -2023,13 +2021,15 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
     int ij_prims = iprim * jprim;
     int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
     int reserved_shm_size = max(buflen, 6*gout_stride*quartets_per_block);
-    buflen = reserved_shm_size + ij_prims;
-    if (buflen*(int)sizeof(double) > 48000) {
-        cudaError_t err = cudaFuncSetAttribute(rys_ejk_ip1_sum_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                             buflen*sizeof(double));
+    buflen = (reserved_shm_size + ij_prims)*sizeof(double);
+    auto blocks = make_grid(workers, 1);
+    auto threads = make_block(quartets_per_block, gout_stride);
+    if (buflen > 48000) {
+        cudaFuncSetAttribute(rys_ejk_ip1_sum_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+        cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
-            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n",
-                    (int)(buflen*sizeof(double)), cudaGetErrorString(err));
+            fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
+                    cudaGetErrorString(err));
             return 1;
         }
     }
@@ -2041,10 +2041,7 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
             jk.k_factor = 1.; // ensure not dropping by schwarz screening
         }
     }
-
-    auto blocks = make_grid(workers, 1);
-    auto threads = make_block(quartets_per_block, gout_stride);
-    LAUNCH_KERNEL_DYN( rys_ejk_ip1_sum_kernel, blocks, threads, buflen*sizeof(double),
+    LAUNCH_KERNEL( rys_ejk_ip1_sum_kernel, blocks, threads, buflen,
         envs, jk, bounds, j_factor, k_factor, dm1, dm2,
         q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
         pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size);

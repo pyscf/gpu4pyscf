@@ -75,14 +75,13 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # Alter the contraction order for
     # rho = einsum('piLj,LK,Kji->p', cderi, expLk, dm)
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
+    pair_address, _ = mydf._cderi_idx
+    pair_address = cp.asarray(pair_address, dtype=np.int32)
     expLk = fft_matrix(mydf.kmesh)
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
-    pair_address, diag = mydf._cderi_idx
-    pair_address = cp.asarray(pair_address, dtype=np.int32)
     dm_sparse = dm_sparse[:,pair_address]
-    dm_sparse[:,diag] *= .5
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = int(mem_free * .8)
@@ -139,7 +138,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     t0 = (logger.process_clock(), logger.perf_counter())
     assert kpts_band is None or kpts_band is kpts
     assert mydf.has_kpts(kpts)
-    if mydf._cderi is None:
+    # J-only integrals omit the k-point pairs required for exchange.
+    if mydf._cderi is None or mydf._j_only:
         mydf.build(j_only=False, kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_k_kpts', *t0)
 
@@ -187,7 +187,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = int(mem_free * .8)
-    blksize = avail_mem // (nkpts*nao**2*3 * 16)
+    unit = 3 * nao**2
+    blksize = avail_mem // (nkpts*unit * 16)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)

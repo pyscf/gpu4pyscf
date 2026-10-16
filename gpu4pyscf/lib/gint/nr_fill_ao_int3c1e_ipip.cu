@@ -187,7 +187,7 @@ int GINTfill_int3c1e_ipip1_charge_contracted(const cudaStream_t stream, const Ba
         return 2;
     }
 
-    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
+    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -237,7 +237,7 @@ int GINTfill_int3c1e_ipvip1_charge_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
-    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
+    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -287,7 +287,7 @@ int GINTfill_int3c1e_ip1ip2_charge_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
-    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
+    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -337,7 +337,7 @@ int GINTfill_int3c1e_ipip2_density_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
-    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
+    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;

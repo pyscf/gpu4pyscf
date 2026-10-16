@@ -6,7 +6,7 @@
 #ifdef USE_SYCL
 #include <sycl_device.hpp>
 
-// Named distinctly from gint's s_bpcache (gint/cint2e.cuh) -- both are
+// Named distinctly from gint's s_gint_bpcache (gint/cint2e.cuh) -- both are
 // GLOBAL DEFAULT-visibility device_global objects and libgint.so/libgvhf.so
 // are co-resident in the process with no DT_NEEDED link between them, so
 // identical names alias to whichever library's definition the dynamic

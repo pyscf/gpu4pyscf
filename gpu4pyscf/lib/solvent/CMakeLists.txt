@@ -17,7 +17,6 @@
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60 --ptxas-options=-v")
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_50 --ptxas-options=-v -maxrregcount=255")
 
-set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -std=legacy -fPIC")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(FTN_SRCS
@@ -31,6 +30,8 @@ set(GPU_SRCS
 )
 
 add_library(solvent SHARED ${FTN_SRCS} ${GPU_SRCS})
+target_compile_options(solvent PRIVATE
+  "$<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-std=legacy>")
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
 #option(ENABLE_STATIC "Enforce static library build" 0)
@@ -51,6 +52,6 @@ if (USE_SYCL)
   )
   target_link_libraries(solvent PRIVATE sycl_compat gsycl)
 else()
-  set_target_properties(solvent PROPERTIES
-    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+set_target_properties(solvent PROPERTIES 
+  CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 endif()

@@ -339,13 +339,20 @@ struct xc_func_type{
   double *ext_params;
   /* This is a placeholder for structs of parameters that are used in the Maple generated sources */
   void *params;
-  /* This is sizeof structs of parameters*/
-  int params_size;
-
-  double dens_threshold;       /* functional is put to zero for spin-densities smaller than this */
-  double zeta_threshold;       /* idem for the absolute value of zeta */
-  double sigma_threshold;
-  double tau_threshold;
+/* Above are the common prefix of LibXC 7.0.0 and LibXC 7.1.2
+ *
+ * After params, the 7.0.0 fork has an int params_size followed by the four
+ * double thresholds (dens, zeta, sigma, tau). LibXC 7.1.2 omits params_size,
+ * so the thresholds have different offsets. They are muted in this
+ * common-prefix header.
+ */
+//  /* This is sizeof structs of parameters*/
+//  int params_size;
+//
+//  double dens_threshold;       /* functional is put to zero for spin-densities smaller than this */
+//  double zeta_threshold;       /* idem for the absolute value of zeta */
+//  double sigma_threshold;
+//  double tau_threshold;
 };
 
 typedef struct xc_func_type xc_func_type;

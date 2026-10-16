@@ -364,15 +364,19 @@ C    D
     auxcell.build()
     omega = -0.2
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
-    eval_j3c = opt.int3c2e_evaluator()[0]
+    eval_j3c, batches = opt.int3c2e_evaluator()[:2]
     dat = eval_j3c()
 
     nao = cell.nao
     naux = auxcell.nao
-    pair_address = opt.pair_and_diag_indices()[0]
+    recontract, pair_address = int3c2e._create_pair_recontractor(
+        opt.cell, batches, cell.cart)
+    cderi = np.zeros((naux, len(pair_address)))
+    recontract(0, cderi, dat[:,0].dot(opt.auxcell.ctr_coeff).get())
     i, j = divmod(pair_address, nao)
     j3c = cp.zeros((nao, nao, naux))
-    j3c[j, i] = j3c[i, j] = dat[:,0].dot(opt.auxcell.ctr_coeff)
+    j3c[i, j] = cp.asarray(cderi.T)
+    j3c[j, i] += cp.asarray(cderi.T)
 
     cell.precision=1e-10
     cell.build()
@@ -383,38 +387,42 @@ C    D
 
     ref = dat
     batch_size = int(ref.shape[0] *.23)
-    eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
-        ao_pair_batch_size=batch_size)[:3]
+    eval_j3c, batches = opt.int3c2e_evaluator(ao_pair_batch_size=batch_size)[:2]
+    counts = int3c2e._count_ao_pairs(
+        opt.cell, batches, cell.cart, np.prod(opt.bvk_kmesh))
+    ao_pair_offsets = np.append(0, np.cumsum(counts))
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
                                      ao_pair_offsets[1:])):
         dat[p0:p1] = eval_j3c(i)
     assert abs(dat - ref).max() < 1e-12
 
-    batch_size = int(ref.shape[1] * 0.22)
-    eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
-        aux_batch_size=batch_size)[:4]
+    batch_size = max(1, int(ref.shape[2] * 0.22))
+    eval_j3c, _, aux_offsets = opt.int3c2e_evaluator(
+        aux_batch_size=batch_size)
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         dat[:,:,p0:p1] = eval_j3c(aux_batch_id=i)
     assert abs(dat - ref).max() < 2e-10
 
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh=[3,1,2]).build()
-    eval_j3c, aux_sorting = opt.int3c2e_evaluator()[:2]
+    eval_j3c = opt.int3c2e_evaluator()[0]
     ref = eval_j3c()
     batch_size = int(ref.shape[0] *.23)
 
-    eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
-        ao_pair_batch_size=batch_size)[:3]
+    eval_j3c, batches = opt.int3c2e_evaluator(ao_pair_batch_size=batch_size)[:2]
+    counts = int3c2e._count_ao_pairs(
+        opt.cell, batches, cell.cart, np.prod(opt.bvk_kmesh))
+    ao_pair_offsets = np.append(0, np.cumsum(counts))
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
                                      ao_pair_offsets[1:])):
         dat[p0:p1] = eval_j3c(i)
     assert abs(dat - ref).max() < 1e-12
 
-    batch_size = int(ref.shape[1] * 0.22)
-    eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
-        aux_batch_size=batch_size)[:4]
+    batch_size = max(1, int(ref.shape[2] * 0.22))
+    eval_j3c, _, aux_offsets = opt.int3c2e_evaluator(
+        aux_batch_size=batch_size)
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         dat[:,:,p0:p1] = eval_j3c(aux_batch_id=i)

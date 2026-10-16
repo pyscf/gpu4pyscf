@@ -634,7 +634,7 @@ int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
         LAUNCH_KERNEL(supmol_non_trivial_pairs_kernel, grids, threads, 0, supmol_bas_ij, bas_ij_idx, npairs, log_cutoff, is_mgga, head, dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in bvk_ovlp_mask_estimation: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in supmol_non_trivial_pairs_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -651,7 +651,7 @@ int estimate_aft_Ecut(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
         LAUNCH_KERNEL(estimate_aft_Ecut_kernel, grids, threads, 0, Ecut, bas_ij_idx, img_coords, nimgs, npairs, log_cutoff, Ecut_max, is_mgga, dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in raw_ovlp_mask: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in estimate_aft_Ecut_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

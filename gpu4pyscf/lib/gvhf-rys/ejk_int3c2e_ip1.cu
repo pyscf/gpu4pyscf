@@ -33,17 +33,23 @@
 // unrolled_ejk_int3c2e_ip1.cu is auto-generated upstream and must stay
 // byte-identical. Its kernels use __syncthreads() but never declare an
 // nd_item, so swap in an item-free barrier for the duration of the include.
-// All launches are 3-D nd_range (LAUNCH_KERNEL_*), so get_nd_item<3>() is
+// All launches are 3-D nd_range (LAUNCH_KERNEL), so get_nd_item<3>() is
 // well-formed.
 #ifdef USE_SYCL
 #pragma push_macro("__syncthreads")
 #undef __syncthreads
 #define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<3>().get_group()))
 #endif
+// The generated file defines its own (device-side) LAUNCH_KERNEL; restore
+// gpu_compat.h's launcher after the include, as fill_int3c2e.cu does.
+#pragma push_macro("LAUNCH_KERNEL")
+#undef LAUNCH_KERNEL
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmacro-redefined"
 #include "unrolled_ejk_int3c2e_ip1.cu"
 #pragma GCC diagnostic pop
+#undef LAUNCH_KERNEL
+#pragma pop_macro("LAUNCH_KERNEL")
 #ifdef USE_SYCL
 #pragma pop_macro("__syncthreads")
 #endif
@@ -58,25 +64,25 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             int *ao_pair_loc, int aux_offset, int naux)
 {
     setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, ksh0);
-    SHARED_SCALAR(int, ksh1);
-    SHARED_SCALAR(int, nksh);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, lk);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, nf);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, kprim);
-    SHARED_SCALAR(int, g_size);
-    SHARED_SCALAR(int, nao);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nst_per_block);
-    SHARED_SCALAR(int, aux_per_block);
-    SHARED_SCALAR(int, nsp_per_block);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, ksh0);
+    SHARED_ARRAY(int, ksh1);
+    SHARED_ARRAY(int, nksh);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, nf);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, aux_per_block);
+    SHARED_ARRAY(int, nsp_per_block);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     // For better load balance, consume blocks in the reversed order
@@ -145,12 +151,12 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     int idx_k = lex_xyz_offset(lk);
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double out_ix = 0;
+        double out_iy = 0;
+        double out_iz = 0;
+        double out_jx = 0;
+        double out_jy = 0;
+        double out_jz = 0;
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -228,9 +234,12 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 }
             }
 
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_ix = 0;
+            double v_iy = 0;
+            double v_iz = 0;
+            double v_jx = 0;
+            double v_jy = 0;
+            double v_jz = 0;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp - jprim * ip;
@@ -335,9 +344,6 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 v_ix += goutx;
                                 v_iy += gouty;
                                 v_iz += goutz;
-                                v_kx -= goutx;
-                                v_ky -= gouty;
-                                v_kz -= goutz;
                                 double gjx = gix - rjri[0*nsp] * Ix;
                                 double gjy = giy - rjri[1*nsp] * Iy;
                                 double gjz = giz - rjri[2*nsp] * Iz;
@@ -350,21 +356,24 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 v_jx += goutx;
                                 v_jy += gouty;
                                 v_jz += goutz;
-                                v_kx -= goutx;
-                                v_ky -= gouty;
-                                v_kz -= goutz;
                             }
                         }
                     }
                 }
             }
+            out_ix += v_ix;
+            out_iy += v_iy;
+            out_iz += v_iz;
+            out_jx += v_jx;
+            out_jy += v_jy;
+            out_jz += v_jz;
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 double *reduce = shared_memory + nsp_per_block * 3 + thread_id;
                 __syncthreads();
-                reduce[0*THREADS] = v_kx;
-                reduce[1*THREADS] = v_ky;
-                reduce[2*THREADS] = v_kz;
+                reduce[0*THREADS] = -v_ix - v_jx;
+                reduce[1*THREADS] = -v_iy - v_jy;
+                reduce[2*THREADS] = -v_iz - v_jz;
                 for (int i = gout_stride/2; i > 0; i >>= 1) {
                     __syncthreads();
                     if (gout_id < i && pair_ij < shl_pair1 && kidx < ksh1) {
@@ -386,12 +395,12 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         double *reduce = shared_memory + nsp_per_block * 3 + thread_id;
         __syncthreads();
         // (\nabla i,j|k) + (i,\nabla j|k) + (ij|\nabla k) = 0
-        reduce[0*THREADS] = v_ix;
-        reduce[1*THREADS] = v_iy;
-        reduce[2*THREADS] = v_iz;
-        reduce[3*THREADS] = v_jx;
-        reduce[4*THREADS] = v_jy;
-        reduce[5*THREADS] = v_jz;
+        reduce[0*THREADS] = out_ix;
+        reduce[1*THREADS] = out_iy;
+        reduce[2*THREADS] = out_iz;
+        reduce[3*THREADS] = out_jx;
+        reduce[4*THREADS] = out_jy;
+        reduce[5*THREADS] = out_jz;
         for (int i = gout_stride/2; i > 0; i >>= 1) {
             __syncthreads();
             if (gout_id < i && pair_ij < shl_pair1) {
@@ -422,25 +431,25 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             int *ao_pair_loc, int aux_offset, int npairs, int naux)
 {
     setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, ksh0);
-    SHARED_SCALAR(int, ksh1);
-    SHARED_SCALAR(int, nksh);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, lk);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, nf);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, kprim);
-    SHARED_SCALAR(int, g_size);
-    SHARED_SCALAR(int, nao);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nst_per_block);
-    SHARED_SCALAR(int, aux_per_block);
-    SHARED_SCALAR(int, nsp_per_block);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, ksh0);
+    SHARED_ARRAY(int, ksh1);
+    SHARED_ARRAY(int, nksh);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, nf);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, aux_per_block);
+    SHARED_ARRAY(int, nsp_per_block);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     // For better load balance, consume blocks in the reversed order
@@ -545,11 +554,13 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
             int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-            int k0, dm_tensor;
+            int k0, dm_tensor = 0;
             if (density_auxvec == NULL) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
-                size_t pair_offset = ao_pair_loc[pair_ij];
-                dm_tensor = pair_offset * naux + k0;
+                if (pair_ij < shl_pair1 && kidx < ksh1) {
+                    int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
+                    size_t pair_offset = ao_pair_loc[pair_ij];
+                    dm_tensor = pair_offset * naux + k0;
+                }
             } else {
                 int i0 = envs.ao_loc[ish];
                 int j0 = envs.ao_loc[jsh];
@@ -792,7 +803,7 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
         ejk, ejk_aux, dm, density_auxvec, n_dm, dev_envs,
         omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
@@ -825,8 +836,9 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     auto threads = make_block(THREADS);
     auto dev_envs = *envs;
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
-        LAUNCH_KERNEL_DYN( ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
-            ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n,
+        LAUNCH_KERNEL( ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
+            ejk+n*natm*3, ejk_aux ? ejk_aux+n*natm*3 : (double *)NULL,
+            dm, density_auxvec, n_dm-n,
             omega, lr_factor, sr_factor, dev_envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
             ao_pair_loc, aux_offset, npairs, naux);

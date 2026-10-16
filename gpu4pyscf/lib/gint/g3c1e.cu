@@ -21,7 +21,6 @@ __device__
 static void GINTwrite_int3c1e(const double* g, double* output, const int ish, const int jsh, const int i_grid,
                               const int i_l, const int j_l, const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j)
 {
-    GINT_CACHE_REF();
     const int* ao_loc = c_bpcache.ao_loc;
 
     const int i0 = ao_loc[ish  ] - ao_offsets_i;
@@ -72,7 +71,6 @@ static void GINTfill_int3c1e_kernel_general(double* output, const BasisProdOffse
     setup_context();
     const int task_ij = global_x;
     const int task_grid = global_y;
-    GINT_CACHE_REF();
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -148,7 +146,6 @@ static void GINTfill_int3c1e_charge_contracted_kernel_expanded(double* output, c
     const int task_ij = global_x;
     const int thread_y_id = global_y;
     const int total_threads_y = gridDim_y * blockDim_y;
-    GINT_CACHE_REF();
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -235,7 +232,6 @@ static void GINTfill_int3c1e_charge_contracted_kernel_general(double* output, co
     const int task_ij = global_x;
     const int thread_y_id = global_y;
     const int total_threads_y = gridDim_y * blockDim_y;
-    GINT_CACHE_REF();
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -292,7 +288,6 @@ static void GINTfill_int3c1e_density_contracted_kernel_general(double* output, c
     const int task_grid = global_y;
     const int thread_x_id = global_x;
     const int total_threads_x = gridDim_x * blockDim_x;
-    GINT_CACHE_REF();
     if (task_grid >= ngrids) {
         return;
     }

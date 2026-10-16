@@ -19,6 +19,7 @@ import numpy as np
 import cupy as cp
 import scipy.linalg
 from pyscf import gto
+from pyscf.lib.misc import _blocksize_partition
 from pyscf.pbc import gto as pbcgto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
@@ -315,13 +316,19 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
         else:
             return mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts
 
-def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
+def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1,
+                        orig_shell_idx=None):
     '''Splits l_ctr patterns into small groups with group_size the maximum
-    number of AOs in each group
+    number of AOs in each group. If orig_shell_idx is provided, boundaries
+    within each pattern must also separate original contracted shells.
     '''
     _l_ctrs = []
     _l_ctr_counts = []
+    offset = 0
     for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
+        if orig_shell_idx is not None:
+            shell_ids = orig_shell_idx[offset:offset+counts]
+        offset += counts
         l = l_ctr[0]
         nf = (l + 1) * (l + 2) // 2
         if isinstance(group_size, (int, np.integer)):
@@ -335,12 +342,24 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
             _l_ctr_counts.append(counts)
             continue
 
+        if orig_shell_idx is not None:
+            # Stable sorting keeps each original shell's contributions
+            # contiguous within this (l, nprim) pattern.
+            changes = np.flatnonzero(shell_ids[1:] != shell_ids[:-1]) + 1
+            shell_offsets = np.concatenate(([0], changes, [counts]))
+            splits = _blocksize_partition(shell_offsets, max_shells)
+            sub_counts = np.diff(shell_offsets[splits])
+            _l_ctrs.extend([l_ctr] * len(sub_counts))
+            _l_ctr_counts.extend(sub_counts)
+            continue
+
         nsubs, remaining = counts.__divmod__(max_shells)
         _l_ctrs.extend([l_ctr] * nsubs)
         _l_ctr_counts.extend([max_shells] * nsubs)
         if remaining > 0:
             _l_ctrs.append(l_ctr)
             _l_ctr_counts.append(remaining)
+
     uniq_l_ctr = np.vstack(_l_ctrs)
     l_ctr_counts = np.hstack(_l_ctr_counts)
     return uniq_l_ctr, l_ctr_counts
@@ -601,6 +620,10 @@ class SortedGTO:
 
         Parameters
         ----------
+        group_size : int or sequence, optional
+            Limit group sizes without splitting an original contracted
+            shell's contributions within an (l, nprim) pattern. An integer
+            specifies Cartesian AOs; a sequence specifies shells per l.
         decontract : bool, optional
             If enabled, decontract generally contractions into primitives.
             Otherwise, simply split general contractions into segment-contracted shells,
@@ -634,32 +657,31 @@ class SortedGTO:
             l_ctrs_descend, return_index=True, return_inverse=True, return_counts=True, axis=0)
         uniq_l_ctr[:,1] = -uniq_l_ctr[:,1]
 
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable')
+        self._bas = np.asarray(self._bas[sorted_idx], dtype=np.int32)
+        self.sorted_idx = sorted_idx
+        inv_sorted = np.empty(len(self._bas), dtype=np.int32)
+        inv_sorted[sorted_idx] = np.arange(len(self._bas))
+        # Maps generated shells in recontraction order to sorted shells.
+        # Each recontract_bas row starts at PTR_PBAS_IDX in this array.
+        self.recontraction_idx = inv_sorted
+
         # Limit the number of AOs in each group
         if group_size is not None:
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
-                uniq_l_ctr, l_ctr_counts, group_size)
+                uniq_l_ctr, l_ctr_counts, group_size,
+                orig_shell_idx=self.get_orig_shell_idx())
 
         if mol.verbose >= logger.DEBUG1:
             logger.debug1(mol, 'Number of shells for each [l, nprim] group')
             for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
                 logger.debug1(mol, '    %s : %s', l_ctr, n)
 
-        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable')
-        self._bas = np.asarray(self._bas[sorted_idx], dtype=np.int32)
-
         # PTR_BAS_COORD is required by various CUDA kernels
         self._bas[:,PTR_BAS_COORD] = self._atm[self._bas[:,ATOM_OF],PTR_COORD]
 
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_counts = l_ctr_counts
-        self.sorted_idx = sorted_idx
-        inv_sorted = np.empty(len(self._bas), dtype=np.int32)
-        inv_sorted[sorted_idx] = np.arange(len(self._bas))
-        # recontraction_idx stores the indices of primitive shells (self._bas)
-        # for each original contracted shell (self.mol._bas). The offset of each
-        # contracted shell for recontraction_idx is provided by the
-        # recontract_bas[:,PTR_PBAS_IDX]
-        self.recontraction_idx = inv_sorted
         self.p_ao_loc = self.ao_loc_nr(cart=True)
 
         # cache envs
@@ -973,6 +995,14 @@ class SortedGTO:
 
         return np.hstack([idx[i] for i in inv_sorted])
 
+    def get_orig_shell_idx(self):
+        """Map each sorted shell to its original shell in self.cell._bas."""
+        shell_idx = np.empty(self.nbas, dtype=np.int32)
+        libvhf_rys.get_orig_shell_idx(
+            shell_idx.ctypes, self.cell._bas.ctypes, ctypes.c_int(self.cell.nbas),
+            self.recontract_bas.ctypes, self.recontraction_idx.ctypes)
+        return shell_idx
+
     @property
     def rys_envs(self):
         raise NotImplementedError
@@ -1033,7 +1063,7 @@ class SortedMole(Mole, SortedGTO):
                 batch_size = nsp_per_block[l[i], l[j]]
             shl_pair_offsets.append(cp.arange(
                 sp0, sp1, batch_size, dtype=np.int32))
-        bas_ij_idx = cp.asarray(cp.hstack(bas_ij_idx), dtype=np.int32)
+        bas_ij_idx = cp.asarray(cp.hstack(bas_ij_idx), dtype=np.uint32)
         shl_pair_offsets.append(np.int32(sp1))
         shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
         return bas_ij_idx, shl_pair_offsets
@@ -1122,6 +1152,14 @@ class PBCIntEnvVars(ctypes.Structure):
         # Keep a reference to these arrays, prevent releasing them upon returning
         obj._env_ref_holder = (atm, bas, env, ao_loc, Ls)
         return obj
+
+    @classmethod
+    def from_RysIntEnvs(cls, rys_envs):
+        if isinstance(rys_envs, PBCIntEnvVars):
+            return rys_envs
+        atm, bas, env, ao_loc = rys_envs._env_ref_holder
+        Ls = cp.zeros((1, 3))
+        return cls.new(rys_envs.natm, rys_envs.nbas, 1, 1, atm, bas, env, ao_loc, Ls)
 
     def copy(self):
         atm, bas, env, ao_loc, Ls = self._env_ref_holder

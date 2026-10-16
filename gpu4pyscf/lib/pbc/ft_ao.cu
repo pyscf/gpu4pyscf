@@ -205,16 +205,16 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                       double *Gv, int nGv, int *ao_loc, int compressing, int to_sph)
 {
     setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, nao);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
-    SHARED_SCALAR(int, img_max);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nsp_per_block);
+    SHARED_ARRAY(int, img_max);
     SHARED_ARRAY(int, img_counts, [WARPS]);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
@@ -1184,7 +1184,7 @@ int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool, int *head,
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto threads = make_block(nGv_per_block, WARPS);
     auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
-    LAUNCH_KERNEL_DYN( ft_aopair_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size,
             out, *envs, pool, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, grids, ngrids,
             ao_loc, compressing, to_sph);

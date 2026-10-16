@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
+cmake_minimum_required (VERSION 3.21 FATAL_ERROR) # Required by Libxc 7.1.2
 
 # Backend selection — mutually exclusive (like ExchCXX)
 option(USE_SYCL "Using SYCL backend" OFF)
@@ -25,11 +25,7 @@ if(NOT USE_SYCL AND NOT USE_CUDA)
   message(FATAL_ERROR "Must select at least one backend: USE_SYCL=ON or USE_CUDA=ON")
 endif()
 
-if (USE_SYCL)
-  project (gpu4pyscf C CXX Fortran)
-else()
-  project (gpu4pyscf C CXX CUDA Fortran)
-endif()
+project (gpu4pyscf C CXX Fortran)
 
 set(CMAKE_C_STANDARD "99")
 set(CMAKE_CXX_STANDARD 17)
@@ -84,7 +80,6 @@ if (USE_SYCL)
     -fsycl
     -Wno-ignored-reference-qualifiers
     -Wno-register
-    -fsycl-device-code-split=per_kernel
     -fp-model=precise
     -fno-system-debug
     -fsycl-default-sub-group-size=32
@@ -105,10 +100,15 @@ if (USE_SYCL)
     "$<$<COMPILE_LANGUAGE:Fortran>:-g>"
   )
 
+  # Device code is split in sycl-post-link at LINK time, so the split mode
+  # must be a link option (as a compile option it is ignored). per_kernel
+  # gives llvm-foreach one ocloc job per kernel; without it a single-TU
+  # library (ecp: nr_ecp_driver.cu) becomes one module compiled serially.
   add_link_options(
     -fsycl
     -flink-huge-device-code
-    -fsycl-max-parallel-link-jobs=32
+    -fsycl-device-code-split=per_kernel
+    -fsycl-max-parallel-link-jobs=64
   )
   if (GPU4PYSCF_SYCL_AOT)
     add_link_options(
@@ -133,14 +133,16 @@ if (USE_SYCL)
   include_directories(${PROJECT_SOURCE_DIR}/gsycl)      
 endif()
 
-# For better performance on A100, the option
-# -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
 if (NOT USE_SYCL)
+  # Set architectures before enabling CUDA, which otherwise initializes its own default.
+  # For better performance on A100, the option
+  # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
   if(DEFINED CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHITECTURES}")
-  else()
+  elseif(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES "70-real;80-real;90-real")
   endif()
+  enable_language(CUDA)
   message("CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 endif()
 

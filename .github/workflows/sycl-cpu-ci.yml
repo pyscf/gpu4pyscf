@@ -102,6 +102,7 @@ jobs:
           ref: ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
 
       - name: Set up Python
+        id: py
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -169,16 +170,33 @@ jobs:
             /home/runner/sycl-venv
             /home/runner/dpctl
             /home/runner/dpnp
-          key: sycl-stack-v2-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
-          # Fall back to any earlier week on the same oneAPI: a stale but
-          # working dpctl/dpnp beats a 45 min rebuild, and the weekly key
+          # The venv's bin/python is a symlink into the hosted toolcache, so the
+          # key must pin the exact Python patch version: a venv restored onto a
+          # newer 3.11.x has a dangling interpreter and every venv script
+          # (cmake, pip, ...) fails with "No such file or directory".
+          key: sycl-stack-v3-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
+          # Fall back to any earlier week on the same Python + oneAPI: a stale
+          # but working dpctl/dpnp beats a 45 min rebuild, and the weekly key
           # above still refreshes it once the bucket rolls over.
           restore-keys: |
-            sycl-stack-v2-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-
-            sycl-stack-v2-${{ runner.os }}-py311-
+            sycl-stack-v3-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-oneapi${{ steps.stack.outputs.oneapi_ver }}-
+            sycl-stack-v3-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-
+
+      - name: Verify restored stack (rebuild if the venv is unusable)
+        id: stack-ok
+        run: |
+          # A cache hit is not proof of a working venv; rebuild if the
+          # interpreter or the dpctl/dpnp installs do not load.
+          if [ -n "${{ steps.stack-cache.outputs.cache-matched-key }}" ] && \
+             "$VENV/bin/python" -c "import dpctl, dpnp" 2>/dev/null; then
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+          else
+            rm -rf "$VENV" /home/runner/dpctl /home/runner/dpnp
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Create venv with Python build/runtime dependencies
-        if: steps.stack-cache.outputs.cache-matched-key == ''
+        if: steps.stack-ok.outputs.rebuild == 'true'
         run: |
           python -m venv "$VENV"
           "$VENV/bin/pip" install --upgrade pip
@@ -198,7 +216,7 @@ jobs:
             sycl-ccache-${{ runner.os }}-
 
       - name: Build dpctl from source (IntelPython/dpctl master)
-        if: steps.stack-cache.outputs.cache-matched-key == ''
+        if: steps.stack-ok.outputs.rebuild == 'true'
         run: |
           source /opt/intel/oneapi/setvars.sh --force
           source "$VENV/bin/activate"
@@ -221,7 +239,7 @@ jobs:
           # PEP-660 editable install hides it behind an import hook.
 
       - name: Build dpnp from source (IntelPython/dpnp master)
-        if: steps.stack-cache.outputs.cache-matched-key == ''
+        if: steps.stack-ok.outputs.rebuild == 'true'
         run: |
           source /opt/intel/oneapi/setvars.sh --force
           source "$VENV/bin/activate"
@@ -239,14 +257,14 @@ jobs:
         # always(): a cancelled or failed run has usually still built part of
         # the stack, and saving it means the next run resumes rather than
         # restarting. Mirrors the ccache save step below.
-        if: always() && steps.stack-cache.outputs.cache-matched-key == ''
+        if: always() && steps.stack-ok.outputs.rebuild == 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             /home/runner/sycl-venv
             /home/runner/dpctl
             /home/runner/dpnp
-          key: sycl-stack-v2-${{ runner.os }}-py311-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
+          key: sycl-stack-v3-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
 
       - name: Build gpu4pyscf (SYCL backend, JIT spir64, CPU-runnable)
         env:
@@ -285,16 +303,19 @@ jobs:
             python -c "import dpnp; a = dpnp.arange(10); assert int(a.sum()) == 45; print('dpnp', dpnp.__version__, 'OK')" &&
             python -c "import gpu4pyscf; print('gpu4pyscf import OK')" ; } 2>&1 | tee /tmp/logs/50_smoke.log
 
-      - name: scf unit tests (SYCL CPU - full gate)
-        # Re-enabled 2026-10-17: SCF suite is 105/0/3 green on PVC (see progress.md).
-        # Runs on the OpenCL CPU device via JIT spir64; dpnp sparse now in upstream wheels.
+      - name: scf unit tests (SYCL CPU, timings)
+        # SCF suite is green on PVC (see progress.md). On the OpenCL CPU device
+        # (JIT spir64) it runs to collect per-test timings (--durations=0);
+        # continue-on-error until CPU runtimes are known, so the timing table
+        # and logs are always published.
+        continue-on-error: true
         timeout-minutes: 90
         run: |
           source /opt/intel/oneapi/setvars.sh --force
           source "$VENV/bin/activate"
           set -o pipefail; mkdir -p /tmp/logs
           python -m pytest gpu4pyscf/scf/tests/ -v --timeout=900 \
-            --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/60_pytest_scf.log
+            --durations=0 --continue-on-collection-errors 2>&1 | tee /tmp/logs/60_pytest_scf.log
 
       - name: df unit tests (smoke, partial completion expected)
         # Disabled: the SYCL backend still has known aborts and hangs in

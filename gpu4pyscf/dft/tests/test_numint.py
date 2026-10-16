@@ -25,6 +25,10 @@ from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
 from gpu4pyscf.dft import gen_grid
 from gpu4pyscf.dft import xc_deriv
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except ImportError:
+    dftd3 = dftd4 = None
 
 def setUpModule():
     global mol, grids_cpu, grids_gpu, dm, dm0, dm1, mo_occ, mo_coeff
@@ -422,6 +426,7 @@ H   1.7   -2.0   0.4''',
         assert  ref_rho.shape == (2, 5, mf.grids.coords.shape[0])
         assert np.max(np.abs(test_rho - ref_rho)) < 1e-11
 
+    @unittest.skipIf(dftd4 is None, "dftd4 not available")
     def test_get_rho_with_derivatives_unrestricted_dm_input(self):
         assert mol.spin == 1
         mf = mol.UKS(xc = 'wB97X-d4').density_fit(auxbasis = "def2-universal-jkfit").to_gpu()

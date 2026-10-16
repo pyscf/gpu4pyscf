@@ -137,7 +137,7 @@ static void GINTwrite_int3c2e_ipip1_direct(GINTEnvVars envs, ERITensor eri,
     double* __restrict__ g0, double ai2,
     const int ish, const int jsh, const int ksh)
 {
-    KERNEL_SETUP_LOCAL();
+    setup_context();
     int *ao_loc = c_bpcache.ao_loc;
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
@@ -250,7 +250,6 @@ void GINTfill_int3c2e_ipip1_general_kernel(GINTEnvVars envs, ERITensor eri, Basi
     DYNAMIC_SHARED_PTR(double, g0);
     const int task_ij = blockIdx_x;
     const int task_kl = blockIdx_y;
-    GINT_CACHE_REF();
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;

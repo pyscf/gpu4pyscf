@@ -121,24 +121,24 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
                                 uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, lk);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, kprim);
-    SHARED_SCALAR(int, g_size);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nst_per_block);
-    SHARED_SCALAR(int, dm_id0);
-    SHARED_SCALAR(double, xk);
-    SHARED_SCALAR(double, yk);
-    SHARED_SCALAR(double, zk);
-    SHARED_SCALAR(int, expk);
-    SHARED_SCALAR(int, ck);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, dm_id0);
+    SHARED_ARRAY(double, xk);
+    SHARED_ARRAY(double, yk);
+    SHARED_ARRAY(double, zk);
+    SHARED_ARRAY(int, expk);
+    SHARED_ARRAY(int, ck);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;
@@ -373,19 +373,19 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, int n_dm, int n
 {
     // For better load balance, consume blocks in the reversed order
     setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, ksh0);
-    SHARED_SCALAR(int, ksh1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, lk);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, kprim);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nst_per_block);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, ksh0);
+    SHARED_ARRAY(int, ksh1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;
@@ -592,7 +592,7 @@ int contract_int3c2e_dm(double *out, double *dm, int n_dm, int naux,
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
         out, dm, n_dm, naux, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -617,7 +617,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL_DYN( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
         vj, auxvec, n_dm, naux, dev_envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup);
     err = cudaGetLastError();

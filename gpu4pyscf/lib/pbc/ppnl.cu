@@ -29,6 +29,23 @@
 #include "int3c2e.cuh"
 #include "overlap.cuh"
 
+// Common prologue of the ppnl kernels: context, shared-pair state and the
+// dynamic shared buffer `g` (same as overlap.cu).
+#define KERNEL_SETUP() \
+    setup_context(); \
+    SHARED_ARRAY(int, shl_pair0); \
+    SHARED_ARRAY(int, shl_pair1); \
+    SHARED_ARRAY(int, li); \
+    SHARED_ARRAY(int, lj); \
+    SHARED_ARRAY(int, iprim); \
+    SHARED_ARRAY(int, jprim); \
+    SHARED_ARRAY(int, gout_stride); \
+    SHARED_ARRAY(int, nsp_per_block); \
+    DYNAMIC_SHARED_PTR(double, g); \
+    int sp_block_id = blockIdx_x; \
+    int thread_id = threadIdx_x;
+
+
 #define GOUT_WIDTH      36
 #define GOUT_WIDTH_IP1  18
 
@@ -38,18 +55,7 @@ void int1e_r2_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                            int *shl_pair_offsets, int *gout_stride_lookup,
                            int naoi, int naoj, size_t ij_offset)
 {
-    setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g);
-    int sp_block_id = blockIdx_x;
-    int thread_id = threadIdx_x;
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -195,18 +201,7 @@ void int1e_r4_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                            int *shl_pair_offsets, int *gout_stride_lookup,
                            int naoi, int naoj, size_t ij_offset)
 {
-    setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g);
-    int sp_block_id = blockIdx_x;
-    int thread_id = threadIdx_x;
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -357,18 +352,7 @@ void int1e_r2_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                                int *shl_pair_offsets, int *gout_stride_lookup,
                                int naoi, int naoj, size_t ij_offset)
 {
-    setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g);
-    int sp_block_id = blockIdx_x;
-    int thread_id = threadIdx_x;
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -539,18 +523,7 @@ void int1e_r4_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                                int *shl_pair_offsets, int *gout_stride_lookup,
                                int naoi, int naoj, size_t ij_offset)
 {
-    setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g);
-    int sp_block_id = blockIdx_x;
-    int thread_id = threadIdx_x;
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -733,18 +706,7 @@ void ppnl_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvV
                              int *shl_pair_offsets, int *bas_ij_idx,
                              int *gout_stride_lookup, int naoi, int naoj)
 {
-    setup_context();
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g);
-    int sp_block_id = blockIdx_x;
-    int thread_id = threadIdx_x;
+    KERNEL_SETUP();
     int *bas = envs.bas;
     int cell0_nbas = envs.cell0_nbas;
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -950,7 +912,7 @@ static int ppnl_derivatives(double *grad, double *sigma, double *dm,
     if (err == cudaSuccess) {
         auto blocks = make_grid(nbatches_shl_pair);
         auto threads = make_block(THREADS);
-        LAUNCH_KERNEL_DYN( ppnl_derivatives_kernel<RADIAL>, blocks, threads, shm_size,
+        LAUNCH_KERNEL( ppnl_derivatives_kernel<RADIAL>, blocks, threads, shm_size,
             grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx,
             gout_stride_lookup, naoi, naoj);
         err = cudaGetLastError();
@@ -972,7 +934,7 @@ int PBCint1e_r2_origi(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaFuncSetAttribute(int1e_r2_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( int1e_r2_origi_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int1e_r2_origi_kernel, blocks, threads, shm_size,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -991,7 +953,7 @@ int PBCint1e_r4_origi(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaFuncSetAttribute(int1e_r4_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( int1e_r4_origi_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int1e_r4_origi_kernel, blocks, threads, shm_size,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -1010,7 +972,7 @@ int PBCint1e_r2_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaFuncSetAttribute(int1e_r2_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( int1e_r2_origi_ip2_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int1e_r2_origi_ip2_kernel, blocks, threads, shm_size,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -1029,7 +991,7 @@ int PBCint1e_r4_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaFuncSetAttribute(int1e_r4_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( int1e_r4_origi_ip2_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int1e_r4_origi_ip2_kernel, blocks, threads, shm_size,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();

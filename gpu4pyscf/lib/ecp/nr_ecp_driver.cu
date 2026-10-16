@@ -40,7 +40,7 @@
     LAUNCH_KERNEL((KPREFIX<LI,LJ,LC>), blocks, threads, 0, ECP_ARGS)
 
 #define ECP_LAUNCH_SMEM(TAG, SMEM, KFUNC, ...) { \
-    LAUNCH_KERNEL_DYN((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__); \
+    LAUNCH_KERNEL((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__); \
 }
 
 #define ECP_LAUNCH_GENERAL(TAG, SMEM, KFUNC, ...) do { \
@@ -51,7 +51,7 @@
                 __func__, cudaGetErrorString(_e)); \
         return 1; \
     } \
-    LAUNCH_KERNEL_DYN((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__); \
+    LAUNCH_KERNEL((KFUNC), blocks, threads, (SMEM)*sizeof(double), __VA_ARGS__); \
 } while(0)
 
 namespace {

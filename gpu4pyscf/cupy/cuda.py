@@ -1861,7 +1861,8 @@ def alloc_pinned_memory(nbytes, flags=None):
     # next host touch through a SIGSEGV handler that libigc can leave
     # displaced after concurrent JIT compiles (see empty_mapped in
     # gpu4pyscf/lib/dpnp_helper.py). `flags` is accepted for API parity.
-    return _PinnedMemoryPointer(dpmem.MemoryUSMHost(nbytes, queue=q))
+    # dpctl rejects zero-byte allocations; CuPy accepts them.
+    return _PinnedMemoryPointer(dpmem.MemoryUSMHost(max(nbytes, 1), queue=q))
 
 
 # =====================================================================

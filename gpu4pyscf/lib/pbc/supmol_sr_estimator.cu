@@ -198,8 +198,8 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
     int stride_k = stride_j * (lj + 1);
     int nfij = nfi * nfj;
 
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nsp_per_block);
     if (t_id == 0) {
         gout_stride = gout_stride_lookup[li*LMAX1+lj];
         nsp_per_block = THREADS / gout_stride;
@@ -501,7 +501,7 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
     auto dev_envs = *envs;
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( fill_s_estimator, blocks, threads, buflen,
+    LAUNCH_KERNEL( fill_s_estimator, blocks, threads, buflen,
         s_estimator, dev_envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
         npairs, omega, tril_symmetry, Ecut_mask);
@@ -522,7 +522,7 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
     auto dev_envs = *envs;
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( q_cond_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( q_cond_kernel, blocks, threads, shm_size,
         q_cond, dev_envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

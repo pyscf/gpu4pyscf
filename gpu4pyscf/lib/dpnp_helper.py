@@ -623,6 +623,10 @@ def take_last2d(a, indices, out=None):
     else:
         count = np.prod(a.shape[:-2])
     out = ndarray((count, nidx, nidx), buffer=out)
+    if a.ndim == 2:
+        out = out.reshape(nidx,nidx)
+    if nidx == 0:
+        return out
     indices_int32 = dpnp.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.take_last2d(
@@ -636,8 +640,6 @@ def take_last2d(a, indices, out=None):
     )
     if err != 0:
         raise RuntimeError('failed in take_last2d kernel')
-    if a.ndim == 2:
-        out = out.reshape(nidx,nidx)
     return out
 
 def takebak(out, a, indices, axis=-1):
@@ -741,28 +743,48 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
         raise RuntimeError('hermi_triu kernel failed')
     return mat
 
-def cart2sph_cutensor(t, axis=0, ang=1, out=None):
-    '''
-    transform 'axis' of a tensor from cartesian basis into spherical basis with cutensor
-    '''
-    from gpu4pyscf.gto import mole
-    if(ang <= 1):
-        if(out is not None): out[:] = t
-        return t
-    size = list(t.shape)
-    c2s = mole.cart2sph_by_l(ang)
-    if(not t.flags['C_CONTIGUOUS']): t = dpnp.asarray(t, order='C')
-    li_size = c2s.shape
-    nli = size[axis] // li_size[0]
-    i0 = max(1, np.prod(size[:axis]))
-    i3 = max(1, np.prod(size[axis+1:]))
-    out_shape = size[:axis] + [nli*li_size[1]] + size[axis+1:]
+def copy_symmetric(a, i_addr, j_addr, stream=None):
+    '''a[j_addr,i_addr] = a[i_addr, j_addr]'''
+    assert a.ndim == 3
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    N1, N2 = a.shape[1:3]
+    npairs = len(i_addr)
+    if a.dtype == np.complex128:
+        N2 *= 2
+    i_addr = dpnp.asarray(i_addr, dtype=np.int32)
+    j_addr = dpnp.asarray(j_addr, dtype=np.int32)
+    err = libdpnp_helper.copy_symmetric(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(i_addr.data.ptr, ctypes.c_void_p),
+        ctypes.cast(j_addr.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(npairs), ctypes.c_int(N1), ctypes.c_int(N2))
+    if err != 0:
+        raise RuntimeError('copy_symmetric kernel failed')
+    return a
 
-    t_cart = t.reshape([i0*nli, li_size[0], i3])
-    if(out is not None):
-        out = out.reshape([i0*nli, li_size[1], i3])
-    t_sph = contract('min,ip->mpn', t_cart, c2s, out=out)
-    return t_sph.reshape(out_shape)
+def scatter_add(a, idx, b, alpha=1, stream=None):
+    '''a[idx,:] += alpha * b'''
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    assert a.ndim == 2 and b.ndim == 2
+    assert a.dtype == b.dtype
+    nrow, ncol = b.shape
+    if b.dtype == np.complex128:
+        ncol *= 2
+    idx = dpnp.asarray(idx, dtype=np.int32)
+    err = libdpnp_helper.scatter_add(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(b.data.ptr, ctypes.c_void_p),
+        ctypes.cast(idx.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(alpha),
+        ctypes.c_int(nrow), ctypes.c_int(ncol))
+    if err != 0:
+        raise RuntimeError('scatter_add kernel failed')
+    return a
+
 
 def cart2sph(t, axis=0, ang=1, out=None, stream=None):
     '''
@@ -997,6 +1019,10 @@ def empty_mapped(shape, dtype=float, order='C'):
     This array can be used as the buffer of zero-copy memory.
     '''
     nbytes = np.prod(shape) * np.dtype(dtype).itemsize
+    if nbytes == 0:
+        # CuPy accepts zero-byte pinned allocations; dpctl raises
+        # "Number of bytes of request allocation must be positive".
+        return np.empty(shape, dtype=dtype, order=order)
     q = dpctl.SyclQueue()  # or _create_from_ptr(int(libgpu.sycl_get_queue_ptr()))
     # USM-host, not USM-shared: CUDA's hostAllocMapped is page-locked host
     # memory the device reads/writes in place, which is what USM-host is.
@@ -1467,7 +1493,7 @@ def batched_vec3_norm2(batched_vec3):
     Accepts either C-order (N,3) or F-order (3,N) layout, mirroring the CuPy
     implementation. All work stays on the device; no host transfers.
     '''
-    assert type(batched_vec3) is dpnp.ndarray
+    assert isinstance(batched_vec3, dpnp.ndarray)
     assert batched_vec3.dtype == dpnp.float64
     assert batched_vec3.ndim == 2
     assert batched_vec3.shape[0] == 3 or batched_vec3.shape[1] == 3

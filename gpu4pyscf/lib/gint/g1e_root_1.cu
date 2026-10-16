@@ -27,7 +27,6 @@ static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets off
     setup_context();
     const int task_ij = global_x;
     const int task_grid = global_y;
-    GINT_CACHE_REF();
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -97,7 +96,6 @@ static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const Ba
     const int task_ij = global_x;
     const int thread_y_id = global_y;
     const int total_threads_y = gridDim_y * blockDim_y;
-    GINT_CACHE_REF();
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -174,7 +172,6 @@ static void GINTfill_int3c1e_density_contracted_kernel00(double* output, const d
     const int task_grid = global_y;
     const int thread_x_id = global_x;
     const int total_threads_x = gridDim_x * blockDim_x;
-    GINT_CACHE_REF();
 
     if (task_grid >= ngrids) {
         return;
@@ -246,7 +243,6 @@ static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets off
     setup_context();
     const int task_ij = global_x;
     const int task_grid = global_y;
-    GINT_CACHE_REF();
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -344,7 +340,6 @@ static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const Ba
     const int task_ij = global_x;
     const int thread_y_id = global_y;
     const int total_threads_y = gridDim_y * blockDim_y;
-    GINT_CACHE_REF();
 
     if (task_ij >= ntasks_ij) {
         return;
@@ -453,7 +448,6 @@ static void GINTfill_int3c1e_density_contracted_kernel10(double* output, const d
     const int task_grid = global_y;
     const int thread_x_id = global_x;
     const int total_threads_x = gridDim_x * blockDim_x;
-    GINT_CACHE_REF();
 
     if (task_grid >= ngrids) {
         return;

@@ -259,7 +259,9 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     '''Full response including the response of the grids'''
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
+    omega = ni.omega
     ni = numint.NumInt() # Don't mess up with the old ni
+    ni.omega = omega
     xctype = ni._xc_type(xc_code)
 
     grids = grids.copy()

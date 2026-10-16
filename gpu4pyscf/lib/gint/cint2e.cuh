@@ -29,7 +29,10 @@
 
 #ifdef USE_SYCL
 
-extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;
+extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gint_bpcache;
+// Kernel bodies keep CUDA's `c_bpcache.member` spelling (device code only;
+// host uploads go through TABLE_FILL, which names s_gint_bpcache directly).
+#define c_bpcache (::s_gint_bpcache.get())
 
 // Generated with GINTinit_index1d_xyz
 // Look into constant.cu for details
@@ -62,44 +65,6 @@ extern __constant__ int c_l_locs[GPU_LMAX+2];
 // Launch with make_block(THREADSX, THREADSY) + make_grid(...) so x/y lanes match.
 #define KERNEL_SETUP() \
     setup_context(); \
-    GINT_CACHE_REF(); \
     const int task_ij = blockIdx_x * blockDim_x + threadIdx_x; \
     const int task_kl = blockIdx_y * blockDim_y + threadIdx_y;
 
-// Cache reference for gpu_compat-style (rank-3) kernels that spell out index
-// setup inline via setup_context(). CUDA uses the __constant__ symbol directly;
-// SYCL binds the device_global. Keeps .cu files free of backend branches.
-#ifdef USE_SYCL
-#define GINT_CACHE_REF() \
-    const auto& c_bpcache = s_bpcache.get()
-#else
-#define GINT_CACHE_REF()
-#endif
-
-// Backend-agnostic constant-cache symbol for CONSTANT_MEMCPY upload sites.
-// Usage: CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
-#ifdef USE_SYCL
-#define GINT_BPCACHE_SYM s_bpcache
-#define GINT_BPCACHE_DEFINE() \
-    SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache
-#else
-#define GINT_BPCACHE_SYM c_bpcache
-#define GINT_BPCACHE_DEFINE() \
-    __constant__ BasisProdCache c_bpcache
-#endif
-
-// Backend-agnostic upload of host BasisProdCache to constant memory on a
-// caller-provided stream. Usage: GINT_BPCACHE_UPLOAD(stream, bpcache);
-#ifdef USE_SYCL
-#define GINT_BPCACHE_UPLOAD(stream, src) \
-    (stream).memcpy(s_bpcache, src, sizeof(BasisProdCache)).wait()
-#else
-#define GINT_BPCACHE_UPLOAD(stream, src) \
-    do { checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, src, sizeof(BasisProdCache))); (void)(stream); } while (0)
-#endif
-
-// Context + cache setup for intra-block direct-write helpers. Use threadIdx_x /
-// blockDim_x macros directly at use sites (1D block span THREADSX*THREADSY).
-#define KERNEL_SETUP_LOCAL() \
-    setup_context(); \
-    GINT_CACHE_REF();

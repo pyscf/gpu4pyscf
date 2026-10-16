@@ -268,7 +268,7 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
 {
     setup_context();
     int thread_id = threadIdx_x;
-    SHARED_SCALAR(int, task_head);
+    SHARED_ARRAY(int, task_head);
     if (thread_id == 0) {
         task_head = THREADS;
     }

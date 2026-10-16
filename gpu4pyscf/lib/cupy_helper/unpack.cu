@@ -217,9 +217,34 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
     }
 }
 
+__global__ static
+void copy_symmetric_kernel(double *a, int *i_addr, int *j_addr, int N1, int N2)
+{
+    setup_context();
+    int k = blockIdx_x;
+    size_t i = i_addr[k];
+    size_t j = j_addr[k];
+    size_t ij = (i * N1 + j) * N2;
+    size_t ji = (j * N1 + i) * N2;
+    for (int z = threadIdx_x; z < N2; z += blockDim_x) {
+        a[ji + z] = a[ij + z];
+    }
+}
+
+__global__ static
+void scatter_add_kernel(double *a, double *b, int *idx, double alpha, int ncol)
+{
+    setup_context();
+    int i = blockIdx_x;
+    long long dst_base = (long long)idx[i] * ncol;
+    long long src_base = (long long)i      * ncol;
+    for (int j = threadIdx_x; j < ncol; j += blockDim_x) {
+        a[dst_base + j] += b[src_base + j] * alpha;
+    }
+}
+
 extern "C" {
-int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi,
-              int dtype)
+int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi, int dtype)
 {
     int nx = (n + THREADS - 1) / THREADS;
     int ny = (n + THREADS - 1) / THREADS;
@@ -333,6 +358,36 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int copy_symmetric(cudaStream_t stream, double *a, int *i_addr, int *j_addr,
+                   int npairs, int N1, int N2)
+{
+    auto blocks = make_grid(npairs);
+    auto threads = make_block(1024);
+    LAUNCH_KERNEL(copy_symmetric_kernel, blocks, threads, 0, stream,
+        a, i_addr, j_addr, N1, N2);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "copy_symmetric error %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int scatter_add(cudaStream_t stream, double *a, double *b, int *idx,
+                double alpha, int nrow, int ncol)
+{
+    auto blocks = make_grid(nrow);
+    auto threads = make_block(1024);
+    LAUNCH_KERNEL(scatter_add_kernel, blocks, threads, 0, stream,
+        a, b, idx, alpha, ncol);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "scatter_add_kernel error %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

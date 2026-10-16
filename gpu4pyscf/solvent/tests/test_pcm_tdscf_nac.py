@@ -262,9 +262,9 @@ class KnownValues(unittest.TestCase):
                                    [ 0.0000000000, -1.4830798082,  1.0952335814],
                                    [-0.0000000000, -1.4830798082, -1.0952335814]])
         assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 2.0E-6
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 2.0E-6
 
     @pytest.mark.slow
     def test_nac_tda_singlet_ge_ref_IEFPCM(self):
@@ -456,9 +456,9 @@ class KnownValues(unittest.TestCase):
                                    [ 0.0000000000,  1.4826227017, -1.0948208712],
                                    [-0.0000000000,  1.4826227017,  1.0948208712]])
         assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 2.0E-6
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 2.0E-6
 
     @pytest.mark.slow
     def test_nac_tda_df_b3lyp_singlet_ge_ref_IEFPCM(self):

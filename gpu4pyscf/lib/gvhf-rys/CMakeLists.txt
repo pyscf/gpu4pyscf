@@ -13,6 +13,7 @@ set(GPU_SRCS
   utils.c
   ejk_int3c2e_ip2.cu fill_int3c2e_ip1.cu
   e_int2c2e_ip2.cu
+  fill_int4c2e.cu
 )
 
 if (USE_SYCL)

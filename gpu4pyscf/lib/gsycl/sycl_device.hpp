@@ -16,10 +16,24 @@
 using cudaError_t = int;
 constexpr int cudaSuccess = 0;
 inline unsigned int __activemask() { return 0; }
-inline int cudaGetLastError() { return 0; }
-inline int cudaPeekAtLastError() { return 0; }
+// Sticky launch error, set by gpu4pyscf_detail::launch_kernel when a launch
+// is rejected (bad shared-memory size, synchronous sycl::exception), so the
+// CUDA-style `err = cudaGetLastError(); if (err != cudaSuccess)` checks at
+// call sites see SYCL launch failures. Asynchronous kernel faults are not
+// reported here.
+constexpr int cudaErrorInvalidConfiguration = 9;
+inline thread_local int gpu4pyscf_last_launch_error = 0;
+inline thread_local char gpu4pyscf_last_launch_error_msg[512] = "no error";
+inline int cudaGetLastError() {
+  int e = gpu4pyscf_last_launch_error;
+  gpu4pyscf_last_launch_error = 0;
+  return e;
+}
+inline int cudaPeekAtLastError() { return gpu4pyscf_last_launch_error; }
 inline void checkCudaErrors(int) { }
-inline const char* cudaGetErrorString(int) { return "No error"; }
+inline const char* cudaGetErrorString(int e) {
+  return e == 0 ? "no error" : gpu4pyscf_last_launch_error_msg;
+}
 
 #define cudaGetDevice(ptr) (syclGetDevice(ptr))
 
@@ -58,7 +72,13 @@ enum cudaFuncCache {
 #define __maxnreg__(x)
 
 #define __global__ __attribute__((always_inline))
-#define __device__ __attribute__((always_inline))
+// Overridable so a library can opt out of forced inlining of device helpers
+// (CUDA's __device__ does not force inlining; the IGC compile time of
+// fully flattened kernels grows steeply).
+#ifndef GPU4PYSCF_DEVICE_ATTR
+#define GPU4PYSCF_DEVICE_ATTR __attribute__((always_inline))
+#endif
+#define __device__ GPU4PYSCF_DEVICE_ATTR
 #define __forceinline__ __attribute__((always_inline))
 #define __host__ __attribute__((always_inline))
 #define __constant__ inline constexpr
@@ -72,7 +92,9 @@ using double2 = sycl::double2;
 #define __syncthreads() (sycl::group_barrier(item.get_group()))
 #define __syncwarps() (sycl::group_barrier(item.get_sub_group()))
 #define __threadfence_block() (sycl::atomic_fence(sycl::memory_order::seq_cst, sycl::memory_scope::work_group))
-#define __shfl_down_sync(mask, val, delta) (sycl::shift_group_left((item.get_sub_group()), (val), (delta)))
+// Optional 4th arg (width) is accepted for CUDA parity; callers pass warpSize,
+// which equals the full sub-group here.
+#define __shfl_down_sync(mask, val, delta, ...) (sycl::shift_group_left((item.get_sub_group()), (val), (delta)))
 #define __ballot_sync(mask, predicate) (sycl::reduce_over_group(item.get_sub_group(), (predicate) ? (0x1 << item.get_sub_group().get_local_linear_id()) : 0, sycl::plus<>()))
 #define __popc(x) (sycl::popcount(x))
 
@@ -256,6 +278,23 @@ static inline cudaError_t cudaHostGetDevicePointer(void **pDevice, void *hHost,
                                                    unsigned int /*flags*/) {
   // Host USM allocations are directly device-accessible; no mapping needed.
   *pDevice = hHost;
+  return cudaSuccess;
+}
+// Typed overload, as in the CUDA runtime API (cuda_runtime.h template).
+template <class T>
+static inline cudaError_t cudaHostGetDevicePointer(T **pDevice, void *hHost,
+                                                   unsigned int flags) {
+  return cudaHostGetDevicePointer((void **)pDevice, hHost, flags);
+}
+
+// __constant__ tables are device_globals on SYCL; same call as CUDA.
+template <class T>
+static inline cudaError_t cudaMemcpyToSymbol(sycl_device_global<T> &symbol,
+                                             const void *src, size_t count,
+                                             size_t offset = 0,
+                                             cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
+  (void)kind;
+  sycl_get_queue()->memcpy(symbol, src, count, offset).wait();
   return cudaSuccess;
 }
 

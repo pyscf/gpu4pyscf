@@ -126,6 +126,25 @@ class KnownValues(unittest.TestCase):
 
         assert abs(test_gradient - ref_gradient).max() < 3e-6
 
+    def test_grid_response_omega_override(self):
+        mol = pyscf.M(atom='O 0 0 0; H 0 0.757 0.587; H 0 -0.757 0.587',
+                      basis='def2-svp', output='/dev/null', verbose=0)
+        for method in (rks.RKS, uks.UKS):
+            mf = method(mol, xc = 'LC_WPBE')
+            mf.omega = 0.175
+            mf.grids.atom_grid = atom_grid_loose
+            mf.conv_tol = 1e-12
+
+            ref_gradient = numerical_gradient(mf)
+            assert mf.converged
+
+            gobj = mf.Gradients()
+            gobj.grid_response = True
+            test_gradient = gobj.kernel()
+
+            assert abs(test_gradient - ref_gradient).max() < 1e-6
+        mol.stdout.close()
+
     def test_rks_grid_no_response_one_atom(self):
         mol = pyscf.M(
             atom = "Na 10 100 1000",

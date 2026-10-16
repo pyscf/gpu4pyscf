@@ -20,7 +20,6 @@ static void GINTfill_int2e_kernel0011(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -172,7 +171,6 @@ static void GINTfill_int2e_kernel0020(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -306,7 +304,6 @@ static void GINTfill_int2e_kernel0021(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -500,7 +497,6 @@ static void GINTfill_int2e_kernel0030(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -653,7 +649,6 @@ static void GINTfill_int2e_kernel1010(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -808,7 +803,6 @@ static void GINTfill_int2e_kernel1011(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -1051,7 +1045,6 @@ static void GINTfill_int2e_kernel1020(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -1249,7 +1242,6 @@ static void GINTfill_int2e_kernel1100(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -1401,7 +1393,6 @@ static void GINTfill_int2e_kernel1110(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -1644,7 +1635,6 @@ static void GINTfill_int2e_kernel2000(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -1778,7 +1768,6 @@ static void GINTfill_int2e_kernel2010(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -1976,7 +1965,6 @@ static void GINTfill_int2e_kernel2100(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -2170,7 +2158,6 @@ static void GINTfill_int2e_kernel3000(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     setup_context();
-    GINT_CACHE_REF();
     const int task_ij = global_x;
     const int task_kl = global_y;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {

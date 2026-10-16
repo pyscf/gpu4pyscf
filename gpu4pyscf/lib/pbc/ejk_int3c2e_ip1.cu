@@ -37,29 +37,29 @@ void ejk_int3c2e_deriv_kernel(double *ejk, double *sigma, double *dm, double *dm
                                int *head, int sp_blocks, int ksh_blocks)
 {
     setup_context();
-    SHARED_SCALAR(int, sp_block_id);
-    SHARED_SCALAR(int, ksh_block_id);
-    SHARED_SCALAR(int, ksh0_cell0);
-    SHARED_SCALAR(int, ksh1_cell0);
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, lk);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, nf);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, kprim);
-    SHARED_SCALAR(int, nao);
-    SHARED_SCALAR(int, g_size);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nst_per_block);
+    SHARED_ARRAY(int, sp_block_id);
+    SHARED_ARRAY(int, ksh_block_id);
+    SHARED_ARRAY(int, ksh0_cell0);
+    SHARED_ARRAY(int, ksh1_cell0);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, nf);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
     DYNAMIC_SHARED_PTR(double, shared_memory);
-    SHARED_SCALAR(int, num_ijk_tasks);
-    SHARED_SCALAR(int, num_sub_tasks);
-    SHARED_SCALAR(int, img_not_processed);
-    SHARED_SCALAR(int, img_tile_size);
+    SHARED_ARRAY(int, num_ijk_tasks);
+    SHARED_ARRAY(int, num_sub_tasks);
+    SHARED_ARRAY(int, img_not_processed);
+    SHARED_ARRAY(int, img_tile_size);
 
     int thread_id = threadIdx_x;
     uint32_t *img_pool = pool + blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
@@ -156,6 +156,7 @@ while (1) {
     while (img_not_processed > 0) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
                         rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
+        if (num_sub_tasks > 0) {
         for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
@@ -430,7 +431,7 @@ while (1) {
                 atomicAdd(ejk+ja*3+2, reduce[8*THREADS]);
             }
             __syncthreads();
-        }
+        } }
     } // while (img_not_processed > 0)
     _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info,
                       (int *)shared_memory);
@@ -457,15 +458,17 @@ int PBCsr_ejk_int3c2e_deriv(double *ejk, double *sigma, double *dm, double *dm_a
                             int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
                             float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaMemset(head, 0, sizeof(int));
-
+    if (nbatches_shl_pair == 0 || nbatches_ksh == 0) {
+        return 0;
+    }
+    cudaFuncSetAttribute(ejk_int3c2e_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaFuncSetAttribute(ejk_int3c2e_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( ejk_int3c2e_deriv_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ejk_int3c2e_deriv_kernel, blocks, threads, shm_size,
             ejk, sigma, dm, dm_auxvec, omega, *envs, pool, task_pool,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, nauxbas, naux,

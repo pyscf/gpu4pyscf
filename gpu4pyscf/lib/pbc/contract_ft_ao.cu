@@ -21,6 +21,28 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 
+// Common prologue of the ft_ao kernels. Expects nGv_per_block and
+// sp_threads (constexpr) in the enclosing kernel.
+#define KERNEL_SETUP() \
+    setup_context(); \
+    SHARED_ARRAY(int, sp_block_id); \
+    SHARED_ARRAY(int, shl_pair0); \
+    SHARED_ARRAY(int, shl_pair1); \
+    SHARED_ARRAY(int, li); \
+    SHARED_ARRAY(int, lj); \
+    SHARED_ARRAY(int, iprim); \
+    SHARED_ARRAY(int, jprim); \
+    SHARED_ARRAY(int, nao); \
+    SHARED_ARRAY(int, gout_stride); \
+    SHARED_ARRAY(int, nsp_per_block); \
+    SHARED_ARRAY(int, img_max); \
+    SHARED_ARRAY(int, img_counts, [sp_threads]); \
+    DYNAMIC_SHARED_PTR(double, shared_memory); \
+    int thread_id = threadIdx_x; \
+    int Gv_id_in_block = thread_id % nGv_per_block; \
+    int t_id = thread_id / nGv_per_block;
+
+
 #define WARP_SIZE       32
 #define WARPS           8
 #define THREADS         256
@@ -41,23 +63,7 @@ void ft_aopair_kernel(double *out, double *vG,
     constexpr int nGv_per_block = 16;
     constexpr int sp_threads = THREADS / nGv_per_block;
     constexpr unsigned mask = (1u << nGv_per_block) - 1;
-    setup_context();
-    SHARED_SCALAR(int, sp_block_id);
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, nao);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
-    SHARED_SCALAR(int, img_max);
-    SHARED_ARRAY(int, img_counts, [sp_threads]);
-    DYNAMIC_SHARED_PTR(double, shared_memory);
-    int thread_id = threadIdx_x;
-    int Gv_id_in_block = thread_id % nGv_per_block;
-    int t_id = thread_id / nGv_per_block;
+    KERNEL_SETUP();
 while (1) {
     if (thread_id == 0) {
         sp_block_id = atomicAdd(head, 1);
@@ -335,23 +341,7 @@ void ft_pdotp_kernel(double *out, double *vG,
     constexpr int nGv_per_block = 16;
     constexpr int sp_threads = THREADS / nGv_per_block;
     constexpr unsigned mask = (1u << nGv_per_block) - 1;
-    setup_context();
-    SHARED_SCALAR(int, sp_block_id);
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, nao);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
-    SHARED_SCALAR(int, img_max);
-    SHARED_ARRAY(int, img_counts, [sp_threads]);
-    DYNAMIC_SHARED_PTR(double, shared_memory);
-    int thread_id = threadIdx_x;
-    int Gv_id_in_block = thread_id % nGv_per_block;
-    int t_id = thread_id / nGv_per_block;
+    KERNEL_SETUP();
 while (1) {
     if (thread_id == 0) {
         sp_block_id = atomicAdd(head, 1);
@@ -695,7 +685,7 @@ int contract_ft_aopair(double *out, double *vG, PBCIntEnvVars *envs, int *head,
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto threads = make_block(THREADS);
     auto blocks = make_grid(workers);
-    LAUNCH_KERNEL_DYN( ft_aopair_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();
@@ -719,7 +709,7 @@ int contract_ft_pdotp(double *out, double *vG, PBCIntEnvVars *envs, int *head,
     cudaFuncSetAttribute(ft_pdotp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto threads = make_block(THREADS);
     auto blocks = make_grid(workers);
-    LAUNCH_KERNEL_DYN( ft_pdotp_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_pdotp_kernel, blocks, threads, shm_size,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();

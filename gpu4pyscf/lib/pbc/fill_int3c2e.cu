@@ -49,27 +49,27 @@ void pbc_int3c2e_latsum23_kernel(double *out, double omega, PBCIntEnvVars envs, 
                                  int *head, int nbatches_shl_pair, int nbatches_ksh)
 {
     setup_context();
-    SHARED_SCALAR(int, sp_block_id);
-    SHARED_SCALAR(int, ksh_block_id);
-    SHARED_SCALAR(int, ksh0_cell0);
-    SHARED_SCALAR(int, ksh1_cell0);
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, lk);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, nf);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, kprim);
-    SHARED_SCALAR(int, g_size);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nst_per_block);
-    SHARED_SCALAR(int, num_ijk_tasks);
-    SHARED_SCALAR(int, num_sub_tasks);
-    SHARED_SCALAR(int, img_not_processed);
-    SHARED_SCALAR(int, img_tile_size);
+    SHARED_ARRAY(int, sp_block_id);
+    SHARED_ARRAY(int, ksh_block_id);
+    SHARED_ARRAY(int, ksh0_cell0);
+    SHARED_ARRAY(int, ksh1_cell0);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, nf);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, num_ijk_tasks);
+    SHARED_ARRAY(int, num_sub_tasks);
+    SHARED_ARRAY(int, img_not_processed);
+    SHARED_ARRAY(int, img_tile_size);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int thread_id = threadIdx_x;
     int worker_id = blockIdx_x;
@@ -168,7 +168,7 @@ while (1) {
     while (img_not_processed > 0) {
         _select_sub_ijk(sub_task_idx, num_sub_tasks, img_not_processed, img_tile_size,
                         rem_task_idx, num_ijk_tasks, ijk_tasks_info, (int *)shared_memory);
-        if (num_sub_tasks == 0) continue;
+        if (num_sub_tasks > 0) {
         if (!int3c2e_unrolled(out, omega, envs, img_pool, sub_task_idx, num_sub_tasks,
                               img_tile_size, ijk_tasks_info, c2s_pool,
                               shm_size, iprim, jprim, kprim, li, lj, lk,
@@ -976,7 +976,7 @@ while (1) {
                     }
                 }
             }
-        }
+        } }
     } // while (img_not_processed > 0)
     _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info,
                       (int *)shared_memory);
@@ -1127,18 +1127,21 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
                            uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                            int *img_idx, uint32_t *sp_img_offsets,
                            int *gout_stride_lookup, int *ao_pair_loc,
-                           int ao_pair_offset, int nao_pairs,
-                           int aux_offset, int nauxbas, int naux, int to_sph,
+                           int ao_pair_offset, int aux_offset,
+                           int nauxbas, int naux, int to_sph,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaMemset(head, 0, sizeof(int));
+    if (nbatches_shl_pair == 0 || nbatches_ksh == 0) {
+        return 0;
+    }
+    cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( pbc_int3c2e_latsum23_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( pbc_int3c2e_latsum23_kernel, blocks, threads, shm_size,
             out, omega, *envs, pool, task_pool, c2s_pool, shm_size,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, sp_img_offsets,
             gout_stride_lookup, ao_pair_loc,

@@ -35,14 +35,14 @@
 // trailing kernel argument on either backend.
 #define KERNEL_SETUP() \
     setup_context(); \
-    SHARED_SCALAR(int, shl_pair0); \
-    SHARED_SCALAR(int, shl_pair1); \
-    SHARED_SCALAR(int, li); \
-    SHARED_SCALAR(int, lj); \
-    SHARED_SCALAR(int, iprim); \
-    SHARED_SCALAR(int, jprim); \
-    SHARED_SCALAR(int, gout_stride); \
-    SHARED_SCALAR(int, nsp_per_block); \
+    SHARED_ARRAY(int, shl_pair0); \
+    SHARED_ARRAY(int, shl_pair1); \
+    SHARED_ARRAY(int, li); \
+    SHARED_ARRAY(int, lj); \
+    SHARED_ARRAY(int, iprim); \
+    SHARED_ARRAY(int, jprim); \
+    SHARED_ARRAY(int, gout_stride); \
+    SHARED_ARRAY(int, nsp_per_block); \
     DYNAMIC_SHARED_PTR(double, g); \
     int sp_block_id = blockIdx_x; \
     int thread_id = threadIdx_x;
@@ -62,7 +62,7 @@
     auto dev_envs = *envs; \
     auto blocks = make_grid(nbatches_); \
     auto threads = make_block(THREADS); \
-    LAUNCH_KERNEL_DYN( KERNEL, blocks, threads, shm_size, out_, dev_envs, __VA_ARGS__); \
+    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, dev_envs, __VA_ARGS__); \
     cudaError_t err = cudaGetLastError(); \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA Error in " #KERNEL ": %s\n", cudaGetErrorString(err)); \
@@ -73,7 +73,7 @@
     auto dev_envs = *envs; \
     auto blocks = make_grid(nbatches_); \
     auto threads = make_block(THREADS); \
-    LAUNCH_KERNEL_DYN( KERNEL, blocks, threads, shm_size, out_, dm_, dev_envs, __VA_ARGS__); \
+    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, dm_, dev_envs, __VA_ARGS__); \
     cudaError_t err = cudaGetLastError(); \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA Error in " #KERNEL ": %s\n", cudaGetErrorString(err)); \
@@ -1247,7 +1247,7 @@ int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
     auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( ovlp_derivatives_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ovlp_derivatives_kernel, blocks, threads, shm_size,
             grad, sigma, dm, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1265,7 +1265,7 @@ int PBCkin_derivatives(double *grad, double *sigma, double *dm,
     auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( kin_derivatives_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( kin_derivatives_kernel, blocks, threads, shm_size,
             grad, sigma, dm, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

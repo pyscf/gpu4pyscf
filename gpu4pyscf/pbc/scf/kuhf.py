@@ -147,6 +147,7 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         homo = homo_a = fermi_a
         homo_b = None
         if nocc_b > 0:
+            homo_b = fermi_b
             homo = max(homo, fermi_b)
         lumo = lumo_b = mo_energy_b[nocc_b]
         lumo_a = None

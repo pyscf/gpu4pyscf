@@ -18,10 +18,11 @@ from cupyx.scipy.linalg import block_diag
 from pyscf.lib import PauliMatrices
 from pyscf.scf import ghf as ghf_cpu
 from pyscf.data.nist import HARTREE2EV
-from gpu4pyscf.scf import hf
+from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array, tag_array
 from gpu4pyscf.lib import utils
+
 
 def _from_rhf_init_dm(dma, breaksym=True):
     dma = dma * .5
@@ -133,19 +134,11 @@ class GHF(hf.SCF):
     scf = kernel = hf.RHF.kernel
     make_rdm2 = NotImplemented
     newton = NotImplemented
-    to_rhf = NotImplemented
-    to_uhf = NotImplemented
-    to_ghf = NotImplemented
-    to_rks = NotImplemented
-    to_uks = NotImplemented
-    to_gks = NotImplemented
-    to_ks = NotImplemented
     canonicalize = NotImplemented
     density_fit             = hf.RHF.density_fit
     # TODO: Enable followings after testing
     analyze = NotImplemented
     stability = NotImplemented
-    mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
 
     get_grad = return_cupy_array(ghf_cpu.GHF.get_grad)
@@ -206,10 +199,10 @@ class GHF(hf.SCF):
             dm = cp.asarray(dm) - dm_last
         else:
             dm_last = None
-            
+
         vj, vk = self.get_jk(mol, dm, hermi)
         vhf = vj - vk
-        
+
         ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
         if dm_last is not None:
             vhf += cp.asarray(vhf_last)
@@ -225,7 +218,7 @@ class GHF(hf.SCF):
         nocc = self.mol.nelectron
         if nocc > nmo:
             raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
-            
+
         mo_occ[e_idx[:nocc]] = 1
         if self.verbose >= logger.INFO and nocc < nmo:
             homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
@@ -262,6 +255,19 @@ class GHF(hf.SCF):
         s = (ss+.25)**.5 - .5
         return ss, s*2+1
 
+    def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
+        '''Mulliken population analysis
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        if s is None: s = self.get_ovlp()
+        assert s.shape == dm.shape
+        nao = s.shape[0] // 2
+        s = s[:nao,:nao]
+        dma = dm[:nao,:nao]
+        dmb = dm[nao:,nao:]
+        return uhf.UHF.mulliken_pop(self, mol, np.stack((dma,dmb)), s, verbose)
+
     def to_cpu(self):
         mf = ghf_cpu.GHF(self.mol)
         utils.to_cpu(self, out=mf)
@@ -272,3 +278,9 @@ class GHF(hf.SCF):
         return x2c1e_ghf(self)
     x2c = x2c1e
     sfx2c1e = NotImplemented
+
+    def to_ks(self, xc='HF'):
+        '''Convert to UKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.GKS(self.mol, xc=xc))

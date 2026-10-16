@@ -194,19 +194,19 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
     setup_context();
     PBC_GXYZ_SELECT(gxyz_offsets);
     DYNAMIC_SHARED_PTR(double, shared_memory);
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, cell_j);
-    SHARED_SCALAR(int, ish_cell0);
-    SHARED_SCALAR(int, jsh_cell0);
-    SHARED_SCALAR(int, i0);
-    SHARED_SCALAR(int, j0);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, cell_j);
+    SHARED_ARRAY(int, ish_cell0);
+    SHARED_ARRAY(int, jsh_cell0);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     // sq is short for shl_quartet
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -563,7 +563,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                     return;
                 }
             }
-            LAUNCH_KERNEL_DYN( rys_j_kernel<OFFSET>, blocks, threads, buflen,
+            LAUNCH_KERNEL( rys_j_kernel<OFFSET>, blocks, threads, buflen,
                 dev_envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,

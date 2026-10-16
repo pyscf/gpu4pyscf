@@ -25,6 +25,7 @@ SMEARING_METHOD = mol_smearing.SMEARING_METHOD
 def smearing(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
     '''Fermi-Dirac or Gaussian smearing'''
     from gpu4pyscf.pbc.scf import khf
+    assert not mf.istype('KROHF'), 'Smearing for KROHF/KROKS is not supported'
     if not isinstance(mf, khf.KSCF):
         return mol_smearing.smearing(mf, sigma, method, mu0, fix_spin)
 

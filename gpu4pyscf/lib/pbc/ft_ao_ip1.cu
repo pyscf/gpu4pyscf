@@ -642,11 +642,14 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int permutation_symmetry)
 {
+    if (nbatches_shl_pair == 0 || ngrids == 0) {
+        return 0;
+    }
     cudaFuncSetAttribute(ft_aopair_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     auto threads = make_block(NG_PER_BLOCK, NSP_PER_BLOCK);
     auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
-    LAUNCH_KERNEL_DYN( ft_aopair_deriv_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size,
             out, sigma, dm, vG, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
@@ -663,11 +666,14 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int permutation_symmetry)
 {
+    if (nbatches_shl_pair == 0 || ngrids == 0) {
+        return 0;
+    }
     cudaFuncSetAttribute(ft_aopair_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     auto threads = make_block(NG_PER_BLOCK, NSP_PER_BLOCK);
     auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
-    LAUNCH_KERNEL_DYN( ft_aopair_deriv_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size,
             out, sigma, nullptr, dm_vG, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();

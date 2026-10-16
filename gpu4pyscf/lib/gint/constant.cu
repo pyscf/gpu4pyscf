@@ -17,7 +17,8 @@
 #include "gint.h"
 #include "cint2e.cuh"
 
-// Backed by GINT_BPCACHE_DEFINE so one symbol name covers both backends.
-// SYCL defines s_bpcache as a device_global; CUDA's c_bpcache lives in
-// constant_tables.cu (built only under !USE_SYCL).
-GINT_BPCACHE_DEFINE();
+// SYCL store behind the c_bpcache accessor (cint2e.cuh). CUDA's
+// __constant__ c_bpcache lives in constant_tables.cu (built only under !USE_SYCL).
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gint_bpcache;
+#endif

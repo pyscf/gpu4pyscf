@@ -160,7 +160,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
-    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
+    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
     ERITensor eritensor;
     eritensor.stride_j = strides[1];
     eritensor.stride_k = strides[2];

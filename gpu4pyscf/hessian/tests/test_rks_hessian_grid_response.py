@@ -281,6 +281,27 @@ class KnownValues(unittest.TestCase):
 
         assert abs(test_dF - reference_dF).max() < 1e-8
 
+    def test_hessian_grid_response_omega_override(self):
+        mf = RKS(mol, xc = 'LC_WPBE')
+        mf.omega = 0.175
+        mf.grids.atom_grid = (10,14)
+        mf.conv_tol = 1e-8
+        mf.small_rho_cutoff = 1e-30
+
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        hobj.grid_response = True
+
+        test_de2 = _get_exc_deriv2(hobj, mf.mo_coeff, mf.mo_occ, mf.make_rdm1(), max_memory = None)
+        reference_de2 = _get_exc_deriv2_numerical(hobj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+        assert abs(test_de2 - reference_de2).max() < 1e-8
+
+        test_dF = _get_vxc_deriv1(hobj, mf.mo_coeff, mf.mo_occ, max_memory = 16000)
+        reference_dF = _get_vxc_deriv1_numerical(hobj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+        assert abs(test_dF - reference_dF).max() < 1e-8
+
     def test_hessian_grid_response_lda(self):
         mf = RKS(mol, xc = 'LDA')
         mf.grids.atom_grid = (10,14)

@@ -17,12 +17,14 @@ import numpy as np
 import cupy
 from pyscf.scf import uhf as uhf_cpu
 from pyscf.scf import hf as hf_cpu
-from pyscf import __config__
 from pyscf.data.nist import HARTREE2EV
-from gpu4pyscf.scf.hf import eigh, damping, level_shift
-from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array, asarray
+from gpu4pyscf.scf.hf import eigh, damping, level_shift
+from gpu4pyscf.scf import hf
+from gpu4pyscf.gto.mole import groupby
+from gpu4pyscf import __config__
+
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''One-particle density matrix in AO representation
@@ -276,7 +278,7 @@ class UHF(hf.SCF):
             lumo = lumo_b = mo_energy[1, e_idx_b[n_b]].item()
             lumo_a = None
             if n_a < nmo:
-                lumo_a = mo_energy[1, e_idx_a[n_a]].item()
+                lumo_a = mo_energy[0, e_idx_a[n_a]].item()
                 lumo = min(lumo, lumo_a)
             gap = (lumo - homo) * HARTREE2EV
             self.scf_summary['gap'] = gap
@@ -313,6 +315,14 @@ class UHF(hf.SCF):
             dm1 = self.make_rdm1(mo_coeff, mo_occ)
             fock = self.get_hcore(self.mol) + self.get_veff(self.mol, dm1)
         return get_grad(mo_coeff, mo_occ, fock)
+
+    def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
+        '''Mulliken population analysis
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        if s is None: s = self.get_ovlp(mol)
+        return uhf_cpu.mulliken_pop(mol, cupy.asnumpy(dm), cupy.asnumpy(s), verbose)
 
     make_asym_dm             = NotImplemented
     make_rdm2                = NotImplemented
@@ -422,3 +432,9 @@ class UHF(hf.SCF):
         mf = uhf_cpu.UHF(self.mol)
         utils.to_cpu(self, mf)
         return mf
+
+    def to_ks(self, xc='HF'):
+        '''Convert to UKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.UKS(self.mol, xc=xc))

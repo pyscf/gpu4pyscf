@@ -39,20 +39,20 @@ void rys_ejk_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         int reserved_shm_size)
 {
     setup_context();
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, cell_j);
-    SHARED_SCALAR(int, ish_cell0);
-    SHARED_SCALAR(int, jsh_cell0);
-    SHARED_SCALAR(int, i0);
-    SHARED_SCALAR(int, j0);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, cell_j);
+    SHARED_ARRAY(int, ish_cell0);
+    SHARED_ARRAY(int, jsh_cell0);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rj, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
@@ -602,16 +602,16 @@ int PBC_jk_derivatives(double *ejk, double j_factor, double k_factor,
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
         auto blocks = make_grid(workers, 1);
         auto threads = make_block(quartets_per_block, gout_stride);
-        int shm_bytes = buflen;
-        if (shm_bytes > 48000) {
-            cudaError_t err = cudaFuncSetAttribute(rys_ejk_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_bytes);
+        if (buflen > 48000) {
+            cudaFuncSetAttribute(rys_ejk_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+            cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_bytes,
+                fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
                         cudaGetErrorString(err));
                 return 1;
             }
         }
-        LAUNCH_KERNEL_DYN( rys_ejk_deriv_kernel, blocks, threads, shm_bytes,
+        LAUNCH_KERNEL( rys_ejk_deriv_kernel, blocks, threads, buflen,
                 *envs, jk, bounds, sigma, pair_ij_mapping, pair_kl_mapping,
                 bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,

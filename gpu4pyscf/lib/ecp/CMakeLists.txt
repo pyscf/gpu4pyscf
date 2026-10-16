@@ -24,26 +24,11 @@ if (USE_SYCL)
   set_target_properties(gecp PROPERTIES
     COMPILE_FLAGS "-fsycl -x c++ -nocudainc -nocudalib -O2"
   )
-  # ocloc tuning for the 21MB per_kernel-split SPV emitted by this TU:
-  #  * -fsycl-max-parallel-link-jobs=N raises llvm-foreach --jobs (default 4)
-  #  * a second -Xsycl-target-backend appends "-options ..." to EVERY ocloc
-  #    invocation (both the bundle compile and the per-kernel llvm-foreach
-  #    step). The whole backend string must be single-quoted for the shell
-  #    with the -options payload in inner double quotes, so icpx forwards
-  #    "-ze-opt-level=1" to ocloc as ONE argument. Without
-  #    the inner quotes icpx splits the words and ocloc rejects
-  #    "-ze-opt-level=1" as a top-level option (Invalid option, exit 226).
-  #    -cl-opt-disable was REMOVED (2026-10-14): with IGC optimization
-  #    passes disabled, the ECP ipip kernels are miscompiled into
-  #    cumulative private-scratch corruption -> GPU "Write (NotPresent)"
-  #    aborts in unrelated later kernels (see progress.md). With opts
-  #    enabled the lib is correct; link cost rises ~30 min -> ~2h25m.
-  #    The historical IGC SIGSEGV (error -11) did NOT reappear on the
-  #    2026.1 stack. Options concatenate with the parent's global
-  #    "-device pvc" flag (duplicate -device is harmless).
-  set_target_properties(gecp PROPERTIES
-    LINK_FLAGS "-fsycl-max-parallel-link-jobs=32 -Xsycl-target-backend=spir64_gen '-device pvc -options \"-ze-opt-level=1\"'"
-  )
+  # No forced inlining of __device__ helpers here (sycl_device.hpp defaults
+  # to always_inline). Fully flattened ECP kernels spill heavily and the
+  # general-path ip1/ipipv/ipvip kernels each take >38 min in IGC's register
+  # allocator; with real calls the whole per-kernel AOT link is ~7 min.
+  target_compile_definitions(gecp PRIVATE GPU4PYSCF_DEVICE_ATTR=)
   target_link_libraries(gecp PRIVATE sycl_compat gsycl)
 else()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")

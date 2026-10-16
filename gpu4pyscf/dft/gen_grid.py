@@ -748,7 +748,10 @@ class Grids(lib.StreamObject):
 
     def to_cpu(self):
         grids = gen_grid_cpu.Grids(self.mol)
-        utils.to_cpu(self, out=grids)
+        # non0tab, screen_index might be incompatible with CPU impl. calling
+        # reset() to release them.
+        grids_gpu = self.copy().reset()
+        utils.to_cpu(grids_gpu, out=grids)
         return grids
 
 _default_rad = gen_grid_cpu._default_rad

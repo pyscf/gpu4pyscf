@@ -23,16 +23,17 @@ from pyscf import lib as pyscf_lib
 from pyscf.data.nist import HARTREE2EV
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
+from pyscf.lib import StreamObject
 from gpu4pyscf.gto.ecp import get_ecp
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
+from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot, stack_with_padding)
 from gpu4pyscf.scf import diis, jk, j_engine
 from . import dispersion
 from gpu4pyscf.scf.smearing import smearing
-from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 
 WITH_META_LOWDIN = getattr(__config__, 'scf_analyze_with_meta_lowdin', True)
@@ -618,6 +619,137 @@ def init_guess_by_atom(mol):
     mo_occ = cupy.hstack(mo_occ)
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
+def _init_guess_by_sad(mol, mf_template, uhf_for_atom=False):
+    '''
+        Generate initial guess density matrix from superposition of atomic density matrix.
+
+        If uhf_for_atom is True,
+        The level of theory of atomic calculation is the same as mf_template,
+        except that we always render unrestricted calculation for one atom in vacuum.
+        It reproduces Q-Chem SCF_GUESS AUTOSAD.
+
+        If uhf_for_atom is False,
+        The level of theory of atomic calculation is UHF (in vacuum).
+        The basis / ecp / auxiliary basis (if applicable) are keeped.
+        It reproduces Q-Chem SCF_GUESS SAD.
+    '''
+    from gpu4pyscf.scf.uhf import UHF
+    from gpu4pyscf.dft.rks import RKS
+    from gpu4pyscf.dft.uks import UKS
+    assert isinstance(mf_template, RHF) or isinstance(mf_template, UHF) # GHF not supported
+
+    from gpu4pyscf.qmmm.hirshfeld import charge_of_element, _neutral_atom_spin
+
+    elements = mol.elements
+    unique_elements = list(set(elements))
+
+    mf_per_element = {}
+    for element in unique_elements:
+        Z = charge_of_element(element)
+        if Z == 0: # Ghost atom
+            mf_per_element[element] = None
+            continue
+        assert 0 < Z and Z < len(_neutral_atom_spin)
+        spin = _neutral_atom_spin[Z - 1]
+        assert spin >= 0 # So extra electron is always put in alpha orbitals, and we can guarantee high spin configuration
+        charge = 0 # Only support neutral atoms for now
+
+        mol_atom = gto.M(
+            atom = f"{element} 0 0 0",
+            basis = mol.basis,
+            ecp = mol.ecp,
+            charge = charge,
+            spin = spin,
+            verbose = mol.verbose,
+        )
+
+        mf_atom = mf_template.copy()
+        for key, attr in mf_template.__dict__.items():
+            if isinstance(attr, StreamObject):
+                setattr(mf_atom, key, attr.copy())
+
+        if isinstance(mf_template, RKS):
+            mf_atom = mf_atom.to_uks()
+        elif isinstance(mf_template, RHF):
+            mf_atom = mf_atom.to_uhf()
+        assert isinstance(mf_atom, UHF)
+
+        if uhf_for_atom:
+            mf_atom = mf_atom.to_uhf()
+            assert not isinstance(mf_atom, UKS)
+
+        if hasattr(mf_atom, 'with_solvent'):
+            mf_atom = mf_atom.undo_solvent()
+
+        mf_atom = mf_atom.reset(mol_atom)
+
+        mf_atom.conv_tol = 1e-10
+
+        mf_atom.kernel()
+        assert mf_atom.converged
+
+        mf_per_element[element] = mf_atom
+
+    dm0 = cupy.zeros((2, mol.nao, mol.nao))
+
+    nao_offset = 0
+    for i_atom in range(mol.natm):
+        element = elements[i_atom]
+        mf_atom = mf_per_element[element]
+        if mf_atom is None: # Ghost atom
+            continue # Keep corresponding block of density matrix zero.
+        nao_atom = mf_atom.mol.nao
+
+        dm_atom = mf_atom.make_rdm1()
+        assert dm_atom.shape == (2, nao_atom, nao_atom)
+
+        assert not mf_atom.mol.cart, "Spherical averaging for Cartesian basis not supported yet"
+
+        ao_loc = mf_atom.mol.ao_loc_nr()
+        for i_bas in range(mf_atom.mol.nbas):
+            nctr_i = mf_atom.mol._bas[i_bas, gto.NCTR_OF]
+            li = mf_atom.mol._bas[i_bas, gto.ANG_OF]
+            nao_li = 2 * li + 1
+            iao_li = ao_loc[i_bas]
+            for j_bas in range(mf_atom.mol.nbas):
+                nctr_j = mf_atom.mol._bas[j_bas, gto.NCTR_OF]
+                lj = mf_atom.mol._bas[j_bas, gto.ANG_OF]
+                nao_lj = 2 * lj + 1
+                iao_lj = ao_loc[j_bas]
+
+                if li != lj:
+                    dm_atom[:, iao_li:iao_li + nao_li * nctr_i, iao_lj:iao_lj + nao_lj * nctr_j] = 0
+                else:
+                    for i_ctr in range(nctr_i):
+                        for j_ctr in range(nctr_j):
+                            for i_dm in range(2):
+                                dm_l_trace = float(cupy.trace(dm_atom[i_dm,
+                                                                      iao_li + i_ctr * nao_li : iao_li + (i_ctr + 1) * nao_li,
+                                                                      iao_lj + j_ctr * nao_lj : iao_lj + (j_ctr + 1) * nao_lj]))
+                                dm_atom[i_dm,
+                                        iao_li + i_ctr * nao_li : iao_li + (i_ctr + 1) * nao_li,
+                                        iao_lj + j_ctr * nao_lj : iao_lj + (j_ctr + 1) * nao_lj] = cupy.eye(nao_li) * (dm_l_trace / nao_li)
+
+        dm0[:, nao_offset:nao_offset + nao_atom, nao_offset:nao_offset + nao_atom] = dm_atom
+        nao_offset += nao_atom
+
+    if isinstance(mf_template, RHF):
+        dm0 = dm0[0] + dm0[1]
+    else:
+        if uhf_for_atom: # Reproduce Q-Chem SCF_GUESS SAD behavior
+            dm_averaged = (dm0[0] + dm0[1]) * 0.5
+            dm0[0] = dm0[1] = dm_averaged
+
+    mf_template.reset(mol)
+
+    return dm0
+
+def init_guess_by_sad(mol, mf_template):
+    return _init_guess_by_sad(mol, mf_template, uhf_for_atom=False)
+
+def init_guess_by_sad_hf(mol, mf_template):
+    return _init_guess_by_sad(mol, mf_template, uhf_for_atom=True)
+
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
     def fn_init_guess(mf, mol=None, breaksym=None):
@@ -856,7 +988,6 @@ class SCF(pyscf_lib.StreamObject):
     init_direct_scf          = NotImplemented
     get_veff                 = NotImplemented
     mulliken_meta = pop      = NotImplemented
-    mulliken_pop             = NotImplemented
     _is_mem_enough           = NotImplemented
     density_fit              = NotImplemented
     newton                   = NotImplemented
@@ -864,12 +995,64 @@ class SCF(pyscf_lib.StreamObject):
     stability                = NotImplemented
     update_                  = NotImplemented
     istype                   = hf_cpu.SCF.istype
-    to_rhf                   = NotImplemented
-    to_uhf                   = NotImplemented
-    to_ghf                   = NotImplemented
-    to_rks                   = NotImplemented
-    to_uks                   = NotImplemented
-    to_gks                   = NotImplemented
+
+    def to_rhf(self):
+        '''Convert the input mean-field object to a RHF/ROHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        return addons.convert_to_rhf(self)
+
+    def to_uhf(self):
+        '''Convert the input mean-field object to a UHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        return addons.convert_to_uhf(self)
+
+    def to_ghf(self):
+        '''Convert the input mean-field object to a GHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        return addons.convert_to_ghf(self)
+
+    def to_rks(self, xc='HF'):
+        '''Convert the input mean-field object to a RKS/ROKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_rhf().to_ks(xc)
+
+    def to_uks(self, xc='HF'):
+        '''Convert the input mean-field object to a UKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_uhf().to_ks(xc)
+
+    def to_gks(self, xc='HF'):
+        '''Convert the input mean-field object to a GKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_ghf().to_ks(xc)
+
     to_ks                    = NotImplemented
     canonicalize             = NotImplemented
     gen_response             = NotImplemented
@@ -884,6 +1067,14 @@ class SCF(pyscf_lib.StreamObject):
     def init_guess_by_atom(self, mol=None):
         if mol is None: mol = self.mol
         return init_guess_by_atom(mol)
+
+    def init_guess_by_sad(self, mol=None):
+        if mol is None: mol = self.mol
+        return init_guess_by_sad(mol, self)
+
+    def init_guess_by_sad_hf(self, mol=None):
+        if mol is None: mol = self.mol
+        return init_guess_by_sad_hf(mol, self)
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
@@ -923,6 +1114,14 @@ class SCF(pyscf_lib.StreamObject):
                 **kwargs):
         return self.to_cpu().analyze(
             verbose=verbose, with_meta_lowdin=with_meta_lowdin, **kwargs)
+
+    def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
+        '''Mulliken population analysis
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        if s is None: s = self.get_ovlp(mol)
+        return hf_cpu.mulliken_pop(mol, cupy.asnumpy(dm), cupy.asnumpy(s), verbose)
 
     def reset(self, mol=None):
         if mol is not None:
@@ -993,7 +1192,25 @@ class SCF(pyscf_lib.StreamObject):
         raise NotImplementedError
 
     def _transfer_attrs_(self, dst):
-        raise NotImplementedError
+        '''This helper function transfers attributes from one SCF object to
+        another SCF object. It is invoked by to_ks and to_hf methods.
+        '''
+        from gpu4pyscf.df.df_jk import _DFHF
+        if isinstance(self, _DFHF) and not hasattr(dst, 'with_df'):
+            # * Handle DF_SCF instances for to_xxx methods.
+            # * Only the molecular SCF methods need to be explicitly converted.
+            #   For PBC SCF methods, DF is enabled by default. calling density_fit()
+            #   may alter the DF class. Conversion should be avoided here.
+            dst = dst.density_fit(auxbasis=self.with_df.auxbasis)
+        # Search for all tracked attributes, including those in base classes
+        cls_keys = [getattr(cls, '_keys', ()) for cls in dst.__class__.__mro__[:-1]]
+        dst_keys = set(dst.__dict__).union(*cls_keys)
+
+        loc_dic = self.__dict__
+        keys = set(loc_dic).intersection(dst_keys)
+        dst.__dict__.update({k: loc_dic[k] for k in keys})
+        dst.converged = False
+        return dst
 
 class KohnShamDFT:
     '''
@@ -1054,3 +1271,9 @@ class RHF(SCF):
         mf = hf_cpu.RHF(self.mol)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def to_ks(self, xc='HF'):
+        '''Convert to RKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.RKS(self.mol, xc=xc))

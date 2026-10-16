@@ -24,7 +24,6 @@ static void GINT_g1e(double* __restrict__ g, const double* __restrict__ grid_poi
                      const int ish, const int jsh, const int prim_ij,
                      const int i_l, const int j_l, const double charge_exponent, const double omega)
 {
-    GINT_CACHE_REF();
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
     const double* __restrict__ x12 = c_bpcache.x12;
@@ -142,7 +141,6 @@ static void GINT_g1e_save_u2(double* __restrict__ g, double* __restrict__ u2_sav
                              const int ish, const int jsh, const int prim_ij,
                              const int i_l, const int j_l, const double charge_exponent, const double omega)
 {
-    GINT_CACHE_REF();
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
     const double* __restrict__ x12 = c_bpcache.x12;
@@ -259,7 +257,6 @@ __device__
 static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, const double grid_y, const double grid_z,
                                  const int ish, const int prim_ij, const double charge_exponent, const double omega)
 {
-    GINT_CACHE_REF();
     constexpr int NROOTS = L_SUM / 2 + 1;
 
     const double* __restrict__ a12 = c_bpcache.a12;
@@ -357,7 +354,6 @@ __device__
 static void GINT_g1e_without_hrr_save_u2(double* __restrict__ g, double* __restrict__ u2_save, const double grid_x, const double grid_y, const double grid_z,
                                          const int ish, const int prim_ij, const double charge_exponent, const double omega)
 {
-    GINT_CACHE_REF();
     constexpr int NROOTS = L_SUM / 2 + 1;
 
     const double* __restrict__ a12 = c_bpcache.a12;

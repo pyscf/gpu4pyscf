@@ -36,7 +36,6 @@ struct Int3c2eSharedVars {
     int nsp_per_block, Rt_stride;
     double rk[3];
     double ak, ck;
-    double shared[8];
 };
 
 struct AuxvecSharedVars {
@@ -360,7 +359,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
     // Pack small shared vars into a single group_local_memory allocation
     // instead of 9 separate ones
     SHARED_ARRAY(Int3c2eSharedVars, sv);
-    DYNAMIC_SHARED_PTR(double, phase);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int &shl_pair0 = sv.shl_pair0;
     int &shl_pair1 = sv.shl_pair1;
     int &order     = sv.order;
@@ -372,7 +371,6 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
     double (&rk)[3] = sv.rk;
     double &ak     = sv.ak;
     double &ck     = sv.ck;
-    double (&shared)[8] = sv.shared;
     constexpr int lk = LK;
     constexpr int nfk = (lk + 1) * (lk + 2) / 2;
     constexpr int nf3k = nfk * (lk + 3) / 3;
@@ -407,8 +405,8 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
 
-    double *gamma_inc = phase + sp_id;
-    double *Rt = phase + (order+1) * nsp_per_block + sp_id;
+    double *gamma_inc = shared_memory + sp_id;
+    double *Rt = shared_memory + (order+1) * nsp_per_block + sp_id;
     const uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     const int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     for (int kp = 0; kp < kprim; ++kp) {
@@ -550,12 +548,12 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
                 val += __shfl_down_sync(0xffffffff, val, offset);
             }
             if (lane == 0) {
-                phase[wid] = val;
+                shared_memory[wid] = val;
             }
             __syncthreads();
 
             if (thread_id < 8) {
-                val = phase[lane];
+                val = shared_memory[lane];
             }
             for (int offset = 4; offset > 0; offset >>= 1) {
                 val += __shfl_down_sync(0xff, val, offset);
@@ -816,7 +814,7 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
     auto threads = make_block(THREADS, 1);
     auto blocks = make_grid(nksh, nbatches_shl_pair);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_DYN( contract_int3c2e_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_int3c2e_kernel, blocks, threads, shm_size,
                         dev_envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -840,7 +838,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
     auto threads = make_block(THREADS, 1);
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_DYN( contract_auxvec_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_auxvec_kernel, blocks, threads, shm_size,
                         dev_envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
                         aux_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();

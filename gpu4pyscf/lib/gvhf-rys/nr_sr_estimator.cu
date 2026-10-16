@@ -108,15 +108,15 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
     int thread_id = threadIdx_x;
     int threads = blockDim_x;
     DYNAMIC_SHARED_PTR(float, shared_memory);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, stride_k);
-    SHARED_SCALAR(int, g_size);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nsp_per_block);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, stride_k);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nsp_per_block);
 
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -436,7 +436,7 @@ int int2e_qcond_estimator(float *q_out, RysIntEnvVars *envs, int shm_size,
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     auto dev_envs = *envs;
-    LAUNCH_KERNEL_DYN( int2e_qcond_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int2e_qcond_kernel, blocks, threads, shm_size,
         q_out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
         omega, lr_factor, sr_factor);
     cudaError_t err = cudaGetLastError();

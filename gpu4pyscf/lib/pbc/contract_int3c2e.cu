@@ -40,26 +40,26 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, double omega, PBCIntEnv
                                 int *head, int sp_blocks)
 {
     setup_context();
-    SHARED_SCALAR(int, sp_block_id);
-    SHARED_SCALAR(int, ksh_cell0);
-    SHARED_SCALAR(int, shl_pair0);
-    SHARED_SCALAR(int, shl_pair1);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, lk);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, kprim);
-    SHARED_SCALAR(int, nao);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nst_per_block);
-    SHARED_SCALAR(int, expk);
-    SHARED_SCALAR(int, ck);
-    SHARED_SCALAR(int, num_ijk_tasks);
-    SHARED_SCALAR(int, num_sub_tasks);
-    SHARED_SCALAR(int, img_not_processed);
-    SHARED_SCALAR(int, img_tile_size);
+    SHARED_ARRAY(int, sp_block_id);
+    SHARED_ARRAY(int, ksh_cell0);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, expk);
+    SHARED_ARRAY(int, ck);
+    SHARED_ARRAY(int, num_ijk_tasks);
+    SHARED_ARRAY(int, num_sub_tasks);
+    SHARED_ARRAY(int, img_not_processed);
+    SHARED_ARRAY(int, img_tile_size);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int thread_id = threadIdx_x;
     img_pool += blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
@@ -309,36 +309,36 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, double omega, P
                                     int *head, int npairs_ij, int ksh_blocks)
 {
     setup_context();
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, ksh_block_id);
-    SHARED_SCALAR(int, ksh0_cell0);
-    SHARED_SCALAR(int, ksh1_cell0);
-    SHARED_SCALAR(int, ish);
-    SHARED_SCALAR(int, jsh);
-    SHARED_SCALAR(int, li);
-    SHARED_SCALAR(int, lj);
-    SHARED_SCALAR(int, lk);
-    SHARED_SCALAR(int, nroots);
-    SHARED_SCALAR(int, iprim);
-    SHARED_SCALAR(int, jprim);
-    SHARED_SCALAR(int, kprim);
-    SHARED_SCALAR(int, gout_stride);
-    SHARED_SCALAR(int, nst_per_block);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
-    SHARED_SCALAR(int, ci);
-    SHARED_SCALAR(int, cj);
-    SHARED_SCALAR(double, xi);
-    SHARED_SCALAR(double, yi);
-    SHARED_SCALAR(double, zi);
-    SHARED_SCALAR(double, xjxi);
-    SHARED_SCALAR(double, yjyi);
-    SHARED_SCALAR(double, zjzi);
-    SHARED_SCALAR(double, fac);
-    SHARED_SCALAR(int, num_ijk_tasks);
-    SHARED_SCALAR(int, num_sub_tasks);
-    SHARED_SCALAR(int, img_not_processed);
-    SHARED_SCALAR(int, img_tile_size);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, ksh_block_id);
+    SHARED_ARRAY(int, ksh0_cell0);
+    SHARED_ARRAY(int, ksh1_cell0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
+    SHARED_ARRAY(int, ci);
+    SHARED_ARRAY(int, cj);
+    SHARED_ARRAY(double, xi);
+    SHARED_ARRAY(double, yi);
+    SHARED_ARRAY(double, zi);
+    SHARED_ARRAY(double, xjxi);
+    SHARED_ARRAY(double, yjyi);
+    SHARED_ARRAY(double, zjzi);
+    SHARED_ARRAY(double, fac);
+    SHARED_ARRAY(int, num_ijk_tasks);
+    SHARED_ARRAY(int, num_sub_tasks);
+    SHARED_ARRAY(int, img_not_processed);
+    SHARED_ARRAY(int, img_tile_size);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int thread_id = threadIdx_x;
     img_pool += blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
@@ -596,7 +596,7 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, double omega, PBCIntEnvVars 
     cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
             out, dm, omega, *envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
@@ -623,7 +623,7 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, double omega, PBCInt
     cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL_DYN( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
             out, auxvec, omega, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,

@@ -39,19 +39,19 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     setup_context();
     GXYZ_BIND(c_gxyz_offset, s_rys_gxyz_offset);
     DYNAMIC_SHARED_PTR(double, shared_memory);
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, ish);
-    SHARED_SCALAR(int, jsh);
-    SHARED_SCALAR(int, i0);
-    SHARED_SCALAR(int, j0);
-    SHARED_SCALAR(int, nao);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
+    SHARED_ARRAY(int, nao);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     // sq is short for shl_quartet
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -428,7 +428,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                     return;
                 }
             }
-            LAUNCH_KERNEL_DYN( rys_jk_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL( rys_jk_kernel, blocks, threads, buflen,
                 dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
                 head + offset/256, gout_pattern, reserved_shm_size);

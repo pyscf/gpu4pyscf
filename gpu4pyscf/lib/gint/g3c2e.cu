@@ -20,7 +20,6 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, const doub
     const int ish, const int jsh, const int ksh)
 {
     setup_context();
-    GINT_CACHE_REF();
     int *ao_loc = c_bpcache.ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
@@ -76,7 +75,6 @@ __device__
 static void GINTmemset_int3c2e(ERITensor eri, int ish, int jsh, int ksh)
 {
     setup_context();
-    GINT_CACHE_REF();
     int *ao_loc = c_bpcache.ao_loc;
     size_t jstride = eri.stride_j;
     size_t kstride = eri.stride_k;
@@ -106,7 +104,6 @@ void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets o
     const int ntasks_kl = offsets.ntasks_kl;
     const int task_ij = blockIdx_x;
     const int task_kl = blockIdx_y;
-    GINT_CACHE_REF();
 
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;

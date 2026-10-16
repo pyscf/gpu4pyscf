@@ -45,12 +45,12 @@ void eval_density_kernel(double *rho_c, double *dm, PBCIntEnvVars envs,
     int thread_id = ty * nsp_per_block + tx;
     int segment_id = blockIdx_x / atom_mesh_a_max;
     int a_index_id = blockIdx_x - atom_mesh_a_max * segment_id;
-    SHARED_SCALAR(int, a_index);
-    SHARED_SCALAR(int, b_start);
-    SHARED_SCALAR(int, b_stop);
-    SHARED_SCALAR(int, c_start);
-    SHARED_SCALAR(int, c_stop);
-    SHARED_SCALAR(int, c_index1);
+    SHARED_ARRAY(int, a_index);
+    SHARED_ARRAY(int, b_start);
+    SHARED_ARRAY(int, b_stop);
+    SHARED_ARRAY(int, c_start);
+    SHARED_ARRAY(int, c_stop);
+    SHARED_ARRAY(int, c_index1);
     DYNAMIC_SHARED_PTR(double, rho_cache);
 
     float2 x_range = atom_frac_ranges[       segment_id];
@@ -273,7 +273,7 @@ extern "C" {
         auto dev_envs = *envs; \
         auto _threads = make_block(WARP_SIZE, TILE); \
         auto _grids = make_grid(ntasks); \
-        LAUNCH_KERNEL_DYN( (eval_density_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, \
+        LAUNCH_KERNEL( (eval_density_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, \
             rho_c, dm, dev_envs, factor, shl_pair_offsets, bas_ij_idx, \
                         atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
                         da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \

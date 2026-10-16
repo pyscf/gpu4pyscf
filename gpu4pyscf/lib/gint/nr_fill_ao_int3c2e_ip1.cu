@@ -140,7 +140,7 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
             }
             auto threads = make_block(THREADSX*THREADSY);
             auto blocks = make_grid(ntasks_ij, ntasks_kl);
-            LAUNCH_KERNEL_DYN( GINTfill_int3c2e_ip1_general_kernel, blocks, threads, shm_size,
+            LAUNCH_KERNEL( GINTfill_int3c2e_ip1_general_kernel, blocks, threads, shm_size,
                 *envs, *eri, *offsets);
             }
         }
@@ -172,7 +172,7 @@ int GINTfill_int3c2e_ip1(cudaStream_t stream, BasisProdCache *bpcache, double *e
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
-    CONSTANT_MEMCPY(GINT_BPCACHE_SYM, bpcache, sizeof(BasisProdCache));
+    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
 
     ERITensor eritensor;
     eritensor.stride_j = strides[1];

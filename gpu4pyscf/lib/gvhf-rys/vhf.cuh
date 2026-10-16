@@ -182,12 +182,12 @@ extern __constant__ Fold3Index c_i_in_fold3idx[];
 #define FOLD_TABLE_BIND(cname, sname) \
     (void)0
 #define FOLD_TABLE_FILL(cname, sname, src, bytes) \
-    CONSTANT_MEMCPY(cname, src, bytes)
+    cudaMemcpyToSymbol(cname, src, bytes)
 
 // Per-launch gxyz chunk publish into the 256-entry __constant__
 // (with errors checked).
 #define GXYZ_COPY_CHUNK(goff, off, bytes) \
-    checkCudaErrors(CONSTANT_MEMCPY(c_gxyz_offset, (goff) + (off), (bytes)))
+    checkCudaErrors(cudaMemcpyToSymbol(c_gxyz_offset, (goff) + (off), (bytes)))
 
 // Device-side gxyz table store, defined once (in rys_contract_k.cu).
 // CUDA reuses c_gxyz_offset from rys_constant.cu.
@@ -237,11 +237,11 @@ extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
 #define FOLD_TABLE_BIND(cname, sname) \
     auto cname = sname.get()
 #define FOLD_TABLE_FILL(cname, sname, src, bytes) \
-    CONSTANT_MEMCPY(sname, src, bytes)
+    cudaMemcpyToSymbol(sname, src, bytes)
 
 // Per-launch gxyz chunk publish into the device_global table.
 #define GXYZ_COPY_CHUNK(goff, off, bytes) \
-    CONSTANT_MEMCPY(s_rys_gxyz_offset, (goff) + (off), (bytes))
+    cudaMemcpyToSymbol(s_rys_gxyz_offset, (goff) + (off), (bytes))
 
 // Device-side gxyz table store, defined once (in rys_contract_k.cu).
 #define GXYZ_DEFINE(type, sname, N) \

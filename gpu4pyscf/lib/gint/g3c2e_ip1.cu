@@ -117,7 +117,6 @@ __device__
 static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double* g, double ai2, const int ish, const int jsh, const int ksh)
 {
     setup_context();
-    GINT_CACHE_REF();
     int *ao_loc = c_bpcache.ao_loc;
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
@@ -196,7 +195,6 @@ void GINTfill_int3c2e_ip1_general_kernel(GINTEnvVars envs, ERITensor eri, BasisP
     DYNAMIC_SHARED_PTR(double, g);
     const int task_ij = blockIdx_x;
     const int task_kl = blockIdx_y;
-    GINT_CACHE_REF();
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;

@@ -132,7 +132,7 @@ static int GINTfill_int3c2e_ipvip1(ERITensor *eri, BasisProdOffsets *offsets, GI
             }
             auto threads = make_block(THREADSX*THREADSY);
             auto blocks = make_grid(ntasks_ij, ntasks_kl);
-            LAUNCH_KERNEL_DYN( GINTfill_int3c2e_ipvip1_general_kernel, blocks, threads, shm_size,
+            LAUNCH_KERNEL( GINTfill_int3c2e_ipvip1_general_kernel, blocks, threads, shm_size,
                 *envs, *eri, *offsets);
         }
     }
@@ -167,7 +167,7 @@ int GINTfill_int3c2e_ipvip1(cudaStream_t stream, BasisProdCache *bpcache, double
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
-    GINT_BPCACHE_UPLOAD(stream, bpcache);
+    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
 
     ERITensor eritensor;
     eritensor.stride_j = strides[1];

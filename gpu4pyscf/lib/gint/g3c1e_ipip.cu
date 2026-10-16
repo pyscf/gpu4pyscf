@@ -20,7 +20,6 @@ template <int NROOTS>
 __device__
 static void GINTwrite_int3c1e_ipip1_charge_contracted(const double* g, double* local_output, const double minus_two_a, const double prefactor, const int i_l, const int j_l)
 {
-    GINT_CACHE_REF();
     const int *idx = c_idx;
     const int *idy = c_idx + TOT_NF;
     const int *idz = c_idx + TOT_NF * 2;
@@ -105,7 +104,6 @@ static void GINTfill_int3c1e_ipip1_charge_contracted_kernel_general(double* outp
     const int task_ij = global_x;
     const int thread_y_id = global_y;
     const int total_threads_y = gridDim_y * blockDim_y;
-    GINT_CACHE_REF();
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -273,7 +271,6 @@ static void GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general(double* out
     const int task_ij = global_x;
     const int thread_y_id = global_y;
     const int total_threads_y = gridDim_y * blockDim_y;
-    GINT_CACHE_REF();
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -451,7 +448,6 @@ static void GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general(double* out
     const int task_ij = global_x;
     const int thread_y_id = global_y;
     const int total_threads_y = gridDim_y * blockDim_y;
-    GINT_CACHE_REF();
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -551,7 +547,6 @@ static void GINTfill_int3c1e_ipip2_density_contracted_kernel_general(double* out
     const int task_grid = global_y;
     const int thread_x_id = global_x;
     const int total_threads_x = gridDim_x * blockDim_x;
-    GINT_CACHE_REF();
     if (task_grid >= ngrids) {
         return;
     }

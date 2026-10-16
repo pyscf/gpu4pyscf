@@ -31,25 +31,25 @@
     int gout_id = threadIdx_y; \
     int _nsq_per_block = blockDim_x; \
     int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH; \
-    SHARED_SCALAR(int, ntasks); \
-    SHARED_SCALAR(int, pair_ij); \
-    SHARED_SCALAR(int, pair_kl0); \
-    SHARED_SCALAR(int, cell_j); \
-    SHARED_SCALAR(int, ish_cell0); \
-    SHARED_SCALAR(int, jsh_cell0); \
-    SHARED_SCALAR(int, i0); \
-    SHARED_SCALAR(int, j0); \
+    SHARED_ARRAY(int, ntasks); \
+    SHARED_ARRAY(int, pair_ij); \
+    SHARED_ARRAY(int, pair_kl0); \
+    SHARED_ARRAY(int, cell_j); \
+    SHARED_ARRAY(int, ish_cell0); \
+    SHARED_ARRAY(int, jsh_cell0); \
+    SHARED_ARRAY(int, i0); \
+    SHARED_ARRAY(int, j0); \
     SHARED_ARRAY(double, ri, [3]); \
     SHARED_ARRAY(double, rjri, [3]); \
-    SHARED_SCALAR(int, expi); \
-    SHARED_SCALAR(int, expj); \
+    SHARED_ARRAY(int, expi); \
+    SHARED_ARRAY(int, expj); \
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
 #define LAUNCH_JKMATRIX_KERNEL(KERNEL) { \
     auto _rys_envs = *envs; auto _rys_kmat = *kmat; auto _rys_bounds = *bounds; \
     auto _rys_blocks = make_grid(workers, 1); \
     auto _rys_threads = make_block(nsq_per_block, gout_stride); \
-    LAUNCH_KERNEL_DYN( KERNEL, _rys_blocks, _rys_threads, \
+    LAUNCH_KERNEL( KERNEL, _rys_blocks, _rys_threads, \
         (buflen)*sizeof(double), \
         _rys_envs, _rys_kmat, _rys_bounds, \
         pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \

@@ -37,16 +37,16 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     setup_context();
     FOLD_TABLE_BIND(c_i_in_fold2idx, s_rys_i_in_fold2idx);
     FOLD_TABLE_BIND(c_i_in_fold3idx, s_rys_i_in_fold3idx);
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, ish);
-    SHARED_SCALAR(int, jsh);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -510,16 +510,16 @@ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 {
     setup_context();
     FOLD_TABLE_BIND(c_i_in_fold3idx, s_rys_i_in_fold3idx);
-    SHARED_SCALAR(int, ntasks);
-    SHARED_SCALAR(int, pair_ij);
-    SHARED_SCALAR(int, pair_kl0);
-    SHARED_SCALAR(int, ish);
-    SHARED_SCALAR(int, jsh);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
     SHARED_ARRAY(double, ri, [3]);
     SHARED_ARRAY(double, rjri, [3]);
     SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_SCALAR(int, expi);
-    SHARED_SCALAR(int, expj);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -906,7 +906,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     return 1;
                 }
             }
-            LAUNCH_KERNEL_DYN( rys_j_with_gout_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL( rys_j_with_gout_kernel, blocks, threads, buflen,
                 dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
         } else {
@@ -926,7 +926,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     return 1;
                 }
             }
-            LAUNCH_KERNEL_DYN( rys_j_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen,
                 dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
         }
