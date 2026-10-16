@@ -34,8 +34,7 @@ __global__ static
 void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                        uint32_t *pool, int *head, int nf, int reserved_shm_size,
-                        void *shm_mem)
+                        uint32_t *pool, int *head, int nf, int reserved_shm_size)
 {
     setup_context();
     SHARED_SCALAR(int, ntasks);
@@ -48,7 +47,7 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     SHARED_ARRAY(double, aij_cache, [3]);
     SHARED_SCALAR(int, expi);
     SHARED_SCALAR(int, expj);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -362,8 +361,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                         uint32_t *pool, int *head, double *dd_pool, int nf,
-                        int reserved_shm_size,
-                        void *shm_mem)
+                        int reserved_shm_size)
 {
     setup_context();
     SHARED_SCALAR(int, ntasks);
@@ -378,7 +376,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     SHARED_ARRAY(double, aij_cache, [2]);
     SHARED_SCALAR(int, expi);
     SHARED_SCALAR(int, expj);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -778,8 +776,7 @@ void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
                              float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                              float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                              uint32_t *pool, int *head, double *dd_pool,
-                             int dd_cache_size, int nf, int reserved_shm_size,
-                             void *shm_mem)
+                             int dd_cache_size, int nf, int reserved_shm_size)
 {
     setup_context();
     SHARED_SCALAR(int, ntasks);
@@ -794,7 +791,7 @@ void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
     SHARED_ARRAY(double, aij_cache, [2]);
     SHARED_SCALAR(int, expi);
     SHARED_SCALAR(int, expj);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -1253,8 +1250,7 @@ void rys_ejk_ip1_sum_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                             float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                             float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                             uint32_t *pool, int *head, double *dd_pool,
-                            int dd_cache_size, int nf, int reserved_shm_size,
-                            void *shm_mem)
+                            int dd_cache_size, int nf, int reserved_shm_size)
 {
     setup_context();
     SHARED_SCALAR(int, ntasks);
@@ -1269,7 +1265,7 @@ void rys_ejk_ip1_sum_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     SHARED_ARRAY(double, aij_cache, [2]);
     SHARED_SCALAR(int, expi);
     SHARED_SCALAR(int, expj);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;

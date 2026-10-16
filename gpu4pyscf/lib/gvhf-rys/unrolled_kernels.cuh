@@ -36,13 +36,15 @@
 #define RYS_KERNEL_TAG_CAT(KERNEL, TAG)  RYS_KERNEL_TAG_CAT_(KERNEL, TAG)
 #define RYS_KERNEL_TAG(KERNEL)           RYS_KERNEL_TAG_CAT(KERNEL, RYS_UNROLLED_KERNEL_TAG)
 
-#define dim3 sycl::range<2>
+// dim3 (spelled by the auto-generated .cu files) resolves to the
+// gpu4pyscf_dim3 shim from gsycl/gpu_compat.h, already included via
+// gvhf-rys/vhf.cuh above. Do NOT redefine it here.
 
 #define JKMATRIX_KERNEL_ARGS \
     RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, \
     float *q_cond_ij, float *q_cond_kl, float dm_penalty, \
     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
-    uint32_t *pool, int *head, void *shm_mem
+    uint32_t *pool, int *head
 
 #define JKMATRIX_KERNEL_SETUP() \
     setup_context(); \
@@ -59,7 +61,7 @@
     SHARED_ARRAY(double, rjri, [3]); \
     SHARED_SCALAR(int, expi); \
     SHARED_SCALAR(int, expj); \
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
 #define LAUNCH_JKMATRIX_KERNEL(KERNEL) { \
     auto _rys_envs = *envs; auto _rys_jk = *jk; auto _rys_bounds = *bounds; \
@@ -75,7 +77,7 @@
     RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds, \
     float *q_cond_ij, float *q_cond_kl, float dm_penalty, \
     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
-    uint32_t *pool, double *dd_pool, int *head, void *shm_mem
+    uint32_t *pool, double *dd_pool, int *head
 
 #define JKENERGY_KERNEL_SETUP() \
     setup_context(); \
@@ -91,7 +93,7 @@
     SHARED_ARRAY(double, rjri, [3]); \
     SHARED_SCALAR(int, expi); \
     SHARED_SCALAR(int, expj); \
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
 #define LAUNCH_JKENERGY_KERNEL(KERNEL) { \
     auto _rys_envs = *envs; auto _rys_jk = *jk; auto _rys_bounds = *bounds; \

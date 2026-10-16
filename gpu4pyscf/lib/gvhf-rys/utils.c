@@ -18,6 +18,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 int ao_pair_indices(int *ao_pair_idx, int *bas_ij_idx, int *ao_loc,
                     int npairs, int nbas, int nao)
 {
@@ -38,3 +42,7 @@ int ao_pair_indices(int *ao_pair_idx, int *bas_ij_idx, int *ao_loc,
     }
     return n;
 }
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

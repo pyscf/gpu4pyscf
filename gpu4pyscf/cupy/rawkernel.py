@@ -59,7 +59,10 @@ import numpy as np
 
 import dpctl
 import dpctl.memory as dpmem
-import dpctl.program as dpprog
+# dpctl.program is deprecated (its compat shim does not forward
+# is_sycl_source_compilation_available, so is_available() below always
+# silently returned False on newer dpctl) -- use the replacement module.
+import dpctl.compiler as dpprog
 
 
 __all__ = ["RawKernel", "RawModule", "is_available"]
@@ -150,6 +153,15 @@ struct int2    { int x, y; };
 static inline double2 make_double2(double x, double y) { return double2{x, y}; }
 static inline float2  make_float2(float x, float y)   { return float2{x, y}; }
 static inline int2    make_int2(int x, int y)         { return int2{x, y}; }
+
+// cuComplex.h (stripped above, no SYCL counterpart): cuDoubleComplex IS
+// double2 in real CUDA headers (.x = real, .y = imag) -- same layout we
+// already define, just under CUDA's name plus its three accessor/ctor
+// functions used by the embedded kernels.
+using cuDoubleComplex = double2;
+static inline double cuCreal(cuDoubleComplex z) { return z.x; }
+static inline double cuCimag(cuDoubleComplex z) { return z.y; }
+static inline cuDoubleComplex make_cuDoubleComplex(double re, double im) { return cuDoubleComplex{re, im}; }
 
 // CUDA atomicAdd -> sycl::atomic_ref (relaxed, device scope) compound add.
 template <typename T>
@@ -351,7 +363,7 @@ def _get_bundle(code, options, queue):
         if not is_available():
             raise RuntimeError(
                 "Runtime SYCL kernel compilation is unavailable in this "
-                "DPC++/dpctl build (dpctl.program."
+                "DPC++/dpctl build (dpctl.compiler."
                 "is_sycl_source_compilation_available() is False). Kernels "
                 "that used cupy.RawKernel cannot be JIT-compiled; they must "
                 "be built ahead of time into gpu4pyscf's native libraries."

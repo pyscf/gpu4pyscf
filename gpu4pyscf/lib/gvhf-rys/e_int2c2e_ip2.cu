@@ -34,8 +34,7 @@ __global__ static
 void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
                           double omega, double lr_factor, double sr_factor,
                           int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                          int *gout_stride_lookup,
-                          void *shm_mem)
+                          int *gout_stride_lookup)
 {
     setup_context();
     int sp_block_id = blockIdx_x;
@@ -51,7 +50,7 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
     SHARED_SCALAR(int, nao);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int *bas = envs.bas;
     double *env = envs.env;

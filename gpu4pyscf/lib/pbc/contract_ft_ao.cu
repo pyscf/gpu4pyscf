@@ -36,8 +36,7 @@ void ft_aopair_kernel(double *out, double *vG,
     PBCIntEnvVars envs, int *shl_pair_offsets,
     uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
     int *gout_stride_lookup, double *Gv, int nGv,
-    int nbatches_shl_pair, int compressing, int *head,
-    void *shm_mem)
+    int nbatches_shl_pair, int compressing, int *head)
 {
     constexpr int nGv_per_block = 16;
     constexpr int sp_threads = THREADS / nGv_per_block;
@@ -55,7 +54,7 @@ void ft_aopair_kernel(double *out, double *vG,
     SHARED_SCALAR(int, nsp_per_block);
     SHARED_SCALAR(int, img_max);
     SHARED_ARRAY(int, img_counts, [sp_threads]);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int t_id = thread_id / nGv_per_block;
@@ -331,8 +330,7 @@ void ft_pdotp_kernel(double *out, double *vG,
     PBCIntEnvVars envs, int *shl_pair_offsets,
     uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
     int *gout_stride_lookup, double *Gv, int nGv,
-    int nbatches_shl_pair, int compressing, int *head,
-    void *shm_mem)
+    int nbatches_shl_pair, int compressing, int *head)
 {
     constexpr int nGv_per_block = 16;
     constexpr int sp_threads = THREADS / nGv_per_block;
@@ -350,7 +348,7 @@ void ft_pdotp_kernel(double *out, double *vG,
     SHARED_SCALAR(int, nsp_per_block);
     SHARED_SCALAR(int, img_max);
     SHARED_ARRAY(int, img_counts, [sp_threads]);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int t_id = thread_id / nGv_per_block;

@@ -9,7 +9,7 @@
 
 #define KERNEL_ARGS \
     RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
-    float *q_cond_ij, float *q_cond_kl, void *shm_mem
+    float *q_cond_ij, float *q_cond_kl
 
 #define KERNEL_SETUP() \
     setup_context(); \
@@ -19,7 +19,7 @@
     int ty = threadIdx.y; \
     int block_x = blockIdx.x; \
     int block_y = blockIdx.y; \
-    DYNAMIC_SHARED_PTR(double, vj_kl_cache, shm_mem);
+    DYNAMIC_SHARED_PTR(double, vj_kl_cache);
 
 #define LAUNCH_MD_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
     auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds; \

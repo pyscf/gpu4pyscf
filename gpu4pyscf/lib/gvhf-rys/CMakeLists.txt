@@ -26,18 +26,30 @@ if (USE_SYCL)
   # rys_k_0000 .. rys_k_3200 with different bodies. SYCL derives the kernel
   # identity from the name-class type, whose host-side registry symbols are
   # vague-linkage and collapse at link time -- both launch sites would then
-  # dispatch to the same body, silently, with no diagnostic.
+  # dispatch to the same body, silently, with no diagnostic. (Verified
+  # 2026-10-12: the jk dispatch ran the K-only bodies -- K was computed
+  # correctly in get_jk results while vj came back all-zero.)
   #
-  # unrolled_kernels.cuh appends RYS_UNROLLED_KERNEL_TAG to every kernel
-  # name class and #errors if it is missing. The tag MUST be injected here
-  # rather than in the .cu files: those are auto-generated upstream and must
-  # stay byte-identical to upstream/master.
-  #
-  # Every file that includes unrolled_kernels.cuh needs a UNIQUE tag.
+  # The .cu files are auto-generated upstream and must stay byte-identical
+  # to upstream/master, so the per-TU disambiguation is done with object-like
+  # -D macros that rewrite the 19 shared identifiers within each TU only:
+  # kernel definitions and their dispatch sites rename together. The
+  # RYS_UNROLLED_KERNEL_TAG definitions satisfy the #error guard in
+  # unrolled_kernels.cuh for every unrolled_*.cu TU.
+  set(_RYS_JK_K_SHARED_KERNELS rys_k_0000 rys_k_1000 rys_k_1010 rys_k_1011
+      rys_k_1100 rys_k_1110 rys_k_1111 rys_k_2000 rys_k_2010 rys_k_2011
+      rys_k_2020 rys_k_2100 rys_k_2110 rys_k_2200 rys_k_3000 rys_k_3010
+      rys_k_3020 rys_k_3100 rys_k_3200)
+  set(_RYS_JK_KERNEL_DEFS "RYS_UNROLLED_KERNEL_TAG=jk")
+  set(_RYS_K_KERNEL_DEFS  "RYS_UNROLLED_KERNEL_TAG=k")
+  foreach(_k ${_RYS_JK_K_SHARED_KERNELS})
+    list(APPEND _RYS_JK_KERNEL_DEFS "${_k}=${_k}_jk_sycl")
+    list(APPEND _RYS_K_KERNEL_DEFS  "${_k}=${_k}_k_sycl")
+  endforeach()
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_rys_jk.cu
-    PROPERTIES COMPILE_DEFINITIONS "RYS_UNROLLED_KERNEL_TAG=jk")
+    PROPERTIES COMPILE_DEFINITIONS "${_RYS_JK_KERNEL_DEFS}")
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_rys_k.cu
-    PROPERTIES COMPILE_DEFINITIONS "RYS_UNROLLED_KERNEL_TAG=k")
+    PROPERTIES COMPILE_DEFINITIONS "${_RYS_K_KERNEL_DEFS}")
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_rys_jk_ip1.cu
     PROPERTIES COMPILE_DEFINITIONS "RYS_UNROLLED_KERNEL_TAG=vjk_ip1")
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_ejk_ip1.cu

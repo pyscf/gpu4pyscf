@@ -31,6 +31,7 @@ from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
+from gpu4pyscf.pbc.dft import multigrid_v2
 from gpu4pyscf.lib.multi_gpu import num_devices
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 import pytest
@@ -256,6 +257,7 @@ class KnownValues(unittest.TestCase):
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
+    @unittest.skipIf(multigrid_v2.libgpbc is None, 'libmgrid_v2 not built')
     def test_multigrid_image_boundary_strain_deriv(self):
         # The structure is from t-HfO2, all elements are changed to H.
         cell = gto.Cell()

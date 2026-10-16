@@ -202,8 +202,7 @@ __global__ static
 void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pair_offsets,
                       uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                       int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
-                      double *Gv, int nGv, int *ao_loc, int compressing, int to_sph,
-                      void *shm_mem)
+                      double *Gv, int nGv, int *ao_loc, int compressing, int to_sph)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -217,7 +216,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     SHARED_SCALAR(int, nsp_per_block);
     SHARED_SCALAR(int, img_max);
     SHARED_ARRAY(int, img_counts, [WARPS]);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     // ft_aopair_kernel's grid-points-per-block is independent of ft_ao_bdiv_kernel's
     // NG_PER_BLOCK (bumped to FT_AO_THREADS for that kernel's divergence fix); upstream

@@ -56,8 +56,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int ao_pair_offset, int aux_offset, int naux,
                     int reorder_aux, int to_sph,
-                    int *head, int nbatches_shl_pair, int nbatches_ksh,
-                    void *shm_mem)
+                    int *head, int nbatches_shl_pair, int nbatches_ksh)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -79,7 +78,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     SHARED_SCALAR(int, nst_per_block);
     SHARED_SCALAR(int, sp_block_id);
     SHARED_SCALAR(int, ksh_block_id);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;
     int worker_id = blockIdx_x;

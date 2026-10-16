@@ -36,7 +36,7 @@
 __global__ static
 void int1e_r2_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                            int *shl_pair_offsets, int *gout_stride_lookup,
-                           int naoi, int naoj, size_t ij_offset, void *shm_mem)
+                           int naoi, int naoj, size_t ij_offset)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -47,7 +47,7 @@ void int1e_r2_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
     SHARED_SCALAR(int, jprim);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g, shm_mem);
+    DYNAMIC_SHARED_PTR(double, g);
     int sp_block_id = blockIdx_x;
     int thread_id = threadIdx_x;
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -193,7 +193,7 @@ void int1e_r2_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 __global__ static
 void int1e_r4_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                            int *shl_pair_offsets, int *gout_stride_lookup,
-                           int naoi, int naoj, size_t ij_offset, void *shm_mem)
+                           int naoi, int naoj, size_t ij_offset)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -204,7 +204,7 @@ void int1e_r4_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
     SHARED_SCALAR(int, jprim);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g, shm_mem);
+    DYNAMIC_SHARED_PTR(double, g);
     int sp_block_id = blockIdx_x;
     int thread_id = threadIdx_x;
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -355,7 +355,7 @@ void int1e_r4_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 __global__ static
 void int1e_r2_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                                int *shl_pair_offsets, int *gout_stride_lookup,
-                               int naoi, int naoj, size_t ij_offset, void *shm_mem)
+                               int naoi, int naoj, size_t ij_offset)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -366,7 +366,7 @@ void int1e_r2_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
     SHARED_SCALAR(int, jprim);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g, shm_mem);
+    DYNAMIC_SHARED_PTR(double, g);
     int sp_block_id = blockIdx_x;
     int thread_id = threadIdx_x;
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -537,7 +537,7 @@ void int1e_r2_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 __global__ static
 void int1e_r4_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                                int *shl_pair_offsets, int *gout_stride_lookup,
-                               int naoi, int naoj, size_t ij_offset, void *shm_mem)
+                               int naoi, int naoj, size_t ij_offset)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -548,7 +548,7 @@ void int1e_r4_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
     SHARED_SCALAR(int, jprim);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g, shm_mem);
+    DYNAMIC_SHARED_PTR(double, g);
     int sp_block_id = blockIdx_x;
     int thread_id = threadIdx_x;
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -731,7 +731,7 @@ template<int RADIAL>
 static __global__
 void ppnl_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVars envs,
                              int *shl_pair_offsets, int *bas_ij_idx,
-                             int *gout_stride_lookup, int naoi, int naoj, void *shm_mem)
+                             int *gout_stride_lookup, int naoi, int naoj)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -742,7 +742,7 @@ void ppnl_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvV
     SHARED_SCALAR(int, jprim);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, g, shm_mem);
+    DYNAMIC_SHARED_PTR(double, g);
     int sp_block_id = blockIdx_x;
     int thread_id = threadIdx_x;
     int *bas = envs.bas;

@@ -353,15 +353,14 @@ void _dot_aux(double& out, double *Rt, double *auxvec,
 template <int LK, int RT_SIZE> __device__ inline
 void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
                                int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                               int *pair_ij_loc, int *nsp_lookup,
-                               void *shm_mem)
+                               int *pair_ij_loc, int *nsp_lookup)
 {
     setup_context();
 
     // Pack small shared vars into a single group_local_memory allocation
     // instead of 9 separate ones
     SHARED_ARRAY(Int3c2eSharedVars, sv);
-    DYNAMIC_SHARED_PTR(double, phase, shm_mem);
+    DYNAMIC_SHARED_PTR(double, phase);
     int &shl_pair0 = sv.shl_pair0;
     int &shl_pair1 = sv.shl_pair1;
     int &order     = sv.order;
@@ -572,20 +571,19 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
 __global__ static
 void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
                              int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                             int *pair_ij_loc, int *nsp_lookup,
-                             void *shm_mem)
+                             int *pair_ij_loc, int *nsp_lookup)
 {
     setup_context();
     int ksh = gridDim_x - blockIdx_x - 1 + envs.nbas;
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unrolled_contract_int3c2e<0,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, shm_mem); break;
-    case 1: unrolled_contract_int3c2e<1,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, shm_mem); break;
-    case 2: unrolled_contract_int3c2e<2,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, shm_mem); break;
-    case 3: unrolled_contract_int3c2e<3,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, shm_mem); break;
-    case 4: unrolled_contract_int3c2e<4,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, shm_mem); break;
-    case 5: unrolled_contract_int3c2e<5,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, shm_mem); break;
-    case 6: unrolled_contract_int3c2e<6,30>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, shm_mem); break;
+    case 0: unrolled_contract_int3c2e<0,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 1: unrolled_contract_int3c2e<1,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 2: unrolled_contract_int3c2e<2,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 3: unrolled_contract_int3c2e<3,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 4: unrolled_contract_int3c2e<4,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 5: unrolled_contract_int3c2e<5,42>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 6: unrolled_contract_int3c2e<6,30>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
     }
 }
 
@@ -596,13 +594,12 @@ template <int LK, int IJ_SIZE, int RT_SIZE> __device__ inline
 void unroll_contract_auxvec(RysIntEnvVars& envs, JKMatrix& jk,
                             int *shl_pair_offsets, int *ksh_offsets,
                             uint32_t *bas_ij_idx, int *pair_ij_loc,
-                            int *aux_loc, int *nsp_lookup,
-                            void *shm_mem)
+                            int *aux_loc, int *nsp_lookup)
 {
     setup_context();
 
     SHARED_ARRAY(AuxvecSharedVars, sv);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int &shl_pair0 = sv.shl_pair0;
     int &shl_pair1 = sv.shl_pair1;
     int &ksh0       = sv.ksh0;
@@ -788,21 +785,20 @@ __global__ static
 void contract_auxvec_kernel(RysIntEnvVars envs, JKMatrix jk,
                             int *shl_pair_offsets, int *ksh_offsets,
                             uint32_t *bas_ij_idx, int *pair_ij_loc,
-                            int *aux_loc, int *nsp_lookup,
-                            void *shm_mem)
+                            int *aux_loc, int *nsp_lookup)
 {
     setup_context();
     int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int ksh = ksh_offsets[ksh_block_id];
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unroll_contract_auxvec<0,35,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, shm_mem); break;
-    case 1: unroll_contract_auxvec<1,21,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, shm_mem); break;
-    case 2: unroll_contract_auxvec<2,15,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, shm_mem); break;
-    case 3: unroll_contract_auxvec<3,11,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, shm_mem); break;
-    case 4: unroll_contract_auxvec<4, 8,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, shm_mem); break;
-    case 5: unroll_contract_auxvec<5, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, shm_mem); break;
-    case 6: unroll_contract_auxvec<6, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup, shm_mem); break;
+    case 0: unroll_contract_auxvec<0,35,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 1: unroll_contract_auxvec<1,21,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 2: unroll_contract_auxvec<2,15,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 3: unroll_contract_auxvec<3,11,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 4: unroll_contract_auxvec<4, 8,35>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 5: unroll_contract_auxvec<5, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
+    case 6: unroll_contract_auxvec<6, 8,21>(envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc, aux_loc, nsp_lookup); break;
     }
 }
 

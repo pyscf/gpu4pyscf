@@ -50,6 +50,17 @@ double reduce(double val, double *swap, int thread_id)
     }
     int lane = thread_id % WARP_SIZE;
     int warp = thread_id / WARP_SIZE;
+#ifdef USE_SYCL
+    // The callers invoke reduce() repeatedly (once per matrix element of a
+    // shell-pair block) with the SAME `swap` scratch. Without this barrier
+    // the warps of iteration n+1 can overwrite swap[] while warp 0 is still
+    // reading it for iteration n. On NVIDIA the warp scheduler happens to
+    // hide this; on Intel GPUs it produces run-to-run nondeterministic
+    // results (observed: multigrid nonorth matrices varying by up to 1e-4
+    // between identical calls, only for the LI>0/LJ>0 kernels, i.e. exactly
+    // those that call reduce() more than once).
+    __syncthreads();
+#endif
     if (lane == 0) {
         swap[warp] = val;
     }

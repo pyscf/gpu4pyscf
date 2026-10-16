@@ -33,8 +33,7 @@ void contract_int3c2e_pvp_auxvec_kernel(double *out, double *auxvec, double omeg
                                         int *img_idx, uint32_t *sp_img_offsets,
                                         int *gout_stride_lookup, int nauxbas,
                                         float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                                        int *head, int npairs_ij, int ksh_blocks,
-                                        void *shm_mem)
+                                        int *head, int npairs_ij, int ksh_blocks)
 {
     setup_context();
     SHARED_SCALAR(int, pair_ij);
@@ -66,7 +65,7 @@ void contract_int3c2e_pvp_auxvec_kernel(double *out, double *auxvec, double omeg
     SHARED_SCALAR(int, num_sub_tasks);
     SHARED_SCALAR(int, img_not_processed);
     SHARED_SCALAR(int, img_tile_size);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int thread_id = threadIdx_x;
     img_pool += blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0

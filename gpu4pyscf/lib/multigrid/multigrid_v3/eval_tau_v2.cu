@@ -33,7 +33,7 @@ void eval_tau_kernel(double *rho_c, double *tau_c, double *dm, PBCIntEnvVars env
                      double factor, int *shl_pair_offsets, int64_t *bas_ij_idx,
                      float2 *atom_frac_ranges, int atom_mesh_a_max, int nseg, int c_stride,
                      double da_squared, double db_squared, double dc_squared,
-                     int mesh_a, int mesh_b, int mesh_c, double negligible, void *shm_mem)
+                     int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
     constexpr int nsp_per_block = WARP_SIZE;
     constexpr int threads = WARP_SIZE * TILE;
@@ -51,7 +51,7 @@ void eval_tau_kernel(double *rho_c, double *tau_c, double *dm, PBCIntEnvVars env
     SHARED_SCALAR(int, c_start);
     SHARED_SCALAR(int, c_stop);
     SHARED_SCALAR(int, c_index1);
-    DYNAMIC_SHARED_PTR(double, rho_cache, shm_mem);
+    DYNAMIC_SHARED_PTR(double, rho_cache);
 
     float2 x_range = atom_frac_ranges[       segment_id];
     float2 y_range = atom_frac_ranges[nseg  +segment_id];

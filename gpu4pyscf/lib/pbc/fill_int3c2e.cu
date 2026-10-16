@@ -46,8 +46,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, double omega, PBCIntEnvVars envs, 
                                  int ao_pair_offset, int aux_offset,
                                  int nauxbas, int naux, int to_sph,
                                  float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                                 int *head, int nbatches_shl_pair, int nbatches_ksh,
-                                 void *shm_mem)
+                                 int *head, int nbatches_shl_pair, int nbatches_ksh)
 {
     setup_context();
     SHARED_SCALAR(int, sp_block_id);
@@ -71,7 +70,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, double omega, PBCIntEnvVars envs, 
     SHARED_SCALAR(int, num_sub_tasks);
     SHARED_SCALAR(int, img_not_processed);
     SHARED_SCALAR(int, img_tile_size);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int thread_id = threadIdx_x;
     int worker_id = blockIdx_x;
 

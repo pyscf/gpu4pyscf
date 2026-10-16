@@ -23,7 +23,7 @@
     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao, \
     float *q_cond_ij, float *q_cond_kl, \
     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps, \
-    float dm_penalty, int64_t *pool, int *head, void *shm_mem
+    float dm_penalty, int64_t *pool, int *head
 
 #define JKMATRIX_KERNEL_SETUP() \
     setup_context(); \
@@ -43,7 +43,7 @@
     SHARED_ARRAY(double, rjri, [3]); \
     SHARED_SCALAR(int, expi); \
     SHARED_SCALAR(int, expj); \
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
 #define LAUNCH_JKMATRIX_KERNEL(KERNEL) { \
     auto _rys_envs = *envs; auto _rys_kmat = *kmat; auto _rys_bounds = *bounds; \

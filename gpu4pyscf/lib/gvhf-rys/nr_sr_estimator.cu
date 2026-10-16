@@ -101,14 +101,13 @@ void fill_s_estimator_kernel(float *s_estimator, RysIntEnvVars envs,
 static __global__
 void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
                         int *shl_pair_offsets, int *gout_stride_lookup,
-                        double omega, double lr_factor, double sr_factor,
-                        void *shm_mem)
+                        double omega, double lr_factor, double sr_factor)
 {
     setup_context();
     int sp_block_id = blockIdx_x;
     int thread_id = threadIdx_x;
     int threads = blockDim_x;
-    DYNAMIC_SHARED_PTR(float, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(float, shared_memory);
     SHARED_SCALAR(int, li);
     SHARED_SCALAR(int, lj);
     SHARED_SCALAR(int, iprim);

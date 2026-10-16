@@ -41,11 +41,10 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
                             double *dm, double2 *dm_vG, double *Gv,
                             PBCIntEnvVars envs, int nGv, int shm_size,
                             int *bas_ij_idx, int *bas_ij_img_idx,
-                            int *shl_pair_offsets, int permutation_symmetry,
-                            void *shm_mem)
+                            int *shl_pair_offsets, int permutation_symmetry)
 {
     setup_context();
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     constexpr int nGv_per_block = NG_PER_BLOCK;
     constexpr int threads = NG_PER_BLOCK * NSP_PER_BLOCK;
     int sp_block_id = blockIdx_x;

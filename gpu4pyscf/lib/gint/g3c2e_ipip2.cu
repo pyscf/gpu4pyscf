@@ -248,11 +248,10 @@ static void GINTwrite_int3c2e_ipip2_direct(GINTEnvVars envs, ERITensor eri,
 
 // General version
 __global__
-void GINTfill_int3c2e_ipip2_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets,
-                                            void *shm_mem)
+void GINTfill_int3c2e_ipip2_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     setup_context();
-    DYNAMIC_SHARED_PTR(double, g0, shm_mem);
+    DYNAMIC_SHARED_PTR(double, g0);
     const int task_ij = blockIdx_x;
     const int task_kl = blockIdx_y;
     GINT_CACHE_REF();

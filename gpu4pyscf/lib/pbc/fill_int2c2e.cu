@@ -34,7 +34,7 @@ __global__ static
 void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs,
                         double omega, double lr_factor, double sr_factor,
                         int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                        int *gout_stride_lookup, void *shm_mem)
+                        int *gout_stride_lookup)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -47,7 +47,7 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs,
     SHARED_SCALAR(int, iprim);
     SHARED_SCALAR(int, jprim);
     SHARED_SCALAR(int, gout_stride);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int sp_block_id = blockIdx_x;
     int thread_id = threadIdx_x;
 

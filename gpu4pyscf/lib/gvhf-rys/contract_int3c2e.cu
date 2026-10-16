@@ -118,8 +118,7 @@ void _store_vj(double *out, double *vj_cache, int li, int lj, size_t nao,
 __global__ static
 void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
                                 RysIntEnvVars envs, int *shl_pair_offsets,
-                                uint32_t *bas_ij_idx, int *gout_stride_lookup,
-                                void *shm_mem)
+                                uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -140,7 +139,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
     SHARED_SCALAR(double, zk);
     SHARED_SCALAR(int, expk);
     SHARED_SCALAR(int, ck);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;
     int nbas = envs.nbas;
@@ -370,8 +369,7 @@ __global__ static
 void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, int n_dm, int naux,
                                     RysIntEnvVars envs, int *shl_pair_offsets,
                                     uint32_t *bas_ij_idx, int *ksh_offsets,
-                                    int *gout_stride_lookup,
-                                    void *shm_mem)
+                                    int *gout_stride_lookup)
 {
     // For better load balance, consume blocks in the reversed order
     setup_context();
@@ -388,7 +386,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, int n_dm, int n
     SHARED_SCALAR(int, kprim);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nst_per_block);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;
     int nbas = envs.nbas;

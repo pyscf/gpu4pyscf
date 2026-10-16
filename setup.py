@@ -108,17 +108,16 @@ class CMakeBuildPy(build_py):
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
         if BACKEND == 'sycl':
             # USE_SYCL defaults OFF in gpu4pyscf/lib/CMakeLists.txt so that a
-            # plain CUDA build needs no flags at all. SYCL uses ExchCXX where
-            # CUDA uses libxc, and there is no wheel for ExchCXX, so it has to
-            # be built from source, hence BUILD_LIBXC=ON rather than the OFF
-            # that CUDA passes.
-            libxc_arg = '-DBUILD_LIBXC=ON'
-            backend_args = ['-DUSE_SYCL=ON']
+            # plain CUDA build needs no flags at all. SYCL uses ExchCXX (built
+            # from source, no wheel) where CUDA uses libxc (wheel), so libxc
+            # is never built for SYCL.
+            libxc_arg = '-DBUILD_LIBXC=OFF'
+            backend_args = ['-DUSE_SYCL=ON', '-DUSE_CUDA=OFF']
         else:
             # CUDA takes libxc from the gpu4pyscf-libxc-cuda* wheel listed in
             # install_requires rather than building it (upstream, since #110).
             libxc_arg = '-DBUILD_LIBXC=OFF'
-            backend_args = []
+            backend_args = ['-DUSE_CUDA=ON', '-DUSE_SYCL=OFF']
         cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', libxc_arg] + backend_args
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:

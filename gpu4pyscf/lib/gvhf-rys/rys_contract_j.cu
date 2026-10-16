@@ -32,8 +32,7 @@ __global__ static
 void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                  uint32_t *pool, int *head, int reserved_shm_size,
-                  void *shm_mem)
+                  uint32_t *pool, int *head, int reserved_shm_size)
 {
     setup_context();
     FOLD_TABLE_BIND(c_i_in_fold2idx, s_rys_i_in_fold2idx);
@@ -48,7 +47,7 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     SHARED_ARRAY(double, aij_cache, [2]);
     SHARED_SCALAR(int, expi);
     SHARED_SCALAR(int, expj);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
     int gout_id = threadIdx_y;
@@ -507,8 +506,7 @@ __global__ static
 void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                             float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                            uint32_t *pool, int *head, int reserved_shm_size,
-                            void *shm_mem)
+                            uint32_t *pool, int *head, int reserved_shm_size)
 {
     setup_context();
     FOLD_TABLE_BIND(c_i_in_fold3idx, s_rys_i_in_fold3idx);
@@ -522,7 +520,7 @@ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     SHARED_ARRAY(double, aij_cache, [2]);
     SHARED_SCALAR(int, expi);
     SHARED_SCALAR(int, expj);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
     int gout_id = threadIdx_y;

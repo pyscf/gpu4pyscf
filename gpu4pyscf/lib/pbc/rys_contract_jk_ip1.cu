@@ -36,7 +36,7 @@ void rys_ejk_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         float *q_cond_ij, float *q_cond_kl,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                         int64_t *pool, double *dd_pool, int *head,
-                        int reserved_shm_size, void *shm_mem)
+                        int reserved_shm_size)
 {
     setup_context();
     SHARED_SCALAR(int, ntasks);
@@ -53,7 +53,7 @@ void rys_ejk_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     SHARED_ARRAY(double, aij_cache, [2]);
     SHARED_SCALAR(int, expi);
     SHARED_SCALAR(int, expj);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;

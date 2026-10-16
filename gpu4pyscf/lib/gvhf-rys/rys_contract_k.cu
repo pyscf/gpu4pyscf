@@ -37,12 +37,11 @@ __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                  uint32_t *pool, int *head, int gout_pattern, int reserved_shm_size,
-                  void *shm_mem)
+                  uint32_t *pool, int *head, int gout_pattern, int reserved_shm_size)
 {
     setup_context();
     GXYZ_BIND(c_gxyz_offset, s_rys_gxyz_offset);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     SHARED_SCALAR(int, ntasks);
     SHARED_SCALAR(int, pair_ij);
     SHARED_SCALAR(int, pair_kl0);

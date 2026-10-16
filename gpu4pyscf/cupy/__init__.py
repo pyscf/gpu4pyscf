@@ -136,6 +136,10 @@ else:
     cupy_fake.__package__ = "cupy"
     cupy_fake.__path__    = [os.path.dirname(os.path.abspath(__file__))]
     cupy_fake.__gpu4pyscf_cupy_facade__ = True   # marker for early short-circuit
+    # Version floor for the CuPy API surface this facade implements
+    # (solvent/pcm.py:416 branches gmres kwargs on it; our cupyx gmres
+    # has the >= 14.0.0 rtol/atol signature).
+    cupy_fake.__version__ = "14.0.0"
 
     cupy_fake.ndarray = _CuPyNdarray
     cupy_fake.asnumpy = dpnp.asnumpy
@@ -151,6 +155,14 @@ else:
     # mat.flags.c_contiguous and aborts the test otherwise. Normalise here so
     # every caller sees the layout it would get on the CUDA backend.
     def _einsum(*args, **kwargs):
+        # SAFETY NET (2026-10-13): CuPy's einsum uploads host operands;
+        # wrong-type call sites are fixed at source, this converts any
+        # numpy stragglers so they fail soft. Plus the contiguity fix.
+        import numpy as _np
+        args = tuple(
+            dpnp.asarray(a) if isinstance(a, _np.ndarray) and not isinstance(a, dpnp.ndarray) else a
+            for a in args
+        )
         out = dpnp.einsum(*args, **kwargs)
         if isinstance(out, dpnp.ndarray) and not out.flags.c_contiguous:
             out = dpnp.ascontiguousarray(out)
@@ -159,6 +171,26 @@ else:
     _einsum.__name__ = 'einsum'
     _einsum.__doc__ = getattr(dpnp.einsum, '__doc__', None)
     cupy_fake.einsum = _einsum
+
+
+    # -----------------------------------------------------------------
+    # cupy.concatenate -- CuPy tolerates a bare ndarray where NumPy
+    # raises and dpnp errors with "Shapes of two arrays are not
+    # compatible": re-concatenating an already-flat result returns it
+    # (test_cupy_helper.test_grouped_dot re-concatenates a flat array
+    # with axis=None and passes on CUDA). Sequence inputs keep dpnp
+    # semantics unchanged.
+    # -----------------------------------------------------------------
+    def _concatenate(seq, axis=0, out=None, dtype=None, casting="same_kind"):
+        if isinstance(seq, dpnp.ndarray):
+            if axis is None:
+                return seq
+            return dpnp.concatenate([seq], axis=axis, dtype=dtype, casting=casting)
+        return dpnp.concatenate(seq, axis=axis, out=out, dtype=dtype, casting=casting)
+
+    _concatenate.__name__ = 'concatenate'
+    _concatenate.__doc__ = getattr(dpnp.concatenate, '__doc__', None)
+    cupy_fake.concatenate = _concatenate
 
 
     # -----------------------------------------------------------------
@@ -285,7 +317,7 @@ else:
         "hstack", "vstack",
         "allclose", "sqrt", "tril_indices",
         "dot", "asarray", "array",
-        "einsum",
+        "einsum", "concatenate",
     })
 
     for _attr in dir(dpnp):

@@ -572,12 +572,19 @@ class PBCJKMatrixOpt:
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
                 log.debug3('update_vk [%s:%s]', p0, p1)
                 Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
-                Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
+                # Gpq is itself a view into Gpq_buf (and Gpq1_buf aliases
+                # Gpq_buf when not exclude_dd_block). Passing Gpq1_buf/buf as
+                # the out/buf scratch for the recontraction below aliases
+                # memory that Gpq (still being read from) also occupies --
+                # same bug as aft_jk.get_k_kpts, fixed the same way: use
+                # fresh, non-aliased scratch (see
+                # 0002-fix-pbc-aft-vk-buffer-aliasing-in-get_k_kpts.patch).
+                Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq)
                 update_vk(vk, Gpq1, dms, wcoulG[p0:p1], ki_idx, kj_idx,
                           not self_conj, k_to_compute, t_rev_pairs, buf)
                 if exclude_dd_block:
                     Gpq[:,:,diffuse_i,diffuse_j] = 0.
-                    Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
+                    Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq)
                     update_vk(vk, Gpq1, dms, wcoulG_SR[p0:p1], ki_idx, kj_idx,
                               not self_conj, k_to_compute, t_rev_pairs, buf)
                 Gpq = Gpq1 = None

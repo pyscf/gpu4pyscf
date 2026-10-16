@@ -15,7 +15,12 @@
 
 import cupy as cp
 import numpy as np
-from scipy.special import erfc
+# scipy.special.erfc(cupy_array) only works on CUDA because CuPy implements
+# __array_ufunc__ and NEP-13 redirects the call to cupyx.scipy.special.erfc
+# transparently; dpnp does not implement that protocol (no cheap global hook
+# -- see gpu4pyscf/cupy/cuda.py's disabled 4h note), so call the device-aware
+# entry point directly. Identical result on CUDA (same underlying erfc).
+from cupyx.scipy.special import erfc
 
 from pyscf.gto import ATOM_OF
 from pyscf import lib
@@ -429,7 +434,10 @@ def ewald_derivatives(cell, ew_eta=None, ew_cut=None):
         r2 = cp.einsum('nijx,nijx->nij', rij, rij)
         r2[r2 < 1e-30] = np.inf
         r = cp.sqrt(r2)
-        fac = erfc(ew_eta*r)/r + 2*ew_eta/np.sqrt(np.pi)*np.exp(-ew_eta**2*r2)
+        # np.exp(device_array) only works on CUDA via CuPy's __array_ufunc__
+        # NEP-13 redirect (same gap as the erfc import above); np.sqrt(np.pi)
+        # stays numpy since it is a plain host scalar, not device data.
+        fac = erfc(ew_eta*r)/r + 2*ew_eta/np.sqrt(np.pi)*cp.exp(-ew_eta**2*r2)
         fac *= charge_pairs / r2
         grad_sigma[:-3] -= cp.einsum('nij,nijx->ix', fac, rij)
         grad_sigma[-3:] -= .5 * cp.einsum('nij,nijx,nijy->xy', fac, rij, rij)

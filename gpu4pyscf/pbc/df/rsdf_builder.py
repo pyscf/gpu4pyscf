@@ -409,6 +409,17 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
             t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
+    # cderi is a host-mapped (USM-shared) buffer that store_col_segment
+    # above writes asynchronously. For num_devices == 1, multi_gpu.run
+    # calls proc() inline on the main thread with no synchronize() ever
+    # firing (the per-batch sync above is gated on num_devices > 1), so
+    # the store_col_segment kernels can still be in flight when this
+    # function returns. Callers read cderi with raw host memcpys/slices
+    # (e.g. df.py's loop()); a host access to a USM-shared page while a
+    # kernel is still writing it faults (not just stale data -- an actual
+    # page fault that aborts the process). Drain the queue once here so
+    # every caller sees a fully written buffer.
+    cp.cuda.get_current_stream().synchronize()
 
     cderip = None
     for k, nauxp in negative_metric_size.items():
@@ -577,6 +588,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
             t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
+    # See the matching comment in compressed_cderi_j_only: num_devices == 1
+    # never synchronizes above, so drain here before any caller does a raw
+    # host read of the USM-shared cderi buffers.
+    cp.cuda.get_current_stream().synchronize()
 
     cderip = None
     if negative_metric_size:

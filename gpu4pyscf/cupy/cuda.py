@@ -48,6 +48,7 @@ not Python-object identity, because dpnp internals may reconstruct a
 fresh SyclQueue Python wrapper around the same underlying sycl::queue.
 """
 import atexit
+import contextlib
 import ctypes
 import functools
 import os
@@ -473,12 +474,11 @@ _DPNP_CREATION = (
 # ---------------------------------------------------------
 # The fix keeps the freed buffer's owning dpctl _Memory alive, submits a
 # BARRIER on the master queue, and retains the (event, batch) pair on the
-# Python side. A later call to _reap_completed_locked() drains the master
-# queue with a REAL `.wait()` (batched/throttled -- not per kernel launch,
-# see that function's docstring for why a non-blocking execution_status poll
-# was tried first and found insufficient on this SYCL/PVC stack) before
-# dropping any tagged batch, so the real sycl::free happens strictly after
-# the kernels that read those buffers. `.wait()` releases the GIL while
+# Python side. A later call to _reap_completed_locked() blocks on a REAL
+# `.wait()` -- on each tagged barrier event, falling back to draining the
+# whole master queue if any event is missing or unusable -- before dropping
+# any tagged batch, so the real sycl::free happens strictly after the
+# kernels that read those buffers. `.wait()` releases the GIL while
 # blocking, so this does not reintroduce the async_dec_ref/PyGILState_Ensure
 # deadlock described below -- that required a SYCL WORKER THREAD to need the
 # GIL back while the calling thread held it; here the calling thread gives up
@@ -522,14 +522,15 @@ def _flush_deferred_frees_locked():
     worker's future.)
 
     Instead we submit a barrier and retain the batch on the Python side.
-    `_reap_completed_locked()` now drains the master queue with a real
-    `.wait()` before releasing any tagged batch (see that function's
-    docstring for why the earlier non-blocking `execution_status` check was
-    replaced) -- the barrier submitted here is retained for bookkeeping
-    (probe stats, the `(event, batch)` tagging structure) but the actual
-    safety guarantee comes from the queue drain in `_reap_completed_locked`,
-    not from this event's status. The GIL is never touched from a SYCL
-    worker thread by anything in this function.
+    `_reap_completed_locked()` now blocks on a real `.wait()` of the barrier
+    event submitted here (see that function's docstring for why the earlier
+    non-blocking `execution_status` check was replaced, and for the
+    busy-queue/idle-queue event evidence) before releasing any tagged batch.
+    The safety guarantee comes from that wait: the master queue is in-order,
+    so once this barrier completes, every kernel enqueued before it -- i.e.
+    everything that could read the batch's buffers -- is provably done. The
+    GIL is never touched from a SYCL worker thread by anything in this
+    function.
     """
     batch = _pending_frees.get("batch")
     if not batch:
@@ -582,23 +583,61 @@ def _reap_completed_locked():
     status query on every single `get_jk` call, before the task loop that
     later reports the fault even starts.
 
-    THE FIX: a real, GIL-releasing wait
-    ------------------------------------
-    `_master_queue().wait()` drains the ENTIRE in-order master queue -- a
-    documented-safe superset of waiting for any barrier submitted on that
-    queue (see the `Event`/`Device.synchronize()` comment above, which
-    already uses this exact pattern and documents why: `submit_barrier()` on
-    an IDLE queue can return a Level Zero "internal event" that cannot be
-    `.wait()`'d on directly, but `queue.wait()` has no such caveat and is
-    always safe). Both `SyclQueue.wait()` and `SyclEvent.wait()` release the
-    GIL while blocking (`with nogil: DPCTLQueue_Wait(...)` /
-    `DPCTLEvent_Wait(...)` in dpctl's Cython source) -- this is NOT the
-    `async_dec_ref`/`PyGILState_Ensure` deadlock this reaper design was
-    originally built to avoid. That deadlock required a SYCL WORKER THREAD to
-    need the GIL back while the main thread held it inside the driver's
+    THE FIX: a real, GIL-releasing wait on each tagged barrier event
+    -----------------------------------------------------------------
+    Instead of draining the entire master queue, this reaper now blocks on
+    the barrier event that `_flush_deferred_frees_locked` tagged each batch
+    with. Because the master queue is in-order, completing the barrier
+    proves every kernel enqueued before it has finished touching device
+    memory, so dropping the batch afterwards runs the real `sycl::free`
+    strictly after the last possible reader. Events are waited in
+    submission order (oldest first): the oldest event is the long pole, and
+    later waits are typically already complete.
+
+    Two empirically verified properties of `submit_barrier()` events on
+    this SYCL/PVC/Level-Zero stack (probes run this session, mirrors of the
+    `test_rhf_hessian` evidence cited above):
+
+    * BUSY queue: the barrier event is a REAL waitable backend event. A
+      probe submitting a ~13 s kernel, then the barrier, then more work,
+      saw `ev.wait()` block ~13 s -- exactly until the pre-barrier work
+      completed, ignoring the post-barrier submissions. This is the
+      property that makes the tagged reap correct.
+    * IDLE queue: the barrier returns a Level Zero "internal event" whose
+      `.wait()` returns immediately and does NOT raise. That is still safe
+      here: an idle in-order queue means all previously submitted work has
+      completed, so dropping the batch right away cannot race anything.
+
+    `ext_oneapi_get_last_event()` was ALSO probed as a cheaper tag
+    candidate (no barrier submission at all) and REJECTED: on this stack it
+    returns a marker event whose `.wait()` no-ops even while the tracked
+    kernel is still running (0.005 ms wait against a 62 s kernel; status
+    stuck at "submitted"). Root cause in DPC++ `queue_impl::getLastEvent`:
+    the common scheduler-bypass submission path for in-order queues does
+    not track a last event (`LastEvent = nullptr`), so the function falls
+    back to `insertMarkerEvent()`, whose event is not waitable. Do not use
+    `ext_oneapi_get_last_event` for lifetime ordering on this stack.
+
+    If any tagged event is missing or its `.wait()` raises, this falls
+    back to the previous whole-queue drain -- `_master_queue().wait()` --
+    which is a strict superset of waiting for any barrier submitted on
+    that queue and is always safe (see the `Event`/`Device.synchronize()`
+    comment above documenting the idle-queue internal-event caveat).
+
+    Both `SyclEvent.wait()` and `SyclQueue.wait()` release the GIL while
+    blocking (`with nogil: DPCTLEvent_Wait(...)` / `DPCTLQueue_Wait(...)`
+    in dpctl's Cython source) -- this is NOT the
+    `async_dec_ref`/PyGILState_Ensure deadlock this reaper design was
+    originally built to avoid. That deadlock required a SYCL WORKER THREAD
+    to need the GIL back while the main thread held it inside the driver's
     enqueue path; here, the CALLING Python thread simply releases the GIL
     itself before blocking, so any other thread (worker or otherwise) that
     needs the GIL remains free to acquire it throughout the wait.
+
+    Benefit over the whole-queue drain: memory is released as soon as the
+    flush point completes. The old `_master_queue().wait()` also waited
+    for every kernel the application submitted AFTER the barrier, pinning
+    the batch's buffers for work that could never read them.
 
     Cost: this still only runs where `_flush_deferred_frees_locked` /
     `_reap_completed_locked` were already being called (throttled to every
@@ -609,11 +648,11 @@ def _reap_completed_locked():
     tagged = _pending_frees.get("tagged")
     if not tagged:
         return
-    # queue.wait() parks inside Scheduler::GraphProcessor::waitForEvent while
+    # ev.wait() parks inside Scheduler::GraphProcessor::waitForEvent while
     # holding the scheduler's SHARED lock. Doing that from a worker thread
     # adds a second reader that can outlive the main thread's own wait and
     # starve a pending writer (submit_barrier from any thread). Confine the
-    # drain to the owning thread. See _on_scheduler_safe_thread.
+    # wait to the owning thread. See _on_scheduler_safe_thread.
     if not _on_scheduler_safe_thread():
         return
     # Release _defer_free_lock across the actual blocking wait. The SYCL
@@ -621,11 +660,11 @@ def _reap_completed_locked():
     # tagged batch's dpnp arrays); if one of those DECREFs collects another
     # usm_ndarray, its finalizer re-enters _deferred_release(), which needs
     # this SAME lock to append to "batch". Holding the lock through the wait
-    # self-deadlocks: this (owning) thread parks in queue.wait() waiting for
-    # the host task to finish, while the host task blocks acquiring a lock
-    # this thread still holds. Confirmed via gdb on the real hang: main
-    # thread inside DPCTLQueue_Wait -> Scheduler::waitForEvent, a SYCL
-    # ThreadPool worker inside a DispatchHostTask DECREF chain blocked in
+    # self-deadlocks: this (owning) thread parks in the wait for the host
+    # task to finish, while the host task blocks acquiring a lock this
+    # thread still holds. Confirmed via gdb on the real hang: main thread
+    # inside DPCTLQueue_Wait -> Scheduler::waitForEvent, a SYCL ThreadPool
+    # worker inside a DispatchHostTask DECREF chain blocked in
     # PyThread_acquire_lock_timed. Dropping the lock here is safe -- only
     # the owning thread ever reaches this function or _flush_deferred_frees_
     # locked (both gated on _on_scheduler_safe_thread), so nothing else can
@@ -633,16 +672,33 @@ def _reap_completed_locked():
     # "batch", which is unaffected by releasing this lock.
     _defer_free_lock.release()
     try:
-        _master_queue().wait()
-    except Exception:
-        # Cannot drain the queue -- release rather than leak.
-        pass
+        waited_all = True
+        for ev, _batch in tagged:
+            if ev is None:
+                waited_all = False
+                break
+            try:
+                ev.wait()
+            except Exception:
+                # An unusable barrier event (historically the Level Zero
+                # "internal event" on an idle queue). The whole-queue drain
+                # below is always safe.
+                waited_all = False
+                break
+        if not waited_all:
+            try:
+                _master_queue().wait()
+            except Exception:
+                # Cannot drain the queue -- release rather than leak.
+                pass
     finally:
         _defer_free_lock.acquire()
-    # Every tagged batch was submitted strictly before this wait (the master
-    # queue is in-order and _flush_deferred_frees_locked always submits its
-    # barrier before returning), so draining the queue proves every one of
-    # them is now genuinely safe to release. Nothing stays "still pending".
+    # Every tagged event was submitted strictly after the buffers in its
+    # batch were last read (the master queue is in-order and
+    # _flush_deferred_frees_locked always submits its barrier before
+    # returning), so completing those waits -- or the fallback queue drain
+    # -- proves every tagged batch is now genuinely safe to release.
+    # Nothing stays "still pending".
     _pending_frees["tagged"] = []
 
 
@@ -706,7 +762,7 @@ def _register_deferred_free(arr):
         # not submit a host task on every allocation.
         cnt = _pending_frees.get("alloc_count", 0) + 1
         _pending_frees["alloc_count"] = cnt
-        if (cnt % _DEFER_FREE_FLUSH_STRIDE) == 0:
+        if (cnt % _DEFER_FREE_FLUSH_STRIDE) == 0 and _on_scheduler_safe_thread():
             with _defer_free_lock:
                 _flush_deferred_frees_locked()
                 _reap_completed_locked()
@@ -736,6 +792,24 @@ _DPNP_ARRAY_PRODUCERS = (
     "__neg__", "__pos__", "__abs__",
     # dtype / layout conversions that allocate
     "astype", "conj", "conjugate",
+    # linear algebra / manipulation methods that allocate a fresh buffer.
+    # `.dot` is the 2026-10-12 crash: DIIS (`lib/diis.py update -> dt.conj()
+    # .dot(dti)`) left the gemm result unregistered; its GC-freed buffer was
+    # read by in-flight kernels during the DF-RKS SCF of
+    # test_rks_df_against_qchem -> GPU page fault -> NEO background-thread
+    # abort (6/6 deterministic; gone under ZE_SERIALIZE=2). OneMKL/gemm
+    # outputs are created inside dpnp C++ and escape every other Layer.
+    "dot", "matmul", "copy", "flatten", "ravel", "repeat",
+    "diagonal", "trace",
+    # reductions / accumulation methods (2026-10-12 crash class 2: the
+    # ECP `get_ecp_ipip(...).sum(axis=0)` pattern and df
+    # `_jk_energy_per_atom` sums left the reduction output unregistered;
+    # `del result` ran eager sycl::free while the reduction kernel was
+    # still writing it -> GPU "Write to NotPresent" fault from a NEO
+    # background thread, layout/timing-gated). Module-level dpnp.sum etc.
+    # were already wrapped (Layer 4c); these are the METHOD forms.
+    "sum", "mean", "prod", "cumsum", "cumprod",
+    "max", "min", "var", "std",
 )
 
 
@@ -772,6 +846,20 @@ _DPNP_ALLOCATING_FUNCS = (
     "multiply", "add", "subtract", "divide",
     # selection / construction
     "where", "take", "tril", "triu", "unique",
+    # linear algebra / contractions producing fresh buffers (same 2026-10-12
+    # crash family as the .dot producer hole -- oneMKL/einsum outputs are
+    # allocated inside dpnp C++ and escaped registration)
+    "dot", "matmul", "vdot", "inner", "tensordot", "einsum", "kron",
+    "cross", "ascontiguousarray",
+)
+
+# dpnp.linalg functions whose outputs are fresh device buffers. Reached via
+# `cupy.linalg.*` (the facade aliases dpnp.linalg) -- e.g. cholesky in
+# df.DF.build, solve/eigh in DIIS/SOSCF paths.
+_DPNP_LINALG_ALLOCATING_FUNCS = (
+    "cholesky", "inv", "solve", "pinv", "lstsq",
+    "eigh", "eig", "eigvals", "eigvalsh",
+    "qr", "svd", "matrix_power", "norm",
 )
 
 
@@ -789,8 +877,13 @@ def _wrap_allocating_funcs():
     Idempotent; failures are swallowed so a dpnp build missing any one of
     these names cannot break import.
     """
-    for name in _DPNP_ALLOCATING_FUNCS:
-        orig = getattr(dpnp, name, None)
+    return _wrap_allocating_funcs_on(dpnp, _DPNP_ALLOCATING_FUNCS)
+
+
+def _wrap_allocating_funcs_on(mod, names):
+    """Worker behind _wrap_allocating_funcs; also used for dpnp.linalg."""
+    for name in names:
+        orig = getattr(mod, name, None)
         if orig is None or getattr(orig, "__master_q_wrapped__", False):
             continue
 
@@ -822,6 +915,9 @@ def _wrap_allocating_funcs():
                     self.__master_q_wrapped__ = True
 
                 def __call__(self, *args, **kwargs):
+                    out = kwargs.get('out', None)
+                    if out is not None and any(out is arg for arg in args):
+                        return self._orig(*args, **kwargs)
                     return _register_deferred_free(self._orig(*args, **kwargs))
 
                 def __getattr__(self, attr):
@@ -829,9 +925,26 @@ def _wrap_allocating_funcs():
 
             wrapper = _DeferredFreeProxy(orig)
         try:
-            setattr(dpnp, name, wrapper)
+            setattr(mod, name, wrapper)
         except (TypeError, AttributeError):
             continue
+
+
+def _wrap_linalg_allocating_funcs():
+    """Layer 4d -- deferred-free finalizers on dpnp.linalg outputs.
+
+    Same rationale as Layer 4c, but the results are reached as
+    `dpnp.linalg.foo(...)`, which the `cupy.linalg` facade aliases directly.
+    Cholesky in df.DF.build, solve/eigh in DIIS and SOSCF paths all hand
+    these buffers to raw kernels; an eager free of one of them is the
+    2026-10-12 GPU-page-fault crash family. Idempotent; missing names are
+    skipped.
+    """
+    try:
+        linalg_mod = dpnp.linalg
+    except AttributeError:
+        return
+    _wrap_allocating_funcs_on(linalg_mod, _DPNP_LINALG_ALLOCATING_FUNCS)
 
 
 def _wrap_array_producers():
@@ -858,6 +971,9 @@ def _wrap_array_producers():
 
         @functools.wraps(orig)
         def wrapper(self, *args, _orig=orig, _name=name, **kwargs):
+            # Skip in-place operations - they don't create new arrays
+            if _name.startswith("__i") and _name.endswith("__"):
+                return _orig(self, *args, **kwargs)
             return _register_deferred_free(_orig(self, *args, **kwargs))
 
         wrapper.__master_q_wrapped__ = True
@@ -1115,9 +1231,140 @@ def _bootstrap():
     # RYS_build_jk as a raw pointer -- eligible for eager, non-queue-ordered
     # sycl::free while kernels were still reading it.
     _wrap_allocating_funcs()
-    # Layer 5: keep oneMKL's internal, GIL-holding waits away from
-    # pending GIL-needing host tasks.
-    _wrap_blocking_lapack()
+    # Layer 4d: dpnp.linalg outputs (cholesky/solve/eigh/...). Same gap
+    # family as 4c -- oneMKL results allocated inside dpnp C++.
+    _wrap_linalg_allocating_funcs()
+    # Layer 4e + 4f SAFETY NETS (2026-10-13): wrong-type (numpy-into-dpnp)
+    # usage is fixed at the gpu4pyscf call sites — these shims are dormant
+    # backstops so a missed site fails soft instead of crashing a run.
+    # 4e: CuPy's ndarray implements __array__ as an implicit device-to-host
+    # copy; dpnp raises. Keep the CuPy behavior available.
+    try:
+        import numpy as _np
+        _dpnp_arr_cls = dpnp.ndarray
+        if not getattr(_dpnp_arr_cls, "__cupy_shim_array__", False):
+            def _dpnp_shim_array(self, dtype=None, copy=None):
+                host = self.asnumpy()
+                return _np.array(host, dtype=dtype, copy=True) if dtype is not None else _np.array(host)
+            _dpnp_shim_array.__cupy_shim_array__ = True
+            _dpnp_arr_cls.__array__ = _dpnp_shim_array
+    except Exception:
+        pass
+    # 4f: CuPy's linalg functions asarray() their inputs; dpnp raises.
+    # Skip isinstance(x, type) entries — wrapping LinAlgError broke
+    # `except` clauses once (see progress.md).
+    try:
+        import numpy as _np
+        _linalg_mod = dpnp.linalg
+        for _name in dir(_linalg_mod):
+            if _name.startswith('_'):
+                continue
+            _orig = getattr(_linalg_mod, _name, None)
+            if (not callable(_orig) or isinstance(_orig, types.ModuleType)
+                    or isinstance(_orig, type)
+                    or getattr(_orig, "__hostarg_wrapped__", False)):
+                continue
+            def _linalg_wrapper(*args, _orig=_orig, **kwargs):
+                args = tuple(
+                    dpnp.asarray(a) if isinstance(a, _np.ndarray) and not isinstance(a, dpnp.ndarray) else a
+                    for a in args
+                )
+                for _k, _v in list(kwargs.items()):
+                    if isinstance(_v, _np.ndarray) and not isinstance(_v, dpnp.ndarray):
+                        kwargs[_k] = dpnp.asarray(_v)
+                return _orig(*args, **kwargs)
+            _linalg_wrapper.__hostarg_wrapped__ = True
+            _linalg_wrapper.__wrapped__ = _orig
+            try:
+                setattr(_linalg_mod, _name, _linalg_wrapper)
+            except (TypeError, AttributeError):
+                continue
+    except Exception:
+        pass
+    # Layer 4g: index()-normalize slice components on dpnp getitem.
+    # NumPy (and hence CuPy upstream code) accepts np.float64 slice ends
+    # because NumPy calls __index__ on them; dpnp's Cython slicer does not
+    # ("slice indices must be integers...", hit by df/hessian/rhf.py:1408
+    # `v[:,0,:,:nocca]` where nocca comes from `mo_occ.sum(axis=1).get()`).
+    # Patch dpnp_array.__getitem__ to convert integral float / 0-d-array
+    # slice bounds via __index__, matching NumPy semantics.
+    try:
+        import operator as _op
+        _np2 = __import__("numpy")
+
+        def _norm_idx(v):
+            # CuPy accepts integral float slice bounds (it int()-converts
+            # them in its own slicer); dpnp's Cython slicer does not.
+            # Floats have no __index__, so convert integral floats
+            # explicitly, everything else via __index__.
+            if v is None:
+                return None
+            if isinstance(v, float):
+                return int(v) if v.is_integer() else v
+            try:
+                return _op.index(v)
+            except (TypeError, ValueError):
+                return v
+
+        def _norm_key(k):
+            if isinstance(k, slice):
+                return slice(_norm_idx(k.start), _norm_idx(k.stop), _norm_idx(k.step))
+            if isinstance(k, tuple):
+                return tuple(
+                    slice(_norm_idx(x.start), _norm_idx(x.stop), _norm_idx(x.step))
+                    if isinstance(x, slice) else x
+                    for x in k
+                )
+            return k
+
+        _getitem_register = (
+            os.environ.get("GPU4PYSCF_GETITEM_REGISTER", "1") != "0"
+        )
+        _orig_getitem = dpnp.ndarray.__getitem__
+        if not getattr(_orig_getitem, "__cupy_shim_getitem__", False):
+            def _dpnp_shim_getitem(self, key):
+                res = _orig_getitem(self, _norm_key(key))
+                # Fancy/advanced indexing COPIES into a fresh device buffer
+                # created inside dpnp's Cython slicer; without registration
+                # its GC ran an eager sycl::free while raw kernels reading
+                # it were still in flight -> GPU "Read (NotPresent)" page
+                # fault -> NEO background-thread abort (the df
+                # `_jk_energy_per_atom` dm_aux[aux_sorting[:,None],
+                # aux_sorting] crash family, 2026-10-13). Basic-slice views
+                # share self's USM pointer -- registering those would stack
+                # duplicate finalizers on the same usm_ndarray with no
+                # lifetime benefit, so only distinct-pointer results are
+                # registered.
+                try:
+                    if (_getitem_register and
+                            res is not self and
+                            getattr(res, "get_array", None) is not None and
+                            res.data.ptr != self.data.ptr):
+                        return _register_deferred_free(res)
+                except Exception:
+                    pass
+                return res
+            _dpnp_shim_getitem.__cupy_shim_getitem__ = True
+            dpnp.ndarray.__getitem__ = _dpnp_shim_getitem
+        # Layer 4h: numpy-ufunc fallback for SCALAR dpnp operands. dpnp
+        # sets __array_ufunc__ = None, so 3rd-party numpy code applying
+        # numpy ufuncs to GPU results raises "operand 'dpnp_array' does
+        # not support ufuncs" (geomeTRIC's optimizer: np.abs(del_E) with
+        # a dpnp 0-d energy). On CUDA those values arrive as plain
+        # floats. Convert ONLY scalar-like (0-d / size-1) dpnp operands
+        # to host and let numpy run; larger arrays keep the raise — a
+        # broad conversion silently D2H-copies matrices and derails
+        # downstream device code (observed: soscf g_orb + hdxi TypeError
+        # in multi-file runs when an upstream np-ufunc host-converted a
+        # whole matrix).
+        # DISABLED (2026-10-13): even the scalar-only conversion broke
+        # multi-file runs (soscf-after-scf_jk failed at g_orb + hdxi with
+        # a numpy operand after an upstream numpy ufunc host-converted a
+        # value). Do NOT enable without understanding that path; the
+        # geomeTRIC/np.abs(del_E) case is tracked as an open item.
+        dpnp.ndarray.__array_ufunc__ = None
+    except Exception:
+        pass
     _wrap_blocking_setitem()
     # Layer 6: stop dpctl's thread-local order managers from running a
     # blocking event wait inside a finalizer when a worker thread exits.
@@ -1222,7 +1469,17 @@ def release_deferred_frees():
     deferred-free reaper they are exactly where the retained batches should be
     handed back. Same flush -> wait -> reap sequence as `_mark_shutdown()`,
     minus the shutdown flag.
+
+    Off the owning thread this is a no-op: the flush submits a barrier on the
+    master queue (scheduler WRITER lock) and the wait drains it, which is the
+    exact reader/writer deadlock combination documented at
+    `_on_scheduler_safe_thread` when the main thread is parked inside its own
+    queue wait. Batches freed from worker threads stay retained until the next
+    main-thread flush; they are bounded by `_DEFER_FREE_BATCH` /
+    `_DEFER_FREE_OFFTHREAD_CAP`, so nothing leaks.
     """
+    if not _on_scheduler_safe_thread():
+        return
     try:
         with _defer_free_lock:
             _flush_deferred_frees_locked()
@@ -1413,11 +1670,16 @@ device = Device
 # =====================================================================
 # Event -- wall-clock timing + queue.wait() sync
 #
-# submit_barrier() on an idle in-order queue can return a Level Zero
-# 'internal event' that cannot be .wait()'d on, so we use host-clock
+# submit_barrier() on an idle in-order queue returns a Level Zero
+# 'internal event' whose .wait() returns immediately (probed directly:
+# no raise, no hang) and tracks no queued work, so we use host-clock
 # for elapsed-time math and queue.wait() as the sync primitive. On
 # an in-order queue, queue.wait() is a strict superset of 'wait for
-# the barrier we would have submitted'.
+# the barrier we would have submitted'. (For lifetime ordering the
+# deferred-free reaper waits barrier events directly -- see
+# _reap_completed_locked -- which is safe because the busy-queue
+# barrier event IS real and the idle-queue case implies nothing is
+# in flight.)
 # =====================================================================
 class Event:
     """CuPy-compatible GPU timing Event."""
@@ -1569,17 +1831,54 @@ runtime = _Runtime()
 # =====================================================================
 # Pinned-memory allocator (attached to master queue)
 # =====================================================================
+class _PinnedMemoryPointer:
+    """Minimal CuPy `MemoryPointer`-like handle for pinned host memory.
+
+    CuPy's `cupy.cuda.alloc_pinned_memory` returns a MemoryPointer exposing
+    `.ptr`; the codebase (gto/int3c1e*.py, df/int3c2e.py, cupyx, and
+    test_cupy_helper) uses `.ptr` plus the buffer protocol via
+    `numpy.ndarray(..., buffer=...)`. dpctl's `_Memory` already implements
+    the buffer protocol, so we only add `.ptr` and keep the owner alive.
+    """
+
+    __slots__ = ("ptr", "mem")
+
+    def __init__(self, mem):
+        self.mem = mem
+        self.ptr = mem._pointer
+
+    def __buffer__(self, flags):
+        # Python 3.12 buffer protocol delegation (numpy ndarray(buffer=...)).
+        return memoryview(self.mem).__buffer__(flags)
+
+
 def alloc_pinned_memory(nbytes, flags=None):
     nbytes = int(nbytes)
     q      = _master_queue()
-    mapped = True
-    if flags is not None:
-        try:
-            mapped = bool(flags & runtime.hostAllocMapped)
-        except Exception:
-            mapped = True
-    Mem = dpmem.MemoryUSMShared if mapped else dpmem.MemoryUSMHost
-    return Mem(nbytes, queue=q)
+    # Always USM-host, mapped or not. CUDA pinned memory (with or without
+    # hostAllocMapped) is page-locked host memory; USM-host is the match.
+    # USM-shared is NOT: its pages migrate to the GPU and NEO services the
+    # next host touch through a SIGSEGV handler that libigc can leave
+    # displaced after concurrent JIT compiles (see empty_mapped in
+    # gpu4pyscf/lib/dpnp_helper.py). `flags` is accepted for API parity.
+    return _PinnedMemoryPointer(dpmem.MemoryUSMHost(nbytes, queue=q))
+
+
+# =====================================================================
+# cupy.cuda.using_allocator (CuPy >= 13 API)
+#
+# Callers use `with cp.cuda.using_allocator(...):` to give allocations a
+# distinct boundary. There is no pluggable allocator on the dpnp backend;
+# honor the boundary intent by draining the deferred-free pool on entry
+# and exit, then run the block with the default allocation path.
+# =====================================================================
+@contextlib.contextmanager
+def using_allocator(allocator=None):
+    release_deferred_frees()
+    try:
+        yield
+    finally:
+        release_deferred_frees()
 
 
 # =====================================================================

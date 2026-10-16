@@ -189,11 +189,11 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                   float dm_penalty,
                    int64_t *pool, int *head, const GXYZOffset *p_gxyz_offsets,
-                   int gout_pattern, int reserved_shm_size, void *shm_mem)
+                   int gout_pattern, int reserved_shm_size)
 {
     setup_context();
     PBC_GXYZ_SELECT(gxyz_offsets);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     SHARED_SCALAR(int, ntasks);
     SHARED_SCALAR(int, pair_ij);
     SHARED_SCALAR(int, pair_kl0);

@@ -34,8 +34,7 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
                     int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc,                     int ao_pair_offset, int aux_offset,
-                    int nao_pairs, int naux,
-                    void *shm_mem)
+                    int nao_pairs, int naux)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -57,7 +56,7 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
     SHARED_SCALAR(int, g_size);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nst_per_block);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;
     int sp_block_id = gridDim_x - blockIdx_x - 1;
@@ -265,8 +264,7 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
                     int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc,                     int ao_pair_offset, int aux_offset,
-                    int nao_pairs, int naux,
-                    void *shm_mem)
+                    int nao_pairs, int naux)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -288,7 +286,7 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
     SHARED_SCALAR(int, g_size);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nst_per_block);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;
     int sp_block_id = gridDim_x - blockIdx_x - 1;

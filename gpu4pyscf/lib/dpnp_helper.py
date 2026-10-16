@@ -18,6 +18,7 @@ import functools
 import inspect
 import ctypes
 import warnings
+import weakref
 import numpy as np
 import scipy.linalg
 import cupy
@@ -997,10 +998,32 @@ def empty_mapped(shape, dtype=float, order='C'):
     '''
     nbytes = np.prod(shape) * np.dtype(dtype).itemsize
     q = dpctl.SyclQueue()  # or _create_from_ptr(int(libgpu.sycl_get_queue_ptr()))
-    mem = dpmem.MemoryUSMShared(nbytes, queue=q)  # use MemoryUSMHost(...) if you don't need device mapping
+    # USM-host, not USM-shared: CUDA's hostAllocMapped is page-locked host
+    # memory the device reads/writes in place, which is what USM-host is.
+    # USM-shared pages migrate to the GPU, and NEO brings them back on the
+    # next host touch through its own SIGSEGV handler. libigc swaps the
+    # process-wide SIGSEGV/SIGABRT handlers around every JIT compile and
+    # restores them non-atomically. When the main thread and the SYCL
+    # host-task thread compile at the same time, IGC's handler can stay
+    # installed. A later host read of a migrated page (np_ary.copy() in
+    # pbc/df/df.py loop) then enters IGC's handler instead of NEO's, which
+    # longjmps to a stale jmp_buf and spins in an abort loop forever.
+    mem = dpmem.MemoryUSMHost(nbytes, queue=q)
     # mem = cupy.cuda.PinnedMemoryPointer(
     #     cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
+    # These USM-shared buffers are read/written by raw device kernels
+    # (store_col_segment, decompress_and_transpose, ft_ao, ...) with no
+    # runtime tracking. When the numpy array is GC'd, dpctl frees the USM
+    # allocation eagerly while such a kernel may still be in flight; the
+    # GPU then faults on an unmapped page (Read/Write NotPresent at the
+    # host-VA range; host reads fault too, since PVC host access goes
+    # through the GPU page tables) and NEO kills the whole process.
+    # Route the free through the deferred-free pool (barrier-tagged,
+    # queue-ordered) -- the same cudaFree-synchronizes parity every other
+    # USM owner gets. Lazy import: gpu4pyscf.cupy.cuda imports dpnp.
+    from gpu4pyscf.cupy.cuda import _deferred_release
+    weakref.finalize(out, _deferred_release, mem)
     return out
 
 def ndarray(shape, dtype=np.float64, buffer=None):
@@ -1123,7 +1146,14 @@ def grouped_dot(As, Bs, Cs=None):
     for i in range(groups):
         # B.T: transpose B so that (N, K) -> (K, N)
         # Result: (M, K) @ (K, N) -> (M, N)
-        Cs[i][...] = dpnp.matmul(As[i], Bs[i].T)
+        result = dpnp.matmul(As[i], Bs[i].T)
+        # Write the top-left (M, N) block. The CUDA CUTLASS kernel writes
+        # raw pointers without shape checks, so a caller-provided C larger
+        # than (M, N) receives a partial update there; a full `Cs[i][...]`
+        # assignment would raise a shape error instead (test_grouped_dot
+        # passes (K, K) reference buffers). Slice assignment reproduces
+        # the kernel semantics for exactly-sized C as well.
+        Cs[i][:result.shape[0], :result.shape[1]] = result
 
     return Cs
 
@@ -1227,7 +1257,10 @@ def grouped_gemm(As, Bs, Cs=None):
     for i in range(groups):
         # A.T: transpose A so that (K, M) -> (M, K)
         # Result: (M, K) @ (K, N) -> (M, N)
-        Cs[i][...] = dpnp.matmul(As[i].T, Bs[i])
+        result = dpnp.matmul(As[i].T, Bs[i])
+        # Top-left block write; see grouped_dot for the rationale (CUDA
+        # kernel writes raw pointers unchecked).
+        Cs[i][:result.shape[0], :result.shape[1]] = result
 
     return Cs
 

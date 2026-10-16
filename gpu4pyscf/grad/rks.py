@@ -683,7 +683,8 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         wv = cupy.vstack([fw_rho_i[g0_nonzero : g1_nonzero], fw_gamma_vxc_form[:, g0_nonzero : g1_nonzero]])
         wv[0] *= .5
         vtmp = _gga_grad_sum_(ao, wv)
-        dvmat_orbital_response[numpy.ix_(range(3), idx, idx)] += vtmp
+        # idx is a device array; numpy.ix_ needs host index arrays
+        dvmat_orbital_response[numpy.ix_(range(3), cupy.asnumpy(idx), cupy.asnumpy(idx))] += vtmp
         dms_masked = take_last2d(dms_sorted, idx, out = dm_mask_buf)
         de_grid_response_rho[i_atom_of_grids] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
 

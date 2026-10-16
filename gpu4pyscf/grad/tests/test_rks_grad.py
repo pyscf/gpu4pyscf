@@ -64,8 +64,13 @@ def _check_grad(mol, grid_response=False, xc='B3LYP', disp=None, tol=1e-9):
 
     cpu_gradient = gpu_gradient.to_cpu()
     g_cpu = cpu_gradient.kernel()
-    print('|| CPU - GPU ||:', cupy.linalg.norm(g_cpu - g_gpu))
-    assert(cupy.linalg.norm(g_cpu - g_gpu) < tol)
+
+    # Final host-side check: ensure the GPU result is a numpy array
+    # (cupy.asnumpy is a no-op for host arrays, a D2H copy for device
+    # arrays) and do the norm/tol math in numpy.
+    g_gpu = cupy.asnumpy(g_gpu)
+    print('|| CPU - GPU ||:', numpy.linalg.norm(g_cpu - g_gpu))
+    assert(numpy.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
 

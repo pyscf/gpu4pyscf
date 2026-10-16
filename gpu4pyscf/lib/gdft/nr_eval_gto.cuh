@@ -27,8 +27,18 @@
 
 #ifdef USE_SYCL
 
-#define BLOCKS_SET_Y(val)  (blocks[0] = (val))
-#define BLOCKS_GET_Y()     (blocks[0])
+// make_grid(x, y, z) / make_block(x, y, z) return sycl::range<3>(z, y, x):
+// range index 1 is the CUDA y axis, index 0 is CUDA z. Setting the CUDA-y
+// (per-shell batch) extent must therefore write blocks[1], NOT blocks[0].
+// Writing blocks[0] put the shell count on the z axis, leaving the y axis
+// at one group: kernels that take bas_id = blockIdx_y evaluated only the
+// FIRST shell of every multi-shell contraction batch (all other shells'
+// AO output was never written). This silently corrupted eval_ao whenever
+// two shells shared a contraction pattern -- e.g. the two identical H
+// atoms in H2O -- and with it every DFT energy (2026-10-12 DFT-numerics
+// investigation).
+#define BLOCKS_SET_Y(val)  (blocks[1] = (val))
+#define BLOCKS_GET_Y()     (blocks[1])
 
 #else
 

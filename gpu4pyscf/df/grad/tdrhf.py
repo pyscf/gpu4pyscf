@@ -530,7 +530,9 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
             ejk_aux.append(
                 -int2c2e_ip1_per_atom(auxmol, dm_aux, omega, lr_factor, sr_factor))
-        ejk_aux = cp.array(np.stack(ejk_aux))
+        # np.stack() implicitly converts operands to numpy (raise on dpnp);
+        # stack on device instead
+        ejk_aux = cp.array(cp.stack(ejk_aux))
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     auxvec1 = auxvec2 = dm_aux = None
 

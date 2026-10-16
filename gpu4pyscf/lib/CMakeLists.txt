@@ -13,11 +13,17 @@
 # limitations under the License.
 
 cmake_minimum_required (VERSION 3.19 FATAL_ERROR) # 3.19 is required by cutlass
-# OFF by default so that a plain `python setup.py build` produces the CUDA
-# backend, as upstream does. An ON default sent the CUDA CI down the SYCL
-# path, where it failed looking for MKL. setup.py passes -DUSE_SYCL=ON when
-# GPU4PYSCF_BACKEND=sycl is set.
+
+# Backend selection — mutually exclusive (like ExchCXX)
 option(USE_SYCL "Using SYCL backend" OFF)
+option(USE_CUDA "Using CUDA backend" ON)
+
+if(USE_SYCL AND USE_CUDA)
+  message(FATAL_ERROR "SYCL and CUDA backends are mutually exclusive; choose one")
+endif()
+if(NOT USE_SYCL AND NOT USE_CUDA)
+  message(FATAL_ERROR "Must select at least one backend: USE_SYCL=ON or USE_CUDA=ON")
+endif()
 
 if (USE_SYCL)
   project (gpu4pyscf C CXX Fortran)
@@ -102,7 +108,7 @@ if (USE_SYCL)
   add_link_options(
     -fsycl
     -flink-huge-device-code
-    -fsycl-max-parallel-link-jobs=4
+    -fsycl-max-parallel-link-jobs=32
   )
   if (GPU4PYSCF_SYCL_AOT)
     add_link_options(
@@ -288,6 +294,99 @@ else()
   endif()
 endif()
 
+# ExchCXX / libxc configuration — mutually exclusive.
+# Defaults are backend-aware so a SYCL configure never starts with
+# BUILD_LIBXC=ON (libxc is CUDA-only; SYCL uses ExchCXX).
+if(USE_SYCL)
+  option(BUILD_EXCHCXX "Build ExchCXX for SYCL backend (XC functionals)" ON)
+  option(BUILD_LIBXC "Build libxc for CUDA backend (XC functionals)" OFF)
+else()
+  option(BUILD_EXCHCXX "Build ExchCXX for SYCL backend (XC functionals)" OFF)
+  option(BUILD_LIBXC "Build libxc for CUDA backend (XC functionals)" ON)
+endif()
+
+# Enforce correct combination based on backend. FORCE is the safety net for
+# stale caches and explicit -D flags that request an invalid combination
+# (e.g. a cached or user-passed BUILD_LIBXC=ON with USE_SYCL=ON).
+if(USE_SYCL)
+  set(BUILD_EXCHCXX ON CACHE BOOL "Build ExchCXX for SYCL" FORCE)
+  set(BUILD_LIBXC OFF CACHE BOOL "Using libxc for DFT" FORCE)
+  message(STATUS "SYCL backend: BUILD_EXCHCXX=ON, BUILD_LIBXC=OFF")
+else()
+  set(BUILD_EXCHCXX OFF CACHE BOOL "Build ExchCXX for SYCL" FORCE)
+  # BUILD_LIBXC keeps user/default value (ON)
+endif()
+
+# ExchCXX setup (SYCL only) — must run before gdft which links ExchCXX::ExchCXX
+if(BUILD_EXCHCXX)
+  include(ExternalProject)
+
+  set(_exchcxx_lib "${PROJECT_SOURCE_DIR}/deps/lib/libexchcxx.so")
+  set(_exchcxx_inc "${PROJECT_SOURCE_DIR}/deps/include")
+
+  # Always define the IMPORTED target
+  file(MAKE_DIRECTORY "${_exchcxx_inc}")
+  file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/deps/lib")
+
+  add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
+  set_target_properties(ExchCXX::ExchCXX PROPERTIES
+    IMPORTED_LOCATION             "${_exchcxx_lib}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_exchcxx_inc}"
+    INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
+  )
+
+  # Conditionally build or skip ExchCXX
+  if(NOT EXISTS "${_exchcxx_lib}")
+    message(STATUS "ExchCXX: not found -- building from source (~35 min)")
+    ExternalProject_Add(ExchCXX
+      GIT_REPOSITORY    https://github.com/abagusetty/ExchCXX.git
+      GIT_TAG           d7ed4af53ce0499da62d38e54e100713ee565e8f
+      UPDATE_DISCONNECTED ON
+      PREFIX            ${PROJECT_BINARY_DIR}/deps
+      INSTALL_DIR       ${PROJECT_SOURCE_DIR}/deps
+      CMAKE_ARGS
+      -DCMAKE_BUILD_TYPE=Release
+      -DBUILD_SHARED_LIBS=ON
+      -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DEXCHCXX_ENABLE_SYCL=ON
+      -DEXCHCXX_SYCL_TARGET=${GPU4PYSCF_EXCHCXX_SYCL_TARGET}
+      -DEXCHCXX_ENABLE_TESTS=OFF
+      -DEXCHCXX_ENABLE_LIBXC=OFF
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+      -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+      -DCMAKE_INSTALL_LIBDIR:PATH=lib
+      -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
+      -DCMAKE_CXX_CREATE_SHARED_LIBRARY=${CXX_LINK_TEMPLATE}
+      BUILD_BYPRODUCTS "${_exchcxx_lib}"
+    )
+  else()
+    message(STATUS "ExchCXX: found ${_exchcxx_lib} -- skipping rebuild")
+    add_custom_target(ExchCXX)
+  endif()
+
+  add_dependencies(ExchCXX::ExchCXX ExchCXX)
+endif()
+
+# libxc setup (CUDA only) — runs at end like upstream
+if(BUILD_LIBXC)
+  include(ExternalProject)
+  ExternalProject_Add(libxc
+    URL https://gitlab.com/libxc/libxc/-/archive/7.1.2/libxc-7.1.2.tar.gz
+    PATCH_COMMAND patch -p1 --batch --forward -i ${PROJECT_SOURCE_DIR}/libxc_prune.patch
+    PREFIX ${PROJECT_BINARY_DIR}/deps
+    INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
+    CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
+            -DBUILD_TESTING=OFF -DENABLE_FORTRAN=OFF
+            -DMAXORDER=3 -DDISABLE_FHC=ON
+            -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+            -DCMAKE_INSTALL_LIBDIR:PATH=lib
+            -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
+            -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
+    CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
+  )
+endif()
+
 add_subdirectory(gint)
 add_subdirectory(gvhf)
 add_subdirectory(gdft)
@@ -304,75 +403,3 @@ add_subdirectory(gvhf-md)
 add_subdirectory(pbc)
 add_subdirectory(multigrid)
 add_subdirectory(ecp)
-
-option(BUILD_LIBXC "Using libxc for DFT" ON)
-if(BUILD_LIBXC)
-  include(ExternalProject)
-
-  if(USE_SYCL)
-    set(_exchcxx_lib "${PROJECT_SOURCE_DIR}/deps/lib/libexchcxx.so")
-    set(_exchcxx_inc "${PROJECT_SOURCE_DIR}/deps/include")
-
-    # Always define the IMPORTED target — both branches need it
-    file(MAKE_DIRECTORY "${_exchcxx_inc}")   # must exist at configure time
-    file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/deps/lib")
-
-    add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
-    set_target_properties(ExchCXX::ExchCXX PROPERTIES
-      IMPORTED_LOCATION             "${_exchcxx_lib}"
-      INTERFACE_INCLUDE_DIRECTORIES "${_exchcxx_inc}"
-      INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
-    )
-
-    # Conditionally build or skip ExchCXX
-    if(NOT EXISTS "${_exchcxx_lib}")
-      message(STATUS "ExchCXX: not found -- building from source (~35 min)")
-      ExternalProject_Add(ExchCXX
-        GIT_REPOSITORY    https://github.com/abagusetty/ExchCXX.git
-        GIT_TAG           d7ed4af53ce0499da62d38e54e100713ee565e8f
-        UPDATE_DISCONNECTED ON
-        PREFIX            ${PROJECT_BINARY_DIR}/deps
-        INSTALL_DIR       ${PROJECT_SOURCE_DIR}/deps
-        CMAKE_ARGS
-        -DCMAKE_BUILD_TYPE=Release
-        -DBUILD_SHARED_LIBS=ON
-        # ExternalProject does not inherit the parent's compiler choice; without
-        # this the inner configure falls back to /usr/bin/c++ (no -fsycl).
-        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DEXCHCXX_ENABLE_SYCL=ON
-        -DEXCHCXX_SYCL_TARGET=${GPU4PYSCF_EXCHCXX_SYCL_TARGET}
-        -DEXCHCXX_ENABLE_TESTS=OFF
-        -DEXCHCXX_ENABLE_LIBXC=OFF
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-        -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-        -DCMAKE_INSTALL_LIBDIR:PATH=lib
-        -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-        -DCMAKE_CXX_CREATE_SHARED_LIBRARY=${CXX_LINK_TEMPLATE}
-        BUILD_BYPRODUCTS "${_exchcxx_lib}"
-      )
-    else()
-      message(STATUS "ExchCXX: found ${_exchcxx_lib} -- skipping rebuild")
-      add_custom_target(ExchCXX)    # no-op target, satisfies add_dependencies()
-    endif()
-
-    # Wire IMPORTED target to whichever ExchCXX target was created above
-    add_dependencies(ExchCXX::ExchCXX ExchCXX)
-  else (USE_SYCL)
-    ExternalProject_Add(libxc
-      GIT_REPOSITORY https://github.com/wxj6000/libxc.git
-      GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
-      PATCH_COMMAND git apply --reject ${PROJECT_SOURCE_DIR}/libxc_prune.patch || true
-      PREFIX ${PROJECT_BINARY_DIR}/deps
-      INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-      CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
-      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-      -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
-      -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-      -DCMAKE_INSTALL_LIBDIR:PATH=lib
-      -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-      -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
-      CMAKE_CACHE_ARGS -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
-    )
-  endif(USE_SYCL)
-endif(BUILD_LIBXC)

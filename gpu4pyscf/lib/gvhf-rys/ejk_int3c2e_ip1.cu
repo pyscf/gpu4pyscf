@@ -55,8 +55,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             double omega, double lr_factor, double sr_factor,
                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int naux,
-                            void *shm_mem)
+                            int *ao_pair_loc, int aux_offset, int naux)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -78,7 +77,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     SHARED_SCALAR(int, nst_per_block);
     SHARED_SCALAR(int, aux_per_block);
     SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     // For better load balance, consume blocks in the reversed order
     int thread_id = threadIdx_x;
@@ -420,8 +419,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             RysIntEnvVars envs,
                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int npairs, int naux,
-                            void *shm_mem)
+                            int *ao_pair_loc, int aux_offset, int npairs, int naux)
 {
     setup_context();
     SHARED_SCALAR(int, shl_pair0);
@@ -443,7 +441,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     SHARED_SCALAR(int, nst_per_block);
     SHARED_SCALAR(int, aux_per_block);
     SHARED_SCALAR(int, nsp_per_block);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
     // For better load balance, consume blocks in the reversed order
     int thread_id = threadIdx_x;

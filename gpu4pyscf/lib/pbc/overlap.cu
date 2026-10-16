@@ -30,8 +30,9 @@
 
 // Backend-agnostic prologue for the 1D overlap kernels in this file.
 // setup_context() is the first statement; the SHARED_* decls bind to `item`;
-// DYNAMIC_SHARED_PTR aliases the trailing `void *shm_mem` kernel argument
-// (extern __shared__ in CUDA, local-accessor pointer in SYCL).
+// DYNAMIC_SHARED_PTR declares the dynamic shared allocation in place
+// (extern __shared__ in CUDA, work-group scratch memory in SYCL) with no
+// trailing kernel argument on either backend.
 #define KERNEL_SETUP() \
     setup_context(); \
     SHARED_SCALAR(int, shl_pair0); \
@@ -42,7 +43,7 @@
     SHARED_SCALAR(int, jprim); \
     SHARED_SCALAR(int, gout_stride); \
     SHARED_SCALAR(int, nsp_per_block); \
-    DYNAMIC_SHARED_PTR(double, g, shm_mem); \
+    DYNAMIC_SHARED_PTR(double, g); \
     int sp_block_id = blockIdx_x; \
     int thread_id = threadIdx_x;
 
@@ -84,7 +85,7 @@
 __global__ static
 void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                        int *shl_pair_offsets, int *gout_stride_lookup,
-                       int naoi, int naoj, size_t ij_offset, void *shm_mem)
+                       int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -219,7 +220,7 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_kin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup,
-                      int naoi, int naoj, size_t ij_offset, void *shm_mem)
+                      int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -367,7 +368,7 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                          int *shl_pair_offsets, int *gout_stride_lookup,
-                         int naoi, int naoj, size_t ij_offset, void *shm_mem)
+                         int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -525,7 +526,7 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                         int *shl_pair_offsets, int *gout_stride_lookup,
-                        int naoi, int naoj, size_t ij_offset, void *shm_mem)
+                        int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -711,7 +712,7 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void ovlp_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVars envs,
                              int *shl_pair_offsets, int *bas_ij_idx,
-                             int *gout_stride_lookup, void *shm_mem)
+                             int *gout_stride_lookup)
 {
     KERNEL_SETUP();
     int *bas = envs.bas;
@@ -903,7 +904,7 @@ void ovlp_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvV
 static __global__
 void kin_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVars envs,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, void *shm_mem)
+                            int *gout_stride_lookup)
 {
     KERNEL_SETUP();
     int *bas = envs.bas;

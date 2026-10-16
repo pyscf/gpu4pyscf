@@ -98,11 +98,10 @@ static void GINTmemset_int3c2e(ERITensor eri, int ish, int jsh, int ksh)
 }
 
 __global__
-void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets,
-                             void *shm_mem)
+void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     setup_context();
-    DYNAMIC_SHARED_PTR(double, g, shm_mem);
+    DYNAMIC_SHARED_PTR(double, g);
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
     const int task_ij = blockIdx_x;

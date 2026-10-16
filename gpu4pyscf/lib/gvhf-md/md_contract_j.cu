@@ -74,10 +74,10 @@ __global__
 void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley,
-                     int rt2_off, int efg_off, void *shm_mem)
+                     int rt2_off, int efg_off)
 {
     setup_context();
-    DYNAMIC_SHARED_PTR(double, vj_kl_cache, shm_mem);
+    DYNAMIC_SHARED_PTR(double, vj_kl_cache);
     const uint16_t *pRt2_kl_ij = Rt2_kl_ij + rt2_off;
     const int8_t *efg_phase = c_Rt2_efg_phase + efg_off;
     int *pair_ij_mapping = bounds.pair_ij_mapping;
@@ -407,10 +407,10 @@ __global__
 void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley, int dm_size,
-                     int rt2_off, int efg_off, void *shm_mem)
+                     int rt2_off, int efg_off)
 {
     setup_context();
-    DYNAMIC_SHARED_PTR(double, vj_kl_cache, shm_mem);
+    DYNAMIC_SHARED_PTR(double, vj_kl_cache);
     const uint16_t *pRt2_kl_ij = Rt2_kl_ij + rt2_off;
     const int8_t *efg_phase = c_Rt2_efg_phase + efg_off;
     int *pair_ij_mapping = bounds.pair_ij_mapping;

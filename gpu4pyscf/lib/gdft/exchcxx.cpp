@@ -1154,6 +1154,40 @@ extern "C" void xc_available_functional_numbers(int* list) {
     list[i++] = id;
   }
 }
+
+// libxc >= 6 ext-params ABI (bound unconditionally by gpu4pyscf/dft/libxc.py).
+// ExchCXX builtins bake range-separation parameters (omega) in at
+// construction; nothing is tunable at runtime, so report zero parameters.
+extern "C" int xc_func_info_get_n_ext_params(const xc_func_info_type *info) {
+  (void)info;
+  return 0;
+}
+extern "C" char const *xc_func_info_get_ext_params_name(const xc_func_info_type *info, int number) {
+  (void)info; (void)number;
+  return nullptr;
+}
+extern "C" char const *xc_func_info_get_ext_params_description(const xc_func_info_type *info, int number) {
+  (void)info; (void)number;
+  return nullptr;
+}
+extern "C" double xc_func_info_get_ext_params_default_value(const xc_func_info_type *info, int number) {
+  (void)info; (void)number;
+  return 0.0;
+}
+extern "C" void xc_func_set_ext_params(xc_func_type *p, const double *ext_params) {
+  (void)p; (void)ext_params;
+}
+extern "C" void xc_func_get_ext_params(const xc_func_type *p, double *ext_params) {
+  (void)p; (void)ext_params;
+}
+extern "C" void xc_func_set_ext_params_name(xc_func_type *p, const char *name, double par) {
+  (void)p; (void)name; (void)par;
+}
+extern "C" double xc_func_get_ext_params_name(const xc_func_type *p, const char *name) {
+  (void)p; (void)name;
+  return 0.0;
+}
+
 /* ---------------- Shim state kept in xc_func_type::params ---------------- */
 struct ShimImpl {
   ExchCXX::Spin spin{};

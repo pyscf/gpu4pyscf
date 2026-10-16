@@ -42,11 +42,10 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
                       int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                       float *diffuse_exps, float *diffuse_ctr_coef,
                       float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
-                      double omega, int tril_symmetry, int8_t *Ecut_mask,
-                      void *shm_mem)
+                      double omega, int tril_symmetry, int8_t *Ecut_mask)
 {
     setup_context();
-    DYNAMIC_SHARED_PTR(float, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(float, shared_memory);
     uint32_t sp_block_id = blockIdx_x;
     int t_id = threadIdx_x;
     int *atm = envs.atm;
@@ -170,10 +169,10 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
 __global__ static
 void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
                    int64_t *bas_ij_idx, int *gout_stride_lookup,
-                   uint32_t npairs, double omega, void *shm_mem)
+                   uint32_t npairs, double omega)
 {
     setup_context();
-    DYNAMIC_SHARED_PTR(float, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(float, shared_memory);
     uint32_t sp_block_id = blockIdx_x;
     int threads = blockDim_x;
     int t_id = threadIdx_x;

@@ -34,8 +34,7 @@ void ejk_int3c2e_deriv_kernel(double *ejk, double *sigma, double *dm, double *dm
                               int *img_idx, uint32_t *sp_img_offsets, int *gout_stride_lookup,
                                int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
                                float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                               int *head, int sp_blocks, int ksh_blocks,
-                               void *shm_mem)
+                               int *head, int sp_blocks, int ksh_blocks)
 {
     setup_context();
     SHARED_SCALAR(int, sp_block_id);
@@ -56,7 +55,7 @@ void ejk_int3c2e_deriv_kernel(double *ejk, double *sigma, double *dm, double *dm
     SHARED_SCALAR(int, g_size);
     SHARED_SCALAR(int, gout_stride);
     SHARED_SCALAR(int, nst_per_block);
-    DYNAMIC_SHARED_PTR(double, shared_memory, shm_mem);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     SHARED_SCALAR(int, num_ijk_tasks);
     SHARED_SCALAR(int, num_sub_tasks);
     SHARED_SCALAR(int, img_not_processed);
