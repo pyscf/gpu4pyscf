@@ -1,0 +1,33 @@
+# Conda environment for .github/workflows/sycl-cpu-ci.yml.
+# dpnp/dpctl come from Intel's nightly channel (dppy/label/dev, rebuilt from
+# IntelPython HEAD daily); the oneAPI compilers, MKL and the OpenCL CPU runtime
+# come from Intel's channel, so the compiler and the SYCL runtime that dpnp
+# links are resolved together and always match. Not pinned: every CI run
+# re-solves and picks up the latest nightlies.
+name: sycl-ci
+channels:
+  - dppy/label/dev
+  - https://software.repos.intel.com/python/conda
+  - conda-forge
+dependencies:
+  - python=3.12
+  - dpnp
+  - dpctl
+  - dpcpp_linux-64
+  - ifx_linux-64
+  - mkl-devel-dpcpp
+  - tbb-devel
+  - intel-opencl-rt
+  - cmake
+  - ninja
+  - ccache
+  - numpy
+  - scipy
+  - h5py
+  - pytest
+  - pytest-timeout
+  - pip
+  - pip:
+      - pyscf
+      - pyscf-dispersion
+      - geometric
