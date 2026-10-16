@@ -149,15 +149,13 @@ jobs:
       - name: Resolve dpctl/dpnp commits and cache keys
         id: stack
         run: |
-          # Keying on upstream HEAD meant any commit to IntelPython/dpctl or
-          # dpnp invalidated the cache and forced a ~45 min rebuild, often on
-          # a run that changed nothing here. Bucket by ISO week instead: the
-          # stack is rebuilt at most once a week, and the SHAs resolved inside
-          # that bucket are recorded so a run is still reproducible.
+          # Always test against the latest IntelPython/dpctl and dpnp: the
+          # stack cache is keyed on their current HEAD SHAs, so any upstream
+          # commit triggers a rebuild (ccache keeps it incremental), and the
+          # build checks out exactly these SHAs.
           echo "dpctl_sha=$(git ls-remote https://github.com/IntelPython/dpctl HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
           echo "dpnp_sha=$(git ls-remote https://github.com/IntelPython/dpnp HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
           echo "oneapi_ver=$(dpkg-query -W -f='${Version}' intel-oneapi-compiler-dpcpp-cpp)" >> "$GITHUB_OUTPUT"
-          echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore dpctl/dpnp stack cache (venv + source builds)
         id: stack-cache
@@ -170,24 +168,19 @@ jobs:
             /home/runner/sycl-venv
             /home/runner/dpctl
             /home/runner/dpnp
-          # The venv's bin/python is a symlink into the hosted toolcache, so the
-          # key must pin the exact Python patch version: a venv restored onto a
-          # newer 3.11.x has a dangling interpreter and every venv script
-          # (cmake, pip, ...) fails with "No such file or directory".
-          key: sycl-stack-v3-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
-          # Fall back to any earlier week on the same Python + oneAPI: a stale
-          # but working dpctl/dpnp beats a 45 min rebuild, and the weekly key
-          # above still refreshes it once the bucket rolls over.
-          restore-keys: |
-            sycl-stack-v3-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-oneapi${{ steps.stack.outputs.oneapi_ver }}-
-            sycl-stack-v3-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-
+          # Exact key only, no restore-keys fallback: a stack built from older
+          # dpctl/dpnp commits must not be reused. The venv's bin/python is a
+          # symlink into the hosted toolcache, so the key also pins the exact
+          # Python patch version (a venv restored onto a newer 3.11.x has a
+          # dangling interpreter: "sycl-venv/bin/cmake: No such file").
+          key: sycl-stack-v4-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-oneapi${{ steps.stack.outputs.oneapi_ver }}-dpctl-${{ steps.stack.outputs.dpctl_sha }}-dpnp-${{ steps.stack.outputs.dpnp_sha }}
 
       - name: Verify restored stack (rebuild if the venv is unusable)
         id: stack-ok
         run: |
           # A cache hit is not proof of a working venv; rebuild if the
           # interpreter or the dpctl/dpnp installs do not load.
-          if [ -n "${{ steps.stack-cache.outputs.cache-matched-key }}" ] && \
+          if [ "${{ steps.stack-cache.outputs.cache-hit }}" = "true" ] && \
              "$VENV/bin/python" -c "import dpctl, dpnp" 2>/dev/null; then
             echo "rebuild=false" >> "$GITHUB_OUTPUT"
           else
@@ -215,7 +208,7 @@ jobs:
           restore-keys: |
             sycl-ccache-${{ runner.os }}-
 
-      - name: Build dpctl from source (IntelPython/dpctl master)
+      - name: Build dpctl from source (IntelPython/dpctl latest HEAD)
         if: steps.stack-ok.outputs.rebuild == 'true'
         run: |
           source /opt/intel/oneapi/setvars.sh --force
@@ -226,10 +219,10 @@ jobs:
           # pin; a shallow clone yields 0+untagged, which pip rejects).
           git clone --filter=blob:none https://github.com/IntelPython/dpctl /home/runner/dpctl
           cd /home/runner/dpctl
-          # Route the compiler through ccache. The stack cache above is keyed
-          # by week, so when it does roll over most translation units are
-          # unchanged from the previous build and come straight from ccache
-          # rather than being recompiled.
+          git checkout --detach ${{ steps.stack.outputs.dpctl_sha }}
+          # Route the compiler through ccache: when a new dpctl/dpnp commit
+          # invalidates the stack cache, most translation units are unchanged
+          # and come straight from ccache rather than being recompiled.
           { python scripts/build_locally.py --oneapi \
               --cmake-opts="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache" &&
             pip install --no-build-isolation --no-deps . &&
@@ -238,7 +231,7 @@ jobs:
           # by scanning sys.path for a real site-packages/dpctl/ directory; a
           # PEP-660 editable install hides it behind an import hook.
 
-      - name: Build dpnp from source (IntelPython/dpnp master)
+      - name: Build dpnp from source (IntelPython/dpnp latest HEAD)
         if: steps.stack-ok.outputs.rebuild == 'true'
         run: |
           source /opt/intel/oneapi/setvars.sh --force
@@ -246,6 +239,7 @@ jobs:
           set -o pipefail; mkdir -p /tmp/logs
           git clone --filter=blob:none https://github.com/IntelPython/dpnp /home/runner/dpnp
           cd /home/runner/dpnp
+          git checkout --detach ${{ steps.stack.outputs.dpnp_sha }}
           # ccache as above. dpnp is the expensive half of the stack (291
           # Ninja targets), so this is where it pays off.
           { python scripts/build_locally.py --oneapi \
@@ -264,7 +258,7 @@ jobs:
             /home/runner/sycl-venv
             /home/runner/dpctl
             /home/runner/dpnp
-          key: sycl-stack-v3-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-oneapi${{ steps.stack.outputs.oneapi_ver }}-${{ steps.stack.outputs.week }}
+          key: sycl-stack-v4-${{ runner.os }}-py${{ steps.py.outputs.python-version }}-oneapi${{ steps.stack.outputs.oneapi_ver }}-dpctl-${{ steps.stack.outputs.dpctl_sha }}-dpnp-${{ steps.stack.outputs.dpnp_sha }}
 
       - name: Build gpu4pyscf (SYCL backend, JIT spir64, CPU-runnable)
         env:
