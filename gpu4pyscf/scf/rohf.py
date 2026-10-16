@@ -34,8 +34,9 @@ def _to_uhf_dm(dm):
     elif mo_coeff is not None and mo_coeff.ndim == 2:
         mo_coeff = cupy.repeat(mo_coeff[None], 2, axis=0)
         if mo_occ.ndim == 1:
-            mo_occ = cupy.stack([cupy.minimum(mo_occ, 1.),
-                                 cupy.maximum(mo_occ-1., 0.)])
+            mo_occa = cupy.minimum(mo_occ, 1.)
+            mo_occb = mo_occ - mo_occa
+            mo_occ = cupy.stack([mo_occa, mo_occb])
     if mo_coeff is not None:
         dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     return dm
@@ -143,7 +144,7 @@ class ROHF(hf.RHF):
         if mo_occ is None: mo_occ = self.mo_occ
         if isinstance(mo_occ, cupy.ndarray) and mo_occ.ndim == 1:
             mo_occa = cupy.minimum(mo_occ, 1.)
-            mo_occb = cupy.maximum(mo_occ-1., 0.)
+            mo_occb = mo_occ - mo_occa
         else:
             mo_occa, mo_occb = mo_occ
         dm_a = cupy.dot(mo_coeff*mo_occa, mo_coeff.conj().T)

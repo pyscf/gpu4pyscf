@@ -576,7 +576,7 @@ def _concat_atomic_dms(atm_dms, high_spin=False):
     mo_occ = cupy.hstack([o for o, _, _ in atm_dms])
     if high_spin:
         occ_a = cupy.minimum(mo_occ   , 1.)
-        occ_b = cupy.maximum(mo_occ-1., 0.)
+        occ_b = mo_occ - occ_a
         dm_a = (mo_coeff * occ_a).dot(mo_coeff.conj().T)
         dm_b = dm - dm_a
         dm = cupy.stack([dm_a, dm_b])
@@ -671,16 +671,14 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False):
         assert spin >= 0 # So extra electron is always put in alpha orbitals, and we can guarantee high spin configuration
         charge = 0 # Only support neutral atoms for now
 
-        mol_atom = gto.M(
-            atom = f"{element} 0 0 0",
-            basis = mol.basis,
-            ecp = mol.ecp,
-            charge = charge,
-            spin = spin,
-            verbose = mol.verbose,
-        )
+        mol_atom = mol.copy()
+        mol_atom.atom = f"{element} 0 0 0"
+        mol_atom.charge = charge
+        mol_atom.spin = spin
+        mol_atom.build(False, False)
 
         mf_atom = mf_template.copy()
+        mf_atom.init_guess = 'minao'
         for key, attr in mf_template.__dict__.items():
             if isinstance(attr, StreamObject):
                 setattr(mf_atom, key, attr.copy())
