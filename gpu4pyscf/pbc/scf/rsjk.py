@@ -559,9 +559,9 @@ class PBCJKMatrixOpt:
         Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
         buf = Gpq_buf[nao1**2*bvk_ncells*Gblksize:]
         if exclude_dd_block:
-            Gpq1_buf, buf = buf, buf[nao**2*bvk_ncells*Gblksize:]
-        else:
-            Gpq1_buf = Gpq_buf
+            # Region formerly used as Gpq1_buf; the recontraction below now
+            # allocates its own output (aliasing fix), keep buf's offset.
+            buf = buf[nao**2*bvk_ncells*Gblksize:]
         for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
             wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
                 cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)

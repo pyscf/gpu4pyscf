@@ -1254,7 +1254,6 @@ def _bootstrap():
     # Skip isinstance(x, type) entries — wrapping LinAlgError broke
     # `except` clauses once (see progress.md).
     try:
-        import numpy as _np
         _linalg_mod = dpnp.linalg
         for _name in dir(_linalg_mod):
             if _name.startswith('_'):
@@ -1290,7 +1289,6 @@ def _bootstrap():
     # slice bounds via __index__, matching NumPy semantics.
     try:
         import operator as _op
-        _np2 = __import__("numpy")
 
         def _norm_idx(v):
             # CuPy accepts integral float slice bounds (it int()-converts
