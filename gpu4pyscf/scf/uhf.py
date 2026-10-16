@@ -278,7 +278,7 @@ class UHF(hf.SCF):
             lumo = lumo_b = mo_energy[1, e_idx_b[n_b]].item()
             lumo_a = None
             if n_a < nmo:
-                lumo_a = mo_energy[1, e_idx_a[n_a]].item()
+                lumo_a = mo_energy[0, e_idx_a[n_a]].item()
                 lumo = min(lumo, lumo_a)
             gap = (lumo - homo) * HARTREE2EV
             self.scf_summary['gap'] = gap
