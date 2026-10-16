@@ -27,7 +27,7 @@ from gpu4pyscf.df.int3c2e_bdiv import int2c2e_ip1_per_atom
 from gpu4pyscf.df import df
 from gpu4pyscf.tdscf import rhf as tdrhf
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
-from gpu4pyscf.gto.mole import SortedMole
+from gpu4pyscf.gto.mole import SortedMole, _split_l_ctr_groups
 from gpu4pyscf.scf.jk import _check_rsh_factors
 
 __all__ = ['Gradients']
@@ -132,8 +132,10 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     laux = auxmol.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
+    pair_batch_size = np.minimum(nsp_per_block[0]*4,
+                                 np.maximum(nsp_per_block[0]//4, 16))
     bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-        int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
+        int3c2e_opt.bas_ij_cache, pair_batch_size)
     ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
     aux_loc = auxmol.ao_loc
 
@@ -268,7 +270,10 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
     bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
         int3c2e_opt.bas_ij_cache, nsp_per_block[0]*16)
-    ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+    # Split auxbasis into small batches for load balance
+    _, aux_counts = _split_l_ctr_groups(
+        auxmol.uniq_l_ctr, auxmol.l_ctr_counts, [16]*(laux+1))
+    ksh_offsets_cpu = np.append(0, np.cumsum(aux_counts))
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
@@ -542,8 +547,10 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
     laux = auxmol.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
+    pair_batch_size = np.minimum(nsp_per_block[0]*4,
+                                 np.maximum(nsp_per_block[0]//4, 16))
     bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-        int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
+        int3c2e_opt.bas_ij_cache, pair_batch_size)
     ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
     aux_loc = auxmol.ao_loc
 
@@ -691,7 +698,10 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor,
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
     bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
         int3c2e_opt.bas_ij_cache, nsp_per_block[0]*16)
-    ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+    # Split auxbasis into small batches for load balance
+    _, aux_counts = _split_l_ctr_groups(
+        auxmol.uniq_l_ctr, auxmol.l_ctr_counts, [16]*(laux+1))
+    ksh_offsets_cpu = np.append(0, np.cumsum(aux_counts))
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
