@@ -127,11 +127,27 @@ struct gpu4pyscf_dim3 {
 // Static shared / local memory declaration, arrays and scalars alike.
 // Usage: SHARED_ARRAY(double, tile, [16][16]);  SHARED_ARRAY(int, ntasks);
 // CUDA: __shared__ double tile[16][16];          __shared__ int ntasks;
-// SYCL: group local memory reference bound to `item` from setup_context().
+// SYCL: work_group_static storage (sycl_ext_oneapi_work_group_static), not
+// group_local_memory: when a TU also uses get_work_group_scratch_memory, DPC++
+// gives every group_local_memory kernel an implicit dynamic-local argument,
+// set to 0 bytes on scratch-less launches, which OpenCL rejects
+// (UR_RESULT_ERROR_INVALID_KERNEL_ARGUMENT_SIZE). Storage is a namespace-scope
+// variable template keyed by a function-local tag type: unique per declaring
+// function and per template instantiation (a `static` local work_group_static
+// is rejected inside function templates). Raw aligned bytes keep
+// _for_overwrite semantics (no construction) and allow non-trivially-
+// constructible element types such as compat::double3.
 #ifdef USE_SYCL
+namespace gpu4pyscf_detail {
+template <typename T> struct _wgs_raw { alignas(T) unsigned char bytes[sizeof(T)]; };
+template <typename T, typename Tag>
+sycl::ext::oneapi::experimental::work_group_static<_wgs_raw<T>> _wgs_storage;
+}
 #define SHARED_ARRAY(type, name, ...) \
     using _smt_##name##_t = type __VA_ARGS__; \
-    _smt_##name##_t& name = *sycl::ext::oneapi::group_local_memory_for_overwrite<_smt_##name##_t>(item.get_group())
+    struct _wgs_tag_##name {}; \
+    _smt_##name##_t& name = *reinterpret_cast<_smt_##name##_t*>( \
+        (&gpu4pyscf_detail::_wgs_storage<_smt_##name##_t, _wgs_tag_##name>)->bytes)
 #else
 #define SHARED_ARRAY(type, name, ...) __shared__ type name __VA_ARGS__
 #endif
@@ -142,8 +158,8 @@ struct gpu4pyscf_dim3 {
 // communicates the byte size through the work_group_scratch_size property
 // (see launch_kernel below, via nd_launch + launch_config). No explicit
 // pointer is passed through the kernel signature on the SYCL side.
-// Static shared uses sycl_ext_oneapi_work_group_memory-style group-local
-// memory (group_local_memory_for_overwrite), likewise with no kernel arg.
+// Static shared uses sycl_ext_oneapi_work_group_static storage (see
+// SHARED_ARRAY above), likewise with no kernel arg.
 // CUDA keeps the extern __shared__ idiom, so kernel signatures stay
 // identical with no shared-memory argument on either side.
 // Inside the kernel, after setup_context():
