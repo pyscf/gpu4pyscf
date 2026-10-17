@@ -2,8 +2,10 @@
 # dpnp/dpctl come from Intel's nightly channel (dppy/label/dev, rebuilt from
 # IntelPython HEAD daily); the oneAPI compilers, MKL and the OpenCL CPU runtime
 # come from Intel's channel, so the compiler and the SYCL runtime that dpnp
-# links are resolved together and always match. Not pinned: every CI run
-# re-solves and picks up the latest nightlies.
+# links are resolved together and always match. dpnp/dpctl are not pinned:
+# every CI run re-solves and picks up the latest nightlies. The oneAPI stack
+# is pinned to 2026.2.0 (the solver otherwise settles on 2026.1.1, which the
+# nightlies also accept).
 name: sycl-ci
 channels:
   - dppy/label/dev
@@ -13,11 +15,11 @@ dependencies:
   - python=3.12
   - dpnp
   - dpctl
-  - dpcpp_linux-64
-  - ifx_linux-64
-  - mkl-devel-dpcpp
+  - dpcpp_linux-64=2026.2.0
+  - ifx_linux-64=2026.2.0
+  - mkl-devel-dpcpp=2026.2.0
   - tbb-devel
-  - intel-opencl-rt
+  - intel-opencl-rt=2026.2.0
   - cmake
   - ninja
   - ccache
@@ -27,7 +29,14 @@ dependencies:
   - pytest
   - pytest-timeout
   - pip
+  # Test dependencies as in upstream unittest.yml (requirements.txt minus the
+  # CUDA-only packages cupy/cutensor/gpu4pyscf-libxc, plus MCFun, pytest-xdist).
   - pip:
-      - pyscf
-      - pyscf-dispersion
-      - geometric
+      - pyscf==2.14.0
+      - basis-set-exchange==0.11
+      - pyscf-dispersion==1.5.0
+      - geometric==1.1.0
+      - packaging~=24.0
+      - MCFun
+      - pytest-xdist
+      - pytest-cov

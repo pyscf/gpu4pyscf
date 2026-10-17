@@ -157,43 +157,40 @@ jobs:
             python -c "import dpnp; a = dpnp.arange(10); assert int(a.sum()) == 45; print('dpnp', dpnp.__version__, 'OK')" &&
             python -c "import gpu4pyscf; print('gpu4pyscf import OK')" ; } 2>&1 | tee /tmp/logs/50_smoke.log
 
-      - name: scf unit tests (SYCL CPU, timings)
-        # SCF suite is green on PVC (see progress.md). On the OpenCL CPU device
-        # (JIT spir64) it runs to collect per-test timings (--durations=0);
-        # continue-on-error until CPU runtimes are known, so the timing table
-        # and logs are always published.
-        continue-on-error: true
-        timeout-minutes: 90
+      - name: Test with pytest (same command as upstream unittest.yml)
+        # Identical pytest invocation to upstream's unittest.yml; only the
+        # scope differs. Enable suites one at a time by uncommenting a line.
+        timeout-minutes: 240
         run: |
           set -o pipefail; mkdir -p /tmp/logs
-          python -m pytest gpu4pyscf/scf/tests/ -v --timeout=900 \
-            --durations=0 --continue-on-collection-errors 2>&1 | tee /tmp/logs/60_pytest_scf.log
-
-      - name: df unit tests (smoke, partial completion expected)
-        # Disabled: the SYCL backend still has known aborts and hangs in
-        # these suites, so a run says nothing useful about a given change.
-        # The build and smoke steps above are the meaningful gate for now.
-        # Flip this back to re-enable once the defects are fixed.
-        if: false
-        continue-on-error: true
-        timeout-minutes: 60
-        run: |
-          set -o pipefail; mkdir -p /tmp/logs
-          python -m pytest gpu4pyscf/df/tests/ -v -x --timeout=900 \
-            --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/70_pytest_df.log
-
-      - name: dft unit tests (smoke, partial completion expected)
-        # Disabled: the SYCL backend still has known aborts and hangs in
-        # these suites, so a run says nothing useful about a given change.
-        # The build and smoke steps above are the meaningful gate for now.
-        # Flip this back to re-enable once the defects are fixed.
-        if: false
-        continue-on-error: true
-        timeout-minutes: 60
-        run: |
-          set -o pipefail; mkdir -p /tmp/logs
-          python -m pytest gpu4pyscf/dft/tests/ -v -x --timeout=900 \
-            --durations=25 --continue-on-collection-errors 2>&1 | tee /tmp/logs/80_pytest_dft.log
+          TESTS=(
+            # gpu4pyscf/tests
+            # gpu4pyscf/cc
+            # gpu4pyscf/df
+            # gpu4pyscf/dft
+            # gpu4pyscf/dispersion
+            # gpu4pyscf/fci
+            # gpu4pyscf/geomopt
+            # gpu4pyscf/grad
+            # gpu4pyscf/gto
+            # gpu4pyscf/hessian
+            # gpu4pyscf/lib
+            # gpu4pyscf/mcscf
+            # gpu4pyscf/md
+            # gpu4pyscf/mp
+            # gpu4pyscf/nac
+            # gpu4pyscf/pbc
+            # gpu4pyscf/pop
+            # gpu4pyscf/properties
+            # gpu4pyscf/qmmm
+            gpu4pyscf/scf
+            # gpu4pyscf/sem
+            # gpu4pyscf/solvent
+            # gpu4pyscf/tdscf
+            # gpu4pyscf/x2c
+          )
+          pytest -n 4 --dist loadfile -m 'not slow and not benchmark and not special' \
+            --cov="$GITHUB_WORKSPACE" --durations=50 "${TESTS[@]}" 2>&1 | tee /tmp/logs/60_pytest.log
 
       - name: Upload logs as a run artifact
         if: always()
