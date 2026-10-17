@@ -32,6 +32,13 @@ H       0.0000000000     0.7570000000     0.5870000000
 
 bas0 = "cc-pvdz"
 
+# HOI: one ECP atom among light ones, so the ECP-centre gradient term must land on iodine alone
+atom_ecp = """
+O       0.0000000000     0.0000000000     0.0000000000
+H       0.9700000000     0.0000000000     0.0000000000
+I      -0.4477000000     1.9390000000     0.0000000000
+"""
+
 
 def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, tda, singlet=True):
     a, b = td.get_ab()
@@ -172,6 +179,12 @@ def _check_grad(mol, tol=1e-5, lindep=1.0E-12, disp=None, tda=False, method="cpu
 
 
 class KnownValues(unittest.TestCase):
+    def test_grad_tda_singlet_ecp_cpu(self):
+        mol_ecp = pyscf.M(atom=atom_ecp, basis="def2-svp", ecp={"I": "def2-svp"},
+                          output="/dev/null", verbose=1)
+        _check_grad(mol_ecp, tol=1e-6, tda=True, method="cpu")
+        mol_ecp.stdout.close()
+
     def test_grad_tda_singlet_cpu(self):
         grad_gpu = _check_grad(mol, tol=1e-6, tda=True, method="cpu")
 

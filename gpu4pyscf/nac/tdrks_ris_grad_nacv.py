@@ -15,7 +15,7 @@
 
 import cupy as cp
 import numpy as np
-from pyscf import lib
+from pyscf import lib, gto
 from gpu4pyscf.dft import rks
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
@@ -363,7 +363,8 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
     for k in range(total_tasks):
         dh1e_k = int3c2e.get_dh1e(mol, P_all[k])
         if len(mol._ecpbas) > 0:
-            dh1e_k += rhf_grad.get_dh1e_ecp(mol, P_all[k])
+            ecp_atoms = np.unique(mol._ecpbas[:, gto.ATOM_OF])
+            dh1e_k[ecp_atoms] += rhf_grad.get_dh1e_ecp(mol, P_all[k])
         dh1e_td_list.append(dh1e_k)
     dh1e_td_all = cp.array(dh1e_td_list)
 
