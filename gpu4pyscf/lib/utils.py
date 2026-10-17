@@ -166,7 +166,7 @@ def format_sys_info():
         try:
             device = dpctl.get_devices(device_type='gpu')[0]
         except IndexError:
-            device = dpctl.get_default_device()  # fallback to any device
+            device = dpctl.select_default_device()  # fallback to any device
 
         # Get device properties
         dev_name = device.name
