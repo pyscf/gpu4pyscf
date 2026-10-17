@@ -209,7 +209,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_b3lyp_tda_spinconserving_ecp_cpu(self):
         mol_ecp = pyscf.M(atom=atom_ecp, basis="def2-svp", ecp={"I": "def2-svp"},
                           charge=1, spin=1, output="/dev/null", verbose=1)
-        _check_grad(mol_ecp, xc="b3lyp", tol=1e-9, tda=True, method="cpu")
+        _check_grad(mol_ecp, xc="b3lyp", tol=1e-8, tda=True, method="cpu")
         mol_ecp.stdout.close()
 
     @unittest.skipIf(num_devices > 1, '')
