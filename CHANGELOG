@@ -1,3 +1,49 @@
+v1.9.0 (2026-10-07)
+-------------------
+* New Features (PBC systems)
+  - Stress tensor calculations using Gaussian density fitting at the Gamma point and with k-point sampling. (#896)
+  - Nuclear gradients and stress tensors with Becke grid response. (#887, #906, #921)
+  - All-electron core Hamiltonian nuclear and strain derivatives using GDF. (#916)
+  - Atom-resolved magnetic moment initial guesses. (#892)
+  - Experimental numerical Gamma-point Hessian and phonon modes using phonopy, without non-analytic corrections. (#860)
+* New Features (molecular systems)
+  - MBIS and Hirshfeld atomic charges and multipoles. (#902, #911)
+  - Support cuEST v0.2.0, including density-fitted MO integrals and range-separated hybrid energies and gradients. (#859)
+* Improvements
+  - Multigrid v3 with optimized density evaluation, analytical Fourier transform kernels, and reduced memory usage. (#865, #891)
+  - Optimize PBC GDF short-range integrals and reduce memory usage in GDF gradients. (#924, #928)
+  - Optimize molecular density-fitting gradient and Hessian kernels. (#934)
+  - Combine short- and long-range exchange inside density-fitting kernels for energies, gradients, and Hessians. (#859)
+  - Unify PBC nuclear gradient and stress tensor evaluation. (#910)
+  - Analytical Ewald stress tensor and AFT exchange-divergence corrections. (#913)
+  - Optimize nonlocal pseudopotential integrals and stress tensors. (#883, #912)
+  - Cache QM/MM nuclear Coulomb energy across SCF cycles. (#914)
+  - Upgrade LibXC to 7.1.2 while retaining compatibility with the 7.0.0 fork. (#935)
+  - Add a tutorial for hybrid PySCF/GPU4PySCF workflows. (#882)
+* Fixes
+  - Respect custom range-separation omega in GPU LibXC functionals and grid-response Hessian terms. (#923, #929)
+  - Incorrect screening for mixed range-separated exchange in unrolled K kernels. (#909)
+  - GPU OOM in density-fitted TDHF gradients and PBC GDF and RSJK derivatives. (#885, #907)
+  - Insufficient workspace for molecular J/K gradient kernels. (#879)
+  - Illegal memory access in large PBC RSDF calculations on multiple GPUs. (#862)
+  - CUDA indexing, integer overflow, and CUTLASS stream handling issues. (#863, #868)
+  - Race condition in DFT grid screening. (#925)
+  - Incorrect periodic g-orbital values, second derivatives, and strain derivatives.
+  - Incorrect int1e_r2_origi integrals and one-electron integral accuracy. (#857)
+  - Incorrect k-point weights in constrained DFT gradients. (#856)
+  - Multigrid v2 stress spikes and single-precision collocation kernels. (#855, #874)
+  - Inconsistent orthogonal lattice checks in analytical Fourier transforms. (#918)
+  - Mesh consistency in PBC geometry optimization, numerical Hessians, and FFTDF/AFTDF SCF scanners. (#889, #932, #933)
+  - Stress units and center-of-mass constraints in ASE geometry optimization. (#878, #889)
+  - UHF logging for systems with zero beta electrons. (#853)
+  - Include the pbc.df.grad package in built wheels.
+  - Reject unsupported PCM solvent response in IR intensity calculations. (#922)
+* API Updates
+  - Multigrid v3 replaces multigrid v2 as the default multigrid integrator.
+  - Add lr_factor and sr_factor parameters to the 2c2e and 3c2e integral APIs. (#861)
+  - Remove deprecated dft_driver, opt_driver, and opt_3c_driver modules. (#858)
+
+
 v1.8.1 (2026-08-09)
 -------------------
 * Fixes
