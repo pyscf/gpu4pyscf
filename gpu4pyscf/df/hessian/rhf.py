@@ -1404,7 +1404,7 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
         if with_j: vj = vj.reshape(n_dm,-1)
         if with_k: vk = vk.reshape(n_dm,-1)
     else: # UHF
-        nocca, noccb = mo_occ.sum(axis=1).get()
+        nocca, noccb = (int(x) for x in mo_occ.sum(axis=1).get())
         if nocca != noccb:
             def format_uhf_output(v):
                 return cp.hstack([v[:,0,:,:nocca].reshape(n_dm,-1),

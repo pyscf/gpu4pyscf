@@ -15,7 +15,7 @@
 
 import cupy as cp
 import numpy as np
-from scipy.special import erfc
+from cupyx.scipy.special import erfc
 
 from pyscf.gto import ATOM_OF
 from pyscf import lib
@@ -434,7 +434,7 @@ def ewald_derivatives(cell, ew_eta=None, ew_cut=None):
         r2 = cp.einsum('nijx,nijx->nij', rij, rij)
         r2[r2 < 1e-30] = np.inf
         r = cp.sqrt(r2)
-        fac = erfc(ew_eta*r)/r + 2*ew_eta/np.sqrt(np.pi)*np.exp(-ew_eta**2*r2)
+        fac = erfc(ew_eta*r)/r + 2*ew_eta/np.sqrt(np.pi)*cp.exp(-ew_eta**2*r2)
         fac *= charge_pairs / r2
         grad_sigma[:-3] -= cp.einsum('nij,nijx->ix', fac, rij)
         grad_sigma[-3:] -= .5 * cp.einsum('nij,nijx,nijy->xy', fac, rij, rij)

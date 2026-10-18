@@ -216,7 +216,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
-            Gpq = _bas_recontract_ft_pair(cell, Gpq, Gpq_buf, buf)
+            # Gpq is a view of Gpq_buf; passing Gpq_buf/buf as scratch lets
+            # _bas_recontract_ft_pair overwrite Gpq while reading it.
+            Gpq = _bas_recontract_ft_pair(cell, Gpq)
             update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1], ki_idx, kj_idx,
                       not self_conj, k_to_compute, t_rev_pairs, buf)
             Gpq = None

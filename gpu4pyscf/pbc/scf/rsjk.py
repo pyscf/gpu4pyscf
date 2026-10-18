@@ -559,9 +559,7 @@ class PBCJKMatrixOpt:
         Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
         buf = Gpq_buf[nao1**2*bvk_ncells*Gblksize:]
         if exclude_dd_block:
-            Gpq1_buf, buf = buf, buf[nao**2*bvk_ncells*Gblksize:]
-        else:
-            Gpq1_buf = Gpq_buf
+            buf = buf[nao**2*bvk_ncells*Gblksize:]
         for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
             wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
                 cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
@@ -572,12 +570,14 @@ class PBCJKMatrixOpt:
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
                 log.debug3('update_vk [%s:%s]', p0, p1)
                 Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
-                Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
+                # Gpq is a view of Gpq_buf: recontract into fresh memory,
+                # not into scratch that aliases Gpq (see aft_jk.get_k_kpts).
+                Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq)
                 update_vk(vk, Gpq1, dms, wcoulG[p0:p1], ki_idx, kj_idx,
                           not self_conj, k_to_compute, t_rev_pairs, buf)
                 if exclude_dd_block:
                     Gpq[:,:,diffuse_i,diffuse_j] = 0.
-                    Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
+                    Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq)
                     update_vk(vk, Gpq1, dms, wcoulG_SR[p0:p1], ki_idx, kj_idx,
                               not self_conj, k_to_compute, t_rev_pairs, buf)
                 Gpq = Gpq1 = None
@@ -1590,7 +1590,7 @@ def _search_diffuse_pairs(cell, mesh):
     ke_cutoff = mesh_to_ke(cell.lattice_vectors(), mesh)
     Gmax = (ke_cutoff.min()*2)**.5
     aij = exps[:,None] * exps
-    fac = aij/Gmax * np.exp(-.25*Gmax**2/aij)
+    fac = aij/Gmax * cp.exp(-.25*Gmax**2/aij)
     pair_max *= 1 + fac
 
     precision = cell.precision * max(1, 1e-2 * cell.vol)
