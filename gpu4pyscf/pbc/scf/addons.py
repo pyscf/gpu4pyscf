@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Add-ons for periodic SCF calculations.'''
+'''
+Add-ons for periodic SCF calculations.
+'''
 
 import numpy as np
 import cupy as cp
@@ -24,9 +26,8 @@ from gpu4pyscf.lib.cupy_helper import tag_array
 def slab_dipole_correction(mf, dir_idx=2, z0=None, cut=None, rho_tol=1e-5):
     r'''Apply self-consistent slab dipole corrections in place.
 
-    Implements Neugebauer--Scheffler / Bengtsson corrections
-    (doi:10.1103/PhysRevB.46.16067, doi:10.1103/PhysRevB.59.12301).
-    For the total charge dipole p, E_dip = 2*pi*p**2/Omega and the
+    Implements Bengtsson correction (doi:10.1103/PhysRevB.59.12301).
+    For the TOTAL charge dipole p, E_dip = 2*pi*p**2/Omega and the
     electronic potential is -4*pi*p*(z_wrapped - offset)/Omega.
 
     Supports RKS, UKS, KRKS and KUKS for neutral, three-dimensionally
@@ -55,9 +56,11 @@ def slab_dipole_correction(mf, dir_idx=2, z0=None, cut=None, rho_tol=1e-5):
 
     The correction uses mf.grids, or the MultiGrid mesh when MultiGrid is
     active. The dipole and energy use the branch centered half a cell away
-    from cut. Gauge shifts are applied with the analytic AO overlap matrix,
-    so changing z0 does not change the dipole, energy or orbitals. The
-    potential is the energy derivative at fixed electron number.
+    from cut (this may be changed to beabled to user defined). 
+    Gauge shifts are applied with the analytic AO overlap matrix,
+    so changing z0 does not change the dipole, energy or orbitals for neutral slabs,
+    but it does change the orbital energies.
+    The potential is the energy derivative at fixed electron number.
     To reproduce PySCF's slab_center=c convention, set z0=c and cut=c+L/2.
     As in PySCF, the energy correction is included in veff.exc, and is also
     reported separately as veff.edip.
@@ -84,6 +87,7 @@ def _slab_length(cell, dir_idx):
     if dir_idx not in (0, 1, 2):
         raise ValueError('dir_idx must be 0, 1 or 2')
     if cell.dimension != 3 or cell.charge != 0:
+        # TODO: in the future, support non-neutral cell slabs.
         raise NotImplementedError('Slab dipole correction requires a neutral 3D cell')
     a = cell.lattice_vectors()
     other = [i for i in range(3) if i != dir_idx]
@@ -91,7 +95,7 @@ def _slab_length(cell, dir_idx):
             np.any(abs(a[dir_idx, other]) > 1e-10) or
             np.any(abs(a[other, dir_idx]) > 1e-10)):
         raise NotImplementedError('Slab normal must be parallel to a Cartesian axis')
-    return a[dir_idx, dir_idx]
+    return a[dir_idx, dir_idx] # (0, 0), (1, 1) or (2, 2)
 
 
 def _sawtooth(z, cut, length):
@@ -102,16 +106,12 @@ def _automatic_cut(cell, dm, kpts, mesh, dir_idx, rho_tol):
     from gpu4pyscf.pbc.dft import numint, gen_grid
 
     length = _slab_length(cell, dir_idx)
-    z = cell.atom_coords()[cell.atom_charges() > 0, dir_idx] / length % 1
-    if len(z) == 0:
-        raise ValueError('Automatic vacuum selection requires at least one real atom')
+    z = cell.atom_coords()[cell.atom_charges() > 0, dir_idx] / length % 1 # fractional coordinates
     z = np.sort(z)
     gaps = np.diff(np.append(z, z[0] + 1))
     i = gaps.argmax()
     start, end = z[i], z[i] + gaps[i]
 
-    # A separate uniform grid is needed even when XC uses Becke grids.
-    # Do not use get_rho(): it sorts uniform grids for AO evaluation.
     grids = gen_grid.UniformGrids(cell)
     grids.mesh = mesh
     nplane = mesh[dir_idx]
@@ -121,10 +121,11 @@ def _automatic_cut(cell, dm, kpts, mesh, dir_idx, rho_tol):
         rho = ni.eval_rho(cell, ao, dm, xctype='LDA', hermi=1)
         layers = cp.rint(coords[:, dir_idx] / length * nplane).astype(int) % nplane
         profile += cp.bincount(layers, weights=rho, minlength=nplane)
+    # 1/A int n(x,y,z) dx dy, A is the surface area of the slab.
     profile = profile.get() / (np.prod(mesh) / nplane)
 
     # Unwrap the candidate gap, including one that crosses the cell boundary.
-    layers = np.arange(int(np.floor(start*nplane)) + 1, int(np.ceil(end*nplane)))
+    layers = np.arange(int(np.floor(start*nplane)) + 1, int(np.ceil(end*nplane))) # vacuum layers
     low = profile[layers % nplane] < rho_tol
     edges = np.flatnonzero(np.diff(np.r_[False, low, False]))
     windows = edges.reshape(-1, 2)
@@ -132,11 +133,13 @@ def _automatic_cut(cell, dm, kpts, mesh, dir_idx, rho_tol):
         raise ValueError('No low-density vacuum window for dipole correction; '
                          'increase the vacuum or refine the mesh')
     first, last = windows[np.argmax(windows[:, 1] - windows[:, 0])]
+    # place the cut in the middle of the vacuum window.
     cut = (layers[first] + layers[last - 1]) / (2*nplane)
-    return (cut % 1) * length
+    return (cut % 1) * length # in Bohr
 
 
 class _SlabDipoleCorrection:
+    # TODO: add comments.
     _keys = {'dipole_dir', 'z0', 'cut', 'dipole_rho_tol', 'dipole_cut', 'dipole_z0'}
 
     def reset(self, cell=None):
@@ -210,8 +213,6 @@ class _SlabDipoleCorrection:
         if not is_kpts:
             v_dip = v_dip[0]
         # A constant real-space potential is offset * S, not offset * I.
-        # Use the analytic overlap to preserve a pure gauge change even on
-        # a finite quadrature grid.
         overlap = self.get_ovlp(cell, kpts if is_kpts else kpts[0])
         v_dip += field * offset * overlap
         out = tag_array(veff + v_dip, **veff.__dict__)
