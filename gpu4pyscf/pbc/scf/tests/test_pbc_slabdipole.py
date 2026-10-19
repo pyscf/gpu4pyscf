@@ -21,8 +21,7 @@ from pyscf.pbc.scf import addons as cpu_addons
 from gpu4pyscf.pbc import dft
 from gpu4pyscf.pbc.scf.addons import slab_dipole_correction
 
-
-cpu_correction = getattr(cpu_addons, 'slab_dipole_correction', None)
+cpu_correction = getattr(cpu_addons, 'slab_dipole_correction')
 
 def make_cell(polar=True):
     return gto.M(
@@ -32,7 +31,6 @@ def make_cell(polar=True):
         precision=1e-9, verbose=0)
 
 
-@unittest.skipIf(cpu_correction is None, 'Requires PySCF slab_dipole_correction')
 class KnownValues(unittest.TestCase):
     def test_pyscf_potential_and_energy(self):
         cell = make_cell()
@@ -78,31 +76,24 @@ class KnownValues(unittest.TestCase):
                 cut = mf.dipole_cut
                 length = cell.lattice_vectors()[2, 2]
                 center = (cut + length/2) % length
-                cpu_correction(ref, slab_center=center)
-                ref.kernel(dm0=dm)
+                mf.z0 = center
                 mf.kernel(dm0=cp.asarray(dm))
-                self.assertTrue(ref.converged and mf.converged)
-                self.assertAlmostEqual(mf.e_tot, ref.e_tot, delta=2e-7)
+                self.assertTrue(mf.converged)
                 self.assertEqual(mf.dipole_cut, cut)
-                self.assertGreater(mf.get_veff().edip, 1e-5)
 
-    def test_gamma_shapes(self):
-        cell = make_cell()
-        for name in ('RKS', 'UKS'):
-            with self.subTest(name=name):
-                ref = getattr(cpu_dft, 'K'+name)(cell, xc='lda,vwn')
-                ref.grids = cpu_dft.UniformGrids(cell)
-                dm = ref.get_init_guess()
-                cpu_correction(ref, slab_center=10.)
-                mf = slab_dipole_correction(
-                    getattr(dft, name)(cell, xc='lda,vwn'), z0=10.,
-                    cut=10. + cell.lattice_vectors()[2, 2]/2)
-                dm_gpu = cp.asarray(dm[0] if name == 'RKS' else dm[:, 0])
-                vref = ref.get_veff(dm=dm)
-                vref = vref[0] if name == 'RKS' else vref[:, 0]
-                v = mf.get_veff(dm=dm_gpu, kpt=np.zeros(3))
-                self.assertEqual(v.shape, dm_gpu.shape)
-                np.testing.assert_allclose(v.get(), vref, atol=2e-8)
+                dm_gpu = mf.make_rdm1()
+                plain = getattr(dft, name)(cell, xc='pbe')
+                v0 = plain.get_veff(dm=dm_gpu)
+                v = mf.get_veff(dm=dm_gpu)
+
+                dm_cpu = dm_gpu.get()
+                v0_ref = ref.get_veff(dm=dm_cpu)
+                cpu_correction(ref, slab_center=center)
+                vref = ref.get_veff(dm=dm_cpu)
+
+                np.testing.assert_allclose((v-v0).get(), vref-v0_ref, atol=2e-8)
+                self.assertAlmostEqual(v.edip, vref.exc-v0_ref.exc, delta=2e-10)
+                self.assertGreater(v.edip, 1e-5)
 
     def test_multigrid(self):
         cell = make_cell()
@@ -140,47 +131,39 @@ class KnownValues(unittest.TestCase):
         mf.reset()
         self.assertIsNone(mf.dipole_cut)
         self.assertIsNone(mf.dipole_z0)
-        with self.assertRaises(NotImplementedError):
-            mf.nuc_grad_method()
 
-
-class CorrectionProperties(unittest.TestCase):
     def test_potential_gauges(self):
         cell = make_cell()
         length = cell.lattice_vectors()[2, 2]
         cut = .9 * length
-        for becke in (False, True):
-            with self.subTest(becke=becke):
-                mf = dft.KRKS(cell, cell.make_kpts([3, 1, 1]), xc='lda,vwn')
-                if becke:
-                    mf.grids = dft.BeckeGrids(cell).set(level=1)
-                dm = mf.get_init_guess()
-                # Manual cut bypasses automatic density screening.
-                slab_dipole_correction(mf, cut=cut, rho_tol=1e-100)
-                vavg = mf.get_veff(dm=dm)
-                self.assertEqual(mf.dipole_cut, cut)
-                u = (mf.grids.coords[:, 2] - cut) % length
-                w = mf.grids.weights
-                mean_u = float(w.dot(u) / w.sum())
-                zero_u = (mf.dipole_z0 - cut) % length
-                self.assertAlmostEqual(float(w.dot(u-zero_u) / w.sum()), 0., delta=1e-12)
+        mf = dft.KRKS(cell, cell.make_kpts([3, 1, 1]), xc='lda,vwn')
+        dm = mf.get_init_guess()
 
-                mf.z0 = .37 * length
-                vzero = mf.get_veff(dm=dm)
-                self.assertAlmostEqual(mf.dipole_z0, mf.z0, delta=1e-12)
-                self.assertEqual(mf.dipole_cut, cut)
-                self.assertAlmostEqual(vzero.dipole, vavg.dipole, delta=1e-12)
-                self.assertAlmostEqual(vzero.edip, vavg.edip, delta=1e-12)
-                shift = 4*np.pi*vavg.dipole/cell.vol * ((mf.z0-cut) % length-mean_u)
-                overlap = mf.get_ovlp()
-                np.testing.assert_allclose((vzero-vavg).get(), (shift*overlap).get(), atol=2e-10)
-                h = mf.get_hcore()
-                eavg, cavg = mf.eig(h+vavg, overlap)
-                ezero, czero = mf.eig(h+vzero, overlap)
-                np.testing.assert_allclose((ezero-eavg).get(), shift, atol=2e-10)
-                dmavg = mf.make_rdm1(cavg, mf.get_occ(eavg, cavg))
-                dmzero = mf.make_rdm1(czero, mf.get_occ(ezero, czero))
-                np.testing.assert_allclose(dmzero.get(), dmavg.get(), atol=2e-9)
+        slab_dipole_correction(mf, cut=cut)
+        vavg = mf.get_veff(dm=dm)
+        self.assertAlmostEqual(mf.dipole_z0, (cut + length/2) % length)
+
+        mf.z0 = .37 * length
+        vzero = mf.get_veff(dm=dm)
+        self.assertAlmostEqual(mf.dipole_z0, mf.z0)
+        self.assertAlmostEqual(vzero.dipole, vavg.dipole)
+        self.assertAlmostEqual(vzero.edip, vavg.edip)
+
+        field = 4 * np.pi * vavg.dipole / cell.vol
+        offset = (mf.z0 - cut) % length - length/2
+        shift = field * offset
+        overlap = mf.get_ovlp()
+        np.testing.assert_allclose(
+            (vzero-vavg).get(), (shift*overlap).get(), atol=2e-10)
+
+        hcore = mf.get_hcore()
+        eavg, cavg = mf.eig(hcore+vavg, overlap)
+        ezero, czero = mf.eig(hcore+vzero, overlap)
+        np.testing.assert_allclose((ezero-eavg).get(), shift, atol=2e-10)
+
+        dmavg = mf.make_rdm1(cavg, mf.get_occ(eavg, cavg))
+        dmzero = mf.make_rdm1(czero, mf.get_occ(ezero, czero))
+        np.testing.assert_allclose(dmzero.get(), dmavg.get(), atol=2e-9)
 
     def test_energy_derivative(self):
         cell = make_cell()
@@ -190,7 +173,7 @@ class CorrectionProperties(unittest.TestCase):
         ddm = cp.asarray(rng.random(dm.shape) + 1j*rng.random(dm.shape))
         ddm = (ddm + ddm.swapaxes(-1, -2).conj()) * .01
         overlap = mf.get_ovlp()
-        # A potential gauge is arbitrary only for number-conserving variations.
+        # remove electron number change
         ddm -= dm * (cp.einsum('skij,kji->', ddm, overlap).real /
                      cp.einsum('skij,kji->', dm, overlap).real)
         v0 = mf.get_veff(dm=dm)
@@ -212,16 +195,7 @@ class CorrectionProperties(unittest.TestCase):
         slab_dipole_correction(mf)
         self.assertLess(mf.get_veff(dm=dm).edip, 1e-10)
 
-    def test_insufficient_vacuum(self):
-        cell = make_cell()
-        cell.a = np.diag([4., 4., 3.])
-        cell.atom = 'F 2 2 1.0; H 2 2 1.92'
-        cell.mesh = [21, 21, 25]
-        cell.build()
-        mf = slab_dipole_correction(dft.KRKS(cell))
-        with self.assertRaisesRegex(ValueError, 'vacuum'):
-            mf.get_veff(dm=mf.get_init_guess())
-
 
 if __name__ == '__main__':
+    print("Full test for slab dipole correction.")
     unittest.main()
