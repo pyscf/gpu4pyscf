@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import unittest
+import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib
@@ -170,6 +171,15 @@ class KnowValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, -10.202133062075863, 8)
 
     def test_nr_kuks_gga(self):
+        mf = dft.KUKS(cell, kpts=cell.make_kpts([3,1,1]), xc='pbe')
+        mf = mf.multigrid_numint()
+        ref = mf.copy().run()
+        mf = mf.newton()
+        mf.kernel()
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 7)
+        self.assertAlmostEqual(mf.e_tot, -10.587438241728, 7)
+
+    def test_nr_kuks_hybrid(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([2,1,1]), xc='pbe0').density_fit()
         mf = mf.multigrid_numint()
         ref = mf.copy().run()
