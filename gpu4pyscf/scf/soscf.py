@@ -323,8 +323,8 @@ def _davidson_cc(h_op, g_op, precond, x0, tol=1e-10, xs=[], ax=[],
     ax = list(ax)
     nx = len(xs)
 
-    problem_size = g_orb.size
-    if cp.iscomplexobj(g_orb):
+    problem_size = x0.size
+    if cp.iscomplexobj(x0):
         # With real Davidson coefficients, N complex rotations span up to 2N
         # real directions. Using N would stop at an incomplete subspace.
         problem_size *= 2
