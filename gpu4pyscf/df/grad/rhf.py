@@ -18,6 +18,7 @@ import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, cholesky, eigh, transpose_sum, get_avail_mem)
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -98,9 +99,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True,
         omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
+    batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     aux_batches = len(aux_offsets) - 1
 
-    blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
+    blksize = max(1, min(batch_size, int(mem_avail*.4/(nao*nao*2*8))//8*8))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
@@ -169,11 +171,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
     buf1 = cp.empty((blksize, nao, nao))
-    buf2 = cp.empty((blksize, nao, nao))
+    # Only non-Hermitian densities reuse this buffer for an AO-sized transpose.
+    buf2 = cp.empty((blksize, nocc if hermi == 1 else nao, nao))
     ejk = cp.zeros((mol.natm, 3))
     ejk_aux = cp.zeros((mol.natm, 3))
-    for kbatch in range(aux_batches):
-        naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
+    aux_splits = splits_by_blocksize(aux_offsets, batch_size)
+    for kbatch, kend in zip(aux_splits[:-1], aux_splits[1:]):
+        naux_in_batch = aux_offsets[kend] - aux_offsets[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -208,7 +212,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.byref(int3c2e_envs),
             ctypes.c_int(shm_size_max),
             ctypes.c_int(len(shl_pair_offsets) - 1),
-            ctypes.c_int(1),
+            ctypes.c_int(kend-kbatch),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
