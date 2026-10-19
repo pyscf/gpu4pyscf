@@ -322,7 +322,6 @@ def get_inter_contract_C(int_tensor, C_occ, C_vir):
 
 def gen_hdiag_MVP(hdiag, n_occ, n_vir):
     def hdiag_MVP(V):
-        V = cp.asarray(V)  # the Krylov solver may pass host vectors
         m = V.shape[0]
         V = V.reshape(m, n_occ*n_vir)
         hdiag_v = hdiag * V
@@ -357,7 +356,6 @@ def gen_iajb_MVP(T_ia):
         Returns:
             iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
         '''
-        V = cp.asarray(V)  # the Krylov solver may pass host vectors
         # Get the shape of the tensors
         nauxao, n_occ, n_vir = T_ia.shape
         n_state, n_occ, n_vir = V.shape
@@ -423,7 +421,6 @@ def gen_ijab_MVP(T_ij, T_ab):
         Returns:
             ijab_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
         '''
-        V = cp.asarray(V)  # the Krylov solver may pass host vectors
         T_ij_gpu = cp.asarray(T_ij) # if T_ij was in RAM, upload to GPU on calling
         nauxao, n_occ, n_occ = T_ij.shape
 
@@ -503,7 +500,6 @@ def gen_ibja_MVP(T_ia):
         Returns:
             ibja_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
         '''
-        V = cp.asarray(V)  # the Krylov solver may pass host vectors
         nauxao, n_occ, n_vir = T_ia.shape
         n_state, n_occ, n_vir = V.shape
 
