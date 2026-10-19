@@ -1206,14 +1206,6 @@ class SCF(pyscf_lib.StreamObject):
         if mol is None: mol = self.mol
         return init_guess_by_atom(mol, high_spin)
 
-    def init_guess_by_sad(self, mol=None):
-        if mol is None: mol = self.mol
-        return init_guess_by_sad(mol, self)
-
-    def init_guess_by_sad_hf(self, mol=None):
-        if mol is None: mol = self.mol
-        return init_guess_by_sad_hf(mol, self)
-
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         '''Dispatch initial guesses
 
