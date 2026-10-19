@@ -425,14 +425,13 @@ def gen_ijab_MVP(T_ij, T_ab):
         '''
         V = cp.asarray(V)  # the Krylov solver may pass host vectors
         T_ij_gpu = cp.asarray(T_ij) # if T_ij was in RAM, upload to GPU on calling
-        T_ab_gpu = cp.asarray(T_ab)
         nauxao, n_occ, n_occ = T_ij.shape
 
-        nauxao, n_vir, n_vir = T_ab_gpu.shape  # Dimensions of T_ab
+        nauxao, n_vir, n_vir = T_ab.shape  # Dimensions of T_ab
         n_state, n_occ, n_vir = V.shape      # Dimensions of V
 
         # Initialize result tensor
-        ijab_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ab_gpu.dtype)
+        ijab_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ab.dtype)
 
         # Get free memory and dynamically calculate chunk size
         available_gpu_memory = get_avail_mem()
@@ -442,7 +441,7 @@ def gen_ijab_MVP(T_ij, T_ab):
         n_T_ab_V_chunk = nauxao * 1 * n_state * n_occ 
         n_ijab_V_chunk = n_state * n_occ * 1
 
-        bytes_per_vir = 2*( n_T_ab_chunk + n_T_ab_V_chunk + n_ijab_V_chunk) * T_ab_gpu.itemsize  
+        bytes_per_vir = 2*( n_T_ab_chunk + n_T_ab_V_chunk + n_ijab_V_chunk) * T_ab.itemsize  
         # print('available_gpu_memory', available_gpu_memory)
         # print('bytes_per_vir', bytes_per_vir)
         vir_chunk_size = max(1, int(available_gpu_memory * 0.8 // bytes_per_vir)) 
@@ -462,7 +461,7 @@ def gen_ijab_MVP(T_ij, T_ab):
             # vir_range = vir_end - vir_start
 
             # Extract the corresponding chunk of T_ab
-            T_ab_chunk = T_ab_gpu[:, vir_start:vir_end, :]  # Shape: (nauxao, vir_range, n_vir)
+            T_ab_chunk = cp.asarray(T_ab[:, vir_start:vir_end, :])  # Shape: (nauxao, vir_range, n_vir)
 
             # Compute T_ab_V for the current chunk
             T_ab_chunk_V = contract("Pab,mjb->Pamj", T_ab_chunk, V)
