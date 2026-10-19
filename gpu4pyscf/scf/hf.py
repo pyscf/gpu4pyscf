@@ -883,11 +883,11 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False):
 
     return dm0
 
-def init_guess_by_sad(mol, mf_template):
-    return _init_guess_by_sad(mol, mf_template, uhf_for_atom=False)
+def init_guess_by_qchem_sad(mol, mf_template):
+    return _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False)
 
-def init_guess_by_sad_hf(mol, mf_template):
-    return _init_guess_by_sad(mol, mf_template, uhf_for_atom=True)
+def init_guess_by_qchem_sad_hf(mol, mf_template):
+    return _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=True)
 
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
