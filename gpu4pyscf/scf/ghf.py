@@ -23,13 +23,14 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array, tag_array
 from gpu4pyscf.lib import utils
 
-def _from_rhf_init_dm(dma, breaksym=True):
+def _from_rhf_init_dm(dma, breaksym=False):
+    mo_coeff = dma.mo_coeff
+    mo_occ = dma.mo_occ * .5
     dma = dma * .5
     dm = block_diag(dma, dma)
-    if breaksym:
-        nao = dma.shape[0]
-        idx, idy = cp.diag_indices(nao)
-        dm[idx+nao,idy] = dm[idx,idy+nao] = dma.diagonal() * .05
+    assert not breaksym
+    dm = tag_array(dm, mo_coeff=block_diag(mo_coeff, mo_coeff),
+                   mo_occ=cp.hstack([mo_occ, mo_occ]))
     return dm
 
 

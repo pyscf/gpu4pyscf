@@ -445,8 +445,8 @@ def init_guess_by_minao(mol, high_spin=False):
         spin_signs = [1] * mol.natm
     return _build_sad_dm(mol, atm_conf, spin_signs)
 
-def _infer_afm_spin_signs(mol, threshold=5., mag_elements=None):
-    """Infer atomic spin signs by a nearest-neighbor AFM walk.
+def _infer_afm_cluster_spin_signs(mol, threshold=5., mag_elements=None):
+    """Infer atomic spin signs for nearest-neighbor AFM clusters.
 
     Only elements in the B and N columns, and the 3d, 4d and 5d
     transition-metals are considered. Other atoms remain zero.
@@ -482,7 +482,7 @@ def _infer_afm_spin_signs(mol, threshold=5., mag_elements=None):
     return spin_signs
 
 def _infer_fm_cluster_spin_signs(mol, threshold=5., mag_elements=None):
-    """Infer atomic spin signs by a nearest-neighbor FM cluster walk.
+    """Infer atomic spin signs for nearest-neighbor FM clusters.
 
     Only elements in the B and N columns, and the 3d, 4d and 5d
     transition-metals are considered. Other atoms remain zero.
