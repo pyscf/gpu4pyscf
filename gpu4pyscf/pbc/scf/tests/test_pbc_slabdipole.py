@@ -128,9 +128,11 @@ class KnownValues(unittest.TestCase):
         cpu_correction(ref, slab_center=mf.z0)
         np.testing.assert_allclose(mf.get_veff(dm=dm).get(),
                                    ref.get_veff(dm=dm.get()), atol=2e-8)
+        self.assertIsNotNone(mf.dipole_offset)
         mf.reset()
         self.assertIsNone(mf.dipole_cut)
         self.assertIsNone(mf.dipole_z0)
+        self.assertIsNone(mf.dipole_offset)
 
     def test_potential_gauges(self):
         cell = make_cell()

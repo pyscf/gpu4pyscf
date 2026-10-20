@@ -33,7 +33,8 @@ def slab_dipole_correction(mf, dir_idx=2, z0=None, cut=None, rho_tol=1e-5):
     Supports RKS, UKS, KRKS and KUKS for neutral, three-dimensionally
     periodic slabs. The selected lattice vector must be parallel to its
     Cartesian axis and perpendicular to the other two lattice vectors.
-    Forces, stress, response functions and band k-points are not implemented.
+    Analytical nuclear gradients are supported. Stress, response functions
+    and band k-points are not implemented.
 
     Args:
         mf: GPU periodic Kohn-Sham object.
@@ -64,6 +65,10 @@ def slab_dipole_correction(mf, dir_idx=2, z0=None, cut=None, rho_tol=1e-5):
     To reproduce PySCF's slab_center=c convention, set z0=c and cut=c+L/2.
     As in PySCF, the energy correction is included in veff.exc, and is also
     reported separately as veff.edip.
+
+    For geometry optimization, set cut explicitly to keep the discontinuity
+    fixed across resets. Becke grid response is not implemented; requesting
+    it through gradient.grid_response raises NotImplementedError.
     '''
     from gpu4pyscf.pbc.dft import rks, uks, krks, kuks
 
@@ -76,10 +81,11 @@ def slab_dipole_correction(mf, dir_idx=2, z0=None, cut=None, rho_tol=1e-5):
         lib.set_class(mf, (_SlabDipoleCorrection, mf.__class__))
     mf.dipole_dir = dir_idx
     mf.z0 = z0
-    mf.cut = cut
+    mf.cut = cut                 # cut is fixed regardless of reset()
     mf.dipole_rho_tol = rho_tol
     mf.dipole_cut = None
     mf.dipole_z0 = None
+    mf.dipole_offset = None
     return mf
 
 
@@ -100,6 +106,19 @@ def _slab_length(cell, dir_idx):
 
 def _sawtooth(z, cut, length):
     return (z - cut) % length - length/2
+
+
+def _dipole_grids(mf, cell):
+    from gpu4pyscf.pbc.dft import gen_grid, multigrid
+
+    if isinstance(mf._numint, multigrid.MultiGridNumIntBase):
+        grids = gen_grid.UniformGrids(cell)
+        grids.mesh = mf._numint.mesh
+    else:
+        grids = mf.grids
+        if grids.coords is None:
+            grids.build()
+    return grids
 
 
 def _automatic_cut(cell, dm, kpts, mesh, dir_idx, rho_tol):
@@ -140,17 +159,22 @@ def _automatic_cut(cell, dm, kpts, mesh, dir_idx, rho_tol):
 
 class _SlabDipoleCorrection:
     # TODO: add comments.
-    _keys = {'dipole_dir', 'z0', 'cut', 'dipole_rho_tol', 'dipole_cut', 'dipole_z0'}
+    _keys = {
+        'dipole_dir', 'z0', 'cut', 'dipole_rho_tol',
+        'dipole_cut', 'dipole_z0', 'dipole_offset',
+    }
 
     def reset(self, cell=None):
+        # dipole_cut will reset, but cut will remain the same.
         self.dipole_cut = None
         self.dipole_z0 = None
+        self.dipole_offset = None
         return super().reset(cell)
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None, *, kpt=None):
         from gpu4pyscf.pbc.scf import khf
-        from gpu4pyscf.pbc.dft import numint, gen_grid, multigrid
+        from gpu4pyscf.pbc.dft import numint, gen_grid
 
         if kpts_band is not None:
             raise NotImplementedError('Slab dipole correction for band k-points')
@@ -169,12 +193,7 @@ class _SlabDipoleCorrection:
             dm_charge = dm_charge[0] + dm_charge[1]
         dm_charge = dm_charge.reshape(len(kpts), cell.nao, cell.nao)
 
-        grids = self.grids
-        if isinstance(self._numint, multigrid.MultiGridNumIntBase):
-            grids = gen_grid.UniformGrids(cell)
-            grids.mesh = self._numint.mesh
-        elif grids.coords is None:
-            grids.build()
+        grids = _dipole_grids(self, cell)
         mesh = grids.mesh if isinstance(grids, gen_grid.UniformGrids) else cell.mesh
         cut = self.cut
         if cut is None:
@@ -206,8 +225,10 @@ class _SlabDipoleCorrection:
         dipole = p_ion - float(p_elec)
         field = 4 * np.pi * dipole / cell.vol
         edip = .5 * field * dipole
-        offset = (float(z_sum / weight_sum) if self.z0 is None else
-                  _sawtooth(self.z0, cut, length))
+        self.dipole_offset = (
+            float(z_sum / weight_sum) if self.z0 is None else
+            _sawtooth(self.z0, cut, length))
+        offset = self.dipole_offset
         self.dipole_z0 = (cut + length/2 + offset) % length
         v_dip = -field * position
         if not is_kpts:
@@ -225,7 +246,9 @@ class _SlabDipoleCorrection:
         return out
 
     def Gradients(self):
-        raise NotImplementedError('Slab dipole correction forces and stress')
+        from gpu4pyscf.pbc.grad.slabdipole import _SlabDipoleGradients
+        grad = super().Gradients()
+        return lib.set_class(grad, (_SlabDipoleGradients, grad.__class__))
 
     def Hessian(self):
         raise NotImplementedError('Slab dipole correction Hessian')
