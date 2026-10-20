@@ -49,6 +49,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(
             mf.e_tot, ref.energy_tot(dm=mf.make_rdm1().get()), delta=1e-8)
 
+    @unittest.skip('Multicollinear periodic XC is not implemented on GPU.')
     def test_mcol_gks_gga(self):
         mf = gpu_dft.GKS(cell).density_fit()
         mf.xc = 'pbe'
@@ -57,6 +58,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -0.7331713336996268, 7)
 
+    @unittest.skip('Spin-orbit periodic X2C is not implemented on GPU.')
     def test_ncol_x2c_gks_lda(self):
         mf = gpu_dft.GKS(cell).x2c()
         mf.xc = 'lda,vwn'
@@ -64,6 +66,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -0.6093309656369732, 7)
 
+    @unittest.skip('Spin-orbit periodic X2C is not implemented on GPU.')
     def test_mcol_x2c_gks_lda(self):
         mf = gpu_dft.GKS(cell).x2c()
         mf.xc = 'lda,vwn'
@@ -162,6 +165,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, -1.6373456924395708, 7)
 
     @unittest.skipIf(mcfun is None, "mcfun library not found.")
+    @unittest.skip('Multicollinear periodic XC is not implemented on GPU.')
     def test_mcol_kgks_gga(self):
         cell = gto.Cell()
         cell.a = '''0.      1.7834  1.7834
@@ -178,6 +182,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -1.6312141891350893, 5)
 
+    @unittest.skip('Spin-orbit periodic X2C is not implemented on GPU.')
     def test_ncol_x2c_kgks_lda(self):
         cell = gto.Cell()
         cell.a = '''0.      1.7834  1.7834
@@ -194,6 +199,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, -1.533809531603591, 6)
 
     @unittest.skipIf(mcfun is None, "mcfun library not found.")
+    @unittest.skip('Spin-orbit periodic X2C is not implemented on GPU.')
     def test_mcol_x2c_kgks_lda(self):
         cell = gto.Cell()
         cell.a = '''0.      1.7834  1.7834
