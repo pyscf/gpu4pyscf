@@ -65,8 +65,17 @@ class KnownValues(unittest.TestCase):
         mf_cpu = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_cpu.e_tot, delta=1e-8)
         self.assertAlmostEqual(mf.e_tot, -3.9546467710639632, 7)
-        pop = mf.analyze()[0][0]
-        self.assertAlmostEqual(lib.fp(pop), -0.04691820429296646, 5)
+        for with_meta_lowdin in (True, False):
+            populations, charges = mf.analyze(
+                verbose=0, with_meta_lowdin=with_meta_lowdin)[0]
+            self.assertEqual(np.asarray(populations).shape, (2, cell.nao_nr()))
+            self.assertEqual(np.asarray(charges).shape, (cell.natm,))
+            self.assertAlmostEqual(np.sum(populations[0]), mf.nelec[0], 7)
+            self.assertAlmostEqual(np.sum(populations[1]), mf.nelec[1], 7)
+            if with_meta_lowdin:
+                self.assertAlmostEqual(
+                    lib.fp(populations[0] + populations[1]),
+                    -0.04691820429296646, 5)
 
         np.random.seed(1)
         kpts_bands = np.random.random((4,3))

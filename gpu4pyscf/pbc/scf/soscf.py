@@ -50,12 +50,15 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
 
     vind = mf.gen_response(mo_coeff, mo_occ, singlet=None, hermi=1)
 
+    k_pairs = list(mf.iter_kpt_pairs())
+
     def h_op(x1):
         x1 = _split_matrices(x1, nvir, nocc)
         if aligned:
             dm1 = contract('kij,kqj->kiq', x1*2, orbo.conj())
             dm1 = contract('kiq,kpi->kpq', dm1, orbv)
-            dm1 = transpose_sum(dm1)
+            dm1 = transpose_sum(dm1, inplace=True)
+            dm1 = _time_reversal_symmetrize(dm1, k_pairs)
             v1 = vind(dm1.reshape(1,nkpts,nao,nao))[0]
             x2 = contract('kpq,kqj->kpj', v1, orbo)
             x2 = contract('kpj,kpi->kij', x2, orbv.conj()) * 2
@@ -65,7 +68,8 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
         else:
             dm1 = cp.array([orbv[k].dot(x1[k]*2).dot(orbo[k].conj().T)
                             for k in range(nkpts)])
-            dm1 = transpose_sum(dm1)
+            dm1 = transpose_sum(dm1, inplace=True)
+            dm1 = _time_reversal_symmetrize(dm1, k_pairs)
             v1 = vind(dm1.reshape(1,nkpts,nao,nao))[0]
             x2 = [None] * nkpts
             for k in range(nkpts):
@@ -119,6 +123,8 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
 
     vind = mf.gen_response(mo_coeff, mo_occ, hermi=1)
 
+    k_pairs = list(mf.iter_kpt_pairs())
+
     def h_op(x1):
         x1a = _split_matrices(x1[:tot_vopair_a], nvira, nocca)
         x1b = _split_matrices(x1[tot_vopair_a:], nvirb, noccb)
@@ -134,7 +140,9 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao, h1e=None):
                 orbvb[k].dot(x1b[k]).dot(orbob[k].conj().T, out=dm1[1,k])
 
         dm1 = transpose_sum(dm1.reshape(2*nkpts,nao,nao), inplace=True)
-        v1 = vind(dm1.reshape(2,1,nkpts,nao,nao))[:,0]
+        dm1 = dm1.reshape(2,1,nkpts,nao,nao)
+        dm1 = _time_reversal_symmetrize(dm1, k_pairs)
+        v1 = vind(dm1)[:,0]
 
         if aligned:
             x2a = contract('kpq,kqj->kpj', v1[0], orboa)
@@ -175,6 +183,20 @@ def _split_matrices(a, dim1_list, dim2_list=None):
         z.append(a[p0:p1].reshape(n1,n2))
     return z
 
+def _time_reversal_symmetrize(dm, k_pairs):
+    '''Enforce conjugate pairing due to time reversal symmetry'''
+    assert dm.ndim >= 3
+    if dm.shape[-3] == len(k_pairs):
+        return dm
+
+    for k, k_conj in k_pairs:
+        if k == k_conj:
+            if dm.dtype == cp.complex128:
+                dm[...,k,:,:].imag = 0
+        elif k_conj is not None:
+            dm[...,k_conj,:,:] = dm[...,k,:,:].conj()
+    return dm
+
 class _SecondOrderKRHF(_CIAH_SOSCF):
     gen_g_hop = gen_g_hop_rhf
 
@@ -190,6 +212,8 @@ class _SecondOrderKRHF(_CIAH_SOSCF):
         for k in range(nkpts):
             u[k] = mol_soscf.expm(dr[k])
 
+        k_pairs = list(self.iter_kpt_pairs())
+        u = _time_reversal_symmetrize(u, k_pairs)
         if u0 is not None:
             u = contract('kpq,kqr->kpr', u0, u)
         return u
@@ -219,6 +243,8 @@ class _SecondOrderKUHF(_CIAH_SOSCF):
             for k in range(nkpts):
                 u[s,k] = mol_soscf.expm(dr[s,k])
 
+        k_pairs = list(self.iter_kpt_pairs())
+        u = _time_reversal_symmetrize(u, k_pairs)
         if u0 is not None:
             u = contract('skpq,skqr->skpr', u0, u)
         return u

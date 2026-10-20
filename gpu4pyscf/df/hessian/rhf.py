@@ -27,6 +27,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib.cupy_helper import (
     contract, ndarray, transpose_sum, get_avail_mem, empty_mapped, fill_symmetric)
 from gpu4pyscf.df.int3c2e_bdiv import (
@@ -40,6 +41,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian.rhf import _hcore_energy, _aggregate_to_atoms
 from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.gto.mole import _split_l_ctr_groups
 
 num_devices = multi_gpu.num_devices
 
@@ -188,8 +190,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
+        # Bound serial work in each derivative-integral task.
+        pair_batch_size = np.minimum(nsp_per_block[0]*4,
+                                     np.maximum(nsp_per_block[0]//4, 16))
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-            int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
+            int3c2e_opt.bas_ij_cache, pair_batch_size)
         ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
 
         l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
@@ -199,7 +204,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
         ksh_offsets_cpu = l_ctr_aux_offsets
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
         aux_offsets = aux_loc[ksh_offsets_cpu]
-        num_aux_batches = len(aux_offsets) - 1
+        # Keep device tasks small enough to distribute, retaining the existing
+        # group boundaries that define the auxiliary function ordering.
+        aux_batch_size = min(batch_size, max(np.diff(aux_offsets).max(),
+                                             (naux+num_devices-1)//num_devices))
+        aux_splits = splits_by_blocksize(aux_offsets, aux_batch_size)
+        num_aux_batches = len(aux_splits) - 1
 
         # (20|0)(0|0)(0|00) + (10|1)(0|0)(0|00)
         int3c2e_envs = int3c2e_opt.int3c2e_envs
@@ -208,10 +218,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
         buf = cp.empty((nao_pair*batch_size))
         buf2 = cp.empty((blksize, nao, nao))
         buf1 = cp.empty((blksize, nao, nocc))
-        for kbatch in aux_batch_iter:
-            if kbatch >= num_aux_batches:
+        # Distribute packed auxiliary tiles through the existing device iterator.
+        for batch_id in aux_batch_iter:
+            if batch_id >= num_aux_batches:
                 break
-            naux_in_batch = aux_offsets[kbatch+1] - aux_offsets[kbatch]
+            kbatch, kend = aux_splits[batch_id:batch_id+2]
+            naux_in_batch = aux_offsets[kend] - aux_offsets[kbatch]
             aux0 = aux1 = aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
             compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
             for k0, k1 in lib.prange(0, naux_in_batch, blksize):
@@ -237,7 +249,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
                 ctypes.byref(int3c2e_envs),
                 ctypes.c_int(shm_size_max),
                 ctypes.c_int(len(shl_pair_offsets) - 1),
-                ctypes.c_int(1),
+                ctypes.c_int(kend-kbatch),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
@@ -586,10 +598,16 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
+        # Bound serial work in each derivative-integral task.
+        pair_batch_size = np.minimum(nsp_per_block[0]*4,
+                                     np.maximum(nsp_per_block[0]//4, 16))
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
-            int3c2e_opt.bas_ij_cache, nsp_per_block[0]*4)
+            int3c2e_opt.bas_ij_cache, pair_batch_size)
         ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache)
-        ksh_offsets_cpu = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+        # Split auxbasis into small batches for load balance
+        _, aux_counts = _split_l_ctr_groups(
+            auxmol.uniq_l_ctr, auxmol.l_ctr_counts, [16]*(laux+1))
+        ksh_offsets_cpu = np.append(0, np.cumsum(aux_counts))
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
 
         int3c2e_envs = int3c2e_opt.int3c2e_envs

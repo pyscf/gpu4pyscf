@@ -20,7 +20,7 @@ from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.lib.multi_gpu import num_devices
-from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize, diagonalize_tda
+from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize, diagonalize_tda, atom_ecp
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -172,6 +172,13 @@ def _check_grad(mol, xc, tol=1e-5, lindep=1.0e-12, disp=None, tda=False, method=
 
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
+    def test_grad_b3lyp_tda_singlet_ecp_cpu(self):
+        mol_ecp = pyscf.M(atom=atom_ecp, basis="def2-svp", ecp={"I": "def2-svp"},
+                          output="/dev/null", verbose=1)
+        _check_grad(mol_ecp, xc="b3lyp", tol=1e-9, tda=True, method="cpu")
+        mol_ecp.stdout.close()
+
     @unittest.skipIf(num_devices > 1, '')
     def test_grad_svwn_tda_singlet_cpu(self):
         grad_gpu = _check_grad(mol, xc="svwn", tol=5e-10, tda=True, method="cpu")

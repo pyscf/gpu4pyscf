@@ -91,7 +91,6 @@ class ROHF(hf.RHF):
     make_rdm2 = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
     stability = NotImplemented
-    mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
     nuc_grad_method = NotImplemented
 

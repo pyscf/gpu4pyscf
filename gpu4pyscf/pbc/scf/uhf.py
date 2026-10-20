@@ -155,7 +155,8 @@ class UHF(pbchf.SCF):
         '''Analyze the given SCF object:  print orbital energies, occupancies;
         print orbital coefficients; Mulliken population analysis; Diople moment.
         '''
-        from pyscf.scf.hf import mulliken_meta, mulliken_pop, MO_BASE
+        from pyscf.scf.hf import MO_BASE
+        from pyscf.scf.uhf import mulliken_meta, mulliken_pop
         log = logger.new_logger(self, verbose)
         cell = self.cell
         mo_energy = self.mo_energy.get()

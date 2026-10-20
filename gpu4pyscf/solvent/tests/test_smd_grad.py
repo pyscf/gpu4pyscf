@@ -248,8 +248,8 @@ H -0.646 -0.464 -0.804
 
     def test_to_gpu(self):
         mf = mol.RKS(xc='b3lyp').SMD()
+        mf.with_solvent.solvent = 'water'
         if Version(pyscf.__version__) <= Version('2.11.0'):
-            mf.with_solvent.solvent = 'water'
             mf.with_solvent.sasa_ng = 302
         mf.conv_tol = 1e-12
         mf.kernel()
@@ -267,8 +267,8 @@ H -0.646 -0.464 -0.804
         assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
 
         mf = mol.RKS(xc='b3lyp').density_fit().SMD()
+        mf.with_solvent.solvent = 'water'
         if Version(pyscf.__version__) <= Version('2.11.0'):
-            mf.with_solvent.solvent = 'water'
             mf.with_solvent.sasa_ng = 302
         mf.conv_tol = 1e-12
         mf.kernel()
