@@ -321,6 +321,60 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1) < 1e-8
         assert abs(ref-vxc).max().get() < 1e-7
 
+    def test_eval_lda_mat_skewed_lattice(self):
+        cell = gto.M(
+            atom='He .2 .3 .4',
+            a=[[5, 4, 2.4], [4.2, 5., 3.5], [3.8, .5, 5.]],
+            basis=[[l, [1.3, 1.]] for l in range(5)],
+            unit='Bohr', mesh=[25, 27, 29], precision=1e-10,
+            verbose=0)
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.enable_aft = False
+        ni.allow_mesh_reduction = False
+        ni.build(xctype='LDA')
+
+        # On this lattice, the Gaussian peak along a grid line can be far from
+        # the fractional-range midpoint, and its value at a_start can underflow.
+        # Integrate a signed potential directly to isolate the matrix kernel
+        # from density evaluation and exercise periodic grid-index wrapping.
+        rng = np.random.default_rng(12)
+        weights = rng.random(np.prod(cell.mesh)) - .5
+        weights *= cell.vol / weights.size
+        ao = cell.pbc_eval_gto('GTOval_sph', cell.get_uniform_grids())
+        ref = ao.T.dot(weights[:,None] * ao)
+
+        vxcG = fft(cp.asarray(weights).reshape(cell.mesh), cell.mesh)
+        out = multigrid._eval_xc_mat(ni, vxcG)
+        out = multigrid._inverse_wannier_transform_fock(ni, out, None)[0]
+        np.testing.assert_allclose(out.get(), ref, atol=1e-9, rtol=0)
+
+    def test_eval_mgga_mat_skewed_lattice(self):
+        cell = gto.M(
+            atom='He .2 .3 .4',
+            a=[[5, 4, 2.4], [4.2, 5., 3.5], [3.8, .5, 5.]],
+            basis=[[l, [1.3, 1.]] for l in range(5)],
+            unit='Bohr', mesh=[25, 27, 29], precision=1e-10,
+            verbose=0)
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.enable_aft = False
+        ni.allow_mesh_reduction = False
+        ni.build(xctype='MGGA')
+
+        # Direct AO quadrature tests both the density and tau matrix terms,
+        # including gradient contractions for all supported angular momenta.
+        rng = np.random.default_rng(12)
+        ngrids = np.prod(cell.mesh)
+        weights = (rng.random((2, ngrids)) - .5) * (cell.vol / ngrids)
+        ao = cell.pbc_eval_gto('GTOval_sph_deriv1', cell.get_uniform_grids())
+        ref = ao[0].T.dot(weights[0,:,None] * ao[0])
+        for dao in ao[1:]:
+            ref += .5 * dao.T.dot(weights[1,:,None] * dao)
+
+        vxcG = [fft(cp.asarray(w).reshape(cell.mesh), cell.mesh) for w in weights]
+        out = multigrid._eval_xc_mat(ni, vxcG)
+        out = multigrid._inverse_wannier_transform_fock(ni, out, None)[0]
+        np.testing.assert_allclose(out.get(), ref, atol=1e-9, rtol=0)
+
     def test_get_vxc_lda_kpts(self):
         nao = cell_orth.nao
         np.random.seed(2)
