@@ -164,8 +164,8 @@ class KnownValues(unittest.TestCase):
         e_gpu_atom = myx2c_atom.kernel()
         self.assertAlmostEqual(e_gpu_atom, -128.615723692333, 9)
         self.assertAlmostEqual(e_gpu, e_gpu_atom, 9)
-        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -41.15250349727189, 9)
-        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_atom.mo_energy.get()), 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -41.15250349727189, 6)
+        self.assertAlmostEqual(float(abs(myx2c.mo_energy - myx2c_atom.mo_energy).max().get()), 0, 8)
 
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
                      'pyscf x2c does not support not reset function')

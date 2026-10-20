@@ -245,9 +245,11 @@ def _expand_dm_kpts(dm, nkpts):
     """Repeat a molecular density and its orbital tags over k-points."""
     assert dm.ndim == 2
     if hasattr(dm, 'mo_coeff'):
-        idx = cp.where(dm.mo_occ > 0)[0]
-        mo_coeff = cp.repeat(asarray(dm.mo_coeff)[None,:,idx], nkpts, axis=0)
-        mo_occ = cp.repeat(asarray(dm.mo_occ)[None,idx], nkpts, axis=0)
+        mo_occ = cp.asarray(dm.mo_occ)
+        mo_coeff = cp.asarray(dm.mo_coeff)
+        idx = cp.where(mo_occ > 0)[0]
+        mo_coeff = cp.repeat(mo_coeff[None,:,idx], nkpts, axis=0)
+        mo_occ = cp.repeat(mo_occ[None,idx], nkpts, axis=0)
         dm = cp.repeat(asarray(dm[None]), nkpts, axis=0)
         dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     else:
