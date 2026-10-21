@@ -14,16 +14,3 @@ jobs:
       run: ruff check --config .ruff.toml --unsafe-fixes gpu4pyscf
     - name: Check NumPy
       run: ruff check --select NPY --ignore NPY002 gpu4pyscf
-  flake:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v7
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: 3.9
-    - name: Install flake8
-      run: pip install "flake8>=3.7.0"
-    - name: Static analysis
-      run: flake8 --config .flake8 gpu4pyscf
