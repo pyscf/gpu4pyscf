@@ -98,7 +98,7 @@ def _get_jk(mf, mol, dm, hermi=0, with_j=True, with_k=True, jkbuild=None,
             vj = vj.reshape(dm_shape)
 
         if with_k:
-            dm_k = cp.vstack((dmaa, dmbb, dmab, dmba))
+            dm_k = cp.stack((dmaa, dmbb, dmab, dmba))
             ktmp = jkbuild(mf, mol, dm_k, hermi=0, with_j=False, omega=omega,
                            lr_factor=lr_factor, sr_factor=sr_factor)[1]
             vk = cp.zeros((n_dm, nso, nso), dtype=dm.dtype)
@@ -233,10 +233,14 @@ class GHF(hf.SCF):
             logger.debug(self, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
         return mo_occ
 
-    def spin_square(self, mo, s=None):
+    def spin_square(self, mo_coeff=None, s=None):
+        if mo_coeff is None:
+            mo_coeff = self.mo_coeff[:,self.mo_occ>0]
+        if s is None:
+            s = self.get_ovlp()
+        mo = cp.asarray(mo_coeff)
         nao = mo.shape[0] // 2
-        if s is not None:
-            s = s[:nao,:nao]
+        s = cp.asarray(s[:nao,:nao])
         mo_a = mo[:nao]
         mo_b = mo[nao:]
         saa = mo_a.conj().T.dot(s).dot(mo_a)
@@ -254,6 +258,22 @@ class GHF(hf.SCF):
         ss = float(ssxy.get()) + ssz
         s = (ss+.25)**.5 - .5
         return ss, s*2+1
+
+    def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
+                   verbose=logger.NOTE):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        nao = mol.nao_nr()
+        dm = dm[:nao,:nao] + dm[nao:,nao:]
+        return hf.SCF.dip_moment(self, mol, dm, unit, origin, verbose)
+
+    def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
+                    verbose=logger.NOTE):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        nao = mol.nao_nr()
+        dm = dm[:nao,:nao] + dm[nao:,nao:]
+        return hf.SCF.quad_moment(self, mol, dm, unit, origin, verbose)
 
     def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
         '''Mulliken population analysis
