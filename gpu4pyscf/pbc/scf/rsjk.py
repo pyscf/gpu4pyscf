@@ -1590,7 +1590,7 @@ def _search_diffuse_pairs(cell, mesh):
     ke_cutoff = mesh_to_ke(cell.lattice_vectors(), mesh)
     Gmax = (ke_cutoff.min()*2)**.5
     aij = exps[:,None] * exps
-    fac = aij/Gmax * np.exp(-.25*Gmax**2/aij)
+    fac = aij/Gmax * cp.exp(-.25*Gmax**2/aij)
     pair_max *= 1 + fac
 
     precision = cell.precision * max(1, 1e-2 * cell.vol)

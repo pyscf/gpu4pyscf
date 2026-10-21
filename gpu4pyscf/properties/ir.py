@@ -71,7 +71,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         TRspace.append(TR[3:])
 
     if TRspace:
-        TRspace = cupy.vstack(TRspace)
+        TRspace = cupy.asarray(np.vstack(TRspace))
         q, r = cupy.linalg.qr(TRspace.T)
         P = cupy.eye(natm * 3) - q.dot(q.T)
         w, v = cupy.linalg.eigh(P)
