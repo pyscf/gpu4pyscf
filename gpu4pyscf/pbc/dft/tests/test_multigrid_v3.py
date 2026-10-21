@@ -265,6 +265,53 @@ class KnownValues(unittest.TestCase):
         out = multigrid.MultiGridNumInt(cell_orth).get_rho(dm).get()
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
+    def test_get_rho_skewed_lattice(self):
+        cell = gto.M(
+            atom='He .2 .3 .4',
+            a=[[5, 4, 2.4], [4.2, 5., 3.5], [3.8, .5, 5.]],
+            basis=[[l, [1.3, 1.]] for l in range(5)],
+            unit='Bohr', mesh=[25, 27, 29], precision=1e-10,
+            verbose=0)
+        rng = np.random.default_rng(12)
+        dm = rng.random((cell.nao, cell.nao)) - .5
+        dm = dm.dot(dm.T) / cell.nao
+        ao = cell.pbc_eval_gto('GTOval_sph', cell.get_uniform_grids())
+        ref = np.einsum('gi,ij,gj->g', ao, dm, ao)
+
+        # The Gaussian can underflow at the b-range midpoint even though the
+        # line passes through significant density elsewhere.
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.enable_aft = False
+        ni.allow_mesh_reduction = False
+        rho = ni.get_rho(cp.asarray(dm))
+        np.testing.assert_allclose(rho.get(), ref, atol=1e-9, rtol=0)
+
+    def test_eval_tau_skewed_lattice(self):
+        cell = gto.M(
+            atom='He .2 .3 .4',
+            a=[[5, 4, 2.4], [4.2, 5., 3.5], [3.8, .5, 5.]],
+            basis=[[l, [1.3, 1.]] for l in range(5)],
+            unit='Bohr', mesh=[25, 27, 29], precision=1e-10,
+            verbose=0)
+        rng = np.random.default_rng(12)
+        dm = rng.random((cell.nao, cell.nao)) - .5
+        dm = dm.dot(dm.T) / cell.nao
+        ao = cell.pbc_eval_gto('GTOval_sph_deriv1', cell.get_uniform_grids())
+        ref_rho = np.einsum('gi,ij,gj->g', ao[0], dm, ao[0])
+        ref_tau = .5 * np.einsum('xgi,ij,xgj->g', ao[1:], dm, ao[1:])
+
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.enable_aft = False
+        ni.allow_mesh_reduction = False
+        dm_sc = multigrid._wannier_transform_dm(
+            ni, cp.asarray(dm), None, xctype='MGGA')[0]
+        rhoG, tauG = multigrid._eval_density(ni, dm_sc, with_tau=True)
+        weight = cell.vol / np.prod(cell.mesh)
+        rho = ifft(rhoG, cell.mesh).real.ravel() / weight
+        tau = ifft(tauG, cell.mesh).real.ravel() / weight
+        np.testing.assert_allclose(rho.get(), ref_rho, atol=1e-9, rtol=0)
+        np.testing.assert_allclose(tau.get(), ref_tau, atol=1e-9, rtol=0)
+
     def test_get_j(self):
         nao = cell_orth.nao
         np.random.seed(2)

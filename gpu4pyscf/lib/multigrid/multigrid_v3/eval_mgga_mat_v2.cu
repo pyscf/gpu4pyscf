@@ -168,7 +168,8 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
             int lower = ceilf(a_peak - a_radius);
             int upper = floorf(a_peak + a_radius);
             int a_active_start = max(a_start, lower);
-            int a_active_stop = upper;
+            int a_active_stop = min(a_stop, upper);
+            if (a_active_start > a_active_stop) continue;
 
             int mesh_bc = mesh_b * mesh_c;
             int mesh_abc = mesh_a * mesh_bc;
@@ -179,23 +180,18 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
             int64_t abc_idx = (a_start + 100 * mesh_a) % mesh_a * (int64_t)mesh_bc +
                 (b_index + 100 * mesh_b) % mesh_b * mesh_c +
                 (c_index + 100 * mesh_c) % mesh_c;
-            double gaussian_xyz = 0;
-            double recursion_factor_a = 0;
-            for (int a_index = a_start; a_index <= a_stop; ++a_index) {
-                if (a_index >= a_active_start && a_index <= a_active_stop) {
-                    if (a_index == a_active_start) {
-                        // Initializing at a_start can underflow before the peak.
-                        double x_xij = x - xij;
-                        double y_yij = y - yij;
-                        double z_zij = z - zij;
-                        double e = theta_rr + aij * distance_squared(x_xij, y_yij, z_zij);
-                        double cross_term_a = c_dxyz_dabc[0] * x_xij + c_dxyz_dabc[1] * y_yij + c_dxyz_dabc[2] * z_zij;
-                        gaussian_xyz = exp(-e) * cc;
-                        recursion_factor_a = exp(-aij * (2 * cross_term_a + da_squared));
-                    } else {
-                        gaussian_xyz *= recursion_factor_a;
-                        recursion_factor_a *= exp_da_squared;
-                    }
+            // Initialize at the active start to avoid underflow, but traverse
+            // from a_start to keep neighboring threads' grid accesses aligned.
+            double da_active = a_active_start - a_start;
+            double dx_active = x - xij + da_active * c_dxyz_dabc[0];
+            double dy_active = y - yij + da_active * c_dxyz_dabc[1];
+            double dz_active = z - zij + da_active * c_dxyz_dabc[2];
+            double e = theta_rr + aij * distance_squared(dx_active, dy_active, dz_active);
+            double cross_term_a_start = c_dxyz_dabc[0] * dx_active + c_dxyz_dabc[1] * dy_active + c_dxyz_dabc[2] * dz_active;
+            double gaussian_xyz = exp(-e) * cc;
+            double recursion_factor_a = exp(-aij * (2 * cross_term_a_start + da_squared));
+            for (int a_index = a_start; a_index <= a_active_stop; ++a_index) {
+                if (a_index >= a_active_start) {
                     double rho_fac = vrho_weights[abc_idx] * gaussian_xyz;
                     double tau_fac = vtau_weights[abc_idx] * gaussian_xyz / 2;
                     double i_cartesian[nfi];
@@ -237,6 +233,8 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
                             vj_cache[i*SLICE_SIZE_J+j] += s3 * j_gradient[j+nfj*2];
                         }
                     }
+                    gaussian_xyz *= recursion_factor_a;
+                    recursion_factor_a *= exp_da_squared;
                 }
                 x += c_dxyz_dabc[0];
                 y += c_dxyz_dabc[1];
