@@ -168,7 +168,7 @@ class KnowValues(unittest.TestCase):
         mf = mf.newton()
         mf.conv_tol_grad = 1e-4
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, -10.202133062075863, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.202133062075863, delta=1e-8)
 
     def test_nr_kuks_gga(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([3,1,1]), xc='pbe')
