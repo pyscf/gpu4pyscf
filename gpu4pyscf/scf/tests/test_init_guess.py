@@ -75,7 +75,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -122,7 +122,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol)
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -152,7 +152,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.prune = None
         mf.grids.radii_adjust = None
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -179,7 +179,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.atom_grid = (99,590)
         mf.nlcgrids.atom_grid = (50,194)
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -233,7 +233,7 @@ class KnownValues(unittest.TestCase):
 
         mf = UHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -259,7 +259,7 @@ class KnownValues(unittest.TestCase):
 
         mf = UKS(mol, xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -285,7 +285,7 @@ class KnownValues(unittest.TestCase):
 
         mf = UKS(mol, xc = "wB97X")
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -319,7 +319,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol)
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -331,7 +331,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -355,7 +355,7 @@ class KnownValues(unittest.TestCase):
         mf.with_solvent.method = "IEF-PCM"
         mf.with_solvent.eps = 80.0
 
-        dm0 = mf.get_init_guess(key='qchem_sad')
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -393,7 +393,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.get_init_guess(key='qchem_autosad')
+        dm0 = mf.get_init_guess(key='qchem_sad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -428,7 +428,7 @@ class KnownValues(unittest.TestCase):
         mf.nlcgrids.prune = None
         mf.nlcgrids.radii_adjust = None
 
-        dm0 = mf.get_init_guess(key='qchem_autosad')
+        dm0 = mf.get_init_guess(key='qchem_sad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -456,7 +456,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.prune = None
         mf.grids.radii_adjust = None
 
-        dm0 = mf.get_init_guess(key='qchem_autosad')
+        dm0 = mf.get_init_guess(key='qchem_sad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -472,7 +472,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.prune = None
         mf.grids.radii_adjust = None
 
-        dm0 = mf.get_init_guess(key='qchem_autosad')
+        dm0 = mf.get_init_guess(key='qchem_sad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 

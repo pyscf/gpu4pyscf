@@ -760,19 +760,23 @@ def _atomic_hf_configs(mol, high_spin=False):
 
     return atm_conf
 
-def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False):
+def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=True):
     '''
         Generate initial guess density matrix from superposition of atomic density matrix.
 
-        If uhf_for_atom is True,
-        The level of theory of atomic calculation is the same as mf_template,
-        except that we always render unrestricted calculation for one atom in vacuum.
-        It reproduces Q-Chem SCF_GUESS AUTOSAD.
+        If uhf_for_atom is True, use atomic UHF calculations in vacuum.
+        Otherwise, use the unrestricted version of mf_template's method.
+        The basis, ECP, and auxiliary basis (if applicable) are preserved.
 
-        If uhf_for_atom is False,
-        The level of theory of atomic calculation is UHF (in vacuum).
-        The basis / ecp / auxiliary basis (if applicable) are keeped.
-        It reproduces Q-Chem SCF_GUESS SAD.
+        If high_spin is True, retain aligned atomic spins in unrestricted
+        guesses. Otherwise, average the alpha and beta densities. Restricted
+        guesses always use the spin-summed density.
+
+        The Q-Chem-style presets combine these independent options: AUTOSAD
+        uses the molecular method for the atomic calculations and retains
+        aligned spins (uhf_for_atom=False, high_spin=True). SAD uses atomic
+        UHF calculations and spin-averaged densities (uhf_for_atom=True,
+        high_spin=False).
     '''
     from pyscf.data.elements import NEUTRAL_ATOM_SPIN
     from pyscf.data.elements import charge as charge_of_element
@@ -875,7 +879,7 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False):
     if isinstance(mf_template, RHF):
         dm0 = dm0[0] + dm0[1]
     else:
-        if uhf_for_atom: # Reproduce Q-Chem SCF_GUESS SAD behavior
+        if not high_spin: # Reproduce Q-Chem SCF_GUESS SAD behavior
             dm_averaged = (dm0[0] + dm0[1]) * 0.5
             dm0[0] = dm0[1] = dm_averaged
 
@@ -884,10 +888,10 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False):
     return dm0
 
 def init_guess_by_qchem_sad(mol, mf_template):
-    return _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False)
+    return _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=True)
 
 def init_guess_by_qchem_sad_hf(mol, mf_template):
-    return _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=True)
+    return _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=True, high_spin=False)
 
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
@@ -1220,9 +1224,9 @@ class SCF(pyscf_lib.StreamObject):
                 - 'atom': superposition of atomic HF densities.
                 - 'minao_high_spin': MINAO guess with aligned atomic spins.
                 - 'atom_high_spin': atomic HF guess with aligned atomic spins.
-                - 'qchem_sad': Q-Chem-style SAD using atomic UHF calculations.
+                - 'qchem_sad': Q-Chem-style SAD using spin-averaged atomic UHF densities.
                 - 'qchem_autosad': Q-Chem-style AUTOSAD using unrestricted
-                  atomic calculations at the molecular method's level.
+                  atomic calculations at the molecular method's level, with aligned spins.
                 - '1e' or 'hcore': diagonalize the core Hamiltonian.
                 - 'huckel': on-the-fly Huckel guess.
                 - 'mod_huckel': modified Huckel guess.
@@ -1246,9 +1250,9 @@ class SCF(pyscf_lib.StreamObject):
         elif key == 'atom_high_spin':
             dm = self.init_guess_by_atom(mol, high_spin=True)
         elif key == 'qchem_sad':
-            return _init_guess_by_qchem_sad(mol, self, uhf_for_atom=False)
+            return _init_guess_by_qchem_sad(mol, self, uhf_for_atom=True, high_spin=False)
         elif key == 'qchem_autosad':
-            return _init_guess_by_qchem_sad(mol, self, uhf_for_atom=True)
+            return _init_guess_by_qchem_sad(mol, self, uhf_for_atom=False, high_spin=True)
         elif key == 'sad_frac_occ':
             raise NotImplementedError('SAD_FRAC_OCC: Psi4-style high-spin fractional atomic UHF.')
         elif key == '1e' or key == 'hcore':
