@@ -27,13 +27,13 @@ from pyscf.lib import StreamObject
 from gpu4pyscf.gto.ecp import get_ecp
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
+from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot, stack_with_padding)
 from gpu4pyscf.scf import diis, jk, j_engine
 from . import dispersion
 from gpu4pyscf.scf.smearing import smearing
-from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 
 WITH_META_LOWDIN = getattr(__config__, 'scf_analyze_with_meta_lowdin', True)
@@ -988,7 +988,6 @@ class SCF(pyscf_lib.StreamObject):
     init_direct_scf          = NotImplemented
     get_veff                 = NotImplemented
     mulliken_meta = pop      = NotImplemented
-    mulliken_pop             = NotImplemented
     _is_mem_enough           = NotImplemented
     density_fit              = NotImplemented
     newton                   = NotImplemented
@@ -1115,6 +1114,14 @@ class SCF(pyscf_lib.StreamObject):
                 **kwargs):
         return self.to_cpu().analyze(
             verbose=verbose, with_meta_lowdin=with_meta_lowdin, **kwargs)
+
+    def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
+        '''Mulliken population analysis
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        if s is None: s = self.get_ovlp(mol)
+        return hf_cpu.mulliken_pop(mol, cupy.asnumpy(dm), cupy.asnumpy(s), verbose)
 
     def reset(self, mol=None):
         if mol is not None:

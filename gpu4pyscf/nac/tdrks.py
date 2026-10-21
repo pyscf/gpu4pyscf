@@ -19,7 +19,7 @@ This module is under development.
 from functools import reduce
 import cupy as cp
 import numpy as np
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -166,7 +166,8 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if len(mol._ecpbas) > 0:
-        dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
+        ecp_atoms = np.unique(mol._ecpbas[:, gto.ATOM_OF])
+        dh1e_td[ecp_atoms] += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
     t_debug_4 = log.timer_silent(*time0)[2]
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
@@ -521,7 +522,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if len(mol._ecpbas) > 0:
-        dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
+        ecp_atoms = np.unique(mol._ecpbas[:, gto.ATOM_OF])
+        dh1e_td[ecp_atoms] += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
     t_debug_6 = log.timer_silent(*time0)[2]
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")

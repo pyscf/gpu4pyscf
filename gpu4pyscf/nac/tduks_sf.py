@@ -15,7 +15,7 @@
 from functools import reduce
 import cupy as cp
 import numpy as np
-from pyscf import lib
+from pyscf import lib, gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df_jk import _tag_factorize_dm, _DFHF, _make_factorized_dm
@@ -275,7 +275,8 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
 
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25)  # 1/r like terms
     if len(mol._ecpbas) > 0:
-        dh1e_td += rhf_grad.get_dh1e_ecp(
+        ecp_atoms = np.unique(mol._ecpbas[:, gto.ATOM_OF])
+        dh1e_td[ecp_atoms] += rhf_grad.get_dh1e_ecp(
             mol, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25)  # 1/r like terms
     t_debug_6 = log.timer_silent(*time0)[2]
     if mol._pseudo:
