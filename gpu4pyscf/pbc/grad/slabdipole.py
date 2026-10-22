@@ -14,6 +14,7 @@
 
 '''
 Nuclear gradients of the self-consistent Bengtsson slab correction.
+Ref: 10.1103/PhysRevB.59.12301
 '''
 
 import numpy as np
