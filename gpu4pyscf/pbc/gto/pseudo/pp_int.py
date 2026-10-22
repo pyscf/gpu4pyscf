@@ -57,7 +57,7 @@ def _int_vnl(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
             int_ket(fakecell._bas[hl_dims > 2], intors[2])]
 
 def _sorted_fake_cell_vnl(cell, type='scalar'):
-    fakecell, hl_blocks = fake_cell_vnl(cell, type)
+    fakecell, hl_blocks = fake_cell_vnl(cell, type=type)
     # GTH projectors are spherical even when the AO basis is Cartesian.
     fakecell.cart = False
 
@@ -129,7 +129,7 @@ def get_pp_soc(cell, kpts=None):
         (nkpts,3,nao,nao) array for W_a. W_a is real and antisymmetric for
         gamma point and complex for k-points.
     '''
-    from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _angmom_matrix
+    from pyscf.pbc.gto.pseudo.pp_int import _angmom_matrix
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -137,7 +137,7 @@ def get_pp_soc(cell, kpts=None):
     nkpts = len(kpts)
 
     nao = cell.nao
-    vl_soc = np.zeros((nkpts, 3, nao, nao), dtype=np.complex128)
+    vl_soc = cp.zeros((nkpts, 3, nao, nao), dtype=np.complex128)
     fakecell, kl_blocks, pattern, splits = _sorted_fake_cell_vnl(cell, type='soc')
     if not kl_blocks:
         return vl_soc
@@ -150,23 +150,22 @@ def get_pp_soc(cell, kpts=None):
     for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
         kl_dim, l = pattern[ii]
         if l == 0:
-            assert kl_dim.size == 0
             continue
 
         nd = 2 * l + 1
-        kl_block = np.stack(kl_blocks[i0:i1])
+        kl_block = cp.asarray(np.stack(kl_blocks[i0:i1]))
         n_kl = len(kl_block)
-        ilp = np.empty((kl_dim, nkpts, n_kl, nd, nao), dtype=np.complex128)
+        ilp = cp.empty((kl_dim, nkpts, n_kl, nd, nao), dtype=np.complex128)
         for i in range(kl_dim):
             p0 = kl_offset[i]
             p1 = p0 + n_kl * nd
             ilp[i] = ppnl_half[i][:,p0:p1].reshape(nkpts, n_kl, nd, nao)
             kl_offset[i] = p1
 
-        #:vl_soc += einsum('ktimp,tij,amn,ktjnq->kapq', ilp.conj(), kl_block, Lmm[l], ilp)
+        #:vl_soc += einsum('iknmp,nij,amt,jkntq->kapq', ilp.conj(), kl_block, Lmm[l], ilp)
         radial = contract('nij,jknmq->iknmq', kl_block, ilp)
-        tmp = contract('mt,ikntq->iknmq', Lmm[l], radial)
+        tmp = contract('amt,ikntq->aiknmq', Lmm[l], radial)
         ilp.imag *= -1 # ilp.conj() inplace
-        contract('iknmp,iknmq->kpq', ilp, tmp, beta=1, out=vl_soc)
+        contract('iknmp,aiknmq->kapq', ilp, tmp, beta=1, out=vl_soc)
         radial = tmp = ilp = None
     return vl_soc

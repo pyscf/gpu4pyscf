@@ -30,7 +30,7 @@ import pyscf
 from pyscf import lib
 from pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from gpu4pyscf.pbc.gto.pseudo import pp_int
-from packaging.version import Version
+from pyscf.pbc.gto.pseudo import pp_int as pp_int_cpu
 
 
 def setUpModule():
@@ -113,10 +113,10 @@ class TestGetPpNlKpts(unittest.TestCase):
         self._compare(cell_fe, kpts, places=11)
 
 
-pyscf_version = Version(pyscf.__version__)
+has_pp_soc = hasattr(pp_int_cpu, 'get_pp_soc')
 
-class KnownValues(unittest.TestCase):
-    @unittest.skipIf(pyscf_version < Version('2.15'), 'PP-SOC available in 2.15')
+class TestSOC(unittest.TestCase):
+    @unittest.skipUnless(has_pp_soc, 'PySCF GTH SOC support required')
     def test_pp_soc(self):
         np.random.seed(4)
         cell = pyscf.M(
@@ -140,9 +140,15 @@ He
         kmesh = [3, 1, 4]
         kpts = cell.make_kpts(kmesh)
         dat = pp_int.get_pp_soc(cell, kpts).get()
+        ref = pp_int_cpu.get_pp_soc(cell, kpts)
+        np.testing.assert_allclose(dat, ref, atol=1e-12, rtol=0)
+        np.testing.assert_allclose(dat, -dat.swapaxes(-1, -2).conj(), atol=1e-12)
         assert abs(lib.fp(dat) - 1.0485888724761192) < 1e-12
+        gamma = pp_int.get_pp_soc(cell).get()
+        np.testing.assert_allclose(gamma, pp_int_cpu.get_pp_soc(cell), atol=1e-12)
+        np.testing.assert_allclose(gamma.imag, 0, atol=1e-12)
 
-    @unittest.skipIf(pyscf_version < Version('2.15'), 'PP-SOC available in 2.15')
+    @unittest.skipUnless(has_pp_soc, 'PySCF GTH SOC support required')
     def test_pp_scalar_soc_mixed(self):
         cell = pyscf.M(
             a = '''
@@ -165,8 +171,18 @@ He
         mf.with_soc = True
         h = mf.get_hcore().get()
         self.assertAlmostEqual(lib.fp(h), 0.4445452615133345+0.011423142532064764j, 8)
+        np.testing.assert_allclose(h, h.conj().T, atol=1e-12)
 
-    @unittest.skipIf(pyscf_version < Version('2.15'), 'PP-SOC available in 2.15')
+        # Check the spin blocks at nonzero k-points for both GHF and GKS.
+        kpts = cell.make_kpts([2, 1, 1])
+        ref = cell.KGKS(kpts=kpts)
+        ref.with_soc = True
+        mf = ref.to_gpu()
+        h = mf.get_hcore().get()
+        np.testing.assert_allclose(h, ref.get_hcore(), atol=1e-8, rtol=0)
+        np.testing.assert_allclose(h, h.swapaxes(-1, -2).conj(), atol=1e-12)
+
+    @unittest.skipUnless(has_pp_soc, 'PySCF GTH SOC support required')
     def test_with_soc_for_scalar_pp(self):
         cell = pyscf.M(
             a = '''
@@ -185,6 +201,9 @@ He
                 'S': 'GTH-PBE-q6',
             },
         )
+        soc = pp_int.get_pp_soc(cell)
+        self.assertIsInstance(soc, cp.ndarray)
+        np.testing.assert_array_equal(soc.get(), 0)
         mf_ref = cell.RHF().to_gpu().run()
         mf = cell.GHF().to_gpu().run()
         mf.with_soc = True
