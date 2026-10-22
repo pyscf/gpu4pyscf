@@ -6,13 +6,17 @@
     methods (RKS, ROKS, UKS and GKS)
   - Direct SCF and density fitting
   - Second-order SCF
+  - Conversions between restricted, unrestricted and generalized HF/KS references
+  - SAD initial guesses with spin-averaged or high-spin atomic densities,
+    including Q-Chem-style guesses
   - Fermi and Gaussian smearing
   - LDA, GGA, meta-GGA, hybrid and range-separated hybrid functionals via LibXC
   - VV10 nonlocal correlation, including analytical gradients and Hessians
+  - COACH functional with VV10 and an ATM-only D4 correction
   - Multi-collinear functionals
   - DFT+U
   - Constrained DFT with analytical nuclear gradients
-  - DFT-D3 and DFT-D4 dispersion corrections
+  - DFT-D3 and DFT-D4 dispersion corrections (optional pyscf-dispersion package)
   - Composite 3c methods, including B97-3c, r2SCAN-3c and wB97X-3c
 
 
@@ -38,8 +42,10 @@
   - Restricted MP2
   - Restricted and unrestricted density-fitted MP2
   - Frozen-core and spin-component-scaled density-fitted MP2
-  - In-core restricted CCSD
-  - Density-fitted CASSCF
+  - In-core restricted CCSD, including frozen orbitals
+  - GPU direct-spin1 FCI solver
+  - Density-fitted CASCI and diagonal-Hessian CASSCF for restricted HF/KS
+    references
 
 
 * Analytical nuclear gradients and Hessians
@@ -57,6 +63,8 @@
 * Extended systems with periodic boundary conditions
 
   - RHF, UHF, RKS and UKS at the Gamma point and with k-point sampling
+  - GHF and collinear GKS at the Gamma point and with k-point sampling;
+    GKS supports semilocal functionals with Becke grids
   - All-electron and GTH pseudopotential calculations
   - Gaussian density fitting for exact exchange matrix construction
   - Multigrid integration for LDA, GGA and meta-GGA functionals, including
@@ -68,7 +76,10 @@
   - Second-order SCF
   - Fermi and Gaussian smearing
   - Atom-resolved magnetic moment initial guesses
+  - High-spin SAD initial guesses
   - Band structures and charge population analysis
+  - Berry (Zak) phases, hybrid Wannier centers and electronic/ionic
+    polarization for closed-shell insulators
   - Geometry and lattice optimization through ASE
   - Numerical Gamma-point Hessians and phonon modes
 
@@ -78,6 +89,8 @@
   - C-PCM, COSMO, IEF-PCM and SS(V)PE
   - SWIG and ISWIG surface discretization for PCM
   - SMD implicit solvation
+  - Named solvents and configurable static and optical dielectric constants
+    for PCM and SMD
   - QM/MM embedding with point charges
   - Periodic QM/MM embedding (experimental)
   - External electric fields
@@ -86,6 +99,7 @@
 * Properties and population analysis
 
   - Molecular dipole and quadrupole moments
+  - Mulliken population analysis, including generalized HF references
   - Electron density, density gradients and kinetic energy density on grids
   - CHELPG, ESP and RESP atomic charges
   - MBIS and Hirshfeld atomic charges and multipoles
@@ -105,6 +119,7 @@
   - Minimum-energy crossing point searches
   - ASE interface for molecular and periodic calculations
   - Fewest-switches surface hopping with TDDFT and TDDFT-ris
+  - Wigner sampling of initial conditions and HDF5 trajectory checkpoints
 
 
 * Semi-empirical methods
