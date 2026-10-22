@@ -34,6 +34,7 @@ cp /gpu4pyscf/gpu4pyscf/lib/deps/lib/libxc.so build/lib.gpu4pyscf-libxc/gpu4pysc
 cd build/lib.gpu4pyscf-libxc
 
 # Compile wheels
+export GPU4PYSCF_BUILD_CUDA_WHEEL=1
 PYBIN=/opt/python/cp311-cp311/bin
 ${PYBIN}/python3 -m pip install setuptools
 ${PYBIN}/python3 $setup_dir/setup_libxc.py bdist_wheel

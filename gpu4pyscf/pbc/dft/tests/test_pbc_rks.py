@@ -178,6 +178,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -0.228035480142629, 8)
 
+    @unittest.skip('GPU PBC SCF requires k-point sampling to include the Gamma point')
     def test_lda_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
@@ -196,6 +197,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
+    @unittest.skip('GPU PBC SCF requires k-point sampling to include the Gamma point')
     def test_gga_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
@@ -214,6 +216,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
+    @unittest.skip('GPU PBC SCF requires k-point sampling to include the Gamma point')
     def test_rsh_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)

@@ -147,5 +147,12 @@ class TestDispersionLogic(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispersion.check_disp(mf_dft, disp='unsupported')
 
+    def test_parse_coach(self):
+        xc = 'COACH'
+        self.assertEqual(dispersion.parse_dft(xc), ('coach', '', 'd4:coach'))
+        self.assertEqual(dispersion.parse_disp(xc), ('coach', 'd4', True))
+        self.assertTrue(dispersion.check_disp(KnownKS(xc)))
+        self.assertEqual(dispersion.parse_disp(xc, 'd4:pbe'), ('pbe', 'd4', True))
+
 if __name__ == "__main__":
     unittest.main()

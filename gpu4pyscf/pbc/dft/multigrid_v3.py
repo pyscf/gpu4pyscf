@@ -648,7 +648,11 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     while ke_upper > 0:
         if ke_lower < init_ke:
             ke_lower = 0 # To include all remaining diffuse orbital pairs
-        filtered_pairs = pair_idx[(ke_lower < pair_ke) & (pair_ke <= ke_upper)]
+        # Compare in pair_ke's dtype (float32): pairs clamped at a
+        # float32-rounded Ecut_max would otherwise fall out of every bucket.
+        lo = pair_ke.dtype.type(ke_lower)
+        hi = pair_ke.dtype.type(ke_upper)
+        filtered_pairs = pair_idx[(lo < pair_ke) & (pair_ke <= hi)]
         if len(filtered_pairs) > 0:
             ish, jsh = divmod(filtered_pairs, NBAS_MAX)
             lij = ang_by_shell[ish] * 6 + ang_by_shell[jsh]

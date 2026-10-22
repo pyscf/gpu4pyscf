@@ -20,6 +20,8 @@ from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf
 import gpu4pyscf
 from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize_tda
+from gpu4pyscf.gto.mole import SortedMole
+from gpu4pyscf.lib import logger
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -42,6 +44,27 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
+    def test_get_Tpq_limited_memory(self):
+        auxmol = pyscf.df.addons.make_auxmol(mol, 'def2-universal-jkfit')
+        ris = tdscf.ris
+        lower_inv = ris.get_eri2c_inv_lower(auxmol).astype(cp.float64)
+        C_p = cp.eye(mol.nao)[:,:2]
+        C_q = cp.eye(mol.nao)[:,2:5]
+        log = logger.new_logger(mol)
+        ref = ris.get_Tpq(mol, auxmol, lower_inv, C_p, C_q,
+                          in_ram=False, single=False, log=log)
+        nao = SortedMole.from_mol(mol, decontract=True).nao
+        # Reserve forty auxiliary functions for the inner orbital contraction.
+        memory = 8*nao**2*160
+        for in_ram in (False, True):
+            with self.subTest(in_ram=in_ram):
+                with lib.temporary_env(ris, get_avail_mem=(lambda **kw: memory)):
+                    result = ris.get_Tpq(mol, auxmol, lower_inv, C_p, C_q,
+                                         in_ram=in_ram, single=False, log=log)
+                for actual, expected in zip(result, ref):
+                    np.testing.assert_allclose(cp.asnumpy(actual), expected.get(),
+                                               atol=1e-10, rtol=1e-10)
+
     def test_tda_pbe_singlet(self):
         mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)

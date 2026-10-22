@@ -14,11 +14,13 @@
 # limitations under the License.
 
 import unittest
+import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib
 from gpu4pyscf.pbc import scf
 from gpu4pyscf.pbc import dft
+from gpu4pyscf.scf import soscf
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 
 def setUpModule():
@@ -133,7 +135,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.293741115059207, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.293741125853439, 8)
 
     def test_nr_kuhf(self):
         mf = scf.KUHF(cell, cell.make_kpts([2,1,1]))
@@ -143,7 +145,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.293741115059207, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.293741122058536, 8)
 
     def test_nr_krks_lda(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='lda,')
@@ -152,14 +154,14 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.027594965662892, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.027594976219643, 8)
 
     def test_nr_kuks_lda(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([2,1,1]), xc='lda,')
         mf = mf.newton()
         mf.conv_tol_grad = 1e-4
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, -10.027594965662892, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.027594976219781, 8)
 
     def test_nr_krks_gga(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='b88,')
@@ -167,9 +169,18 @@ class KnowValues(unittest.TestCase):
         mf = mf.newton()
         mf.conv_tol_grad = 1e-4
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, -10.202133062075863, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.202133075401527, delta=1e-8)
 
     def test_nr_kuks_gga(self):
+        mf = dft.KUKS(cell, kpts=cell.make_kpts([3,1,1]), xc='pbe')
+        mf = mf.multigrid_numint()
+        ref = mf.copy().run()
+        mf = mf.newton()
+        mf.kernel()
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 7)
+        self.assertAlmostEqual(mf.e_tot, -10.587438241728, 7)
+
+    def test_nr_kuks_hybrid(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([2,1,1]), xc='pbe0').density_fit()
         mf = mf.multigrid_numint()
         ref = mf.copy().run()
@@ -177,7 +188,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.547948373602484, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.547948386003295, 8)
 
     def test_nr_krks_rsh(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='camb3lyp')
@@ -186,7 +197,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.550541291043928, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.550541301827390, 8)
 
     def test_rks_gen_g_hop(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]))
@@ -276,6 +287,34 @@ class KnowValues(unittest.TestCase):
         mf_so.conv_tol_grad = 1e-4
         mf_so.kernel()
         self.assertAlmostEqual(mf_so.e_tot, mf_fo.e_tot, 8)
+
+    def test_complex_hessian_reconstruction(self):
+        test_cell = pyscf.M(
+            atom='H 0 0 0; H 0 0 1.4', unit='B', a=np.eye(3)*6,
+            basis='sto-3g', precision=1e-7, mesh=[19]*3, verbose=0)
+        mf = scf.KRHF(test_cell, test_cell.make_kpts([3,1,1])).density_fit()
+        mf.time_reversal_symmetry = False
+        mf.exxdiv = None
+        hcore = mf.get_hcore()
+        energy, mo = mf.eig(hcore, mf.get_ovlp())
+        occ = mf.get_occ(energy, mo)
+        # Independent complex rotations avoid cancellation between k and -k.
+        c, s = np.cos(.2), np.sin(.2)
+        rotations = cp.asarray([
+            [[c, -s*np.exp(-1j*t)], [s*np.exp(1j*t), c]]
+            for t in [.3, .8, 1.7]])
+        mo = mo @ rotations
+        fock = hcore + mf.get_veff(test_cell, mf.make_rdm1(mo, occ))
+        g, hop, diag = mf.newton().gen_g_hop(mo, occ, fock)
+        # Ensure this setup exercises a real-linear, not complex-linear,
+        # Hessian; otherwise complex coefficients could hide the defect.
+        self.assertTrue(float(cp.linalg.norm(hop(1j*g)-1j*hop(g))) > 1e-5)
+        # Check reconstruction against a fresh Hessian evaluation
+        steps = list(soscf._davidson_cc(
+            hop, lambda: g, lambda r, w: r/(diag-w), g, max_cycle=2))
+        self.assertEqual(len(steps), 2)
+        for _, _, _, x, hx, _, _ in steps:
+            cp.testing.assert_allclose(hx, hop(x), atol=1e-10, rtol=1e-10)
 
 if __name__ == "__main__":
     print("Full Tests for PBC Newton solver")

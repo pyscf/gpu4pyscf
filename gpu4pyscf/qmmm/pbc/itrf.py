@@ -710,7 +710,7 @@ class QMMMGrad:
         dist2 = all_mm_coords - cp.mean(qm_coords, axis=0)[None]
         dist2 = contract('jx,jx->j', dist2, dist2)
         if with_mm:
-            mm_ewovrl_grad = np.zeros_like(all_mm_coords)
+            mm_ewovrl_grad = cp.zeros_like(all_mm_coords)
         mem_avail = cupy_helper.get_avail_mem()
         blksize = int(mem_avail/64/3/len(all_mm_coords))
         if blksize == 0:

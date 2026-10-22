@@ -178,13 +178,83 @@ class KohnShamDFT(rks.KohnShamDFT):
 
     _keys = {'cphf_grids', *rks.KohnShamDFT._keys}
 
-    to_rhf = NotImplemented
-    to_uhf = NotImplemented
-    to_ghf = NotImplemented
-    to_hf  = NotImplemented
-    to_rks = NotImplemented
-    to_uks = NotImplemented
-    to_gks = NotImplemented
+    def to_rhf(self):
+        '''Convert the input mean-field object to a RHF/ROHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_rks().to_hf()
+
+    def to_uhf(self):
+        '''Convert the input mean-field object to a UHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_uks().to_hf()
+
+    def to_ghf(self):
+        '''Convert the input mean-field object to a GHF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        return self.to_gks().to_hf()
+
+    def to_hf(self):
+        '''Convert the input KS object to the associated HF object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        raise NotImplementedError
+
+    def to_rks(self, xc=None):
+        '''Convert the input mean-field object to a RKS/ROKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        mf = addons.convert_to_rhf(self)
+        if xc is not None:
+            mf.xc = xc
+        mf.converged = xc == self.xc and mf.converged
+        return mf
+
+    def to_uks(self, xc=None):
+        '''Convert the input mean-field object to a UKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        mf = addons.convert_to_uhf(self)
+        if xc is not None:
+            mf.xc = xc
+        mf.converged = xc == self.xc and mf.converged
+        return mf
+
+    def to_gks(self, xc=None):
+        '''Convert the input mean-field object to a GKS object.
+
+        Note this conversion only changes the class of the mean-field object.
+        The total energy and wave-function are the same as them in the input
+        mean-field object.
+        '''
+        from gpu4pyscf.scf import addons
+        mf = addons.convert_to_ghf(self)
+        if xc is not None:
+            mf.xc = xc
+        mf.converged = xc == self.xc and mf.converged
+        return mf
 
     # Use rho to filter grids
     small_rho_cutoff = getattr(__config__, 'dft_rks_RKS_small_rho_cutoff', 0)
@@ -283,5 +353,8 @@ class RKS(KohnShamDFT, hf.RHF):
     energy_elec = energy_elec
     energy_tot = hf.RHF.energy_tot
     get_veff = get_veff
-    to_hf = NotImplemented
+    def to_hf(self):
+        '''Convert to RHF object.'''
+        from gpu4pyscf import scf
+        return self._transfer_attrs_(scf.RHF(self.mol))
     init_guess_by_vsap = rks.init_guess_by_vsap

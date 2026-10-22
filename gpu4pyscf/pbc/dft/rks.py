@@ -160,6 +160,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
             self.kpt = self.__dict__.pop('kpt')
 
         kpts = self.kpts
+        khf._check_kpts(kpts)
         # for GDF and MDF
         with_df = self.with_df
         if (isinstance(with_df, GDF) and

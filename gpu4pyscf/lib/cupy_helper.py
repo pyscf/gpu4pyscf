@@ -467,6 +467,10 @@ def take_last2d(a, indices, out=None):
     else:
         count = np.prod(a.shape[:-2])
     out = ndarray((count, nidx, nidx), buffer=out)
+    if a.ndim == 2:
+        out = out.reshape(nidx,nidx)
+    if nidx == 0:
+        return out
     indices_int32 = cupy.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.take_last2d(
@@ -480,8 +484,6 @@ def take_last2d(a, indices, out=None):
     )
     if err != 0:
         raise RuntimeError('failed in take_last2d kernel')
-    if a.ndim == 2:
-        out = out.reshape(nidx,nidx)
     return out
 
 def takebak(out, a, indices, axis=-1):

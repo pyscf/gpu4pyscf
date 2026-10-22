@@ -17,12 +17,14 @@ import numpy as np
 import cupy
 from pyscf.scf import uhf as uhf_cpu
 from pyscf.scf import hf as hf_cpu
-from pyscf import __config__
 from pyscf.data.nist import HARTREE2EV
-from gpu4pyscf.scf.hf import eigh, damping, level_shift
-from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array, asarray
+from gpu4pyscf.scf.hf import eigh, damping, level_shift
+from gpu4pyscf.scf import hf
+from gpu4pyscf.gto.mole import groupby
+from gpu4pyscf import __config__
+
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''One-particle density matrix in AO representation
@@ -180,9 +182,11 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
 
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
-    def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None):
+    def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None, **kwargs):
         if mol is None: mol = mf.mol
-        dm = fn(mf, mol)
+        dm = fn(mf, mol, **kwargs)
+        if dm.ndim == 3:
+            return dm
         assert dm.ndim == 2
 
         neleca, nelecb = mf.nelec
@@ -276,7 +280,7 @@ class UHF(hf.SCF):
             lumo = lumo_b = mo_energy[1, e_idx_b[n_b]].item()
             lumo_a = None
             if n_a < nmo:
-                lumo_a = mo_energy[1, e_idx_a[n_a]].item()
+                lumo_a = mo_energy[0, e_idx_a[n_a]].item()
                 lumo = min(lumo, lumo_a)
             gap = (lumo - homo) * HARTREE2EV
             self.scf_summary['gap'] = gap
@@ -314,6 +318,14 @@ class UHF(hf.SCF):
             fock = self.get_hcore(self.mol) + self.get_veff(self.mol, dm1)
         return get_grad(mo_coeff, mo_occ, fock)
 
+    def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
+        '''Mulliken population analysis
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        if s is None: s = self.get_ovlp(mol)
+        return uhf_cpu.mulliken_pop(mol, cupy.asnumpy(dm), cupy.asnumpy(s), verbose)
+
     make_asym_dm             = NotImplemented
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
@@ -330,8 +342,8 @@ class UHF(hf.SCF):
     x2c = x2c1e = sfx2c1e   = hf.RHF.sfx2c1e
     newton                  = hf.RHF.newton
 
-    init_guess_by_minao      = _cast_rhf_init_guess(hf.RHF.init_guess_by_minao)
-    init_guess_by_atom       = _cast_rhf_init_guess(hf.RHF.init_guess_by_atom)
+    init_guess_by_minao      = _cast_rhf_init_guess(hf.SCF.init_guess_by_minao)
+    init_guess_by_atom       = _cast_rhf_init_guess(hf.SCF.init_guess_by_atom)
     init_guess_by_chkfile    = hf.return_cupy_array(uhf_cpu.UHF.init_guess_by_chkfile)
 
     def init_guess_by_1e(self, mol=None, breaksym=None):
@@ -361,9 +373,11 @@ class UHF(hf.SCF):
         return hf_cpu.init_guess_by_mod_huckel(mol)
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
+        if not isinstance(key, str):
+            return key
         dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
         if self.verbose >= logger.DEBUG1:
-            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp()).real
+            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp(mol)).real
             logger.debug1(self, 'Nelec from initial guess = %s', nelec)
         return dm
 
@@ -422,3 +436,9 @@ class UHF(hf.SCF):
         mf = uhf_cpu.UHF(self.mol)
         utils.to_cpu(self, mf)
         return mf
+
+    def to_ks(self, xc='HF'):
+        '''Convert to UKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.UKS(self.mol, xc=xc))
