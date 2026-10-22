@@ -173,7 +173,6 @@ class GHF(pbchf.SCF):
     get_bands = ghf_cpu.GHF.get_bands
     density_fit = pbchf.RHF.density_fit
     energy_elec = mol_hf.energy_elec
-    get_init_guess = pbchf.SCF.get_init_guess
     init_guess_by_huckel = return_cupy_array(ghf_cpu.GHF.init_guess_by_huckel)
     init_guess_by_mod_huckel = return_cupy_array(ghf_cpu.GHF.init_guess_by_mod_huckel)
     init_guess_by_chkfile = return_cupy_array(ghf_cpu.GHF.init_guess_by_chkfile)
@@ -217,11 +216,14 @@ class GHF(pbchf.SCF):
             vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
-    def init_guess_by_minao(self, mol=None):
-        return mol_ghf._from_rhf_init_dm(mol_hf.SCF.init_guess_by_minao(self, mol))
+    def get_init_guess(self, cell=None, key='minao', s1e=None):
+        assert isinstance(key, str)
+        if cell is None: cell = self.cell
+        dm = mol_ghf.GHF.get_init_guess(self, cell, key)
+        return pbchf.normalize_dm_(self, dm, s1e)
 
-    def init_guess_by_atom(self, mol=None):
-        return mol_ghf._from_rhf_init_dm(mol_hf.SCF.init_guess_by_atom(self, mol))
+    init_guess_by_minao = mol_ghf.GHF.init_guess_by_minao
+    init_guess_by_atom = mol_ghf.GHF.init_guess_by_atom
 
     def init_guess_by_1e(self, mol=None):
         if mol is None: mol = self.mol

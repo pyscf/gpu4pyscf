@@ -23,14 +23,15 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array, tag_array
 from gpu4pyscf.lib import utils
 
-
-def _from_rhf_init_dm(dma, breaksym=True):
+def _from_rhf_init_dm(dma, breaksym=False):
+    mo_coeff = getattr(dma, 'mo_coeff', None)
+    mo_occ = getattr(dma, 'mo_occ', None)
     dma = dma * .5
     dm = block_diag(dma, dma)
-    if breaksym:
-        nao = dma.shape[0]
-        idx, idy = cp.diag_indices(nao)
-        dm[idx+nao,idy] = dm[idx,idy+nao] = dma.diagonal() * .05
+    assert not breaksym
+    if mo_coeff is not None and mo_occ is not None:
+        dm = tag_array(dm, mo_coeff=block_diag(mo_coeff, mo_coeff),
+                       mo_occ=cp.hstack([mo_occ, mo_occ]) * .5)
     return dm
 
 
@@ -150,11 +151,36 @@ class GHF(hf.SCF):
         '''
         raise NotImplementedError('Solvent models are not implemented for GHF.')
 
+    def init_guess_by_minao(self, mol=None, high_spin=False):
+        dm = hf.SCF.init_guess_by_minao(self, mol, high_spin=high_spin)
+        if high_spin:
+            return tag_array(block_diag(dm[0], dm[1]),
+                             mo_coeff=block_diag(*dm.mo_coeff),
+                             mo_occ=cp.hstack(dm.mo_occ))
+        return _from_rhf_init_dm(dm)
+
+    def init_guess_by_atom(self, mol=None, high_spin=False):
+        dm = hf.SCF.init_guess_by_atom(self, mol, high_spin=high_spin)
+        if high_spin:
+            return tag_array(block_diag(dm[0], dm[1]),
+                             mo_coeff=block_diag(*dm.mo_coeff),
+                             mo_occ=cp.hstack(dm.mo_occ))
+        return _from_rhf_init_dm(dm)
+
     def get_init_guess(self, mol=None, key='minao', **kwargs):
-        dm = hf.RHF.get_init_guess(self, mol, key, **kwargs)
+        if not isinstance(key, str):
+            return key
+        if mol is None:
+            mol = self.mol
         key = key.lower()
-        if key != 'hcore' and key != '1e':
+        dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
+        nao = mol.nao
+        if dm.shape == (nao, nao):
             dm = _from_rhf_init_dm(dm)
+        elif dm.shape == (2, nao, nao):
+            dm = tag_array(block_diag(dm[0], dm[1]),
+                           mo_coeff=block_diag(*dm.mo_coeff),
+                           mo_occ=cp.hstack(dm.mo_occ))
         return dm
 
     def get_hcore(self, mol=None):
