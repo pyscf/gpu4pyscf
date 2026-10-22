@@ -228,6 +228,21 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
+    def test_get_pp_diffuse_f_tight_s(self):
+        cell = gto.M(
+            a=[[3.017031529165, 0., 0.],
+               [-1.604013528206647, 4.811219930671413, 0.],
+               [-1.325096296375144, 2.828110544741328, 2.492047608632386]],
+            atom=[['Be', [-0.195773528208549, 4.838911230672638, 0.156962000000217]],
+                  ['Zn', [1.292339999999215, 3.173069999999211, 0.837040000000720]]],
+            basis={'Be': [[0, [10., 1.]]], 'Zn': [[3, [0.05, 1.]]]},
+            pseudo={'Be': [[4], 0.3252498935955, 0, [], 0],
+                    'Zn': [[0], 0.50704497116043, 0, [], 0]},
+            unit='Bohr', precision=1e-6, verbose=0)
+        ref = pseudo.get_pp(cell)
+        out = multigrid.MultiGridNumInt(cell).get_pp().get()[0]
+        assert abs(out-ref).max() < 1e-6
+
     def test_get_nuc(self):
         ref = MultiGridNumInt_cpu(cell_orth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()

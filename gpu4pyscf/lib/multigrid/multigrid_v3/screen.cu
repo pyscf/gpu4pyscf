@@ -362,8 +362,9 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, PBCIntEnvVars envs,
     float rr_raw = log_fac / theta;
     float Ecut_raw = log_fac * (2*aij);
     float Ecut_2a = Ecut_raw / (2*aij*aij);
-    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw + Ecut_2a);
-    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw + Ecut_2a);
+    // dri = |Rp-Ri| ~ fj*|Rij|, dj = |Rp-Rj| = fi*|Rij|
+    float dri_fac = .5f * logf(.5f*li/aij + fj*fj*rr_raw + Ecut_2a);
+    float drj_fac = .5f * logf(.5f*lj/aij + fi*fi*rr_raw + Ecut_2a);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
     float rr_cutoff = log_fac / theta;
@@ -418,8 +419,9 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars en
     float rr_raw = log_fac / theta;
     float Ecut_raw = log_fac * (2*aij);
     float Ecut_2a = Ecut_raw / (2*aij*aij);
-    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw + Ecut_2a);
-    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw + Ecut_2a);
+    // dri = |Rp-Ri| ~ fj*|Rij|, dj = |Rp-Rj| = fi*|Rij|
+    float dri_fac = .5f * logf(.5f*li/aij + fj*fj*rr_raw + Ecut_2a);
+    float drj_fac = .5f * logf(.5f*lj/aij + fi*fi*rr_raw + Ecut_2a);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
 
@@ -497,8 +499,9 @@ void supmol_non_trivial_pairs_kernel(int64_t *supmol_bas_ij, int64_t *bas_ij_idx
     float log_fac = log_cicj + 1.717f - 1.5f * logf(aij) - log_cutoff;
     log_fac = max(log_fac, 1e-9f);
     float rr_raw = log_fac / theta;
-    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw);
-    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw);
+    // dri = |Rp-Ri| ~ fj*|Rij|, dj = |Rp-Rj| = fi*|Rij|
+    float dri_fac = .5f * logf(.5f*li/aij + fj*fj*rr_raw);
+    float drj_fac = .5f * logf(.5f*lj/aij + fi*fi*rr_raw);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
     log_fac = max(log_fac, 0.f);

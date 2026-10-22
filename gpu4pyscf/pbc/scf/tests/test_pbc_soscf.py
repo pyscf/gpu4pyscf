@@ -135,7 +135,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.293741115059207, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.293741125853439, 8)
 
     def test_nr_kuhf(self):
         mf = scf.KUHF(cell, cell.make_kpts([2,1,1]))
@@ -145,7 +145,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.293741115059207, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.293741122058536, 8)
 
     def test_nr_krks_lda(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='lda,')
@@ -154,14 +154,14 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.027594965662892, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.027594976219643, 8)
 
     def test_nr_kuks_lda(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([2,1,1]), xc='lda,')
         mf = mf.newton()
         mf.conv_tol_grad = 1e-4
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, -10.027594965662892, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.027594976219781, 8)
 
     def test_nr_krks_gga(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='b88,')
@@ -169,7 +169,7 @@ class KnowValues(unittest.TestCase):
         mf = mf.newton()
         mf.conv_tol_grad = 1e-4
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, -10.202133062075863, delta=1e-8)
+        self.assertAlmostEqual(mf.e_tot, -10.202133075401527, delta=1e-8)
 
     def test_nr_kuks_gga(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([3,1,1]), xc='pbe')
@@ -188,7 +188,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.547948373602484, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.547948386003295, 8)
 
     def test_nr_krks_rsh(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='camb3lyp')
@@ -197,7 +197,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.550541291043928, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.550541301827390, 8)
 
     def test_rks_gen_g_hop(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]))
