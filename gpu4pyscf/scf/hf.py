@@ -733,8 +733,8 @@ def _atomic_hf_configs(mol, high_spin=False):
     atm_scf = atom_hf.get_atm_nrhf(mol, configuration)
     aoslice = mol.aoslice_by_atom()
     if mol.cart:
-        ls = mol._bas[:,gto.ANG_OF]
-        c2s_l = [gto.cart2sph(l, normalized='sp') for l in range(5)]
+        c2s_l = {l: gto.cart2sph(l, normalized='sp')
+                 for l in set(mol._bas[:,gto.ANG_OF])}
 
     atm_conf = {}
     for ia in range(mol.natm):
@@ -749,7 +749,8 @@ def _atomic_hf_configs(mol, high_spin=False):
             occ = asarray(occ[occ>0])
             if mol.cart:
                 b0, b1 = aoslice[ia,:2]
-                c2s = [c2s_l[l] for l in ls[b0:b1]]
+                c2s = [c2s_l[mol.bas_angular(ib)]
+                       for ib in range(b0, b1) for _ in range(mol.bas_nctr(ib))]
                 c2s = asarray(scipy.linalg.block_diag(*c2s))
                 c = c2s.dot(c)
         else:  # symb's basis is not specified in the input
@@ -769,8 +770,8 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
         The basis, ECP, and auxiliary basis (if applicable) are preserved.
 
         If high_spin is True, retain aligned atomic spins in unrestricted
-        guesses. Otherwise, average the alpha and beta densities. Restricted
-        guesses always use the spin-summed density.
+        guesses. Otherwise, average the alpha and beta densities. Closed-shell
+        restricted guesses always use the spin-summed density.
 
         The Q-Chem-style presets combine these independent options: AUTOSAD
         uses the molecular method for the atomic calculations and retains
@@ -781,12 +782,13 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
     from pyscf.data.elements import NEUTRAL_ATOM_SPIN
     from pyscf.data.elements import charge as charge_of_element
     from gpu4pyscf.scf.uhf import UHF
+    from gpu4pyscf.scf.rohf import ROHF
     from gpu4pyscf.dft.rks import RKS
     from gpu4pyscf.dft.uks import UKS
     assert isinstance(mf_template, RHF) or isinstance(mf_template, UHF) # GHF not supported
 
-    elements = mol.elements
-    unique_elements = list(set(elements))
+    elements = [mol.atom_symbol(ia) for ia in range(mol.natm)]
+    unique_elements = list(dict.fromkeys(elements))
 
     mf_per_element = {}
     for element in unique_elements:
@@ -794,7 +796,7 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
         if Z == 0: # Ghost atom
             mf_per_element[element] = None
             continue
-        assert 0 < Z and Z < len(NEUTRAL_ATOM_SPIN)
+        assert 0 < Z <= len(NEUTRAL_ATOM_SPIN)
         spin = NEUTRAL_ATOM_SPIN[Z - 1]
         assert spin >= 0 # So extra electron is always put in alpha orbitals, and we can guarantee high spin configuration
         charge = 0 # Only support neutral atoms for now
@@ -803,6 +805,11 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
         mol_atom.atom = f"{element} 0 0 0"
         mol_atom.charge = charge
         mol_atom.spin = spin
+        # Temporary workaround for a PySCF Mole.build bug: rebuilding a copied
+        # molecule as an atom without an ECP leaves the old _ecpbas table intact.
+        # Its pointers refer to the previous _env and can cause invalid integral
+        # reads. Clear it here until the fix is available in supported PySCF versions.
+        mol_atom._ecpbas = np.zeros((0, gto.BAS_SLOTS), dtype=np.int32)
         mol_atom.build(False, False)
 
         mf_atom = mf_template.copy()
@@ -835,8 +842,7 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
 
     dm0 = cupy.zeros((2, mol.nao, mol.nao))
 
-    nao_offset = 0
-    for i_atom in range(mol.natm):
+    for i_atom, (_, _, p0, p1) in enumerate(mol.aoslice_by_atom()):
         element = elements[i_atom]
         mf_atom = mf_per_element[element]
         if mf_atom is None: # Ghost atom
@@ -873,10 +879,9 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
                                         iao_li + i_ctr * nao_li : iao_li + (i_ctr + 1) * nao_li,
                                         iao_lj + j_ctr * nao_lj : iao_lj + (j_ctr + 1) * nao_lj] = cupy.eye(nao_li) * (dm_l_trace / nao_li)
 
-        dm0[:, nao_offset:nao_offset + nao_atom, nao_offset:nao_offset + nao_atom] = dm_atom
-        nao_offset += nao_atom
+        dm0[:, p0:p1, p0:p1] = dm_atom
 
-    if isinstance(mf_template, RHF):
+    if isinstance(mf_template, RHF) and not isinstance(mf_template, ROHF):
         dm0 = dm0[0] + dm0[1]
     else:
         if not high_spin: # Reproduce Q-Chem SCF_GUESS SAD behavior

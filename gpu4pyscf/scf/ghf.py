@@ -24,13 +24,14 @@ from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array, tag_array
 from gpu4pyscf.lib import utils
 
 def _from_rhf_init_dm(dma, breaksym=False):
-    mo_coeff = dma.mo_coeff
-    mo_occ = dma.mo_occ * .5
+    mo_coeff = getattr(dma, 'mo_coeff', None)
+    mo_occ = getattr(dma, 'mo_occ', None)
     dma = dma * .5
     dm = block_diag(dma, dma)
     assert not breaksym
-    dm = tag_array(dm, mo_coeff=block_diag(mo_coeff, mo_coeff),
-                   mo_occ=cp.hstack([mo_occ, mo_occ]))
+    if mo_coeff is not None and mo_occ is not None:
+        dm = tag_array(dm, mo_coeff=block_diag(mo_coeff, mo_coeff),
+                       mo_occ=cp.hstack([mo_occ, mo_occ]) * .5)
     return dm
 
 

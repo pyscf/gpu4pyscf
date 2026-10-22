@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
 import numpy as np
 import cupy as cp
 import pyscf
@@ -285,7 +286,18 @@ class KnownValues(unittest.TestCase):
 
         mf = UKS(mol, xc = "wB97X")
 
-        dm0 = mf.get_init_guess(key='qchem_autosad')
+        atomic_kernel = UKS.kernel
+
+        def check_atomic_ecp(mf_atom, *args, **kwargs):
+            # PySCF Mole.build can retain iodine's ECP table when rebuilding H.
+            # Check the temporary workaround in _init_guess_by_qchem_sad clears
+            # that stale table before the atomic SCF evaluates any integrals.
+            if not mf_atom.mol._ecp:
+                self.assertEqual(mf_atom.mol._ecpbas.size, 0)
+            return atomic_kernel(mf_atom, *args, **kwargs)
+
+        with mock.patch.object(UKS, 'kernel', check_atomic_ecp):
+            dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -479,6 +491,13 @@ class KnownValues(unittest.TestCase):
         ref_guess_energy = -150.5208015220
 
         assert abs(test_guess_energy - ref_guess_energy) < 3e-5
+
+    def test_ghf_untagged_initial_density(self):
+        dm = cp.asarray([[1., .2], [.2, 1.]])
+        result = ghf._from_rhf_init_dm(dm)
+        cp.testing.assert_allclose(result[:2, :2], dm * .5)
+        cp.testing.assert_allclose(result[2:, 2:], dm * .5)
+        cp.testing.assert_allclose(result[:2, 2:], 0)
 
     def test_minao_high_spin_rhf(self):
         mol = pyscf.M(atom='O 0 0 0; O 0 0 1.2', basis='cc-pvdz', verbose=0)

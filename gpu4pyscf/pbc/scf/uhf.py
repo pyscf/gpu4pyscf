@@ -29,6 +29,33 @@ from gpu4pyscf.scf import uhf as mol_uhf
 from gpu4pyscf.pbc.scf import hf as pbchf
 
 
+def _normalize_spin_dm_(dm, ne, nelec):
+    """Normalize spin densities and their orbital tags to the target populations.
+
+    Args:
+        dm : CuPy array
+            Alpha/beta densities, shape (2, nao, nao) or (2, nkpts, nao, nao).
+            Updated in place together with any mo_occ tags; mo_coeff is unchanged.
+        ne : array of length 2
+            Current alpha/beta electron counts obtained by tracing dm with
+            the overlap. Empty channels remain zero even if their target is nonzero.
+        nelec : sequence of length 2
+            Target alpha/beta electron counts. For k-point densities, both
+            ne and nelec count electrons summed over all k-points.
+
+    Returns:
+        The input dm after normalization.
+    """
+    scale_a = nelec[0] / ne[0] if ne[0] != 0 else 0.
+    scale_b = nelec[1] / ne[1] if ne[1] != 0 else 0.
+    dm[0] *= scale_a
+    dm[1] *= scale_b
+    if hasattr(dm, 'mo_coeff'):
+        dm.mo_occ[0] *= scale_a
+        dm.mo_occ[1] *= scale_b
+    return dm
+
+
 class UHF(pbchf.SCF):
     '''UHF class for PBCs.
     '''
@@ -100,12 +127,7 @@ class UHF(pbchf.SCF):
                          'lead to instability in SCF for low-dimensional '
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons %s', ne, nelec)
-            ne[1] += 1e-300 # Number of beta electrons may be 0
-            dm[0] *= nelec[0] / ne[0]
-            dm[1] *= nelec[1] / ne[1]
-            if hasattr(dm, 'mo_coeff'):
-                dm.mo_occ[0] *= nelec[0] / ne[0]
-                dm.mo_occ[1] *= nelec[1] / ne[1]
+            _normalize_spin_dm_(dm, ne, nelec)
         return dm
 
     init_guess_by_minao = mol_uhf.UHF.init_guess_by_minao

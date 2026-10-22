@@ -307,12 +307,7 @@ class KUHF(khf.KSCF):
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons (%g, %g)',
                          ne.mean()/nkpts, nelec[0]/nkpts, nelec[1]/nkpts)
-            ne[1] += 1e-300 # Number of beta electrons may be 0
-            dm[0] *= nelec[0] / ne[0]
-            dm[1] *= nelec[1] / ne[1]
-            if hasattr(dm, 'mo_coeff'):
-                dm.mo_occ[0] *= nelec[0] / ne[0]
-                dm.mo_occ[1] *= nelec[1] / ne[1]
+            pbcuhf._normalize_spin_dm_(dm, ne, nelec)
         return dm
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
