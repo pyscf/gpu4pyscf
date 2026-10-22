@@ -345,3 +345,13 @@ if pyscf_version <= 12:
             gpu_obj.surface_discretization_method = "SWIG"
         return gpu_obj
     PCM.to_gpu = _smd_to_gpu
+
+if pyscf_version <= 14:
+    from pyscf.pbc.gto.pseudo import pp_int
+    if not hasattr(pp_int, 'get_pp_soc'):
+        _fake_cell_vnl_old = pp_int.fake_cell_vnl
+        def fake_cell_vnl(cell, type='scalar'):
+            if type.lower() != 'scalar':
+                raise NotImplementedError('GTH SOC requires a newer PySCF version')
+            return _fake_cell_vnl_old(cell)
+        pp_int.fake_cell_vnl = fake_cell_vnl

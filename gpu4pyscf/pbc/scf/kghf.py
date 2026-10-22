@@ -28,6 +28,7 @@ from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.scf import ghf as mol_ghf
 from gpu4pyscf.pbc.scf import khf, ghf
+from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_soc
 
 
 def get_jk(mf, cell=None, dm_kpts=None, hermi=0, kpts=None, kpts_band=None,
@@ -185,6 +186,11 @@ class KGHF(khf.KSCF):
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kpts
         h = ghf._block_diag(khf.KSCF.get_hcore(self, cell, kpts))
+        if self.with_soc and cell._pseudo:
+            vl_soc = get_pp_soc(cell, kpts)
+            s = .5 * cp.asarray(lib.PauliMatrices)
+            vl_soc = cp.einsum('sxy,kspq->kxpyq', 1j * s, vl_soc)
+            h = h + vl_soc.reshape(h.shape)
         if self.with_soc and cell.has_ecp_soc():
             raise NotImplementedError('ECP in PBC SCF')
         return h
