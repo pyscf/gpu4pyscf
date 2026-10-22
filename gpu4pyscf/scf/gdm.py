@@ -18,7 +18,7 @@ Geometric direct minimization (GDM) SCF solver
 
 import numpy as np
 import cupy as cp
-from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import eigh
 
 GDM_LBFGS_Y_DOT_S_ZERO_THRESHOLD = 1e-12
@@ -235,8 +235,8 @@ def kappa_gradient(mo_coeff, nocc, fock):
         assert mo_coeff.ndim == 2
         assert fock.ndim == 2
 
-        mocc = mo_coeff[0, :, :nocc]
-        mvir = mo_coeff[0, :, nocc:]
+        mocc = mo_coeff[:, :nocc]
+        mvir = mo_coeff[:, nocc:]
         Fov = mocc.T @ fock @ mvir
         # The following factor of -2.0 comes from:
         # dE(alpha * kappa)/dalpha = - Tr(F_{ov} kappa^T) - Tr(F_{vo} kappa) = -2 Re( Tr(F_{vo} kappa) )
@@ -268,10 +268,10 @@ def get_nocc(mo_occ):
     nmo = mo_occ.shape[-1]
     if mo_occ.ndim == 1:
         assert mo_occ.shape == (nmo,)
-        nocc = int(cp.sum(mo_occ == 1))
+        nocc = int(cp.sum(mo_occ == 2))
         nvir = int(cp.sum(mo_occ == 0))
         assert nocc + nvir == nmo, "Only integer occupations are supported for GDM yet."
-        assert cp.all(mo_occ[:nocc] == 1), "Occupation number must be sorted."
+        assert cp.all(mo_occ[:nocc] == 2), "Occupation number must be sorted."
         return nocc
     else:
         assert mo_occ.shape == (2, nmo)
@@ -332,15 +332,30 @@ def lbfgs_get_direction(gradient, lbfgs_s_y, initial_inverse_hessian = None):
 
     return -z
 
-def kernel(mf, dm0=None, *,
-           minimal_diagonal_hessian=1e-4,
-           max_step_norm=0.5,
-           min_n_lbfgs_record=1, max_n_lbfgs_record=20,
-           line_search_c=1e-4, line_search_tau=0.5, max_n_line_search_attempt=8, line_search_initial_scale=1.0):
+def _kernel(mf, dm0,
+            minimal_diagonal_hessian,
+            min_n_lbfgs_record,
+            max_n_lbfgs_record,
+            max_step_norm,
+            line_search_c,
+            line_search_tau,
+            max_n_line_search_attempt,
+            line_search_initial_scale):
+    """
+        Geometric Direct Minimization
+        Implementation follows:
+        Van Voorhis, T.; Head-Gordon, M. A geometric approach to direct minimization.
+        Molecular Physics 2002, 100, 1713-1721. https://doi.org/10.1080/00268970110103642
 
+        Except for the two-loop-recursion LBFGS and backtracking line search,
+        which follow wikipedia pages:
+        https://en.wikipedia.org/wiki/Limited-memory_BFGS
+        https://en.wikipedia.org/wiki/Backtracking_line_search
+    """
     if dm0 is None:
         dm0 = mf.get_init_guess(mf.mol, mf.init_guess)
     dm0 = cp.asarray(dm0)
+
     h1e = cp.asarray(mf.get_hcore())
     s1e = cp.asarray(mf.get_ovlp())
     vhf0 = mf.get_veff(mf.mol, dm0)
@@ -353,6 +368,10 @@ def kernel(mf, dm0=None, *,
 
     verbose = mf.verbose
     log = logger.new_logger(mf, verbose)
+    if mf.conv_tol_grad is None:
+        mf.conv_tol_grad = mf.conv_tol**0.5
+        log.info('Set gradient conv threshold to %g', mf.conv_tol_grad)
+
     if mo_coeff.ndim == 2:
         log.info(" Cycle               Energy    RMS Gradient    Step")
     else:
@@ -361,6 +380,7 @@ def kernel(mf, dm0=None, *,
     lbfgs_s_y = []
     previous_gradient = previous_step = None
     previous_e_tot = None
+    step_type = "Uninitialized error! Please report a bug if you see this line."
 
     converged = False
     assert mf.max_cycle > 1
@@ -477,3 +497,67 @@ def kernel(mf, dm0=None, *,
 
     return e_tot
 
+class GDM:
+    _keys = {}
+
+    def __init__(self, mf):
+        self.mf = mf
+
+        # Approximated hessian parameters
+        self.minimal_diagonal_hessian = 1e-4
+
+        # L-BFGS parameters
+        self.min_n_lbfgs_record = 1
+        self.max_n_lbfgs_record = 20
+        self.max_step_norm = 0.5
+
+        # Line search parameters
+        self.line_search_c = 1e-4
+        self.line_search_tau = 0.5
+        self.max_n_line_search_attempt = 8
+        self.line_search_initial_scale = 1.0
+
+    to_gpu = utils.to_gpu
+    device = utils.device
+
+    def to_cpu(self):
+        raise NotImplementedError("GDM not implemented in CPU mode yet")
+
+    def build(self, mol=None):
+        self.mf.build(mol)
+        return self
+
+    def reset(self, mol=None):
+        self.mf.reset(mol)
+        return self
+
+    def undo_gdm(self):
+        return self.mf
+
+    def error_undo_first(self):
+        raise ValueError("Please call undo_gdm() first to get the mean-field object back!")
+    nuc_grad_method = error_undo_first
+    Gradients = error_undo_first
+    Hessian = error_undo_first
+
+    def kernel(self, dm0=None):
+        return _kernel(self.mf, dm0,
+                       self.minimal_diagonal_hessian,
+                       self.min_n_lbfgs_record,
+                       self.max_n_lbfgs_record,
+                       self.max_step_norm,
+                       self.line_search_c,
+                       self.line_search_tau,
+                       self.max_n_line_search_attempt,
+                       self.line_search_initial_scale)
+
+def gdm(mf):
+    if isinstance(mf, GDM):
+        return mf
+
+    from gpu4pyscf.scf.hf import SCF
+    assert isinstance(mf, SCF)
+
+    assert mf.istype('RHF') or mf.istype('UHF'), "RO/G HF/KS not supported yet, only R/U HF/KS are supported"
+
+    return GDM(mf)
