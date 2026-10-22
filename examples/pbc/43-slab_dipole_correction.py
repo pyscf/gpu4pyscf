@@ -35,12 +35,12 @@ kpts = cell.make_kpts([2, 2, 1])
 mf = dft.KRKS(cell, kpts, xc='pbe').multigrid_numint()
 slab_dipole_correction(mf)
 
-# The zero point and the discontinuity can be set independently (both in Bohr):
-# slab_dipole_correction(mf, z0=10.0)           # automatic cut, v_dip(10) = 0
+# IMPORTANT: z0 and cut are always in Bohr, regardless of cell.unit.
+# slab_dipole_correction(mf, z0=10.0)          # automatic cut, v_dip(10) = 0
 # slab_dipole_correction(mf, cut=20.0)         # manual cut, zero-average potential
 # slab_dipole_correction(mf, z0=10.0, cut=20.0)
 # The cut must lie in vacuum; changing z0 leaves this cut fixed.
-# To match PySCF's slab_center=10 convention:
+# To match PySCF's slab_center=10 Bohr convention:
 # slab_dipole_correction(mf, z0=10.0, cut=10.0+cell.lattice_vectors()[2, 2]/2)
 
 mf.kernel()
@@ -51,8 +51,8 @@ print('Charge dipole (e Bohr):', veff.dipole)
 print('Dipole energy correction (Hartree):', veff.edip)
 
 # Analytic nuclear gradient of the dipole-corrected total energy.
-# For geometry optimization, set cut explicitly in the vacuum so that the
-# sawtooth branch remains fixed when the cell is reset.
+# For geometry optimization, set cut explicitly in Bohr in the vacuum so that
+# the sawtooth branch remains fixed when the cell is reset.
 gradient = mf.nuc_grad_method().kernel()
 print('Nuclear gradient (Hartree/Bohr):')
 print(gradient)

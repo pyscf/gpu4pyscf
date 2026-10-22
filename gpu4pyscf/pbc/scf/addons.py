@@ -52,17 +52,20 @@ def slab_dipole_correction(mf, dir_idx=2, z0=None, cut=None, rho_tol=1e-5):
             planes must lie below this threshold.
 
     The automatic cut is chosen from the first density matrix and held
-    fixed until reset(); it is available as dipole_cut. dipole_z0 reports
-    the resulting potential zero, modulo the cell length.
+    fixed until reset(). All length inputs and reported positions use Bohr,
+    regardless of cell.unit. The selected discontinuity is available as
+    dipole_cut; dipole_z0 reports the resulting potential zero modulo the
+    cell length.
 
     The correction uses mf.grids, or the MultiGrid mesh when MultiGrid is
     active. The dipole and energy use the branch centered half a cell away
-    from cut (this may be changed to beabled to user defined). 
+    from cut.
     Gauge shifts are applied with the analytic AO overlap matrix,
     so changing z0 does not change the dipole, energy or orbitals for neutral slabs,
     but it does change the orbital energies.
     The potential is the energy derivative at fixed electron number.
-    To reproduce PySCF's slab_center=c convention, set z0=c and cut=c+L/2.
+    To reproduce PySCF's slab_center=c convention, set z0=c and cut=c+L/2,
+    with c and L expressed in Bohr.
     As in PySCF, the energy correction is included in veff.exc, and is also
     reported separately as veff.edip.
 
@@ -77,14 +80,14 @@ def slab_dipole_correction(mf, dir_idx=2, z0=None, cut=None, rho_tol=1e-5):
     _slab_length(mf.cell, dir_idx)
     if rho_tol <= 0:
         raise ValueError('rho_tol must be positive')
-    if not isinstance(mf, _SlabDipoleCorrection):
-        lib.set_class(mf, (_SlabDipoleCorrection, mf.__class__))
+    if not isinstance(mf, SlabDipoleCorrection):
+        lib.set_class(mf, (SlabDipoleCorrection, mf.__class__))
     mf.dipole_dir = dir_idx
     mf.z0 = z0
-    mf.cut = cut                 # cut is fixed regardless of reset()
+    mf.cut = cut                 # Explicit cut is in Bohr and persists on reset.
     mf.dipole_rho_tol = rho_tol
-    mf.dipole_cut = None
-    mf.dipole_z0 = None
+    mf.dipole_cut = None         # changed in reset()
+    mf.dipole_z0 = None          # changed in reset()   
     mf.dipole_offset = None
     return mf
 
@@ -157,15 +160,14 @@ def _automatic_cut(cell, dm, kpts, mesh, dir_idx, rho_tol):
     return (cut % 1) * length # in Bohr
 
 
-class _SlabDipoleCorrection:
-    # TODO: add comments.
+class SlabDipoleCorrection:
     _keys = {
         'dipole_dir', 'z0', 'cut', 'dipole_rho_tol',
         'dipole_cut', 'dipole_z0', 'dipole_offset',
     }
 
     def reset(self, cell=None):
-        # dipole_cut will reset, but cut will remain the same.
+        # Reset geometry-dependent values; an explicit cut in Bohr persists (.cut).
         self.dipole_cut = None
         self.dipole_z0 = None
         self.dipole_offset = None
