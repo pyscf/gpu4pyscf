@@ -54,6 +54,7 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
         if charge_exponents.size == 1:
             charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
+    ao_idx = cp.asarray(np.argsort(intopt._ao_idx))
     for p0, p1 in lib.prange(0, ngrids, ngrids_per_split):
         int3c_grid_slice = cp.zeros([6, p1-p0, nao, nao], order='C')
         for cp_ij_id, _ in enumerate(intopt.log_qs):
@@ -110,10 +111,7 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
 
             int3c_grid_slice[:, :, i0:i1, j0:j1] = int3c_angular_slice.transpose(0,1,3,2)
 
-        ao_idx = np.argsort(intopt._ao_idx)
-        grid_idx = np.arange(p1-p0)
-        derivative_idx = np.arange(6)
-        int3c_grid_slice = int3c_grid_slice[np.ix_(derivative_idx, grid_idx, ao_idx, ao_idx)]
+        int3c_grid_slice = int3c_grid_slice[:, :, ao_idx[:,None], ao_idx]
 
         # Each piece of the following memory is contiguous
         int3c_grid_slice[0, :, :, :].get(out = int3c_ip1[0, p0:p1, :, :])
@@ -389,6 +387,7 @@ def get_int3c1e_ip2_charge_contracted(mol, grids, charge_exponents, charges, gri
     assert isinstance(output, cp.ndarray)
     assert output.shape == (n_atom, 3, mol.nao, mol.nao)
 
+    ao_idx = cp.asarray(intopt._ao_idx)
     for cp_ij_id, _ in enumerate(intopt.log_qs):
         cpi = intopt.cp_idx[cp_ij_id]
         cpj = intopt.cp_jdx[cp_ij_id]
@@ -440,7 +439,7 @@ def get_int3c1e_ip2_charge_contracted(mol, grids, charge_exponents, charges, gri
             int1e_angular_slice = cart2sph(int1e_angular_slice, axis=2, ang=lj)
             int1e_angular_slice = cart2sph(int1e_angular_slice, axis=3, ang=li)
 
-        output[np.ix_(range(n_atom), range(3), intopt._ao_idx[i0:i1], intopt._ao_idx[j0:j1])] += int1e_angular_slice.transpose(0,1,3,2)
+        output[:, :, ao_idx[i0:i1,None], ao_idx[j0:j1]] += int1e_angular_slice.transpose(0,1,3,2)
 
 def get_int3c1e_ip1_charge_and_density_contracted(mol, grids, charge_exponents, dm, charges, intopt):
     dm = cp.asarray(dm)

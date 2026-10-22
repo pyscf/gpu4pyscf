@@ -124,6 +124,9 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
     float y_cut = estimate_rcut(li, lj, radius, aij, ypi, ypj, log_factor);
     float z_cut = estimate_rcut(li, lj, radius, aij, zpi, zpj, log_factor);
 
+    // Use one common radius for all reciprocal directions in skewed cells.
+    radius = max(x_cut, max(y_cut, z_cut));
+
     float b00 = c_reciprocal_lattice_vectors[0];
     float b01 = c_reciprocal_lattice_vectors[1];
     float b02 = c_reciprocal_lattice_vectors[2];
@@ -142,9 +145,11 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
     float bnorm_1 = sqrtf(distance_squared(b10, b11, b12));
     float bnorm_2 = sqrtf(distance_squared(b20, b21, b22));
 
-    float xcut_frac = x_cut * bnorm_0;
-    float ycut_frac = y_cut * bnorm_1;
-    float zcut_frac = z_cut * bnorm_2;
+    // Project the same cutoff sphere onto each reciprocal direction. A
+    // Cartesian-axis cutoff is not a radius for an oblique reciprocal slab.
+    float xcut_frac = radius * bnorm_0;
+    float ycut_frac = radius * bnorm_1;
+    float zcut_frac = radius * bnorm_2;
 
     float2 *xfrac_range = grid_frac_ranges;
     float2 *yfrac_range = grid_frac_ranges + npairs;
@@ -160,7 +165,7 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
     // When cutoff radius is 0, the contribution of this orbital pair is small.
     // By setting its pair_ke to 0, this orbital pair will be discarded when
     // filtering orbitals in _partition_ke_for_fft function.
-    if (x_cut < 1e-3 || y_cut < 1e-3 || z_cut < 1e-3) {
+    if (radius < 1e-3) {
         pair_ke[pair_id] = -1.f;
     } else {
         float ke_two_centers = max(ish_ke, jsh_ke);

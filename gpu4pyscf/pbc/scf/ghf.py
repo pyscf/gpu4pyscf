@@ -61,7 +61,9 @@ def _df_jk(mf, dm, hermi, kpts, kpts_band, with_j, with_k, omega):
             vk = vk.reshape(dm.shape)
         return vj, vk
 
-    if not cp.iscomplexobj(dm):
+    # FFTDF needs the full Hermitian density for J: taking the real part of
+    # rho from dm.imag separately loses its contribution at nonzero k-points.
+    if not cp.iscomplexobj(dm) or not isinstance(mf.with_df, GDF):
         return build(dm, hermi)
 
     vjR, vkR = build(cp.asarray(dm.real))

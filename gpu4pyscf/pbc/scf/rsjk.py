@@ -840,7 +840,8 @@ class PBCJKMatrixOpt:
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
 
         avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .8)
-        blksize = int(avail_mem/(nao**2*bvk_ncells*16*2)) // 32 * 32
+        # Reserve space for ft_kern
+        blksize = int(avail_mem/(nao1**2*bvk_ncells*16*3)) // 32 * 32
         if blksize == 0:
             raise RuntimeError('Insufficient GPU memory')
         blksize = min(blksize, ngrids)
@@ -1589,7 +1590,7 @@ def _search_diffuse_pairs(cell, mesh):
     ke_cutoff = mesh_to_ke(cell.lattice_vectors(), mesh)
     Gmax = (ke_cutoff.min()*2)**.5
     aij = exps[:,None] * exps
-    fac = aij/Gmax * np.exp(-.25*Gmax**2/aij)
+    fac = aij/Gmax * cp.exp(-.25*Gmax**2/aij)
     pair_max *= 1 + fac
 
     precision = cell.precision * max(1, 1e-2 * cell.vol)

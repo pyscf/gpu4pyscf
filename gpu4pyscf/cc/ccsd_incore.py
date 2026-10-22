@@ -161,7 +161,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     bas_pair_cache = {k: [cp.asarray(x) for x in v]
                       for k, v in vhfopt.bas_pair_cache.items()}
 
-    mo = mol.apply_C_dot(mycc.mo_coeff)
+    mo = mol.apply_C_dot(mycc.mo_coeff[:,mycc.get_frozen_mask()])
     orbo = cupy.asarray(mo[:,:nocc])
     orbv = cupy.asarray(mo[:,nocc:])
     t1po = orbv.dot(cupy.asarray(t1).T)
@@ -182,9 +182,11 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     T = cupy.cuda.cublas.CUBLAS_OP_T
     one = np.ones(1)
     one_ptr = one.ctypes.data
-    x2_ptr = np.int64(x2.data.ptr)
-    Ht2ao_ptr = np.int64(Ht2ao.data.ptr)
+    x2_ptr = x2.data.ptr
+    Ht2ao_ptr = Ht2ao.data.ptr
     def contract_vvvv_(eri, i0, i1, j0, j1):
+        # Python ints: the pointer offsets below must not wrap in int64.
+        i0, i1, j0, j1 = int(i0), int(i1), int(j0), int(j1)
         ic = i1 - i0
         jc = j1 - j0
         eri = eri.reshape(-1,jc*nao)

@@ -114,12 +114,12 @@ class KnownValues(unittest.TestCase):
                 assert numpy.linalg.norm(dSii[j,:,ia] - numpy.diag(dS0)) < 1e-8
                 numpy.fill_diagonal(dS0, 0)
 
-                dS_ia = numpy.zeros_like(dS0)
+                dS_ia = cupy.zeros_like(dS0)
                 dS_ia[p0:p1] = dS[j,p0:p1,:]
                 dS_ia[:,p0:p1] -= dS[j,:,p0:p1]
                 assert numpy.linalg.norm(dS0 - dS_ia) < 1e-8
 
-                dD_ia = numpy.zeros_like(dD0)
+                dD_ia = cupy.zeros_like(dD0)
                 dD_ia[p0:p1] = dD[j,p0:p1,:]
                 dD_ia[:,p0:p1] -= dD[j,:,p0:p1]
                 assert numpy.linalg.norm(dD0 - dD_ia) < 1e-8

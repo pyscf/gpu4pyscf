@@ -228,7 +228,9 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         aux_batch_size=batch_size, cart=True,
         omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     blksize = min(int(word_avail * 0.25) // nao**2, batch_size)
-    batch_size = min(blksize, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
+    # The evaluator fills a complete auxiliary tile before orbital contractions.
+    batch_size = int((aux_offsets[1:]-aux_offsets[:-1]).max())
+    blksize = min(blksize, batch_size)
 
     buf = cp.empty((batch_size, nao_pair))
     j3c_full = cp.zeros((nao, nao, blksize))
@@ -458,7 +460,7 @@ def gen_ijab_MVP(T_ij, T_ab):
             # vir_range = vir_end - vir_start
 
             # Extract the corresponding chunk of T_ab
-            T_ab_chunk = T_ab[:, vir_start:vir_end, :]  # Shape: (nauxao, vir_range, n_vir)
+            T_ab_chunk = cp.asarray(T_ab[:, vir_start:vir_end, :])  # Shape: (nauxao, vir_range, n_vir)
 
             # Compute T_ab_V for the current chunk
             T_ab_chunk_V = contract("Pab,mjb->Pamj", T_ab_chunk, V)
@@ -523,7 +525,7 @@ def gen_ibja_MVP(T_ia):
             V_chunk = V[:, occ_start:occ_end, :]  # Shape: (n_state, occ_range, n_vir)
 
             # Extract the corresponding chunk of T_ia
-            T_ia_chunk = T_ia[:, occ_start:occ_end, :]  # Shape: (nauxao, occ_range, n_vir)
+            T_ia_chunk = cp.asarray(T_ia[:, occ_start:occ_end, :])  # Shape: (nauxao, occ_range, n_vir)
 
             # Compute T_ib_V for the current chunk
             T_ib_V_chunk = contract("Pib,mjb->Pimj", T_ia_chunk, V_chunk)

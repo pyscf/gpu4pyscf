@@ -260,7 +260,7 @@ H -0.646 -0.464 -0.804
                     C        0.000000    0.000000   -0.542500
                     H        0.000000    0.935307   -1.082500
                     H        0.000000   -0.935307   -1.082500''')
-        mf = mol.RHF().SMD()
+        mf = scf.RHF(mol).SMD('')
         # [n, n25, alpha, beta, gamma, epsilon, phi, psi]
         mf.with_solvent.solvent_descriptors = [1.3843, 1.3766, 0.0, 0.45, 35.06, 13.45, 0.0, 0.0]
         dat = get_cds_hess(mf.with_solvent)
@@ -269,14 +269,14 @@ H -0.646 -0.464 -0.804
                     C        0.000000    0.000000   -0.543500
                     H        0.000000    0.935307   -1.082500
                     H        0.000000   -0.935307   -1.082500''')
-        mf = mol.RHF().SMD()
+        mf = scf.RHF(mol).SMD('')
         mf.with_solvent.solvent_descriptors = [1.3843, 1.3766, 0.0, 0.45, 35.06, 13.45, 0.0, 0.0]
         g1 = get_cds_grad(mf.with_solvent)
         mol.set_geom_('''
                     C        0.000000    0.000000   -0.541500
                     H        0.000000    0.935307   -1.082500
                     H        0.000000   -0.935307   -1.082500''')
-        mf = mol.RHF().SMD()
+        mf = scf.RHF(mol).SMD('')
         mf.with_solvent.solvent_descriptors = [1.3843, 1.3766, 0.0, 0.45, 35.06, 13.45, 0.0, 0.0]
         g2 = get_cds_grad(mf.with_solvent)
         assert abs(dat[0,:,2] - ((g2 - g1) / 2e-3 * BOHR)).max() < 1e-5

@@ -212,7 +212,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
 
     dh1e_ground_and_td = int3c2e.get_dh1e(mol, dm_correlated)  # 1/r like terms
     if len(mol._ecpbas) > 0:
-        dh1e_ground_and_td += rhf_grad.get_dh1e_ecp(mol, dm_correlated)  # 1/r like terms
+        ecp_atoms = np.unique(mol._ecpbas[:, gto.ATOM_OF])
+        dh1e_ground_and_td[ecp_atoms] += rhf_grad.get_dh1e_ecp(mol, dm_correlated)  # 1/r like terms
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
@@ -348,7 +349,6 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
     ao_loc = mol.ao_loc
     uniq_l_ctr = mol.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
-    lmax = uniq_l.max()
     l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     assert uniq_l.max() <= LMAX
@@ -365,16 +365,17 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
              for l in range(k+1)]
     schemes = {t: _ejk_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
 
+    # Size the per-block dd cache from the actual schemes: the quartets per
+    # block grow with SHM_SIZE faster than DD_CACHE_MAX's integer factor.
+    nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    nf = nf[:,None] * nf
+    nf = nf[:,:,None,None] * nf
+    dd_cache_maxsize = max(scheme[0] * nf[tuple(task)] for task, scheme in schemes.items())
     if sum_results:
         kern = libvhf_rys.RYS_per_atom_jk_ip1_sum
-        uniq_l = uniq_l_ctr[:,0]
-        nf = (uniq_l + 1) * (uniq_l + 2) // 2
-        nf = nf[:,None] * nf
-        nf = nf[:,:,None,None] * nf
-        dd_cache_maxsize = max(scheme[0] * nf[tuple(task)] for task, scheme in schemes.items())
     else:
         kern = libvhf_rys.RYS_per_atom_jk_ip1_multidm
-        dd_cache_maxsize = DD_CACHE_MAX[lmax] * n_dm
+        dd_cache_maxsize *= n_dm
 
     tasks = iter(tasks)
 

@@ -304,7 +304,7 @@ class RHF(hf.RHF):
         return self.make_wfn(mo_coeff, mo_occ).make_rdm1()
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm_or_wfn=None, cycle=-1, diis=None,
-                 diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
+                 diis_start_cycle=None, level_shift_factor=None, damp_factor=None, fock_last=None):
         '''Return Fock matrix in square storage'''
         if h1e is None: h1e = self.get_hcore()
         if vhf is None: vhf = self.get_veff(self.mol, dm_or_wfn)

@@ -22,7 +22,7 @@ gradient of dispersion correction for HF and DFT
 
 import numpy as np
 from pyscf.lib import logger
-from gpu4pyscf.scf.dispersion import check_disp, parse_disp
+from gpu4pyscf.scf.dispersion import check_disp, parse_disp, _make_d4_model
 
 def get_dispersion(mf_grad, disp=None, with_3body=None, verbose=None):
     '''gradient of DFTD3/DFTD4 dispersion correction'''
@@ -34,7 +34,7 @@ def get_dispersion(mf_grad, disp=None, with_3body=None, verbose=None):
     if disp is None:
         disp = getattr(mf, 'disp', None)
 
-    from gpu4pyscf.dispersion import dftd3, dftd4
+    from gpu4pyscf.dispersion import dftd3
 
     method = getattr(mf, 'xc', 'hf')
     method, disp_version, disp_with_3body = parse_disp(method, disp)
@@ -52,7 +52,7 @@ def get_dispersion(mf_grad, disp=None, with_3body=None, verbose=None):
     elif disp_version[:2].upper() == 'D4':
         logger.info(mf, "Calc dispersion correction with DFTD4.")
         logger.info(mf, f"Parameters: xc={method}, atm={with_3body}")
-        d4_model = dftd4.DFTD4Dispersion(mol, xc=method, atm=with_3body)
+        d4_model = _make_d4_model(mol, method, with_3body)
         res = d4_model.get_dispersion(grad=True)
         g_d4 = res.get('gradient')
         return g_d4
