@@ -21,7 +21,7 @@ from pyscf.pbc.scf import addons as cpu_addons
 from gpu4pyscf.pbc import dft
 from gpu4pyscf.pbc.scf.addons import slab_dipole_correction
 
-cpu_correction = getattr(cpu_addons, 'slab_dipole_correction')
+cpu_correction = getattr(cpu_addons, 'slab_dipole_correction', None)
 
 def make_cell(polar=True):
     return gto.M(
@@ -31,6 +31,8 @@ def make_cell(polar=True):
         precision=1e-9, verbose=0)
 
 
+@unittest.skipIf(cpu_correction is None,
+                 'PySCF does not provide slab_dipole_correction')
 class KnownValues(unittest.TestCase):
     def test_pyscf_potential_and_energy(self):
         cell = make_cell()
