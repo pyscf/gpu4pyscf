@@ -55,6 +55,8 @@ def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5, width=0.):
             unchanged.
             If z0=None, the potential zero is automatically chosen so that the
             correction potential averages to zero over the integration grid.
+            With gate_charge, z0 must be None: Brumme Eqs. (5) and (7)
+            fix both potentials by zero cell integral analytically.
 
         cut: Position of the potential jump along z, in Bohr.
             This is a position within the cell.
@@ -101,7 +103,7 @@ def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5, width=0.):
     if not isinstance(mf, (rks.RKS, uks.UKS, krks.KRKS, kuks.KUKS)):
         raise NotImplementedError('Slab dipole correction requires RKS/UKS/KRKS/KUKS')
     length = _slab_length(mf.cell)
-    _check_dipole_charge(mf, mf.cell)
+    _check_dipole_charge(mf, mf.cell, z0)
     if not 0 <= width < length:
         raise ValueError('Dipole width must satisfy 0 <= width < cell length')
     if width > 0 and cut is None:
@@ -138,10 +140,13 @@ def _slab_charge(mf, cell):
     return cell.charge / nkpts
 
 
-def _check_dipole_charge(mf, cell):
+def _check_dipole_charge(mf, cell, z0=None):
     from gpu4pyscf.pbc.scf.slabgate import SlabGateCharge
     if _slab_charge(mf, cell) != 0 and not isinstance(mf, SlabGateCharge):
         raise NotImplementedError('Charged slab dipole correction requires gate_charge')
+    if isinstance(mf, SlabGateCharge) and z0 is not None:
+        raise ValueError('z0 cannot be set with gate_charge; the potential reference '
+                         'is fixed by zero cell integral')
 
 
 def _sawtooth(z, cut, length, width=0.):
@@ -233,6 +238,7 @@ class SlabDipoleCorrection:
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None, *, kpt=None):
         from gpu4pyscf.pbc.scf import khf
+        from gpu4pyscf.pbc.scf.slabgate import SlabGateCharge
         from gpu4pyscf.pbc.dft import numint, gen_grid
 
         if kpts_band is not None:
@@ -242,7 +248,7 @@ class SlabDipoleCorrection:
         if dm is None:
             dm = self.make_rdm1()
         length = _slab_length(cell)
-        _check_dipole_charge(self, cell)
+        _check_dipole_charge(self, cell, z0=self.z0)
         width = self.dipole_width
         if not 0 <= width < length:
             raise ValueError('Dipole width must satisfy 0 <= width < cell length')
@@ -293,25 +299,35 @@ class SlabDipoleCorrection:
         dipole = p_ion - float(p_elec)
         field = 4 * np.pi * dipole / cell.vol
         edip = .5 * field * dipole
-        self.dipole_offset = (
-            float(z_sum / weight_sum) if self.z0 is None else
-            _sawtooth(self.z0, cut, length, width))
-        offset = self.dipole_offset
-        self.dipole_z0 = ((cut + length/2 + offset) % length if self.z0 is None
-                          else self.z0 % length)
         v_dip = -field * position
         if not is_kpts:
             v_dip = v_dip[0]
-        # A constant real-space potential is offset * S, not offset * I.
-        overlap = self.get_ovlp(cell, kpts if is_kpts else kpts[0])
-        v_dip += field * offset * overlap
+        # Eq. (7) already has zero cell integral, just as the monopole
+        # potential in Eq. (5). Only standalone dipole corrections shift it.
+        self.dipole_offset = 0.
+        self.dipole_z0 = None
+        if not isinstance(self, SlabGateCharge):
+            self.dipole_offset = (
+                float(z_sum / weight_sum) if self.z0 is None else
+                _sawtooth(self.z0, cut, length, width))
+            offset = self.dipole_offset
+            self.dipole_z0 = ((cut + length/2 + offset) % length if self.z0 is None
+                              else self.z0 % length)
+            # A constant real-space potential is offset * S, not offset * I.
+            overlap = self.get_ovlp(cell, kpts if is_kpts else kpts[0])
+            v_dip += field * offset * overlap
         out = tag_array(veff + v_dip, **veff.__dict__)
         out.exc = veff.exc + edip
         out.edip = edip
         out.dipole = dipole
-        logger.info(self, 'Dipole correction: E = %.10g, p = %.6g, '
-                    'cut = %.6g, z0 = %.6g Bohr',
-                    edip, dipole, cut, self.dipole_z0)
+        if isinstance(self, SlabGateCharge):
+            logger.info(self, 'Dipole correction: E = %.10g, p = %.6g, '
+                        'cut = %.6g Bohr, potential reference = zero cell integral',
+                        edip, dipole, cut)
+        else:
+            logger.info(self, 'Dipole correction: E = %.10g, p = %.6g, '
+                        'cut = %.6g, z0 = %.6g Bohr',
+                        edip, dipole, cut, self.dipole_z0)
         return out
 
     def Gradients(self):

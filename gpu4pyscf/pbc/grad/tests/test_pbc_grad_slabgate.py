@@ -40,7 +40,7 @@ class KnownValues(unittest.TestCase):
             # Intentionally place ions on the barrier ramps to test their force.
             gate_charge(mf, zgate=17., barrier=True, barrier_start=9.6,
                         barrier_end=12.4, barrier_width=1.)
-            return slab_dipole_correction(mf, cut=20., z0=9., width=2.)
+            return slab_dipole_correction(mf, cut=20., width=2.)
         mf = build(cell)
         dm = mf.get_init_guess()
         rng = np.random.default_rng(5)
@@ -61,7 +61,7 @@ class KnownValues(unittest.TestCase):
                 m.grids.coords, m.grids.weights = fixed.coords, fixed.weights
                 gate_charge(m, zgate=17., barrier=True, barrier_start=9.6,
                             barrier_end=12.4, barrier_width=1.)
-                return slab_dipole_correction(m, cut=20., z0=9., width=2.)
+                return slab_dipole_correction(m, cut=20., width=2.)
         grad.grid_response = False
         numeric_gate = finite_difference(cell, lambda c: gate_energy(build(c), dm))
         np.testing.assert_allclose(gate_grad(grad, dm), numeric_gate, atol=3e-7, rtol=0)
@@ -101,11 +101,11 @@ class KnownValues(unittest.TestCase):
         cell.build()
         if name.startswith('K'):
             cell.charge = 2  # One hole per primitive cell for two k-points.
-        def build(c, z0=None):
+        def build(c):
             mf = gate_charge(make_mf(c, name, multigrid), zgate=17.,
                              barrier=True, barrier_start=15., barrier_end=19.,
                              barrier_width=.7)
-            return slab_dipole_correction(mf, cut=20., width=2., z0=z0)
+            return slab_dipole_correction(mf, cut=20., width=2.)
         mf = build(cell)
         mf.kernel()
         self.assertTrue(mf.converged)
@@ -122,12 +122,7 @@ class KnownValues(unittest.TestCase):
                 self.assertTrue(displaced.converged)
             self.assertAlmostEqual(analytic[1, axis], (energies[0]-energies[1])/(2*DISP),
                                    delta=1e-5)
-        shifted = build(cell, z0=19.7)  # Potential zero inside the return region.
-        shifted.kernel(dm0=dm)
-        self.assertTrue(shifted.converged)
-        self.assertAlmostEqual(shifted.e_tot, mf.e_tot, delta=1e-9)
-        np.testing.assert_allclose(shifted.Gradients().kernel(), analytic, atol=5e-7)
-        self.assertAlmostEqual(shifted.dipole_z0, 19.7)
+        self.assertIsNone(mf.dipole_z0)
 
         scanner = mf.Gradients().as_scanner()
         ep, _ = scanner(displaced_cell(cell, 1, 2, DISP))
