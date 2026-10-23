@@ -55,29 +55,13 @@ There shouldn't be cupy or cutensor compilation during pip install process. If y
 
 Features
 --------
-- Density fitting scheme and direct SCF scheme;
-- SCF, analytical gradient, and analytical Hessian calculations for Hartree-Fock and DFT;
-- LDA, GGA, mGGA, hybrid, and range-separated functionals via [libXC](https://gitlab.com/libxc/libxc/-/tree/master/);
-- Spin-conserved and spin-flip TDA and TDDFT for excitated states;
-- Geometry optimization and transition state search via [geomeTRIC](https://geometric.readthedocs.io/en/latest/);
-- Atomic Simulation Environment ([ASE](https://gitlab.com/ase/ase)) interface;
-- Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
-- Analytical gradient and analytical Hessian for nonlocal functional correction (vv10);
-- GPU accelerated ECP;
-- PCM models, their analytical gradients, and analytical Hessian matrix;
-- SMD solvent model;
-- Unrestricted Hartree-Fock and unrestricted DFT, gradient, and Hessian;
-- CHELPG, ESP, and RESP atomic charge;
 
-The following features are still in the experimental stage
-- MP2/DF-MP2 and CCSD;
-- Polarizability, IR, and NMR shielding;
-- Raman spectrum;
-- QM/MM with PBC;
-- Multi-GPU for both direct SCF and density fitting;
-- SCF and DFT with periodic boundary condition;
-- Non-adiabatic coupling for TDDFT;
-- Energy decomposition analysis;
+GPU4PySCF supports molecular and periodic Hartree-Fock and DFT, analytical
+derivatives, excited states, solvent models, properties, geometry optimization,
+and non-adiabatic dynamics.
+
+See [FEATURES](FEATURES) for the detailed list of supported methods and
+experimental capabilities.
 
 Limitations
 --------
