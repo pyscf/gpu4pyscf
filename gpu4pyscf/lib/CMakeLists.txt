@@ -112,7 +112,7 @@ if(BUILD_CUTLASS)
   include(ExternalProject)
   ExternalProject_Add(cutlass
     GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
-    GIT_TAG        v3.4.0
+    GIT_TAG        v3.6.0
     CONFIGURE_COMMAND ""  # No configure step
     BUILD_COMMAND ""      # No build step
     INSTALL_COMMAND ""    # No install step
