@@ -52,6 +52,18 @@ class KnownValues(unittest.TestCase):
         z = np.linspace(0., length, 10001, endpoint=False)
         phi = _sheet_potential(z, zgate, length, area, qc)
         self.assertAlmostEqual(phi.mean(), 0., delta=1e-7)
+        # The reference is zero cell average, not zero at the sheet.
+        self.assertAlmostEqual(_sheet_potential(zgate, zgate, length, area, qc),
+                               np.pi*qc*length/(3*area))
+        # Eq. (7) fixes the dipole by the same zero-cell-integral convention.
+        nodes, weights = np.polynomial.legendre.leggauss(4)
+        for width in (0., 2.):
+            integral = 0.
+            for lo, hi in ((-width/2, width/2), (width/2, length-width/2)):
+                t = (hi+lo)/2 + nodes*(hi-lo)/2
+                integral += (hi-lo)/2 * np.dot(
+                    weights, _sawtooth(zgate+t, zgate, length, width))
+            self.assertAlmostEqual(integral, 0., delta=1e-12)
         # Independent reciprocal-space solution, excluding the sheet cusp.
         modes = np.arange(1, 100001)
         for point in (1.3, 8.2, 20.1):
@@ -173,6 +185,8 @@ class KnownValues(unittest.TestCase):
         ddm -= dm * (cp.einsum('skij,kji->', ddm, overlap).real /
                      cp.einsum('skij,kji->', dm, overlap).real)
         v = mf.get_veff(dm=dm)
+        self.assertEqual(mf.dipole_offset, 0.)
+        self.assertIsNone(mf.dipole_z0)
         h = mf.get_hcore()
         step = 1e-4
         def added_energy(d):
@@ -208,9 +222,25 @@ class KnownValues(unittest.TestCase):
             slab_dipole_correction(gate_charge(make_mf(cell)), width=2.)
         # Both composition orders work on a neutral cell.
         cell = make_cell(charge=0)
-        mf = gate_charge(slab_dipole_correction(make_mf(cell), cut=20., width=2.))
+        for z0 in (0., 19.7):
+            with self.assertRaisesRegex(ValueError, 'z0 cannot be set'):
+                slab_dipole_correction(gate_charge(make_mf(cell)), cut=20., z0=z0)
+            with self.assertRaisesRegex(ValueError, 'z0 cannot be set'):
+                gate_charge(slab_dipole_correction(make_mf(cell), cut=20., z0=z0))
+        mf = slab_dipole_correction(make_mf(cell), cut=20., width=2.)
+        dm = mf.get_init_guess()
+        mf.get_veff(dm=dm)
+        self.assertIsNotNone(mf.dipole_offset)
+        gate_charge(mf)
+        self.assertIsNone(mf.dipole_offset)
         self.assertLess(np.max(abs(mf._gate_matrices(cell, mf.kpts)[0].get())), 1e-15)
+        mf.get_veff(dm=dm)
+        self.assertEqual(mf.dipole_offset, 0.)
+        self.assertIsNone(mf.dipole_z0)
         self.assertIsNotNone(mf.Gradients())
+        mf.z0 = 19.7
+        with self.assertRaisesRegex(ValueError, 'z0 cannot be set'):
+            mf.get_veff(dm=dm)
 
 
 if __name__ == '__main__':

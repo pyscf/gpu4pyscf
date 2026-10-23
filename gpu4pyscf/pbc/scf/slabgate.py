@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Charged-sheet field-effect doping, Phys. Rev. B 89, 245406 (2014).'''
+'''
+Charged-sheet field-effect doping, 
+references: Phys. Rev. B 89, 245406 (2014).
+'''
 
 import numpy as np
 import cupy as cp
@@ -23,19 +26,24 @@ from gpu4pyscf.pbc.scf.slabdipole import _slab_length, _dipole_grids, _slab_char
 
 def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
                 barrier_end=None, barrier_height=.05, barrier_width=None):
-    r'''Apply a compensating planar gate charge in place.
+    '''
+    Apply a compensating planar gate charge in place.
 
     The sheet carries qc = -q, where q = cell.charge/nkpts is the charge
     PER PRIMITIVE CELL. At a single k-point, q = cell.charge. Negative q
     adds electrons. The gate charge is determined solely by cell.charge
     and the number of sampled k-points. To fix a target q per primitive
-    cell when changing the k mesh, set cell.charge = nkpts*q.
+    cell when changing the k mesh, reset cell.charge = nkpts*q.
     Build the cell with a consistent charge/spin; KUKS spin counts are totals
     over the k-points. No electron-count setting is changed by this addon.
     The standard 3D Coulomb calculation retains its G=0 convention.
     With A = Omega/L and s = (z-zgate+L/2) % L - L/2, the sheet potential is
 
         phi_c(z) = 2*pi*qc/A * (-abs(s) + s**2/L + L/6).
+
+    The constant L/6 fixes the zero-average potential reference in
+    Brumme Eq. (5). The dipole in Eq. (7) uses the same zero-cell-integral
+    convention; zgate specifies the sheet position.
 
     The electronic Hamiltonian gains -phi_c and, optionally, a positive
     barrier v_b. The added total energy (atomic units) is
@@ -52,7 +60,7 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     Electronic contributions are already in scf_summary['e1'].
 
     Args:
-        mf: GPU RKS/UKS/KRKS/KUKS for a three-dimensionally periodic slab.
+        mf: RKS/UKS/KRKS/KUKS for a three-dimensionally periodic slab.
             The slab normal is z, with the third lattice vector along positive
             z and the other two in the xy plane.
         zgate: Sheet position in Bohr; None means L/2.
@@ -71,7 +79,9 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     Compose with slab_dipole_correction(mf, cut=..., width=...) to cancel
     the periodic residual field. Its total dipole then includes the sheet;
     the barrier does not contribute to that dipole. Use the same normal and
-    put the whole dipole return region in vacuum.
+    put the whole dipole return region in vacuum. With gate_charge, the
+    dipole uses Brumme Eqs. (7)-(9) without a constant shift; setting z0
+    raises ValueError, in either addon composition order.
 
     Uniform and MultiGrid integration and frozen Becke grids are supported.
     Becke grid response, stress, Hessians, response kernels and band k-points
@@ -79,9 +89,16 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     after changing geometry or basis, as for the underlying SCF object.
     '''
     from gpu4pyscf.pbc.dft import rks, uks, krks, kuks
+    from gpu4pyscf.pbc.scf.slabdipole import SlabDipoleCorrection
     if not isinstance(mf, (rks.RKS, uks.UKS, krks.KRKS, kuks.KUKS)):
         raise NotImplementedError('Gate charge requires RKS/UKS/KRKS/KUKS')
     _slab_length(mf.cell)
+    if isinstance(mf, SlabDipoleCorrection):
+        if mf.z0 is not None:
+            raise ValueError('z0 cannot be set with gate_charge; the potential reference '
+                             'is fixed by zero cell integral')
+        mf.dipole_offset = None  # Recompute the reference after adding the gate.
+        mf.dipole_z0 = None
     if not isinstance(mf, SlabGateCharge):
         lib.set_class(mf, (SlabGateCharge, mf.__class__))
     mf.zgate = zgate

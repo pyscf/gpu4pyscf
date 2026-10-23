@@ -40,6 +40,8 @@ mf = dft.UKS(cell, xc='pbe')
 gate_charge(mf, zgate=.5*length, barrier=True,
             barrier_start=.45*length, barrier_end=.55*length,
             barrier_height=.05, barrier_width=.01*length)
+# Both monopole and dipole potentials use Brumme's zero-cell-integral
+# reference. Do not set z0 when composing with gate_charge.
 # Keep the sheet and the entire linear return region in the vacuum.
 # Fix cut for force calculations/scanners to stay on the same branch.
 slab_dipole_correction(mf, cut=.75*length, width=.1*length)
