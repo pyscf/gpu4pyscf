@@ -111,8 +111,8 @@ try:
 except ImportError:
     pass
 
+package_name = NAME
 if 'sdist' in sys.argv:
-    package_name = NAME
     CUDA_VERSION = '12x'
 else:
     CUDA_VERSION = get_cuda_version()
