@@ -520,11 +520,12 @@ class _VHFOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
-        tasks = ((i,j,k,l)
-                 for i in range(n_groups)
-                 for j in range(i+1)
-                 for k in range(i+1)
-                 for l in range(k+1))
+        # Share a list iterator: concurrent next() calls can re-enter a generator.
+        tasks = iter([(i,j,k,l)
+                      for i in range(n_groups)
+                      for j in range(i+1)
+                      for k in range(i+1)
+                      for l in range(k+1)])
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
@@ -821,11 +822,12 @@ class _VHFOpt:
 
         omega, lr_factor, sr_factor = _check_rsh_factors(self.mol, omega, lr_factor, sr_factor)
 
-        tasks = ((i,j,k,l)
-                 for i in range(n_groups)
-                 for j in range(i+1)
-                 for k in range(i+1)
-                 for l in range(k+1))
+        # Share a list iterator: concurrent next() calls can re-enter a generator.
+        tasks = iter([(i,j,k,l)
+                      for i in range(n_groups)
+                      for j in range(i+1)
+                      for k in range(i+1)
+                      for l in range(k+1)])
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
