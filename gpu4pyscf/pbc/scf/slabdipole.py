@@ -23,7 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 
-def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5):
+def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5, width=0.):
     r'''Remove the artificial electric field between periodically repeated slabs.
     Apply self-consistent slab dipole corrections to the given mf object in place.
 
@@ -42,8 +42,9 @@ def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5):
 
     Args:
         mf: GPU RKS, UKS, KRKS or KUKS object.
-            Modified in place. The cell must be neutral and periodic in all
-            three dimensions, with a vacuum region separating slab images.
+            Modified in place. The cell must be neutral or compensated by
+            gate_charge, and periodic in all three dimensions, with a vacuum
+            region separating slab images.
             The slab normal is always z. The third lattice vector must lie
             along the positive z-axis, and the other two must lie in the xy plane.
 
@@ -71,6 +72,11 @@ def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5):
             At least three consecutive grid planes must have a plane-averaged
             density below this threshold. Ignored when cut is supplied.
 
+        width: Width in Bohr of the linear return region centered on cut.
+            Zero retains the discontinuous Bengtsson sawtooth. A positive
+            width gives the continuous Brumme sawtooth; the entire return
+            region must lie in vacuum. Keep cut explicit for this mode.
+
     Returns:
         The same mf object with the dipole correction enabled.
 
@@ -94,24 +100,29 @@ def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5):
 
     if not isinstance(mf, (rks.RKS, uks.UKS, krks.KRKS, kuks.KUKS)):
         raise NotImplementedError('Slab dipole correction requires RKS/UKS/KRKS/KUKS')
-    _slab_length(mf.cell)
+    length = _slab_length(mf.cell)
+    _check_dipole_charge(mf, mf.cell)
+    if not 0 <= width < length:
+        raise ValueError('Dipole width must satisfy 0 <= width < cell length')
+    if width > 0 and cut is None:
+        raise ValueError('Set cut explicitly for a finite-width dipole return region')
     if rho_tol <= 0:
         raise ValueError('rho_tol must be positive')
     if not isinstance(mf, SlabDipoleCorrection):
         lib.set_class(mf, (SlabDipoleCorrection, mf.__class__))
     mf.z0 = z0
     mf.cut = cut                 # Explicit cut is in Bohr and persists on reset.
+    mf.dipole_width = width
     mf.dipole_rho_tol = rho_tol
     mf.dipole_cut = None         # changed in reset()
-    mf.dipole_z0 = None          # changed in reset()   
+    mf.dipole_z0 = None          # changed in reset()
     mf.dipole_offset = None
     return mf
 
 
 def _slab_length(cell):
-    if cell.dimension != 3 or cell.charge != 0:
-        # TODO: in the future, support non-neutral cell slabs.
-        raise NotImplementedError('Slab dipole correction requires a neutral 3D cell')
+    if cell.dimension != 3:
+        raise NotImplementedError('Slab corrections require a 3D cell')
     a = cell.lattice_vectors()
     if (a[2, 2] <= 0 or
             np.any(abs(a[2, :2]) > 1e-10) or
@@ -122,8 +133,39 @@ def _slab_length(cell):
     return a[2, 2]
 
 
-def _sawtooth(z, cut, length):
-    return (z - cut) % length - length/2
+def _slab_charge(mf, cell):
+    nkpts = len(mf.kpts) if mf.istype('KSCF') else 1
+    return cell.charge / nkpts
+
+
+def _check_dipole_charge(mf, cell):
+    from gpu4pyscf.pbc.scf.slabgate import SlabGateCharge
+    if _slab_charge(mf, cell) != 0 and not isinstance(mf, SlabGateCharge):
+        raise NotImplementedError('Charged slab dipole correction requires gate_charge')
+
+
+def _sawtooth(z, cut, length, width=0.):
+    """Periodic dipole sawtooth: L=length, d_dip=width, z_dip=cut.
+
+    t is z-z_dip wrapped into [-d_dip/2, L-d_dip/2).
+    f(t) = t - L/2                  if t >= d_dip/2
+         = -t*(L-d_dip)/d_dip       if t < d_dip/2
+    The linear return region [-d_dip/2, d_dip/2) has width d_dip.
+    width=0 recovers the discontinuous sawtooth.
+    """
+    if width == 0:
+        return (z - cut) % length - length/2
+    t = (z - cut + width/2) % length - width/2
+    xp = cp.get_array_module(z)
+    return xp.where(t < width/2, -t*(length-width)/width, t-length/2)
+
+
+def _sawtooth_deriv(z, cut, length, width=0.):
+    xp = cp.get_array_module(z)
+    if width == 0:
+        return xp.ones_like(z)
+    t = (z - cut + width/2) % length - width/2
+    return xp.where(t < width/2, -(length-width)/width, 1.)
 
 
 def _dipole_grids(mf, cell):
@@ -134,7 +176,7 @@ def _dipole_grids(mf, cell):
         grids.mesh = mf._numint.mesh
     else:
         grids = mf.grids
-        if grids.coords is None:
+        if not isinstance(grids, gen_grid.UniformGrids) and grids.coords is None:
             grids.build()
     return grids
 
@@ -177,7 +219,7 @@ def _automatic_cut(cell, dm, kpts, mesh, rho_tol):
 
 class SlabDipoleCorrection:
     _keys = {
-        'z0', 'cut', 'dipole_rho_tol',
+        'z0', 'cut', 'dipole_rho_tol', 'dipole_width',
         'dipole_cut', 'dipole_z0', 'dipole_offset',
     }
 
@@ -200,6 +242,10 @@ class SlabDipoleCorrection:
         if dm is None:
             dm = self.make_rdm1()
         length = _slab_length(cell)
+        _check_dipole_charge(self, cell)
+        width = self.dipole_width
+        if not 0 <= width < length:
+            raise ValueError('Dipole width must satisfy 0 <= width < cell length')
         is_kpts = isinstance(self, khf.KSCF)
         if kpts is None:
             kpts = self.kpts if is_kpts else (self.kpt if kpt is None else kpt)
@@ -229,7 +275,7 @@ class SlabDipoleCorrection:
         z_sum = cp.asarray(0.)
         weight_sum = cp.asarray(0.)
         for ao_kpts, weight, coords in ni.block_loop(cell, grids, kpts=kpts):
-            zw = _sawtooth(coords[:, 2], cut, length) * weight
+            zw = _sawtooth(coords[:, 2], cut, length, width) * weight
             z_sum += zw.sum()
             weight_sum += weight.sum()
             if position is None:
@@ -238,15 +284,21 @@ class SlabDipoleCorrection:
                 position[k] += ao.conj().T @ (zw[:, None] * ao)
         p_elec = cp.einsum('kij,kji->', dm_charge, position).real / len(kpts)
         p_ion = np.dot(cell.atom_charges(),
-                       _sawtooth(cell.atom_coords()[:, 2], cut, length))
+                       _sawtooth(cell.atom_coords()[:, 2], cut, length, width))
+        charge = _slab_charge(self, cell)
+        # Add the gate charge contribution to the dipole.
+        if charge != 0:
+            p_ion -= charge * _sawtooth(self._gate_parameters(cell)[1],
+                                       cut, length, width)
         dipole = p_ion - float(p_elec)
         field = 4 * np.pi * dipole / cell.vol
         edip = .5 * field * dipole
         self.dipole_offset = (
             float(z_sum / weight_sum) if self.z0 is None else
-            _sawtooth(self.z0, cut, length))
+            _sawtooth(self.z0, cut, length, width))
         offset = self.dipole_offset
-        self.dipole_z0 = (cut + length/2 + offset) % length
+        self.dipole_z0 = ((cut + length/2 + offset) % length if self.z0 is None
+                          else self.z0 % length)
         v_dip = -field * position
         if not is_kpts:
             v_dip = v_dip[0]
