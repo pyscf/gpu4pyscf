@@ -1559,7 +1559,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             mu_vw = contract("pg,ug->upg", mu, depsilon_drho * weight)
             dmudA_nu_ao = contract("dpg,uqg->udpq", dmu_dr, mu_vw)
             del mu_vw
-            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(2), range(3), idx, idx)] += dmudA_nu_ao
+            add_sparse(dFock_orbital_response_dmudA_nu_term, dmudA_nu_ao, idx)
 
             # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
             # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
@@ -1671,7 +1671,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             dmudA_nu_ao += contract("udpg,qg->udpq", d2mudr2_weight_depsilondnablarho, mu)
             del d2mudr2_weight_depsilondnablarho
 
-            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(2), range(3), idx, idx)] += dmudA_nu_ao
+            add_sparse(dFock_orbital_response_dmudA_nu_term, dmudA_nu_ao, idx)
 
             # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
             #     "pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
@@ -1807,7 +1807,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             dmudA_nu_ao += contract("dxpg,uxqg->udpq", d2mu_dr2, dmudr_weight_depsilondtau + mu_weight_depsilondnablarho)
             del mu_weight_depsilondnablarho, dmudr_weight_depsilondtau
 
-            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(2), range(3), idx, idx)] += dmudA_nu_ao
+            add_sparse(dFock_orbital_response_dmudA_nu_term, dmudA_nu_ao, idx)
 
             # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
             #     "pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)

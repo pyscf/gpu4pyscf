@@ -46,10 +46,11 @@ void eval_lda_grad_kernel(double *grad, double *strain, double *dm,
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
 
-    __shared__ int a_start, a_stop, a_center;
+    __shared__ int a_start, a_stop;
     __shared__ int b_start, b_stop;
     __shared__ int c_start, c_stop;
     __shared__ double cc, exp_da_squared;
+    __shared__ float e_cutoff;
     __shared__ double xi, yi, zi;
     __shared__ double xj, yj, zj;
     __shared__ double xij, yij, zij, ai, aj, aij, theta_rr;
@@ -112,8 +113,8 @@ void eval_lda_grad_kernel(double *grad, double *strain, double *dm,
         a_stop = floor(xfrac_upper * mesh_a);
         b_stop = floor(yfrac_upper * mesh_b);
         c_stop = floor(zfrac_upper * mesh_c);
-        a_center = (a_start + a_stop) / 2;
         exp_da_squared = exp(-2 * aij * da_squared);
+        e_cutoff = (float)(log(fabs(cc)) - log(negligible));
     }
     __syncthreads();
 
@@ -130,6 +131,14 @@ void eval_lda_grad_kernel(double *grad, double *strain, double *dm,
     }
     __syncthreads();
 
+    // Use float32 for boundary estimates; integration stays in float64.
+    float da_x = (float)c_dxyz_dabc[0];
+    float da_y = (float)c_dxyz_dabc[1];
+    float da_z = (float)c_dxyz_dabc[2];
+    float da_squared_f = (float)da_squared;
+    float aij_f = (float)aij;
+    float theta_rr_f = (float)theta_rr;
+
     double grad_i[3] = {};
     double grad_j[3] = {};
     double sigma[9] = {};
@@ -141,20 +150,37 @@ void eval_lda_grad_kernel(double *grad, double *strain, double *dm,
 
         for (int b_index = b_start+ty; b_index <= b_stop; b_index += tile) {
         for (int c_index = c_start+tx; c_index <= c_stop; c_index += tile) {
-            double x_start = a_center * c_dxyz_dabc[0] + b_index * c_dxyz_dabc[3] + c_index * c_dxyz_dabc[6];
-            double y_start = a_center * c_dxyz_dabc[1] + b_index * c_dxyz_dabc[4] + c_index * c_dxyz_dabc[7];
-            double z_start = a_center * c_dxyz_dabc[2] + b_index * c_dxyz_dabc[5] + c_index * c_dxyz_dabc[8];
-            double x = x_start;
-            double y = y_start;
-            double z = z_start;
-            double x_xij = x - xij;
-            double y_yij = y - yij;
-            double z_zij = z - zij;
-            double e = theta_rr + aij * distance_squared(x_xij, y_yij, z_zij);
-            if (e > 50.) continue; // ~1e-22
-            double gaussian_starting_point = exp(-e) * cc;
-            double cross_term_a = c_dxyz_dabc[0] * x_xij + c_dxyz_dabc[1] * y_yij + c_dxyz_dabc[2] * z_zij;
-            double recursion_factor_a_start = exp(-aij * (2 * cross_term_a + da_squared));
+            double x = a_start * c_dxyz_dabc[0] + b_index * c_dxyz_dabc[3] + c_index * c_dxyz_dabc[6];
+            double y = a_start * c_dxyz_dabc[1] + b_index * c_dxyz_dabc[4] + c_index * c_dxyz_dabc[7];
+            double z = a_start * c_dxyz_dabc[2] + b_index * c_dxyz_dabc[5] + c_index * c_dxyz_dabc[8];
+            float x_xij = (float)(x - xij);
+            float y_yij = (float)(y - yij);
+            float z_zij = (float)(z - zij);
+            float cross_term_a = da_x * x_xij + da_y * y_yij + da_z * z_zij;
+
+            // da_peak: how many steps to move from a_start to reach the
+            // closest point to the Gaussian center.
+            // a_start + da_peak may lie outside [a_start, a_stop].
+            float da_peak = -cross_term_a / da_squared_f;
+            // (dx,dy,dz) is the displacement from the Gaussian center to that
+            // closest point.
+            float dx = x_xij + da_peak * da_x;
+            float dy = y_yij + da_peak * da_y;
+            float dz = z_zij + da_peak * da_z;
+            // Minimum exponent on the line, including the shell-pair prefactor.
+            float e_min = theta_rr_f + aij_f * distance_squared(dx, dy, dz);
+            if (e_min > e_cutoff) continue;
+            // Absolute continuous a-grid index of the peak, and the half-width
+            // in grid steps over which |cc| * exp(-e) >= negligible.
+            float a_peak = a_start + da_peak;
+            float a_radius = sqrtf((e_cutoff - e_min) / (aij_f * da_squared_f));
+            // Intersect with the original bounds and retain integer grid points.
+            // a_active_start and a_active_stop are the inclusive first and last indices.
+            int lower = ceilf(a_peak - a_radius);
+            int upper = floorf(a_peak + a_radius);
+            int a_active_start = max(a_start, lower);
+            int a_active_stop = min(a_stop, upper);
+            if (a_active_start > a_active_stop) continue;
 
             int mesh_bc = mesh_b * mesh_c;
             int mesh_abc = mesh_a * mesh_bc;
@@ -162,66 +188,70 @@ void eval_lda_grad_kernel(double *grad, double *strain, double *dm,
             // multiplier to a_index, b_index, c_index to avoid the negative modulo.
             // Images spreads in supmol are typically < 10. A shift of 100* images
             // should be enough.
-            int64_t abc_idx_start = (a_center + 100 * mesh_a) % mesh_a * (int64_t)mesh_bc +
+            int64_t abc_idx = (a_start + 100 * mesh_a) % mesh_a * (int64_t)mesh_bc +
                 (b_index + 100 * mesh_b) % mesh_b * mesh_c +
                 (c_index + 100 * mesh_c) % mesh_c;
-            int64_t abc_idx = abc_idx_start;
-            double gaussian_xyz = gaussian_starting_point;
-            double recursion_factor_a = recursion_factor_a_start;
-            for (int a_index = a_center; a_index <= a_stop; a_index++,
-                 gaussian_xyz *= recursion_factor_a,
-                 recursion_factor_a *= exp_da_squared) {
-                if (fabs(gaussian_xyz) < negligible) break;
+            // Initialize at the active start to avoid underflow, but traverse
+            // from a_start to keep neighboring threads' grid accesses aligned.
+            double da_active = a_active_start - a_start;
+            double dx_active = x - xij + da_active * c_dxyz_dabc[0];
+            double dy_active = y - yij + da_active * c_dxyz_dabc[1];
+            double dz_active = z - zij + da_active * c_dxyz_dabc[2];
+            double e = theta_rr + aij * distance_squared(dx_active, dy_active, dz_active);
+            double cross_term_a_start = c_dxyz_dabc[0] * dx_active + c_dxyz_dabc[1] * dy_active + c_dxyz_dabc[2] * dz_active;
+            double gaussian_xyz = exp(-e) * cc;
+            double recursion_factor_a = exp(-aij * (2 * cross_term_a_start + da_squared));
+            for (int a_index = a_start; a_index <= a_active_stop; ++a_index) {
+                if (a_index >= a_active_start) {
+                    double v = vxc_weights[abc_idx] * gaussian_xyz;
+                    double i_deriv0[nfi];
+                    double i_deriv1[3*nfi];
+                    double x_xi = x - xi;
+                    double y_yi = y - yi;
+                    double z_zi = z - zi;
+                    gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
+                    gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
 
-                double v = vxc_weights[abc_idx] * gaussian_xyz;
-                double i_deriv0[nfi];
-                double i_deriv1[3*nfi];
-                double x_xi = x - xi;
-                double y_yi = y - yi;
-                double z_zi = z - zi;
-                gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
-                gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
-
-                double j_deriv0[nfj];
-                double j_deriv1[3*nfj];
-                double x_xj = x - xj;
-                double y_yj = y - yj;
-                double z_zj = z - zj;
-                gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
-                gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
-                double rho_i[3] = {};
-#pragma unroll
-                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                    double s = 0;
-#pragma unroll
-                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                        s += dm_cache[i*nfj+j] * j_deriv0[j];
-                    }
-                    rho_i[0] += s * i_deriv1[i      ];
-                    rho_i[1] += s * i_deriv1[i+nfi  ];
-                    rho_i[2] += s * i_deriv1[i+nfi*2];
-                }
-                for (int n = 0; n < 3; ++n) {
-                    rho_i[n] *= v;
-                    grad_i[n] -= rho_i[n];
-                }
-
-                double rho_j[3] = {};
-#pragma unroll
-                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                    double s = 0;
+                    double j_deriv0[nfj];
+                    double j_deriv1[3*nfj];
+                    double x_xj = x - xj;
+                    double y_yj = y - yj;
+                    double z_zj = z - zj;
+                    gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
+                    gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
+                    double rho_i[3] = {};
 #pragma unroll
                     for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                        s += dm_cache[i*nfj+j] * i_deriv0[i];
+                        double s = 0;
+#pragma unroll
+                        for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
+                            s += dm_cache[i*nfj+j] * j_deriv0[j];
+                        }
+                        rho_i[0] += s * i_deriv1[i      ];
+                        rho_i[1] += s * i_deriv1[i+nfi  ];
+                        rho_i[2] += s * i_deriv1[i+nfi*2];
                     }
-                    rho_j[0] += s * j_deriv1[j      ];
-                    rho_j[1] += s * j_deriv1[j+nfj  ];
-                    rho_j[2] += s * j_deriv1[j+nfj*2];
-                }
-                for (int n = 0; n < 3; ++n) {
-                    rho_j[n] *= v;
-                    grad_j[n] -= rho_j[n];
-                    rho_i[n] += rho_j[n];
+                    for (int n = 0; n < 3; ++n) {
+                        rho_i[n] *= v;
+                        grad_i[n] -= rho_i[n];
+                    }
+
+                    double rho_j[3] = {};
+#pragma unroll
+                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
+                        double s = 0;
+#pragma unroll
+                        for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
+                            s += dm_cache[i*nfj+j] * i_deriv0[i];
+                        }
+                        rho_j[0] += s * j_deriv1[j      ];
+                        rho_j[1] += s * j_deriv1[j+nfj  ];
+                        rho_j[2] += s * j_deriv1[j+nfj*2];
+                    }
+                    for (int n = 0; n < 3; ++n) {
+                        rho_j[n] *= v;
+                        grad_j[n] -= rho_j[n];
+                        rho_i[n] += rho_j[n];
 // Grid-response contributions.
 // Note that these grid coordinates are taken from the entire integration space,
 // not restricted to the unit cell. In the NumInt implementation, numerical
@@ -230,89 +260,20 @@ void eval_lda_grad_kernel(double *grad, double *strain, double *dm,
 // sum_{r in unit cell} (\nabla rho) * Vxc * r. Although the expression below
 // looks similar, it cannot be reused here because it is evaluated over a
 // different integration domain.
-                    sigma[n*3+0] += rho_i[n] * x;
-                    sigma[n*3+1] += rho_i[n] * y;
-                    sigma[n*3+2] += rho_i[n] * z;
-                }
+                        sigma[n*3+0] += rho_i[n] * x;
+                        sigma[n*3+1] += rho_i[n] * y;
+                        sigma[n*3+2] += rho_i[n] * z;
+                    }
 
+                    gaussian_xyz *= recursion_factor_a;
+                    recursion_factor_a *= exp_da_squared;
+                }
                 x += c_dxyz_dabc[0];
                 y += c_dxyz_dabc[1];
                 z += c_dxyz_dabc[2];
                 abc_idx += mesh_bc;
                 if (abc_idx >= mesh_abc) {
                     abc_idx -= mesh_abc;
-                }
-            }
-
-            x = x_start;
-            y = y_start;
-            z = z_start;
-            gaussian_xyz = gaussian_starting_point;
-            double inv_recursion_factor_a = exp_da_squared / recursion_factor_a_start;
-            abc_idx = abc_idx_start;
-            for (int a_index = a_center - 1; a_index >= a_start; a_index--,
-                inv_recursion_factor_a *= exp_da_squared) {
-                gaussian_xyz *= inv_recursion_factor_a;
-                if (fabs(gaussian_xyz) < negligible) break;
-                x -= c_dxyz_dabc[0];
-                y -= c_dxyz_dabc[1];
-                z -= c_dxyz_dabc[2];
-                abc_idx -= mesh_bc;
-                if (abc_idx < 0) {
-                    abc_idx += mesh_abc;
-                }
-                double v = vxc_weights[abc_idx] * gaussian_xyz;
-                double i_deriv0[nfi];
-                double i_deriv1[3*nfi];
-                double x_xi = x - xi;
-                double y_yi = y - yi;
-                double z_zi = z - zi;
-                gto_cartesian<LI>(i_deriv0, x_xi, y_yi, z_zi);
-                gto_deriv1<LI>(i_deriv1, i_deriv0, x_xi, y_yi, z_zi, ai);
-
-                double j_deriv0[nfj];
-                double j_deriv1[3*nfj];
-                double x_xj = x - xj;
-                double y_yj = y - yj;
-                double z_zj = z - zj;
-                gto_cartesian<LJ>(j_deriv0, x_xj, y_yj, z_zj);
-                gto_deriv1<LJ>(j_deriv1, j_deriv0, x_xj, y_yj, z_zj, aj);
-                double rho_i[3] = {};
-#pragma unroll
-                for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                    double s = 0;
-#pragma unroll
-                    for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                        s += dm_cache[i*nfj+j] * j_deriv0[j];
-                    }
-                    rho_i[0] += s * i_deriv1[i      ];
-                    rho_i[1] += s * i_deriv1[i+nfi  ];
-                    rho_i[2] += s * i_deriv1[i+nfi*2];
-                }
-                for (int n = 0; n < 3; ++n) {
-                    rho_i[n] *= v;
-                    grad_i[n] -= rho_i[n];
-                }
-
-                double rho_j[3] = {};
-#pragma unroll
-                for (int j = dm_j0; j < min(dm_j0+SLICE_SIZE_J, nfj); ++j) {
-                    double s = 0;
-#pragma unroll
-                    for (int i = dm_i0; i < min(dm_i0+SLICE_SIZE_I, nfi); ++i) {
-                        s += dm_cache[i*nfj+j] * i_deriv0[i];
-                    }
-                    rho_j[0] += s * j_deriv1[j      ];
-                    rho_j[1] += s * j_deriv1[j+nfj  ];
-                    rho_j[2] += s * j_deriv1[j+nfj*2];
-                }
-                for (int n = 0; n < 3; ++n) {
-                    rho_j[n] *= v;
-                    grad_j[n] -= rho_j[n];
-                    rho_i[n] += rho_j[n];
-                    sigma[n*3+0] += rho_i[n] * x;
-                    sigma[n*3+1] += rho_i[n] * y;
-                    sigma[n*3+2] += rho_i[n] * z;
                 }
             }
         } }

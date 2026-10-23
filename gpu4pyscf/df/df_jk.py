@@ -295,14 +295,7 @@ class _DFHF:
         log = logger.new_logger(self)
 
         if isinstance(self, rohf.ROHF):
-            if getattr(dm, 'mo_coeff', None) is not None:
-                mo_coeff = cupy.repeat(dm.mo_coeff[None], 2, axis=0)
-                mo_occ = cupy.stack([dm.mo_occ>0, dm.mo_occ==2]).astype(numpy.double)
-                if dm.ndim == 2:  # RHF DM
-                    dm = cupy.repeat(dm[None]*.5, 2, axis=0)
-                dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
-            elif dm.ndim == 2:  # RHF DM
-                dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+            dm = rohf._to_uhf_dm(dm)
 
         # for DFT
         if isinstance(self, rks.KohnShamDFT):

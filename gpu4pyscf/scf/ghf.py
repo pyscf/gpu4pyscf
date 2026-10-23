@@ -23,14 +23,15 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array, tag_array
 from gpu4pyscf.lib import utils
 
-
-def _from_rhf_init_dm(dma, breaksym=True):
+def _from_rhf_init_dm(dma, breaksym=False):
+    mo_coeff = getattr(dma, 'mo_coeff', None)
+    mo_occ = getattr(dma, 'mo_occ', None)
     dma = dma * .5
     dm = block_diag(dma, dma)
-    if breaksym:
-        nao = dma.shape[0]
-        idx, idy = cp.diag_indices(nao)
-        dm[idx+nao,idy] = dm[idx,idy+nao] = dma.diagonal() * .05
+    assert not breaksym
+    if mo_coeff is not None and mo_occ is not None:
+        dm = tag_array(dm, mo_coeff=block_diag(mo_coeff, mo_coeff),
+                       mo_occ=cp.hstack([mo_occ, mo_occ]) * .5)
     return dm
 
 
@@ -98,7 +99,7 @@ def _get_jk(mf, mol, dm, hermi=0, with_j=True, with_k=True, jkbuild=None,
             vj = vj.reshape(dm_shape)
 
         if with_k:
-            dm_k = cp.vstack((dmaa, dmbb, dmab, dmba))
+            dm_k = cp.stack((dmaa, dmbb, dmab, dmba))
             ktmp = jkbuild(mf, mol, dm_k, hermi=0, with_j=False, omega=omega,
                            lr_factor=lr_factor, sr_factor=sr_factor)[1]
             vk = cp.zeros((n_dm, nso, nso), dtype=dm.dtype)
@@ -150,11 +151,36 @@ class GHF(hf.SCF):
         '''
         raise NotImplementedError('Solvent models are not implemented for GHF.')
 
+    def init_guess_by_minao(self, mol=None, high_spin=False):
+        dm = hf.SCF.init_guess_by_minao(self, mol, high_spin=high_spin)
+        if high_spin:
+            return tag_array(block_diag(dm[0], dm[1]),
+                             mo_coeff=block_diag(*dm.mo_coeff),
+                             mo_occ=cp.hstack(dm.mo_occ))
+        return _from_rhf_init_dm(dm)
+
+    def init_guess_by_atom(self, mol=None, high_spin=False):
+        dm = hf.SCF.init_guess_by_atom(self, mol, high_spin=high_spin)
+        if high_spin:
+            return tag_array(block_diag(dm[0], dm[1]),
+                             mo_coeff=block_diag(*dm.mo_coeff),
+                             mo_occ=cp.hstack(dm.mo_occ))
+        return _from_rhf_init_dm(dm)
+
     def get_init_guess(self, mol=None, key='minao', **kwargs):
-        dm = hf.RHF.get_init_guess(self, mol, key, **kwargs)
+        if not isinstance(key, str):
+            return key
+        if mol is None:
+            mol = self.mol
         key = key.lower()
-        if key != 'hcore' and key != '1e':
+        dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
+        nao = mol.nao
+        if dm.shape == (nao, nao):
             dm = _from_rhf_init_dm(dm)
+        elif dm.shape == (2, nao, nao):
+            dm = tag_array(block_diag(dm[0], dm[1]),
+                           mo_coeff=block_diag(*dm.mo_coeff),
+                           mo_occ=cp.hstack(dm.mo_occ))
         return dm
 
     def get_hcore(self, mol=None):
@@ -233,10 +259,14 @@ class GHF(hf.SCF):
             logger.debug(self, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
         return mo_occ
 
-    def spin_square(self, mo, s=None):
+    def spin_square(self, mo_coeff=None, s=None):
+        if mo_coeff is None:
+            mo_coeff = self.mo_coeff[:,self.mo_occ>0]
+        if s is None:
+            s = self.get_ovlp()
+        mo = cp.asarray(mo_coeff)
         nao = mo.shape[0] // 2
-        if s is not None:
-            s = s[:nao,:nao]
+        s = cp.asarray(s[:nao,:nao])
         mo_a = mo[:nao]
         mo_b = mo[nao:]
         saa = mo_a.conj().T.dot(s).dot(mo_a)
@@ -254,6 +284,22 @@ class GHF(hf.SCF):
         ss = float(ssxy.get()) + ssz
         s = (ss+.25)**.5 - .5
         return ss, s*2+1
+
+    def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
+                   verbose=logger.NOTE):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        nao = mol.nao_nr()
+        dm = dm[:nao,:nao] + dm[nao:,nao:]
+        return hf.SCF.dip_moment(self, mol, dm, unit, origin, verbose)
+
+    def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
+                    verbose=logger.NOTE):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        nao = mol.nao_nr()
+        dm = dm[:nao,:nao] + dm[nao:,nao:]
+        return hf.SCF.quad_moment(self, mol, dm, unit, origin, verbose)
 
     def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
         '''Mulliken population analysis
