@@ -163,10 +163,21 @@ def hirshfeld_kernel(mol, grids, dm, make_mf):
 def hirshfeld(mol, grids, dm, xc = "wB97X-V", xc_grid = (99,590), nlc_grid = (50,194), auxbasis = None,
               conv_tol = 1e-10, max_cycle = 100, nlc = None, disp = None):
     """
-        Original Hirshfeld algorithm following:
-        Hirshfeld, F. L. (1977). Bonded-atom fragments for describing molecular charge densities. Theoretica chimica acta, 44(2), 129-138.
+    Original Hirshfeld algorithm following:
+    Hirshfeld, F. L. (1977). Bonded-atom fragments for describing molecular charge densities. Theoretica chimica acta, 44(2), 129-138.
 
-        i.e. Use atomic density of neutral atoms regardless of total molecular charge, and perform spherical averaging for atomic density.
+    i.e. Use atomic density of neutral atoms regardless of total molecular charge, and perform spherical averaging for atomic density.
+
+    Notes
+    -----
+    The neutral free-atom reference densities are obtained from unrestricted
+    atomic HF calculations when xc='HF', or unrestricted atomic DFT calculations
+    with the specified xc functional. Converged atomic density is then
+    spherically averaged before constructing the Hirshfeld weights.
+
+    This reference convention differs from the implementation in PySCF (see
+    https://github.com/pyscf/pyscf/pull/3534), which uses occupancy-averaged,
+    spherically symmetric atomic RHF densities.
     """
 
     def _make_mf(mol):
