@@ -116,6 +116,22 @@ class KnownValues(unittest.TestCase):
         e_ref = mf.kernel()
         assert abs(e_tot - e_ref) < 1e-5
 
+    def test_multipoles(self):
+        mol = pyscf.M(atom='He 0 0 0; H 0 0 1', basis='sto-3g',
+                      spin=1, verbose=0)
+        mf = mol.UHF().to_gpu().to_ghf()
+        nao = mol.nao
+        cp.random.seed(1)
+        dm = cp.random.rand(nao*2, nao*2) + cp.random.rand(nao*2, nao*2) * .5j
+        dm = dm + dm.conj().T
+        spatial_dm = cp.asnumpy(dm[:nao,:nao] + dm[nao:,nao:])
+        ref = pyscf.scf.hf.dip_moment(mol, spatial_dm)
+        assert abs(mf.dip_moment(dm=dm) - ref).max() < 1e-10
+
+        spatial_dm = cp.asnumpy(dm[:nao,:nao] + dm[nao:,nao:])
+        ref = pyscf.scf.hf.quad_moment(mol, spatial_dm, verbose=0)
+        assert abs(mf.quad_moment(dm=dm) - ref).max() < 1e-10
+
 
 if __name__ == "__main__":
     print("Full Tests for ghf")

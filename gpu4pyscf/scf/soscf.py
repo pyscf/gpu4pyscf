@@ -192,7 +192,12 @@ def _rotate_orb_cc(mf, h1e, s1e, conv_tol_grad=None, verbose=None):
             x0_guess = dxi
         g_orb = g_kf
         norm_gorb = norm_gkf
+
         problem_size = g_orb.size
+        if cp.iscomplexobj(g_orb):
+            # With real Davidson coefficients, N complex rotations span up to 2N
+            # real directions. Using N would stop at an incomplete subspace.
+            problem_size *= 2
 
         ah_conv_tol = min(norm_gorb**2, mf.ah_conv_tol)
         # increase the AH accuracy when approach convergence
@@ -319,31 +324,39 @@ def _davidson_cc(h_op, g_op, precond, x0, tol=1e-10, xs=[], ax=[],
     nx = len(xs)
 
     problem_size = x0.size
+    if cp.iscomplexobj(x0):
+        # With real Davidson coefficients, N complex rotations span up to 2N
+        # real directions. Using N would stop at an incomplete subspace.
+        problem_size *= 2
+
     max_cycle = min(max_cycle, problem_size)
-    heff = np.zeros((max_cycle+nx+1,max_cycle+nx+1), dtype=x0.dtype)
-    ovlp = np.eye(max_cycle+nx+1, dtype=x0.dtype)
+    # Note, the subspace H must be real even for Hessian of complex orbitals.
+    # See Eq (9) in https://doi.org/10.1063/1.5036594, disucssions in
+    # https://github.com/pyscf/pyscf/issues/2856 and its fix in PR #2857.
+    heff = np.zeros((max_cycle+nx+1,max_cycle+nx+1))
+    ovlp = np.eye(max_cycle+nx+1)
     if nx == 0:
         xs.append(x0)
         ax.append(h_op(x0))
     else:
         for i in range(1, nx+1):
             for j in range(1, i+1):
-                heff[i,j] = xs[i-1].conj().dot(ax[j-1])
-                ovlp[i,j] = xs[i-1].conj().dot(xs[j-1])
-            heff[1:i,i] = heff[i,1:i].conj()
-            ovlp[1:i,i] = ovlp[i,1:i].conj()
+                heff[i,j] = xs[i-1].conj().dot(ax[j-1]).real
+                ovlp[i,j] = xs[i-1].conj().dot(xs[j-1]).real
+            heff[1:i,i] = heff[i,1:i]
+            ovlp[1:i,i] = ovlp[i,1:i]
 
     w_t = 0
     for istep in range(max_cycle):
         g = g_op()
         nx = len(xs)
         for i in range(nx):
-            heff[i+1,0] = xs[i].conj().dot(g)
-            heff[nx,i+1] = xs[nx-1].conj().dot(ax[i])
-            ovlp[nx,i+1] = xs[nx-1].conj().dot(xs[i])
-        heff[0,:nx+1] = heff[:nx+1,0].conj()
-        heff[1:nx,nx] = heff[nx,1:nx].conj()
-        ovlp[1:nx,nx] = ovlp[nx,1:nx].conj()
+            heff[i+1,0] = xs[i].conj().dot(g).real
+            heff[nx,i+1] = xs[nx-1].conj().dot(ax[i]).real
+            ovlp[nx,i+1] = xs[nx-1].conj().dot(xs[i]).real
+        heff[0,:nx+1] = heff[:nx+1,0]
+        heff[1:nx,nx] = heff[nx,1:nx]
+        ovlp[1:nx,nx] = ovlp[nx,1:nx]
         nvec = nx + 1
         #s0 = scipy.linalg.eigh(ovlp[:nvec,:nvec])[0][0]
         #if s0 < lindep:

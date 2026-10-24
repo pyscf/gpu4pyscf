@@ -220,11 +220,12 @@ class PBCJMatrixOpt:
         dm_cond = None
 
         # TODO: 8-fold symmetry
-        tasks = ((i,j,k,l)
-                 for i in range(n_groups)
-                 for j in range(i+1)
-                 for k in range(n_groups)
-                 for l in range(k+1))
+        # Materialize task metadata before sharing the iterator across workers.
+        tasks = iter([(i,j,k,l)
+                      for i in range(n_groups)
+                      for j in range(i+1)
+                      for k in range(n_groups)
+                      for l in range(k+1)])
 
         def proc(dm_xyz):
             device_id = cp.cuda.device.get_device_id()

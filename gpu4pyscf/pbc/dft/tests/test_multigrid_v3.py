@@ -228,6 +228,21 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
+    def test_get_pp_diffuse_f_tight_s(self):
+        cell = gto.M(
+            a=[[3.017031529165, 0., 0.],
+               [-1.604013528206647, 4.811219930671413, 0.],
+               [-1.325096296375144, 2.828110544741328, 2.492047608632386]],
+            atom=[['Be', [-0.195773528208549, 4.838911230672638, 0.156962000000217]],
+                  ['Zn', [1.292339999999215, 3.173069999999211, 0.837040000000720]]],
+            basis={'Be': [[0, [10., 1.]]], 'Zn': [[3, [0.05, 1.]]]},
+            pseudo={'Be': [[4], 0.3252498935955, 0, [], 0],
+                    'Zn': [[0], 0.50704497116043, 0, [], 0]},
+            unit='Bohr', precision=1e-6, verbose=0)
+        ref = pseudo.get_pp(cell)
+        out = multigrid.MultiGridNumInt(cell).get_pp().get()[0]
+        assert abs(out-ref).max() < 1e-6
+
     def test_get_nuc(self):
         ref = MultiGridNumInt_cpu(cell_orth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
@@ -264,6 +279,53 @@ class KnownValues(unittest.TestCase):
         ref = multigrid_cpu.multigrid.get_rho(MultiGridNumInt_cpu(cell_orth), dm)
         out = multigrid.MultiGridNumInt(cell_orth).get_rho(dm).get()
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+
+    def test_get_rho_skewed_lattice(self):
+        cell = gto.M(
+            atom='He .2 .3 .4',
+            a=[[5, 4, 2.4], [4.2, 5., 3.5], [3.8, .5, 5.]],
+            basis=[[l, [1.3, 1.]] for l in range(5)],
+            unit='Bohr', mesh=[25, 27, 29], precision=1e-10,
+            verbose=0)
+        rng = np.random.default_rng(12)
+        dm = rng.random((cell.nao, cell.nao)) - .5
+        dm = dm.dot(dm.T) / cell.nao
+        ao = cell.pbc_eval_gto('GTOval_sph', cell.get_uniform_grids())
+        ref = np.einsum('gi,ij,gj->g', ao, dm, ao)
+
+        # The Gaussian can underflow at the b-range midpoint even though the
+        # line passes through significant density elsewhere.
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.enable_aft = False
+        ni.allow_mesh_reduction = False
+        rho = ni.get_rho(cp.asarray(dm))
+        np.testing.assert_allclose(rho.get(), ref, atol=1e-9, rtol=0)
+
+    def test_eval_tau_skewed_lattice(self):
+        cell = gto.M(
+            atom='He .2 .3 .4',
+            a=[[5, 4, 2.4], [4.2, 5., 3.5], [3.8, .5, 5.]],
+            basis=[[l, [1.3, 1.]] for l in range(5)],
+            unit='Bohr', mesh=[25, 27, 29], precision=1e-10,
+            verbose=0)
+        rng = np.random.default_rng(12)
+        dm = rng.random((cell.nao, cell.nao)) - .5
+        dm = dm.dot(dm.T) / cell.nao
+        ao = cell.pbc_eval_gto('GTOval_sph_deriv1', cell.get_uniform_grids())
+        ref_rho = np.einsum('gi,ij,gj->g', ao[0], dm, ao[0])
+        ref_tau = .5 * np.einsum('xgi,ij,xgj->g', ao[1:], dm, ao[1:])
+
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.enable_aft = False
+        ni.allow_mesh_reduction = False
+        dm_sc = multigrid._wannier_transform_dm(
+            ni, cp.asarray(dm), None, xctype='MGGA')[0]
+        rhoG, tauG = multigrid._eval_density(ni, dm_sc, with_tau=True)
+        weight = cell.vol / np.prod(cell.mesh)
+        rho = ifft(rhoG, cell.mesh).real.ravel() / weight
+        tau = ifft(tauG, cell.mesh).real.ravel() / weight
+        np.testing.assert_allclose(rho.get(), ref_rho, atol=1e-9, rtol=0)
+        np.testing.assert_allclose(tau.get(), ref_tau, atol=1e-9, rtol=0)
 
     def test_get_j(self):
         nao = cell_orth.nao
@@ -320,6 +382,60 @@ class KnownValues(unittest.TestCase):
         assert abs(n0-n1).max() < 1e-8
         assert abs(exc0-exc1) < 1e-8
         assert abs(ref-vxc).max().get() < 1e-7
+
+    def test_eval_lda_mat_skewed_lattice(self):
+        cell = gto.M(
+            atom='He .2 .3 .4',
+            a=[[5, 4, 2.4], [4.2, 5., 3.5], [3.8, .5, 5.]],
+            basis=[[l, [1.3, 1.]] for l in range(5)],
+            unit='Bohr', mesh=[25, 27, 29], precision=1e-10,
+            verbose=0)
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.enable_aft = False
+        ni.allow_mesh_reduction = False
+        ni.build(xctype='LDA')
+
+        # On this lattice, the Gaussian peak along a grid line can be far from
+        # the fractional-range midpoint, and its value at a_start can underflow.
+        # Integrate a signed potential directly to isolate the matrix kernel
+        # from density evaluation and exercise periodic grid-index wrapping.
+        rng = np.random.default_rng(12)
+        weights = rng.random(np.prod(cell.mesh)) - .5
+        weights *= cell.vol / weights.size
+        ao = cell.pbc_eval_gto('GTOval_sph', cell.get_uniform_grids())
+        ref = ao.T.dot(weights[:,None] * ao)
+
+        vxcG = fft(cp.asarray(weights).reshape(cell.mesh), cell.mesh)
+        out = multigrid._eval_xc_mat(ni, vxcG)
+        out = multigrid._inverse_wannier_transform_fock(ni, out, None)[0]
+        np.testing.assert_allclose(out.get(), ref, atol=1e-9, rtol=0)
+
+    def test_eval_mgga_mat_skewed_lattice(self):
+        cell = gto.M(
+            atom='He .2 .3 .4',
+            a=[[5, 4, 2.4], [4.2, 5., 3.5], [3.8, .5, 5.]],
+            basis=[[l, [1.3, 1.]] for l in range(5)],
+            unit='Bohr', mesh=[25, 27, 29], precision=1e-10,
+            verbose=0)
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.enable_aft = False
+        ni.allow_mesh_reduction = False
+        ni.build(xctype='MGGA')
+
+        # Direct AO quadrature tests both the density and tau matrix terms,
+        # including gradient contractions for all supported angular momenta.
+        rng = np.random.default_rng(12)
+        ngrids = np.prod(cell.mesh)
+        weights = (rng.random((2, ngrids)) - .5) * (cell.vol / ngrids)
+        ao = cell.pbc_eval_gto('GTOval_sph_deriv1', cell.get_uniform_grids())
+        ref = ao[0].T.dot(weights[0,:,None] * ao[0])
+        for dao in ao[1:]:
+            ref += .5 * dao.T.dot(weights[1,:,None] * dao)
+
+        vxcG = [fft(cp.asarray(w).reshape(cell.mesh), cell.mesh) for w in weights]
+        out = multigrid._eval_xc_mat(ni, vxcG)
+        out = multigrid._inverse_wannier_transform_fock(ni, out, None)[0]
+        np.testing.assert_allclose(out.get(), ref, atol=1e-9, rtol=0)
 
     def test_get_vxc_lda_kpts(self):
         nao = cell_orth.nao

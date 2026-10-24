@@ -60,8 +60,8 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars en
     float rr_raw = log_fac / theta;
     float Ecut_raw = log_fac * (2*aij);
     float Ecut_2a = Ecut_raw / (2*aij*aij);
-    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw + Ecut_2a);
-    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw + Ecut_2a);
+    float dri_fac = .5f * logf(.5f*li/aij + fj*fj*rr_raw + Ecut_2a);
+    float drj_fac = .5f * logf(.5f*lj/aij + fi*fi*rr_raw + Ecut_2a);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
 

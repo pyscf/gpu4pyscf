@@ -77,13 +77,17 @@ void eval_tau_kernel(double *rho_c, double *tau_c, double *dm, PBCIntEnvVars env
     int nbas = envs.nbas;
     int bvk_nbas = envs.bvk_ncells * envs.nbas;
     int atom_mesh_b = b_stop - b_start;
+    // Use float32 for boundary estimates; evaluation stays in float64.
+    float db_x = (float)c_dxyz_dabc[3];
+    float db_y = (float)c_dxyz_dabc[4];
+    float db_z = (float)c_dxyz_dabc[5];
+    float db_squared_f = (float)db_squared;
 
 for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
     __syncthreads();
     if (thread_id == 0) {
         c_index1 = min(c_stop, c_index0 + c_stride);
     }
-    int b_center = (b_start + b_stop) / 2;
     int bc_offset = b_start * c_stride + c_index0;
 
     int atom_mesh_bc = atom_mesh_b * c_stride;
@@ -136,7 +140,9 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
         double zij = zjzi * aj_aij + zi;
         double theta_rr = ai * aj_aij * rr;
         double exp_db_squared = exp(-2 * aij * db_squared);
-        // TODO: adjust b_start and b_stop for each individual shl_pair batch
+        float aij_f = (float)aij;
+        float theta_rr_f = (float)theta_rr;
+        float e_cutoff = (float)(log(fabs(cc)) - log(negligible));
 #pragma unroll
         for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
 #pragma unroll
@@ -157,29 +163,54 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
                 } }
             }
             for (int c_index = c_index0+ty; c_index < c_index1; c_index += TILE) {
-                double x_start = a_index * c_dxyz_dabc[0] + b_center * c_dxyz_dabc[3] + c_index * c_dxyz_dabc[6];
-                double y_start = a_index * c_dxyz_dabc[1] + b_center * c_dxyz_dabc[4] + c_index * c_dxyz_dabc[7];
-                double z_start = a_index * c_dxyz_dabc[2] + b_center * c_dxyz_dabc[5] + c_index * c_dxyz_dabc[8];
-                double x = x_start;
-                double y = y_start;
-                double z = z_start;
-                double x_xij = x - xij;
-                double y_yij = y - yij;
-                double z_zij = z - zij;
-                double e = theta_rr + aij * distance_squared(x_xij, y_yij, z_zij);
-                //if (e > 50.) continue; // ~1e-22
-                double gaussian_starting_point = exp(-e) * cc;
-                double cross_term_b = c_dxyz_dabc[3] * x_xij + c_dxyz_dabc[4] * y_yij + c_dxyz_dabc[5] * z_zij;
-                double recursion_factor_b_start = exp(-aij * (2 * cross_term_b + db_squared));
+                double x = a_index * c_dxyz_dabc[0] + b_start * c_dxyz_dabc[3] + c_index * c_dxyz_dabc[6];
+                double y = a_index * c_dxyz_dabc[1] + b_start * c_dxyz_dabc[4] + c_index * c_dxyz_dabc[7];
+                double z = a_index * c_dxyz_dabc[2] + b_start * c_dxyz_dabc[5] + c_index * c_dxyz_dabc[8];
+                float x_xij = (float)(x - xij);
+                float y_yij = (float)(y - yij);
+                float z_zij = (float)(z - zij);
+                float cross_term_b = db_x * x_xij + db_y * y_yij + db_z * z_zij;
 
-                double gaussian_xyz = gaussian_starting_point;
-                double recursion_factor_b = recursion_factor_b_start;
-                for (int b_index = b_center; b_index < b_stop; b_index++,
-                     gaussian_xyz *= recursion_factor_b,
-                     recursion_factor_b *= exp_db_squared) {
+                // db_peak: how many steps to move from b_start to reach the
+                // closest point to the Gaussian center on this fixed-(a,c) line.
+                // b_start + db_peak may lie outside [b_start, b_stop).
+                float db_peak = -cross_term_b / db_squared_f;
+                // Displacement from the Gaussian center to that closest point.
+                float dx = x_xij + db_peak * db_x;
+                float dy = y_yij + db_peak * db_y;
+                float dz = z_zij + db_peak * db_z;
+                float e_min = theta_rr_f + aij_f * distance_squared(dx, dy, dz);
+                // An empty interval keeps inactive lanes in the warp reductions.
+                int b_active_start = b_stop;
+                int b_active_stop = b_stop - 1;
+                if (pair_id < shl_pair1 && e_min <= e_cutoff) {
+                    float b_peak = b_start + db_peak;
+                    float b_radius = sqrtf((e_cutoff - e_min) / (aij_f * db_squared_f));
+                    // Active bounds are inclusive; the traversal stops at b_stop-1.
+                    int lower = ceilf(b_peak - b_radius);
+                    int upper = floorf(b_peak + b_radius);
+                    b_active_start = max(b_start, lower);
+                    b_active_stop = upper;
+                }
+
+                double gaussian_xyz = 0;
+                double recursion_factor_b = 0;
+                // Initialize at the active start to avoid underflow, while all
+                // lanes retain the common b_start traversal for warp reductions.
+                if (b_active_start <= b_active_stop && b_active_start < b_stop) {
+                    double db_active = b_active_start - b_start;
+                    double dx_active = x - xij + db_active * c_dxyz_dabc[3];
+                    double dy_active = y - yij + db_active * c_dxyz_dabc[4];
+                    double dz_active = z - zij + db_active * c_dxyz_dabc[5];
+                    double e = theta_rr + aij * distance_squared(dx_active, dy_active, dz_active);
+                    double cross_term_b_start = c_dxyz_dabc[3] * dx_active + c_dxyz_dabc[4] * dy_active + c_dxyz_dabc[5] * dz_active;
+                    gaussian_xyz = exp(-e) * cc;
+                    recursion_factor_b = exp(-aij * (2 * cross_term_b_start + db_squared));
+                }
+                for (int b_index = b_start; b_index < b_stop; ++b_index) {
                     double rho = 0;
                     double tau = 0;
-                    if (pair_id < shl_pair1 && fabs(gaussian_xyz) > negligible) {
+                    if (b_index >= b_active_start && b_index <= b_active_stop) {
                         double i_cartesian[nfi];
                         double i_gradient[3*nfi];
                         gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
@@ -220,7 +251,10 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
                         }
                         rho *= gaussian_xyz;
                         tau *= gaussian_xyz;
+                        gaussian_xyz *= recursion_factor_b;
+                        recursion_factor_b *= exp_db_squared;
                     }
+                    // Every lane participates, including inactive shell pairs.
                     for (int offset = nsp_per_block/2; offset > 0; offset >>= 1) {
                         rho += __shfl_down_sync(0xffffffff, rho, offset);
                         tau += __shfl_down_sync(0xffffffff, tau, offset);
@@ -232,70 +266,6 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
                     x += c_dxyz_dabc[3];
                     y += c_dxyz_dabc[4];
                     z += c_dxyz_dabc[5];
-                }
-                x = x_start;
-                y = y_start;
-                z = z_start;
-                gaussian_xyz = gaussian_starting_point;
-                double inv_recursion_factor_b = exp_db_squared / recursion_factor_b_start;
-                for (int b_index = b_center - 1; b_index >= b_start; b_index--,
-                    inv_recursion_factor_b *= exp_db_squared) {
-                    gaussian_xyz *= inv_recursion_factor_b;
-                    x -= c_dxyz_dabc[3];
-                    y -= c_dxyz_dabc[4];
-                    z -= c_dxyz_dabc[5];
-                    double rho = 0;
-                    double tau = 0;
-                    if (pair_id < shl_pair1 && fabs(gaussian_xyz) > negligible) {
-                        double i_cartesian[nfi];
-                        double i_gradient[3*nfi];
-                        gto_cartesian<LI>(i_cartesian, x - xi, y - yi, z - zi);
-                        gto_deriv1<LI>(i_gradient, i_cartesian, x - xi, y - yi, z - zi, ai);
-                        rename_registers(i_cartesian, dm_i0, nfi, SLICE_SIZE_I);
-                        rename_registers(i_gradient      , dm_i0, nfi, SLICE_SIZE_I);
-                        rename_registers(i_gradient+nfi  , dm_i0, nfi, SLICE_SIZE_I);
-                        rename_registers(i_gradient+nfi*2, dm_i0, nfi, SLICE_SIZE_I);
-
-                        double j_cartesian[nfj];
-                        double j_gradient[3*nfj];
-                        gto_cartesian<LJ>(j_cartesian, x - xj, y - yj, z - zj);
-                        gto_deriv1<LJ>(j_gradient, j_cartesian, x - xj, y - yj, z - zj, aj);
-                        rename_registers(j_cartesian, dm_j0, nfj, SLICE_SIZE_J);
-                        rename_registers(j_gradient      , dm_j0, nfj, SLICE_SIZE_J);
-                        rename_registers(j_gradient+nfj  , dm_j0, nfj, SLICE_SIZE_J);
-                        rename_registers(j_gradient+nfj*2, dm_j0, nfj, SLICE_SIZE_J);
-#pragma unroll
-                        for (int i = 0; i < SLICE_SIZE_I; ++i) {
-                            if (SLICE_SIZE_I < nfi && dm_i0 + i >= nfi) break;
-                            double s0 = 0;
-                            double s1 = 0;
-                            double s2 = 0;
-                            double s3 = 0;
-#pragma unroll
-                            for (int j = 0; j < SLICE_SIZE_J; ++j) {
-                                if (SLICE_SIZE_J < nfj && dm_j0 + j >= nfj) break;
-                                double dm_val = dm_cache[i * SLICE_SIZE_J + j];
-                                s0 += dm_val * j_cartesian[j];
-                                s1 += dm_val * j_gradient[j      ];
-                                s2 += dm_val * j_gradient[j+nfj  ];
-                                s3 += dm_val * j_gradient[j+nfj*2];
-                            }
-                            rho += s0 * i_cartesian[i];
-                            tau += s1 * i_gradient[i      ];
-                            tau += s2 * i_gradient[i+nfi  ];
-                            tau += s3 * i_gradient[i+nfi*2];
-                        }
-                        rho *= gaussian_xyz;
-                        tau *= gaussian_xyz;
-                    }
-                    for (int offset = nsp_per_block/2; offset > 0; offset >>= 1) {
-                        rho += __shfl_down_sync(0xffffffff, rho, offset);
-                        tau += __shfl_down_sync(0xffffffff, tau, offset);
-                    }
-                    if (tx == 0) {
-                        rho_cache[b_index*c_stride+c_index - bc_offset] += rho;
-                        tau_cache[b_index*c_stride+c_index - bc_offset] += tau;
-                    }
                 }
             }
         } }

@@ -228,7 +228,9 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         aux_batch_size=batch_size, cart=True,
         omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     blksize = min(int(word_avail * 0.25) // nao**2, batch_size)
-    batch_size = min(blksize, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
+    # The evaluator fills a complete auxiliary tile before orbital contractions.
+    batch_size = int((aux_offsets[1:]-aux_offsets[:-1]).max())
+    blksize = min(blksize, batch_size)
 
     buf = cp.empty((batch_size, nao_pair))
     j3c_full = cp.zeros((nao, nao, blksize))

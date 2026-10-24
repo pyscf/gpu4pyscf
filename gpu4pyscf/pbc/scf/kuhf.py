@@ -220,23 +220,26 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     mo_coeff = cp.stack([ca, cb])
     return mo_energy, mo_coeff
 
+def _expand_dm_kpts(dm, nkpts):
+    """Repeat a molecular density and its orbital tags over k-points."""
+    assert dm.ndim == 3
+    if hasattr(dm, 'mo_coeff'):
+        idx = np.where(cp.asnumpy(dm.mo_occ.sum(axis=0)) > 0)[0]
+        mo_coeff = cp.repeat(asarray(dm.mo_coeff[:,None,:,idx]), nkpts, axis=1)
+        mo_occ = cp.repeat(asarray(dm.mo_occ[:,None,idx]), nkpts, axis=1)
+        dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
+        dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+    else:
+        dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
+    return dm
+
 def _cast_mol_init_guess(fn):
     @functools.wraps(fn)
-    def fn_init_guess(mf, cell=None, kpts=None):
+    def fn_init_guess(mf, cell=None, kpts=None, **kwargs):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
-        dm = fn(mf, cell)
-        assert dm.ndim == 3
-        nkpts = len(kpts)
-        if hasattr(dm, 'mo_coeff'):
-            idx = np.where(cp.asnumpy(dm.mo_occ.sum(axis=0)) > 0)[0]
-            mo_coeff = cp.repeat(asarray(dm.mo_coeff[:,None,:,idx]), nkpts, axis=1)
-            mo_occ = cp.repeat(asarray(dm.mo_occ[:,None,idx]), nkpts, axis=1)
-            dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
-            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        else:
-            dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
-        return dm
+        dm = fn(mf, cell, **kwargs)
+        return _expand_dm_kpts(dm, len(kpts))
     return fn_init_guess
 
 class KUHF(khf.KSCF):
@@ -285,13 +288,16 @@ class KUHF(khf.KSCF):
         return dm
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
-        if s1e is None:
-            s1e = self.get_ovlp(cell)
-        dm = cp.asarray(mol_hf.SCF.get_init_guess(self, cell, key))
+        assert isinstance(key, str)
+        key = key.lower()
+        if cell is None: cell = self.cell
+        dm = mol_hf.SCF.get_init_guess(self, cell, key)
         nkpts = len(self.kpts)
         assert dm.ndim == 4 and dm.shape[:2] == (2, nkpts)
 
-        ne = cp.einsum('xkij,kji->x', dm, s1e).real.get()
+        if s1e is None:
+            s1e = self.get_ovlp(cell)
+        ne = cp.einsum('xkij,kji->x', cp.asarray(dm), s1e).real.get()
         nelec = self.nelec
         if any(abs(ne - nelec) > 0.01*nkpts):
             logger.debug(self, 'Big error detected in the electron number '
@@ -301,12 +307,7 @@ class KUHF(khf.KSCF):
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons (%g, %g)',
                          ne.mean()/nkpts, nelec[0]/nkpts, nelec[1]/nkpts)
-            ne[1] += 1e-300 # Number of beta electrons may be 0
-            dm[0] *= nelec[0] / ne[0]
-            dm[1] *= nelec[1] / ne[1]
-            if hasattr(dm, 'mo_coeff'):
-                dm.mo_occ[0] *= nelec[0] / ne[0]
-                dm.mo_occ[1] *= nelec[1] / ne[1]
+            pbcuhf._normalize_spin_dm_(dm, ne, nelec)
         return dm
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
