@@ -1095,7 +1095,17 @@ def ndarray(shape, dtype=np.float64, buffer=None):
     assert buffer.nbytes >= out_nbytes, (
         'buffer of %d bytes is too small for the requested %d bytes'
         % (buffer.nbytes, out_nbytes))
-    return dpnp.ndarray(shape, dtype, buffer=buffer)
+    out = dpnp.ndarray(shape, dtype, buffer=buffer)
+    # The view shares buffer's USM allocation and often outlives it
+    # (empty_aligned drops `buf` on return). buffer's deferred-free
+    # finalizer then runs before any kernel is launched on the view, so
+    # without its own registration the view's death is an eager
+    # sycl::free -- while a kernel that was handed its pointer may still be
+    # running (pbc/x2c `task_pool = None` right after an async launch ->
+    # GPU Write NotPresent). Register the view so its release is
+    # queue-ordered too.
+    from gpu4pyscf.cupy.cuda import _register_deferred_free
+    return _register_deferred_free(out)
 
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf

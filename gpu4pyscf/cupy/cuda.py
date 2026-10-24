@@ -64,6 +64,29 @@ import dpctl._sycl_queue_manager as qmgr
 import dpnp
 
 
+def _pin_libtcm():
+    '''Work around the oneAPI TBB/TCM process-exit race (vendor bug).
+
+    libmkl_tbb_thread -> libtbb dlopens libtcm (its TBB-compatible backend)
+    lazily and dlcloses it from an exit handler. libtcm's own
+    ``__cxa_atexit`` entries (e.g. the hwloc topology loader) can remain
+    pending after its text is unmapped, so the next exit-handler call jumps
+    to an unmapped address -> intermittent SIGSEGV (rc=139) AFTER the whole
+    test session has passed (~15-30% of runs on Aurora's 2026.1 stack).
+    Pinning libtcm with an extra dlopen before libtbb's first one makes
+    libtbb's dlclose only decrement the refcount: the library stays mapped
+    and its handlers run normally. Debug-disable: GPU4PYSCF_PIN_TCM=0.
+    '''
+    if os.environ.get("GPU4PYSCF_PIN_TCM", "1") == "0":
+        return
+    try:
+        ctypes.CDLL("libtcm.so.1", mode=ctypes.RTLD_GLOBAL)
+    except OSError:
+        pass  # stack without TCM (e.g. non-Aurora): the race cannot occur
+
+
+_pin_libtcm()
+
 _DEFERRED_FREE_THRESHOLD = int(
     os.environ.get("GPU4PYSCF_DEFERRED_FREE_THRESHOLD", "256")
 )
@@ -1315,13 +1338,69 @@ def _bootstrap():
                 )
             return k
 
+        import numpy as np
+
+        def _split_advanced_key(ndim, key):
+            # NumPy/CuPy accept advanced (array) indices separated by basic
+            # slices, e.g. `x[i,:,j]`: the broadcast advanced dims go first,
+            # then the sliced dims. dpnp raises "Advanced indexing array
+            # specs may not be separated by basic slicing specs" (hit by
+            # pbc/scf/rsjk.py `mask_exclude_dd[ish,:,jsh] = False`).
+            # Same result: permute the advanced axes to the front, then
+            # index with the advanced specs adjacent. Returns (perm, key)
+            # or None when dpnp handles the key as is.
+            if not isinstance(key, tuple):
+                return None
+            adv = []
+            has_array = False
+            for p, k in enumerate(key):
+                if k is None or k is Ellipsis or isinstance(k, (bool, np.bool_)):
+                    return None
+                if isinstance(k, slice):
+                    continue
+                if isinstance(k, (int, np.integer)):
+                    adv.append(p)
+                    continue
+                if isinstance(k, (list, np.ndarray)) or hasattr(k, "get_array"):
+                    if getattr(k, "dtype", None) is not None and k.dtype.kind == "b":
+                        return None
+                    has_array = True
+                    adv.append(p)
+                    continue
+                return None
+            if not has_array or len(key) > ndim:
+                return None
+            if adv[-1] - adv[0] + 1 == len(adv):
+                return None  # already adjacent
+            rest = [p for p in range(ndim) if p not in adv]
+            perm = tuple(adv + rest)
+            new_key = tuple(key[p] for p in adv) + tuple(
+                key[p] for p in rest if p < len(key))
+            return perm, new_key
+
         _getitem_register = (
             os.environ.get("GPU4PYSCF_GETITEM_REGISTER", "1") != "0"
         )
+        _orig_setitem = dpnp.ndarray.__setitem__
+        if not getattr(_orig_setitem, "__cupy_shim_setitem__", False):
+            def _dpnp_shim_setitem(self, key, value, _orig=_orig_setitem):
+                split = _split_advanced_key(self.ndim, key)
+                if split is not None:
+                    perm, key = split
+                    return _orig(self.transpose(perm), key, value)
+                return _orig(self, key, value)
+            _dpnp_shim_setitem.__cupy_shim_setitem__ = True
+            _dpnp_shim_setitem.__wrapped__ = _orig_setitem
+            dpnp.ndarray.__setitem__ = _dpnp_shim_setitem
         _orig_getitem = dpnp.ndarray.__getitem__
         if not getattr(_orig_getitem, "__cupy_shim_getitem__", False):
             def _dpnp_shim_getitem(self, key):
-                res = _orig_getitem(self, _norm_key(key))
+                key = _norm_key(key)
+                split = _split_advanced_key(self.ndim, key)
+                if split is not None:
+                    perm, key = split
+                    self = self.transpose(perm)
+                res = _orig_getitem(self, key)
                 # Fancy/advanced indexing COPIES into a fresh device buffer
                 # created inside dpnp's Cython slicer; without registration
                 # its GC ran an eager sycl::free while raw kernels reading
@@ -1355,12 +1434,90 @@ def _bootstrap():
         # downstream device code (observed: soscf g_orb + hdxi TypeError
         # in multi-file runs when an upstream np-ufunc host-converted a
         # whole matrix).
-        # DISABLED (2026-10-13): even the scalar-only conversion broke
-        # multi-file runs (soscf-after-scf_jk failed at g_orb + hdxi with
-        # a numpy operand after an upstream numpy ufunc host-converted a
-        # value). Do NOT enable without understanding that path; the
-        # geomeTRIC/np.abs(del_E) case is tracked as an open item.
-        dpnp.ndarray.__array_ufunc__ = None
+        # The host-conversion version (2026-10-13) broke multi-file runs:
+        # it turned device data into numpy behind the caller's back.
+        # What CuPy actually does (NEP-13) is dispatch: a numpy ufunc
+        # called with a device operand runs the same-named device ufunc and
+        # returns a device array; host-array inputs or out= still raise.
+        # Mirror that exactly, never converting to host. Covers
+        # geomeTRIC's np.abs(del_E) and pyscf helpers that apply np.log
+        # etc. to gpu4pyscf results.
+        def _dpnp_array_ufunc(self, ufunc, method, *inputs, **kwargs):
+            if method != '__call__':
+                return NotImplemented
+            fn = getattr(dpnp, ufunc.__name__, None)
+            if fn is None:
+                return NotImplemented
+            out = kwargs.get('out')
+            if isinstance(out, tuple):
+                if len(out) != 1:
+                    return NotImplemented
+                kwargs['out'] = out[0]
+            return fn(*inputs, **kwargs)
+        dpnp.ndarray.__array_ufunc__ = _dpnp_array_ufunc
+
+        # CuPy ufuncs accept Python/NumPy scalars (cupy.sqrt(2.) is a 0-d
+        # device array); dpnp's unary ufuncs, and binary ones with two
+        # scalars, require an array. Promote a leading scalar only; host
+        # ndarrays still raise, as in CuPy.
+        from dpnp.dpnp_algo import dpnp_elementwise_common as _ewc
+        _scalar = (int, float, complex, np.generic)
+
+        def _accept_scalars(cls, nin):
+            orig_call = cls.__call__
+            if getattr(orig_call, '__cupy_scalar__', False):
+                return
+            def __call__(self, *args, **kwargs):
+                if args:
+                    # NumPy scalars (and 0-d host arrays, which is how numpy
+                    # hands scalars to __array_ufunc__) become 0-d device
+                    # arrays of the same dtype (dpnp rejects them; keeps e.g. float32 compares
+                    # in float32).
+                    args = tuple(dpnp.asarray(a) if i < nin and (
+                                     isinstance(a, np.generic) or
+                                     (isinstance(a, np.ndarray) and a.ndim == 0)) else a
+                                 for i, a in enumerate(args))
+                    if (isinstance(args[0], _scalar)
+                            and not any(hasattr(a, 'get_array') for a in args[:nin])):
+                        args = (dpnp.asarray(args[0]),) + args[1:]
+                return orig_call(self, *args, **kwargs)
+            __call__.__cupy_scalar__ = True
+            cls.__call__ = __call__
+        _accept_scalars(_ewc.DPNPUnaryFunc, 1)
+        _accept_scalars(_ewc.DPNPBinaryFunc, 2)
+
+        # ufunc.at (unbuffered in-place accumulation, repeated indices add
+        # up), used as cupy.add.at / cupyx.scatter_add. dpnp has no .at.
+        # A 1-D integer index on axis 0 runs on device through bincount;
+        # other index forms take a host round trip (correct, slower).
+        def _ufunc_at(self, a, indices, b=None):
+            name = getattr(self, 'name_', getattr(self, '__name__', ''))
+            if name not in ('add', 'subtract'):
+                raise NotImplementedError(f'dpnp ufunc.at for {name!r}')
+            vals = dpnp.asarray(b, dtype=a.dtype) if b is not None else None
+            if name == 'subtract':
+                vals = -vals
+            idx = indices[0] if isinstance(indices, tuple) and len(indices) == 1 else indices
+            if hasattr(idx, 'get_array'):
+                one_d = idx.ndim == 1 and idx.dtype.kind in 'iu'
+            elif isinstance(idx, (np.ndarray, list)):
+                one_d = np.asarray(idx).ndim == 1 and np.asarray(idx).dtype.kind in 'iu'
+            else:
+                one_d = False
+            if one_d:
+                idx = dpnp.asarray(idx)
+                n, rows = idx.shape[0], a.shape[0]
+                vals = dpnp.broadcast_to(vals, (n,) + a.shape[1:]).reshape(n, -1)
+                acc = dpnp.stack([dpnp.bincount(idx, weights=vals[:, k], minlength=rows)
+                                  for k in range(vals.shape[1])], axis=1)
+                a += acc.reshape(a.shape).astype(a.dtype, copy=False)
+                return
+            host = dpnp.asnumpy(a)
+            np.add.at(host, tuple(dpnp.asnumpy(x) if hasattr(x, 'get_array') else x
+                                  for x in (indices if isinstance(indices, tuple) else (indices,))),
+                      dpnp.asnumpy(vals))
+            a[...] = dpnp.asarray(host)
+        _ewc.DPNPBinaryFunc.at = _ufunc_at
     except Exception:
         pass
     _wrap_blocking_setitem()
@@ -1665,6 +1822,52 @@ class Device:
 device = Device
 
 
+def _get_cublas_handle():
+    # oneMKL calls take the device queue, not a handle; kept for CuPy API
+    # parity (cupy.cuda.device.get_cublas_handle()).
+    return 0
+Device.get_cublas_handle = staticmethod(_get_cublas_handle)
+
+
+# ---------------------------------------------------------------------
+# cupy.cuda.cublas subset used by gpu4pyscf (cc/ccsd_incore.py): raw dgemm
+# with cuBLAS argument conventions -- column-major, alpha/beta passed as
+# host pointers (cuBLAS default pointer mode), device pointers for A/B/C.
+# ---------------------------------------------------------------------
+class _Cublas:
+    CUBLAS_OP_N = 0
+    CUBLAS_OP_T = 1
+    CUBLAS_OP_C = 2
+
+    _lib = None
+
+    @classmethod
+    def _onemkl(cls):
+        if cls._lib is None:
+            lib_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'lib'))
+            lib = ctypes.CDLL(os.path.join(lib_dir, 'libonemkl_helper.so'))
+            lib.onemkl_dgemm.argtypes = [
+                ctypes.c_int, ctypes.c_int, ctypes.c_long, ctypes.c_long, ctypes.c_long,
+                ctypes.c_double, ctypes.c_void_p, ctypes.c_long,
+                ctypes.c_void_p, ctypes.c_long,
+                ctypes.c_double, ctypes.c_void_p, ctypes.c_long]
+            lib.onemkl_dgemm.restype = None
+            cls._lib = lib
+        return cls._lib
+
+    @classmethod
+    def dgemm(cls, handle, transa, transb, m, n, k, alpha, A, lda, B, ldb,
+              beta, C, ldc):
+        a = ctypes.c_double.from_address(int(alpha)).value
+        b = ctypes.c_double.from_address(int(beta)).value
+        cls._onemkl().onemkl_dgemm(int(transa), int(transb), int(m), int(n), int(k),
+                                   a, int(A), int(lda), int(B), int(ldb),
+                                   b, int(C), int(ldc))
+
+
+cublas = _Cublas
+
+
 # =====================================================================
 # Event -- wall-clock timing + queue.wait() sync
 #
@@ -1766,6 +1969,11 @@ class _Runtime:
     @staticmethod
     def getDeviceCount() -> int:
         return get_device_count()
+
+    @staticmethod
+    def deviceSynchronize():
+        for d in range(get_device_count()):
+            _master_queue(d).wait()
 
     @staticmethod
     def memGetInfo():

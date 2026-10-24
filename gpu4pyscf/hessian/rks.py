@@ -1600,7 +1600,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
             # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum("g,dpg,qg->dpq", depsilon_drho * weight, dmu_dr, mu)
             dmudA_nu_ao = contract("dpg,qg->dpq", dmu_dr, mu * (depsilon_drho * weight))
-            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += dmudA_nu_ao
+            add_sparse(dFock_orbital_response_dmudA_nu_term, dmudA_nu_ao, idx)
 
             # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
             # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
@@ -1701,7 +1701,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             dmudA_nu_ao += contract("dpg,qg->dpq", d2mudr2_weight_depsilondnablarho, mu)
             del d2mudr2_weight_depsilondnablarho
 
-            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += dmudA_nu_ao
+            add_sparse(dFock_orbital_response_dmudA_nu_term, dmudA_nu_ao, idx)
 
             # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
             #     "pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
@@ -1823,7 +1823,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             dmudA_nu_ao += contract("dxpg,xqg->dpq", d2mu_dr2, 0.5 * dmu_dr * weight_depsilon_dtau + mu_weight_depsilondnablarho)
             del mu_weight_depsilondnablarho
 
-            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += dmudA_nu_ao
+            add_sparse(dFock_orbital_response_dmudA_nu_term, dmudA_nu_ao, idx)
 
             # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
             #     "pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
@@ -2412,7 +2412,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
         del mu, dmu_dr, d2mu_dr2
 
-        dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += dmudA_nu_ao
+        add_sparse(dFock_orbital_response_dmudA_nu_term, dmudA_nu_ao, idx)
 
         if grid_response:
             i_atom_of_grids = int(grids.atm_idx[g0_full])

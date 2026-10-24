@@ -818,12 +818,12 @@ class TDA(TDBase):
         nov = e_ia_a.size + e_ia_b.size
         nstates = min(nstates, nov)
 
-        e_ia = cp.append(e_ia_a.ravel(), e_ia_b.ravel())
+        e_ia = np.append(e_ia_a.ravel(), e_ia_b.ravel())
         # Find the nstates-th lowest energy gap
-        e_threshold = cp.partition(e_ia, nstates-1)[nstates-1]
+        e_threshold = np.partition(e_ia, nstates-1)[nstates-1]
         e_threshold += self.deg_eia_thresh
 
-        idx = cp.where(e_ia <= e_threshold)[0]
+        idx = np.where(e_ia <= e_threshold)[0]
         x0 = cp.zeros((idx.size, nov))
         x0[cp.arange(len(idx)), idx] = 1
         return x0

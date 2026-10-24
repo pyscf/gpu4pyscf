@@ -236,7 +236,6 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
                 double s = abs(s1 * s2);
                 if (s > 1e-3 && si+sj < nbins){
                     // #ifdef USE_SYCL
-                    // sycl::ext::oneapi::experimental::printf("%f %f %f %d %d %d %d %d %d %d %d\n", s, s1, s2, si, sj, si+sj, grid_id, ish0, jsh0, i, j);
                     // #else
                     printf("%f %f %f %d %d %d %d %d %d %d %d\n", s, s1, s2, si, sj, si+sj, grid_id, ish0, jsh0, i, j);
                     // #endif

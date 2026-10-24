@@ -82,6 +82,8 @@ def ifft_in_place(x):
 
 
 def unique_with_sort(x):
+    # This function does the same thing as cp.unique(x, return_inverse=True).
+    # It's not super optimized, but for whatever reason, cp.unique is very slow, so this one is better.
     assert isinstance(x, cp.ndarray) and (x.dtype == cp.int32 or x.dtype == cp.int64) and x.ndim == 1
     n = x.shape[0]
     if n <= 1:

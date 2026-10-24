@@ -109,13 +109,17 @@ namespace detail {
     if (key.find("CAM") != std::string::npos && key.find("B3LYP") != std::string::npos) {
       if (auto f = functional_from_string("CAMB3LYP")) return f;
     }
-    // LRC-ωPBE family
-    if (key.find("LC_WPBE") != std::string::npos || key.find("LRC_WPBE") != std::string::npos) {
-      if (key.find('H') != std::string::npos) {
-        if (auto f = functional_from_string("LRCWPBEH")) return f;
-      } else {
-        if (auto f = functional_from_string("LRCWPBE"))  return f;
-      }
+    // LRC-ωPBE family: exact names only. ExchCXX builtins bake ω in, so a
+    // family member with a different ω/α (LC_WPBE, *_WHS: ω=0.4) has no
+    // builtin and must fail, not fall back to a relative. The former
+    // substring test matched the 'H' of the "HYB_" prefix and silently
+    // evaluated every member as LRC-ωPBEh (ω=0.2): 9 Ha off for
+    // HYB_GGA_XC_LC_WPBE_WHS while K still used ω=0.4.
+    if (key == "HYB_GGA_XC_LRC_WPBE") {
+      if (auto f = functional_from_string("LRCWPBE"))  return f;
+    }
+    if (key == "HYB_GGA_XC_LRC_WPBEH") {
+      if (auto f = functional_from_string("LRCWPBEH")) return f;
     }
 
     // 3) Already a canonical ExchCXX name? (users sometimes pass that)

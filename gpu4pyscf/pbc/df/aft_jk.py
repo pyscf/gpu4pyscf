@@ -216,13 +216,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
-            # Gpq is itself a view into Gpq_buf. Passing Gpq_buf/buf as the
-            # out/buf scratch for the recontraction below aliases memory
-            # that Gpq (still being read from) also occupies: the two
-            # apply_CT_dot calls inside _bas_recontract_ft_pair write over
-            # the live Gpq data mid-computation, corrupting vk. Use fresh,
-            # non-aliased scratch instead.
-            Gpq = _bas_recontract_ft_pair(cell, Gpq)
+            Gpq = _bas_recontract_ft_pair(cell, Gpq, Gpq_buf, buf)
             update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1], ki_idx, kj_idx,
                       not self_conj, k_to_compute, t_rev_pairs, buf)
             Gpq = None

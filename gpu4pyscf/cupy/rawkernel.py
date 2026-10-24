@@ -144,6 +144,14 @@ using std::cos;
 #define rsqrtf(x)  (sycl::rsqrt((float)(x)))
 #define __fdividef(a, b) ((float)(a) / (float)(b))
 
+// CUDA device code has global min()/max() for every arithmetic type
+// (fci/direct_spin1.py uses them on ints); SYCL RTC does not.
+// Returns by value in the common arithmetic type, as CUDA's do.
+template <typename T, typename U>
+inline auto min(T a, U b) -> decltype(true ? T() : U()) { return b < a ? b : a; }
+template <typename T, typename U>
+inline auto max(T a, U b) -> decltype(true ? T() : U()) { return a < b ? b : a; }
+
 // CUDA built-in vector types used by the embedded kernels. Plain structs
 // with the same layout/member names as the CUDA originals -- no alignment
 // annotations, since these kernels only ever access them element-wise.

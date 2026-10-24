@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 The PySCF Developers. All Rights Reserved.
+ * Copyright 2024-2026 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -202,9 +202,12 @@ __global__ static
 void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pair_offsets,
                       uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                       int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
-                      double *Gv, int nGv, int *ao_loc, int compressing, int to_sph)
+                      double *Gv, int nGv, int *ao_loc, int compressing, int to_sph,
+                      int *head, int nbatches_shl_pair)
 {
     setup_context();
+    SHARED_ARRAY(int, Gv_block_id);
+    SHARED_ARRAY(int, sp_block_id);
     SHARED_ARRAY(int, shl_pair0);
     SHARED_ARRAY(int, shl_pair1);
     SHARED_ARRAY(int, li);
@@ -219,14 +222,26 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     // ft_aopair_kernel's grid-points-per-block is independent of ft_ao_bdiv_kernel's
-    // NG_PER_BLOCK (bumped to FT_AO_THREADS for that kernel's divergence fix); upstream
-    // hardcodes WARP_SIZE here and sizes shm_size/grid dims on the host to match.
+    // NG_PER_BLOCK (bumped to FT_AO_THREADS for that kernel's divergence fix).
     constexpr int nGv_per_block = WARP_SIZE;
-    int sp_block_id = gridDim_x - blockIdx_x - 1;
-    int Gv_block_id = blockIdx_y;
-    int Gv_id_in_block = threadIdx_x;
-    int warp_id = threadIdx_y;
-    int thread_id = Gv_id_in_block + nGv_per_block * warp_id;
+    int thread_id = threadIdx_x;
+    int Gv_id_in_block = thread_id % nGv_per_block;
+    int warp_id = thread_id / nGv_per_block;
+    // Persistent workers, as upstream: one c2s_pool slice per work-group,
+    // tasks pulled from `head`. Indexing the pool by a hashed group id
+    // instead lets two co-resident groups share a slice (silent garbage).
+    double *c2s_pool = pool + blockIdx_x * POOL_SIZE;
+while (1) {
+    if (thread_id == 0) {
+        int batch_id = atomicAdd(head, 1);
+        Gv_block_id = batch_id / nbatches_shl_pair;
+        sp_block_id = batch_id - Gv_block_id * nbatches_shl_pair;
+    }
+    __syncthreads();
+    if (Gv_block_id * nGv_per_block >= nGv) {
+        return;
+    }
+
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
     int *bas = envs.bas;
@@ -246,7 +261,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
         // cannot handle spherical integrals
         nao = ao_loc[envs.nbas];
         gout_stride = gout_stride_lookup[li*LMAX1+lj];
-        nsp_per_block = blockDim_y / gout_stride;
+        nsp_per_block = WARPS / gout_stride;
     }
     __syncthreads();
     int nGsp_per_block = nGv_per_block * nsp_per_block;
@@ -275,7 +290,6 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     if (thread_id < nfj * 3) {
         idx_j[thread_id] = lex_xyz_address(lj, thread_id) * stride_j * nGsp_per_block;
     }
-    double *c2s_pool = pool + get_smid() * POOL_SIZE;
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
     double kx = 0;
@@ -1147,6 +1161,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
         }
     }
 }
+}
 
 extern "C" {
 int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids)
@@ -1167,27 +1182,27 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids)
     return 0;
 }
 
-// `head` is the persistent-worker task counter upstream's kernel consumes via
-// atomicAdd. Both branches below map the grid statically instead, so the
-// pointer is unused -- but it stays in the signature because the ctypes
-// caller in pbc/df/ft_ao.py is upstream code and still passes it; dropping it
-// shifts every later argument by one and aborts the process.
 int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool, int *head,
                     int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
                     uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                     int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
                     double *grids, int ngrids, int *ao_loc, int compressing, int to_sph)
 {
-    (void)head;
-    constexpr int nGv_per_block = WARP_SIZE;
-    int Gv_batches = (ngrids + nGv_per_block - 1) / nGv_per_block;
+    // No tasks: the persistent workers would compute batch_id / 0.
+    if (nbatches_shl_pair <= 0 || ngrids <= 0) {
+        return 0;
+    }
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    auto threads = make_block(nGv_per_block, WARPS);
-    auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    cudaMemset(head, 0, sizeof(int));
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
     LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size,
-            out, *envs, pool, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
-            gout_stride_lookup, ao_pair_loc, ao_pair_offset, grids, ngrids,
-            ao_loc, compressing, to_sph);
+        out, *envs, pool, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
+        gout_stride_lookup, ao_pair_loc, ao_pair_offset, grids, ngrids,
+        ao_loc, compressing, to_sph, head, nbatches_shl_pair);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));

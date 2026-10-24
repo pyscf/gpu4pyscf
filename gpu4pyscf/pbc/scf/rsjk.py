@@ -559,9 +559,9 @@ class PBCJKMatrixOpt:
         Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
         buf = Gpq_buf[nao1**2*bvk_ncells*Gblksize:]
         if exclude_dd_block:
-            # Region formerly used as Gpq1_buf; the recontraction below now
-            # allocates its own output (aliasing fix), keep buf's offset.
-            buf = buf[nao**2*bvk_ncells*Gblksize:]
+            Gpq1_buf, buf = buf, buf[nao**2*bvk_ncells*Gblksize:]
+        else:
+            Gpq1_buf = Gpq_buf
         for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
             wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
                 cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
@@ -572,19 +572,12 @@ class PBCJKMatrixOpt:
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
                 log.debug3('update_vk [%s:%s]', p0, p1)
                 Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
-                # Gpq is itself a view into Gpq_buf (and Gpq1_buf aliases
-                # Gpq_buf when not exclude_dd_block). Passing Gpq1_buf/buf as
-                # the out/buf scratch for the recontraction below aliases
-                # memory that Gpq (still being read from) also occupies --
-                # same bug as aft_jk.get_k_kpts, fixed the same way: use
-                # fresh, non-aliased scratch (see
-                # 0002-fix-pbc-aft-vk-buffer-aliasing-in-get_k_kpts.patch).
-                Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq)
+                Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
                 update_vk(vk, Gpq1, dms, wcoulG[p0:p1], ki_idx, kj_idx,
                           not self_conj, k_to_compute, t_rev_pairs, buf)
                 if exclude_dd_block:
                     Gpq[:,:,diffuse_i,diffuse_j] = 0.
-                    Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq)
+                    Gpq1 = aft_jk._bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
                     update_vk(vk, Gpq1, dms, wcoulG_SR[p0:p1], ki_idx, kj_idx,
                               not self_conj, k_to_compute, t_rev_pairs, buf)
                 Gpq = Gpq1 = None

@@ -648,13 +648,8 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     while ke_upper > 0:
         if ke_lower < init_ke:
             ke_lower = 0 # To include all remaining diffuse orbital pairs
-        # Compare against the bounds in the dtype of pair_ke (float32).
-        # The Ecut estimator clamps pair_ke at an Ecut_max that was rounded to
-        # float32 by ctypes.c_float, so clamped values can be slightly LARGER
-        # than the float64 ke_cutoff they came from. A float64 comparison then
-        # leaves those pairs out of every bucket and their density is silently
-        # lost. (CuPy/legacy NumPy demote the Python float to the array dtype
-        # and never hit this; the explicit cast makes the two backends agree.)
+        # Compare in pair_ke's dtype (float32): pairs clamped at a
+        # float32-rounded Ecut_max would otherwise fall out of every bucket.
         lo = pair_ke.dtype.type(ke_lower)
         hi = pair_ke.dtype.type(ke_upper)
         filtered_pairs = pair_idx[(lo < pair_ke) & (pair_ke <= hi)]

@@ -352,6 +352,7 @@ void _lj_down_and_write(double *out, double *buf, const int li, const int lj, co
 /*
 __device__
 void _li_up_up(double *out, double *buf, const int li, const int lj){
+    setup_context();
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi0 = (li-1) * li / 2;
@@ -365,7 +366,7 @@ void _li_up_up(double *out, double *buf, const int li, const int lj){
     double *outzy = out + 7*nfi*nfj;
     double *outzz = out + 8*nfi*nfj;
     const double fac = 1.0 / _ecp_fac[li-1] / _ecp_fac[lj-2];
-    for (int ij = threadIdx.x; ij < nfi0*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi0*nfj; ij+=blockDim_x){
         const int i = ij % nfi0;
         const int j = ij / nfi0;
         const double ypow1 = _cart_pow_y[i] + 1;
@@ -397,6 +398,7 @@ void _li_up_up(double *out, double *buf, const int li, const int lj){
 
 __device__
 void _li_up_down(double *out, double *buf, const int li, const int lj){
+    setup_context();
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     double *outxx = out;
@@ -409,7 +411,7 @@ void _li_up_down(double *out, double *buf, const int li, const int lj){
     double *outzy = out + 7*nfi*nfj;
     double *outzz = out + 8*nfi*nfj;
 
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij % nfi;
         const int j = ij / nfi;
         const double yfac = _cart_pow_y[i];
@@ -433,6 +435,7 @@ void _li_up_down(double *out, double *buf, const int li, const int lj){
 
 __device__
 void _li_down_down(double *out, double *buf, const int li, const int lj){
+    setup_context();
     const int nfi = (li+1) * (li+2) / 2;
     const int nfj = (lj+1) * (lj+2) / 2;
     const int nfi2 = (li+3) * (li+4) / 2;
@@ -446,7 +449,7 @@ void _li_down_down(double *out, double *buf, const int li, const int lj){
     double *outzy = out + 7*nfi*nfj;
     double *outzz = out + 8*nfi*nfj;
     const double fac = _ecp_fac[li] / _ecp_fac[li+2];
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij % nfi;
         const int j = ij / nfi;
 

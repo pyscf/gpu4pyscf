@@ -4,46 +4,71 @@
 #include <iostream>
 
 
-extern "C" void onemkl_trsm(double* a, double* b,
-                            int m, int n, int lda, int ldb,
-                            int lower, int trans, int unit_diagonal) {
+// Left-side in-place triangular solve, column-major: B <- op(A)^-1 B.
+// trans: 0 = N, 1 = T, 2 = C (conjugate transpose), as in cuBLAS / CuPy.
+template <typename T>
+static void onemkl_trsm_impl(T* a, T* b, int m, int n, int lda, int ldb,
+                             int lower, int trans, int unit_diagonal) {
   auto queue = *sycl_get_queue();
 
   oneapi::mkl::uplo uplo = lower ? oneapi::mkl::uplo::L : oneapi::mkl::uplo::U;
-  oneapi::mkl::transpose transA = trans ? oneapi::mkl::transpose::T : oneapi::mkl::transpose::N;
+  oneapi::mkl::transpose transA = trans == 2 ? oneapi::mkl::transpose::C
+                                : trans == 1 ? oneapi::mkl::transpose::T
+                                             : oneapi::mkl::transpose::N;
   oneapi::mkl::diag diag = unit_diagonal ? oneapi::mkl::diag::U : oneapi::mkl::diag::N;
-  double alpha = 1.0;
+  T alpha = T(1);
 
-  // in-place
-  auto e = oneapi::mkl::blas::column_major::trsm(queue,
-                                                 oneapi::mkl::side::left,
-                                                 uplo,
-                                                 transA,
-                                                 diag,
-                                                 m, n, alpha,
-                                                 a, lda, b, ldb);
-  e.wait();
+  // in-place. Not waited on, like cuBLAS trsm on a stream: later work on
+  // the in-order queue is ordered after it, and trsm has no scratchpad or
+  // info output to read back.
+  oneapi::mkl::blas::column_major::trsm(queue,
+                                        oneapi::mkl::side::left,
+                                        uplo,
+                                        transA,
+                                        diag,
+                                        m, n, alpha,
+                                        a, lda, b, ldb);
+}
+
+extern "C" void onemkl_trsm(double* a, double* b,
+                            int m, int n, int lda, int ldb,
+                            int lower, int trans, int unit_diagonal) {
+  onemkl_trsm_impl(a, b, m, n, lda, ldb, lower, trans, unit_diagonal);
 }
 
 extern "C" void onemkl_strsm(float* a, float* b,
                              int m, int n, int lda, int ldb,
                              int lower, int trans, int unit_diagonal) {
+  onemkl_trsm_impl(a, b, m, n, lda, ldb, lower, trans, unit_diagonal);
+}
+
+extern "C" void onemkl_ctrsm(std::complex<float>* a, std::complex<float>* b,
+                             int m, int n, int lda, int ldb,
+                             int lower, int trans, int unit_diagonal) {
+  onemkl_trsm_impl(a, b, m, n, lda, ldb, lower, trans, unit_diagonal);
+}
+
+extern "C" void onemkl_ztrsm(std::complex<double>* a, std::complex<double>* b,
+                             int m, int n, int lda, int ldb,
+                             int lower, int trans, int unit_diagonal) {
+  onemkl_trsm_impl(a, b, m, n, lda, ldb, lower, trans, unit_diagonal);
+}
+
+// cuBLAS-style column-major dgemm: C <- alpha op(A) op(B) + beta C.
+// trans: 0 = N, 1 = T, 2 = C. Not waited on, like cublasDgemm on a stream.
+extern "C" void onemkl_dgemm(int transa, int transb, long m, long n, long k,
+                             double alpha, const double* a, long lda,
+                             const double* b, long ldb,
+                             double beta, double* c, long ldc) {
   auto queue = *sycl_get_queue();
-
-  oneapi::mkl::uplo uplo = lower ? oneapi::mkl::uplo::L : oneapi::mkl::uplo::U;
-  oneapi::mkl::transpose transA = trans ? oneapi::mkl::transpose::T : oneapi::mkl::transpose::N;
-  oneapi::mkl::diag diag = unit_diagonal ? oneapi::mkl::diag::U : oneapi::mkl::diag::N;
-  float alpha = 1.0f;
-
-  // in-place
-  auto e = oneapi::mkl::blas::column_major::trsm(queue,
-                                                 oneapi::mkl::side::left,
-                                                 uplo,
-                                                 transA,
-                                                 diag,
-                                                 m, n, alpha,
-                                                 a, lda, b, ldb);
-  e.wait();
+  auto op = [](int t) {
+    return t == 2 ? oneapi::mkl::transpose::C
+         : t == 1 ? oneapi::mkl::transpose::T
+                  : oneapi::mkl::transpose::N;
+  };
+  oneapi::mkl::blas::column_major::gemm(queue, op(transa), op(transb),
+                                        m, n, k, alpha, a, lda, b, ldb,
+                                        beta, c, ldc);
 }
 
 extern "C" void onemkl_dsygvd_scratchpad_size(int itype,

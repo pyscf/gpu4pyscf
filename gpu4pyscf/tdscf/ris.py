@@ -322,9 +322,6 @@ def get_inter_contract_C(int_tensor, C_occ, C_vir):
 
 def gen_hdiag_MVP(hdiag, n_occ, n_vir):
     def hdiag_MVP(V):
-        # The Krylov solver may pass host (numpy) vectors; CuPy's einsum
-        # uploads them implicitly, dpnp does not — normalize here.
-        V = cp.asarray(V)
         m = V.shape[0]
         V = V.reshape(m, n_occ*n_vir)
         hdiag_v = hdiag * V
@@ -359,9 +356,6 @@ def gen_iajb_MVP(T_ia):
         Returns:
             iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
         '''
-        # The Krylov solver may pass host (numpy) vectors; CuPy's einsum
-        # uploads them implicitly, dpnp does not — normalize here.
-        V = cp.asarray(V)
         # Get the shape of the tensors
         nauxao, n_occ, n_vir = T_ia.shape
         n_state, n_occ, n_vir = V.shape
@@ -427,18 +421,14 @@ def gen_ijab_MVP(T_ij, T_ab):
         Returns:
             ijab_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
         '''
-        # The Krylov solver may pass host (numpy) vectors; CuPy's einsum
-        # uploads them implicitly, dpnp does not — normalize here.
-        V = cp.asarray(V)
         T_ij_gpu = cp.asarray(T_ij) # if T_ij was in RAM, upload to GPU on calling
-        T_ab_gpu = cp.asarray(T_ab)     # same: cached T_ab may be a host array too
         nauxao, n_occ, n_occ = T_ij.shape
 
-        nauxao, n_vir, n_vir = T_ab_gpu.shape  # Dimensions of T_ab
+        nauxao, n_vir, n_vir = T_ab.shape  # Dimensions of T_ab
         n_state, n_occ, n_vir = V.shape      # Dimensions of V
 
         # Initialize result tensor
-        ijab_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ab_gpu.dtype)
+        ijab_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ab.dtype)
 
         # Get free memory and dynamically calculate chunk size
         available_gpu_memory = get_avail_mem()
@@ -448,7 +438,7 @@ def gen_ijab_MVP(T_ij, T_ab):
         n_T_ab_V_chunk = nauxao * 1 * n_state * n_occ 
         n_ijab_V_chunk = n_state * n_occ * 1
 
-        bytes_per_vir = 2*( n_T_ab_chunk + n_T_ab_V_chunk + n_ijab_V_chunk) * T_ab_gpu.itemsize  
+        bytes_per_vir = 2*( n_T_ab_chunk + n_T_ab_V_chunk + n_ijab_V_chunk) * T_ab.itemsize  
         # print('available_gpu_memory', available_gpu_memory)
         # print('bytes_per_vir', bytes_per_vir)
         vir_chunk_size = max(1, int(available_gpu_memory * 0.8 // bytes_per_vir)) 
@@ -468,7 +458,7 @@ def gen_ijab_MVP(T_ij, T_ab):
             # vir_range = vir_end - vir_start
 
             # Extract the corresponding chunk of T_ab
-            T_ab_chunk = T_ab_gpu[:, vir_start:vir_end, :]  # Shape: (nauxao, vir_range, n_vir)
+            T_ab_chunk = cp.asarray(T_ab[:, vir_start:vir_end, :])  # Shape: (nauxao, vir_range, n_vir)
 
             # Compute T_ab_V for the current chunk
             T_ab_chunk_V = contract("Pab,mjb->Pamj", T_ab_chunk, V)
@@ -510,9 +500,6 @@ def gen_ibja_MVP(T_ia):
         Returns:
             ibja_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
         '''
-        # The Krylov solver may pass host (numpy) vectors; CuPy's einsum
-        # uploads them implicitly, dpnp does not — normalize here.
-        V = cp.asarray(V)
         nauxao, n_occ, n_vir = T_ia.shape
         n_state, n_occ, n_vir = V.shape
 

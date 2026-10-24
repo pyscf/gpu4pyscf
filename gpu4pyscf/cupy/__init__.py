@@ -255,11 +255,31 @@ else:
         "diag_indices", "repeat", "diag", "tril_indices_from", "ceil", "newaxis",
         "ascontiguousarray", "nonzero", "array_equal", "isinf", "isnan", "dtype",
         "asfortranarray", "abs", "shape", "argmax", "trace", "prod",
+        "nan", "inf", "e", "euler_gamma",
     ):
         try:
             setattr(cupy_fake, _attr, getattr(dpnp, _attr))
         except AttributeError:
             pass
+
+    # CuPy keeps 0-d arrays 0-d in ascontiguousarray/asfortranarray; dpnp
+    # (like NumPy) promotes them to 1-d. Upstream relies on the CuPy
+    # behaviour, e.g. lib/cutensor.py wraps a full contraction's 0-d
+    # einsum result. dpnp is looked up at call time so the deferred-free
+    # wrapping applied later in cupy/cuda.py still takes effect.
+    def _keep_0d(name):
+        def wrapper(a, dtype=None, *args, **kwargs):
+            if getattr(a, 'ndim', None) == 0 and hasattr(a, 'get_array'):
+                return a if dtype is None or a.dtype == dtype else a.astype(dtype)
+            return getattr(dpnp, name)(a, dtype, *args, **kwargs)
+        wrapper.__name__ = name
+        return wrapper
+    # cupy.array2string formats a device array; dpnp has none.
+    def _array2string(a, *args, **kwargs):
+        return np.array2string(dpnp.asnumpy(a), *args, **kwargs)
+    cupy_fake.array2string = _array2string
+    cupy_fake.ascontiguousarray = _keep_0d('ascontiguousarray')
+    cupy_fake.asfortranarray = _keep_0d('asfortranarray')
 
 
     # -----------------------------------------------------------------
@@ -318,6 +338,7 @@ else:
         "allclose", "sqrt", "tril_indices",
         "dot", "asarray", "array",
         "einsum", "concatenate",
+        "ascontiguousarray", "asfortranarray",
     })
 
     for _attr in dir(dpnp):

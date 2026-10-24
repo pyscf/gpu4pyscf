@@ -239,8 +239,13 @@ static inline void cudaFree(void* ptr) {
   sycl::free(ptr, *(sycl_get_queue()));
 }
 
+// Like CUDA's cudaMemset on device memory: asynchronous to the host and
+// ordered on the (in-order) queue before later kernels. No wait: every
+// caller zeroes a device task counter or output buffer that only later
+// work on the same queue reads, and a wait here drained the whole queue
+// before each launch.
 static inline void cudaMemset(void* ptr, int val, size_t size) {
-  sycl_get_queue()->memset(ptr, static_cast<unsigned char>(val), size).wait();
+  sycl_get_queue()->memset(ptr, static_cast<unsigned char>(val), size);
 }
 
 // --- CUDA-compat 2D memcpy + zero-copy helpers ---

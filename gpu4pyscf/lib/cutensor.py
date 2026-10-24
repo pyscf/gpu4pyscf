@@ -54,11 +54,7 @@ def _create_tensor_descriptor(a):
 
 def _contract_einsum(pattern, a, b, alpha, beta, out=None, einsum=cupy.einsum):
     if out is None:
-        out = einsum(pattern, a, b)
-        # ascontiguousarray is documented to force ndim >= 1, corrupting a
-        # full contraction's 0-d scalar (e.g. 'ij,ji->') -- only call it when actually needed.
-        if not out.flags.c_contiguous:
-            out = cupy.ascontiguousarray(out)
+        out = cupy.ascontiguousarray(einsum(pattern, a, b))
         out *= alpha
     elif beta == 0.:
         out[:] = einsum(pattern, a, b)

@@ -25,3 +25,8 @@ def zeros_pinned(shape, dtype=_np.float64, order='C'):
     out = empty_pinned(shape, dtype=dtype, order=order)
     out.fill(0)
     return out
+
+
+def scatter_add(a, slices, value):
+    '''cupyx.scatter_add: a[slices] += value, accumulating repeated indices.'''
+    _cupy.add.at(a, slices, value)

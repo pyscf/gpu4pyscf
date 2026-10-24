@@ -33,6 +33,8 @@ from gpu4pyscf.scf.jk import _check_rsh_factors
 __all__ = ['Gradients']
 
 DM_BLOCK = 7
+# Rows per GEMM when contracting j3c with DMs for the J aux vectors
+J_DM_CHUNK = 4
 
 def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
                         verbose=None, omega=None, lr_factor=None, sr_factor=None):
@@ -427,6 +429,17 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             dm2_factor_l[i].dot(dm2_factor_r[i].T, out=dm2[i])
         auxvec1 = cp.empty((n_dm, naux))
         auxvec2 = cp.empty((n_dm, naux))
+        # Contract j3c with the DMs in zero-padded chunks of J_DM_CHUNK rows,
+        # so every GEMM has the same shape whatever n_dm is. One
+        # (n_dm, nao*nao) GEMM lets the BLAS pick its kernel by n_dm, so the
+        # same DM gives different rounding depending on how many DMs share
+        # the call, and the aux metric amplifies that difference (batched vs
+        # single-pair NAC).
+        n_pad = n_dm + (-n_dm) % J_DM_CHUNK
+        dm1T = cp.zeros((n_pad, nao*nao))
+        dm2T = cp.zeros((n_pad, nao*nao))
+        dm1T[:n_dm] = dm1.transpose(0,2,1).reshape(n_dm, nao*nao)
+        dm2T[:n_dm] = dm2.transpose(0,2,1).reshape(n_dm, nao*nao)
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free - 2*naux*np.dot(dm1_noccs, dm2_noccs)*8 - 2*n_dm*nao**2*8
@@ -470,9 +483,16 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
                 contract('pqr,pi->iqr', j3c, dm1_factor_r[i], out=tmp)
                 contract('iqr,qj->rij', tmp, dm2_factor_l[i], out=j3c_o1o2[i][aux0:aux1])
             if j_factor is not None:
-                auxvec1[:,aux0:aux1] = cp.einsum('pqr,nqp->nr', j3c, dm1)
-                auxvec2[:,aux0:aux1] = cp.einsum('pqr,nqp->nr', j3c, dm2)
+                j3c_2d = j3c_full.reshape(nao*nao, -1)
+                for c0 in range(0, n_dm, J_DM_CHUNK):
+                    c1 = min(c0 + J_DM_CHUNK, n_dm)
+                    v1 = dm1T[c0:c0+J_DM_CHUNK].dot(j3c_2d)
+                    v2 = dm2T[c0:c0+J_DM_CHUNK].dot(j3c_2d)
+                    auxvec1[c0:c1,aux0:aux1] = v1[:c1-c0,:dk]
+                    auxvec2[c0:c1,aux0:aux1] = v2[:c1-c0,:dk]
+                v1 = v2 = None
     j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
+    dm1T = dm2T = j3c_2d = None
     t0 = log.timer_debug1('contract dm', *t0)
 
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
@@ -530,9 +550,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
             ejk_aux.append(
                 -int2c2e_ip1_per_atom(auxmol, dm_aux, omega, lr_factor, sr_factor))
-        # np.stack() implicitly converts operands to numpy (raise on dpnp);
-        # stack on device instead
-        ejk_aux = cp.array(cp.stack(ejk_aux))
+        ejk_aux = cp.stack(ejk_aux)
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     auxvec1 = auxvec2 = dm_aux = None
 

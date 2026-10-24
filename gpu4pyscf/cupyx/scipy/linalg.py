@@ -17,6 +17,7 @@ import cmath
 import math
 import dpnp
 import ctypes
+import numpy
 
 # Load the oneMKL helper shared library from gpu4pyscf/lib/
 _lib_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'lib'))
@@ -47,6 +48,19 @@ libonemkl.onemkl_strsm.argtypes = [
     ctypes.c_int      # unit_diagonal
 ]
 libonemkl.onemkl_strsm.restype = None
+
+# Complex variants share the same signature (pointers to complex data).
+for _f in (libonemkl.onemkl_ctrsm, libonemkl.onemkl_ztrsm):
+    _f.argtypes = libonemkl.onemkl_trsm.argtypes
+    _f.restype = None
+
+# Same per-dtype dispatch as CuPy (cublas s/d/c/z trsm).
+_TRSM_FUNCS = {
+    'f': libonemkl.onemkl_strsm,
+    'd': libonemkl.onemkl_trsm,
+    'F': libonemkl.onemkl_ctrsm,
+    'D': libonemkl.onemkl_ztrsm,
+}
 
 ###########################################################################################################
 
@@ -84,13 +98,14 @@ def solve_triangular(a, b, trans=0, lower=False, unit_diagonal=False,
     if trans in [1, 'T']:
         trans_flag = 1
     elif trans in [2, 'C']:
-        raise NotImplementedError("Hermitian transpose not supported")
+        trans_flag = 2
 
-    # Type promotion - cast to float32 or float64
-    if a.dtype.char in 'fdFD':
+    # Type promotion - same rule as CuPy: keep f/d, promote the rest to at
+    # least float32 (complex stays complex). b is cast to a's dtype.
+    if a.dtype.char in 'fd':
         dtype = a.dtype
     else:
-        dtype = dpnp.promote_types(a.dtype.char, 'f')
+        dtype = numpy.promote_types(a.dtype.char, 'f')
 
     # FIX: Remove copy=False to allow dpnp to copy when necessary
     # If conversion to F-order or dtype change is needed, dpnp will copy automatically
@@ -117,10 +132,9 @@ def solve_triangular(a, b, trans=0, lower=False, unit_diagonal=False,
 
     m, n = (b.size, 1) if b.ndim == 1 else b.shape
 
-    if dtype.char == 'f':
-        trsm_func = libonemkl.onemkl_strsm
-    else:
-        trsm_func = libonemkl.onemkl_trsm
+    # Dispatch on the full dtype. Complex data must not reach the real
+    # dtrsm: it would be read as interleaved doubles and give garbage.
+    trsm_func = _TRSM_FUNCS[numpy.dtype(dtype).char]
 
     trsm_func(ctypes.cast(a.data.ptr, ctypes.c_void_p),
               ctypes.cast(b.data.ptr, ctypes.c_void_p),
