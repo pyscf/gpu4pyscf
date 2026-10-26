@@ -535,7 +535,7 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
             E_en_ji = V1e_i.T @ nucleus_charge_i
 
             nucleus_rij = nucleus_position_i[:, np.newaxis, :] - nucleus_position_j[np.newaxis, :, :]
-            nucleus_rij = np.linalg.norm(nucleus_rij, axis = -1)
+            nucleus_rij = cp.linalg.norm(nucleus_rij, axis = -1)
             nucleus_qiqj_rij = nucleus_charge_i[:, np.newaxis] * nucleus_charge_j[np.newaxis, :] / nucleus_rij
             E_nn_ij = cp.sum(nucleus_qiqj_rij)
 

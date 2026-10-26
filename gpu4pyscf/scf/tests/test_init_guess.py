@@ -13,9 +13,13 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
 import numpy as np
 import cupy as cp
-import pyscf, gpu4pyscf
+import pyscf
+from pyscf import gto
+import gpu4pyscf
+from gpu4pyscf.scf import hf, rohf, ghf
 from gpu4pyscf.dft.rks import RKS
 from gpu4pyscf.dft.uks import UKS
 from gpu4pyscf.scf.hf import RHF
@@ -72,7 +76,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -119,7 +123,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol)
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -149,7 +153,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.prune = None
         mf.grids.radii_adjust = None
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -176,7 +180,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.atom_grid = (99,590)
         mf.nlcgrids.atom_grid = (50,194)
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -230,7 +234,7 @@ class KnownValues(unittest.TestCase):
 
         mf = UHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -256,7 +260,7 @@ class KnownValues(unittest.TestCase):
 
         mf = UKS(mol, xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -282,7 +286,18 @@ class KnownValues(unittest.TestCase):
 
         mf = UKS(mol, xc = "wB97X")
 
-        dm0 = mf.init_guess_by_sad()
+        atomic_kernel = UKS.kernel
+
+        def check_atomic_ecp(mf_atom, *args, **kwargs):
+            # PySCF Mole.build can retain iodine's ECP table when rebuilding H.
+            # Check the temporary workaround in _init_guess_by_qchem_sad clears
+            # that stale table before the atomic SCF evaluates any integrals.
+            if not mf_atom.mol._ecp:
+                self.assertEqual(mf_atom.mol._ecpbas.size, 0)
+            return atomic_kernel(mf_atom, *args, **kwargs)
+
+        with mock.patch.object(UKS, 'kernel', check_atomic_ecp):
+            dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -316,7 +331,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol)
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -328,7 +343,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -352,7 +367,7 @@ class KnownValues(unittest.TestCase):
         mf.with_solvent.method = "IEF-PCM"
         mf.with_solvent.eps = 80.0
 
-        dm0 = mf.init_guess_by_sad()
+        dm0 = mf.get_init_guess(key='qchem_autosad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -390,7 +405,7 @@ class KnownValues(unittest.TestCase):
 
         mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
 
-        dm0 = mf.init_guess_by_sad_hf()
+        dm0 = mf.get_init_guess(key='qchem_sad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -425,7 +440,7 @@ class KnownValues(unittest.TestCase):
         mf.nlcgrids.prune = None
         mf.nlcgrids.radii_adjust = None
 
-        dm0 = mf.init_guess_by_sad_hf()
+        dm0 = mf.get_init_guess(key='qchem_sad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -453,7 +468,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.prune = None
         mf.grids.radii_adjust = None
 
-        dm0 = mf.init_guess_by_sad_hf()
+        dm0 = mf.get_init_guess(key='qchem_sad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
@@ -469,13 +484,48 @@ class KnownValues(unittest.TestCase):
         mf.grids.prune = None
         mf.grids.radii_adjust = None
 
-        dm0 = mf.init_guess_by_sad_hf()
+        dm0 = mf.get_init_guess(key='qchem_sad')
 
         test_guess_energy = get_qchem_sad_guess_energy(mf, dm0)
 
         ref_guess_energy = -150.5208015220
 
         assert abs(test_guess_energy - ref_guess_energy) < 3e-5
+
+    def test_ghf_untagged_initial_density(self):
+        dm = cp.asarray([[1., .2], [.2, 1.]])
+        result = ghf._from_rhf_init_dm(dm)
+        cp.testing.assert_allclose(result[:2, :2], dm * .5)
+        cp.testing.assert_allclose(result[2:, 2:], dm * .5)
+        cp.testing.assert_allclose(result[:2, 2:], 0)
+
+    def test_minao_high_spin_rhf(self):
+        mol = pyscf.M(atom='O 0 0 0; O 0 0 1.2', basis='cc-pvdz', verbose=0)
+        mf = mol.RHF().to_gpu()
+        dm = mf.get_init_guess(key='minao_high_spin')
+        cp.testing.assert_allclose(mf.make_rdm1(dm.mo_coeff, dm.mo_occ), dm, atol=1e-12)
+        cp.testing.assert_allclose(dm, mf.get_init_guess(key='minao'), atol=1e-12)
+
+    def test_minao_high_spin_rohf(self):
+        mol = pyscf.M(atom='O 0 0 0; O 0 0 1.2', basis='cc-pvdz', verbose=0)
+        mf = rohf.ROHF(mol).density_fit()
+        dm = mf.get_init_guess(key='minao_high_spin')
+        cp.testing.assert_allclose(mf.make_rdm1(dm.mo_coeff, dm.mo_occ), dm, atol=1e-12)
+        assert float(cp.max(cp.abs(dm - mf.get_init_guess(key='minao')))) > 1e-2
+
+    def test_minao_high_spin_ghf(self):
+        mol = pyscf.M(atom='O 0 0 0; O 0 0 1.2', basis='cc-pvdz', verbose=0)
+        mf = ghf.GHF(mol).density_fit()
+        dm = mf.get_init_guess(key='minao_high_spin')
+        cp.testing.assert_allclose(mf.make_rdm1(dm.mo_coeff, dm.mo_occ), dm, atol=1e-12)
+        assert float(cp.max(cp.abs(dm - mf.get_init_guess(key='minao')))) > 1e-2
+
+    def test_minao_high_spin_uhf(self):
+        mol = gto.M(atom='O 0 0 0; H 0 0 1', basis='cc-pvdz', spin=1, verbose=0)
+        mf = UHF(mol)
+        dm = mf.get_init_guess(key='minao_high_spin')
+        cp.testing.assert_allclose(mf.make_rdm1(dm.mo_coeff, dm.mo_occ), dm, atol=1e-12)
+        assert float(cp.max(cp.abs(dm - mf.get_init_guess(key='minao')))) > 1e-2
 
 if __name__ == "__main__":
     print("Full Tests for initial guess")

@@ -182,9 +182,11 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
 
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
-    def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None):
+    def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None, **kwargs):
         if mol is None: mol = mf.mol
-        dm = fn(mf, mol)
+        dm = fn(mf, mol, **kwargs)
+        if dm.ndim == 3:
+            return dm
         assert dm.ndim == 2
 
         neleca, nelecb = mf.nelec
@@ -340,8 +342,8 @@ class UHF(hf.SCF):
     x2c = x2c1e = sfx2c1e   = hf.RHF.sfx2c1e
     newton                  = hf.RHF.newton
 
-    init_guess_by_minao      = _cast_rhf_init_guess(hf.RHF.init_guess_by_minao)
-    init_guess_by_atom       = _cast_rhf_init_guess(hf.RHF.init_guess_by_atom)
+    init_guess_by_minao      = _cast_rhf_init_guess(hf.SCF.init_guess_by_minao)
+    init_guess_by_atom       = _cast_rhf_init_guess(hf.SCF.init_guess_by_atom)
     init_guess_by_chkfile    = hf.return_cupy_array(uhf_cpu.UHF.init_guess_by_chkfile)
 
     def init_guess_by_1e(self, mol=None, breaksym=None):
@@ -371,9 +373,11 @@ class UHF(hf.SCF):
         return hf_cpu.init_guess_by_mod_huckel(mol)
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
+        if not isinstance(key, str):
+            return key
         dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
         if self.verbose >= logger.DEBUG1:
-            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp()).real
+            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp(mol)).real
             logger.debug1(self, 'Nelec from initial guess = %s', nelec)
         return dm
 

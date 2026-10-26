@@ -157,15 +157,22 @@ class KnownValues(unittest.TestCase):
 
     def test_1e_vs_atom1e(self):
         myx2c = scf.GHF(mol1).x2c1e()
+        # Orbital energies need tighter convergence than the total energy.
+        myx2c.conv_tol = 1e-13
+        myx2c.conv_tol_grad = 1e-9
         e_gpu = myx2c.kernel()
 
         myx2c_atom = scf.GHF(mol1).x2c1e()
         myx2c_atom.with_x2c.approx = 'ATOM1E'
+        myx2c_atom.conv_tol = 1e-13
+        myx2c_atom.conv_tol_grad = 1e-9
         e_gpu_atom = myx2c_atom.kernel()
+        ref = mol1.GHF().x2c1e().run(conv_tol=1e-13, conv_tol_grad=1e-9)
+        self.assertTrue(myx2c.converged and myx2c_atom.converged and ref.converged)
         self.assertAlmostEqual(e_gpu_atom, -128.615723692333, 9)
         self.assertAlmostEqual(e_gpu, e_gpu_atom, 9)
-        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -41.15250349727189, 9)
-        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_atom.mo_energy.get()), 9)
+        self.assertAlmostEqual(float(abs(myx2c.mo_energy.get() - ref.mo_energy).max()), 0, 8)
+        self.assertAlmostEqual(float(abs(myx2c.mo_energy - myx2c_atom.mo_energy).max().get()), 0, 8)
 
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
                      'pyscf x2c does not support not reset function')

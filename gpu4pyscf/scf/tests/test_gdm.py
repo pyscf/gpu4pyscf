@@ -153,7 +153,7 @@ class KnownValues(unittest.TestCase):
         mf.max_cycle = 100
         mf.conv_tol_grad = 1e-6
 
-        dm0 = mf.init_guess_by_sad_hf()
+        dm0 = mf.get_init_guess(key='qchem_sad') # Yes, we start with a spin-averaged guess
         mf.conv_tol = 1e-10
 
         mf = gdm(mf)
@@ -247,7 +247,7 @@ class KnownValues(unittest.TestCase):
         mf.max_cycle = 100
         mf.conv_tol_grad = 1e-6
 
-        dm0 = mf.init_guess_by_sad_hf()
+        dm0 = mf.get_init_guess(key='qchem_sad') # Yes, we start with a spin-averaged guess
         mf.conv_tol = 1e-10
 
         mf = gdm(mf)
