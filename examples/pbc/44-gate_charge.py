@@ -13,18 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Field-effect doping with a charged sheet, barrier and dipole correction.
+'''
+Field-effect with a charged sheet, barrier and dipole correction.
 
 Refs: Brumme et al., Phys. Rev. B 89, 245406 (2014).
-      https://mcresearch.github.io/abacus-user-guide/abacus-surface6.html
-Lengths below are Bohr; barrier_height is Hartree. ABACUS fractional
-positions and widths are converted by multiplying the cell length L.
+Lengths below are Bohr; barrier_height is Hartree. 
 '''
 
 import numpy as np
 from pyscf.pbc import gto
 from gpu4pyscf.pbc import dft
-from gpu4pyscf.pbc.scf.addons import gate_charge, slab_dipole_correction
+from gpu4pyscf.pbc.scf.addons import gate_charge
 
 cell = gto.M(
     a=np.diag([8., 8., 28.]), unit='Bohr',
@@ -37,14 +36,15 @@ cell = gto.M(
 # charge and spin difference per primitive cell.
 length = cell.lattice_vectors()[2, 2]
 mf = dft.UKS(cell, xc='pbe')
-gate_charge(mf, zgate=.5*length, barrier=True,
-            barrier_start=.45*length, barrier_end=.55*length,
-            barrier_height=.05, barrier_width=.01*length)
-# Both monopole and dipole potentials use Brumme's zero-cell-integral
-# reference. Do not set z0 when composing with gate_charge.
-# Keep the sheet and the entire linear return region in the vacuum.
-# Fix cut for force calculations/scanners to stay on the same branch.
-slab_dipole_correction(mf, cut=.75*length, width=.1*length)
+
+# gate_charge adds the dipole automatically, with
+# cut = zgate + gate_side*(epsilon + d_dip/2), modulo L.
+# Here gate_side=+1 puts the gate above the slab. The dipole is farther
+# toward +z; the default barrier extends toward the slab on the lower-z side.
+# z0 = (cut + L/2) % L. Explicit positions persist in force scanners.
+# For a lower gate, use gate_side=-1 and zgate=.1*length instead.
+gate_charge(mf, zgate=.5*length, gate_side=1, dipole_width=.01*length,
+            dipole_gap=1e-4, barrier=True, barrier_height=.05)
 mf.conv_tol = 1e-10
 mf.kernel()
 assert mf.converged
