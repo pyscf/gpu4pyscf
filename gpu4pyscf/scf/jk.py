@@ -673,10 +673,12 @@ class _VHFOpt:
         if isinstance(dms, cp.ndarray):
             dms = dms.get()
         pair_loc = _make_j_engine_pair_locs(mol)
-        dm_xyz = np.empty(pair_loc[-1])
-        libvhf_rys.transform_cart_to_xyz(
-            dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
-            mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+        dms = np.ascontiguousarray(dms)
+        dm_xyz = np.empty((n_dm, pair_loc[-1]))
+        for i in range(n_dm):
+            libvhf_rys.transform_cart_to_xyz(
+                dm_xyz[i].ctypes, dms[i].ctypes, ao_loc.ctypes, pair_loc.ctypes,
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
@@ -773,9 +775,10 @@ class _VHFOpt:
         vj_xyz = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         vj_xyz = vj_xyz.get()
         vj = np.empty_like(dms)
-        libvhf_rys.transform_xyz_to_cart(
-            vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
-            mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+        for i in range(n_dm):
+            libvhf_rys.transform_xyz_to_cart(
+                vj[i].ctypes, vj_xyz[i].ctypes, ao_loc.ctypes, pair_loc.ctypes,
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
         vj = transpose_sum(asarray(vj))
         vj *= 2.
 

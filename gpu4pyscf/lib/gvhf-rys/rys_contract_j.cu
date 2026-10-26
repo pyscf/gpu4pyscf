@@ -911,9 +911,25 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     return 1;
                 }
             }
-            rys_j_kernel<<<workers, threads, buflen>>>(
-                *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
+            // rys_j_kernel contracts one density per launch. Densities are stored
+            // back to back, pair_loc[nbas*nbas] apart, as rys_j_with_gout_kernel reads them.
+            int nao_pairs = 0;
+            if (n_dm > 1) {
+                cudaMemcpy(&nao_pairs, envs->ao_loc + envs->nbas*envs->nbas, sizeof(int),
+                           cudaMemcpyDeviceToHost);
+            }
+            JKMatrix jk1 = jk;
+            jk1.n_dm = 1;
+            for (int i_dm = 0; i_dm < n_dm; ++i_dm) {
+                if (i_dm > 0) {
+                    cudaMemset(head, 0, sizeof(int));
+                }
+                jk1.dm = dm + (size_t)i_dm * nao_pairs;
+                jk1.vj = vj + (size_t)i_dm * nao_pairs;
+                rys_j_kernel<<<workers, threads, buflen>>>(
+                    *envs, jk1, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                    s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
+            }
         }
     }
     cudaError_t err = cudaGetLastError();
