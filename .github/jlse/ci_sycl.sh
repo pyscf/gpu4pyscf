@@ -7,7 +7,7 @@
 #   ci_sycl.sh test <path>...     run pytest on that built tree
 #
 # Optional environment (GitLab CI/CD variables):
-#   CI_ROOT        shared dir for env, caches, builds   (default $HOME/gitlab-sycl-ci)
+#   CI_ROOT        shared dir for envs, caches, builds  (default $HOME/gitlab-sycl-ci)
 #   SYCL_AOT       ON | OFF | auto                      (default auto: PVC -> ON)
 #   ZE_DRIVER_DIR  dir with libze_intel_gpu             (default /soft intel-gpu-umd 821.36)
 #   PYTEST_WORKERS                                      (default 4)
@@ -19,28 +19,30 @@ CI_ROOT="${CI_ROOT:-$HOME/gitlab-sycl-ci}"
 LOG_DIR="${LOG_DIR:-$SRC_DIR/ci-logs}"
 SHA="${CI_COMMIT_SHA:-local}"
 BUILD_DIR="$CI_ROOT/builds/$SHA"
-ENV_PREFIX="$CI_ROOT/env"
+# One fresh conda env per pipeline, like the GitHub CPU CI (which re-solves on
+# every run and caches only downloaded packages): the nightly dpnp / newest
+# dpctl are picked up automatically. Test jobs reuse the env their build used.
+ENV_PREFIX="$CI_ROOT/envs/${CI_PIPELINE_ID:-local}"
 mkdir -p "$CI_ROOT" "$LOG_DIR"
 
-setup_env() {
-  local MM="$CI_ROOT/bin/micromamba" stamp
+create_env() {
+  local MM="$CI_ROOT/bin/micromamba"
   if [ ! -x "$MM" ]; then
     # micro.mamba.pm returns 503 through the JLSE proxy; the GitHub release works.
     mkdir -p "$CI_ROOT/bin"
     curl -fsSL -o "$MM" https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64 &&
       chmod +x "$MM" || return 1
   fi
-  # Re-solved weekly or when env.yml changes; jobs running concurrently wait on the lock.
-  stamp="$(sha256sum "$SRC_DIR/.github/jlse/env.yml" | cut -c1-12)-$(date +%G-%V)"
-  if [ "$(cat "$CI_ROOT/env.stamp" 2>/dev/null)" != "$stamp" ]; then
-    ( flock 9
-      if [ "$(cat "$CI_ROOT/env.stamp" 2>/dev/null)" != "$stamp" ]; then
-        "$MM" create -y -p "$ENV_PREFIX" -f "$SRC_DIR/.github/jlse/env.yml" &&
-          echo "$stamp" > "$CI_ROOT/env.stamp"
-      fi
-    ) 9>"$CI_ROOT/env.lock" || return 1
-  fi
+  # Shared package cache: re-solving per pipeline only re-downloads what changed.
+  export MAMBA_ROOT_PREFIX="$CI_ROOT/mroot"
+  rm -rf "$ENV_PREFIX"
+  "$MM" create -y -p "$ENV_PREFIX" -f "$SRC_DIR/.github/jlse/env.yml" || return 1
+  "$MM" list -p "$ENV_PREFIX" 2>&1 | grep -E 'dpnp|dpctl|dpcpp|intel-sycl-rt|mkl ' | tee "$LOG_DIR/05_env_versions.log"
+  # Drop envs of old pipelines.
+  find "$CI_ROOT/envs" -mindepth 1 -maxdepth 1 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null
+}
 
+setup_env() {
   export PATH="$ENV_PREFIX/bin:$PATH"
   # conda-forge's intel-compute-runtime ships only a versioned ocloc-<ver>;
   # icpx looks for plain `ocloc`.
@@ -82,7 +84,12 @@ toolchain_check() {
 }
 
 do_build() {
+  mkdir -p "$CI_ROOT/envs"
+  create_env || { echo "environment creation failed"; exit 1; }
+  setup_env || { echo "environment setup failed"; exit 1; }
   cd "$SRC_DIR"
+  # A CMake cache left by an earlier job would point at that job's conda env.
+  rm -rf "$SRC_DIR/build"
   export PYTHONPATH="$SRC_DIR:$SRC_DIR/gpu4pyscf"
   toolchain_check || exit 1
 
@@ -111,6 +118,7 @@ do_build() {
   # Publish the built tree for the test jobs of this pipeline (shared filesystem).
   mkdir -p "$BUILD_DIR"
   rsync -a --delete --exclude=.git --exclude=build --exclude=ci-logs "$SRC_DIR"/ "$BUILD_DIR"/ || exit 1
+  echo "$ENV_PREFIX" > "$BUILD_DIR/.env_prefix"
   touch "$BUILD_DIR/.build_ok"
   find "$CI_ROOT/builds" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
   echo "published build to $BUILD_DIR"
@@ -119,6 +127,9 @@ do_build() {
 do_test() {
   [ $# -gt 0 ] || { echo "usage: $0 test <pytest paths...>"; exit 2; }
   [ -e "$BUILD_DIR/.build_ok" ] || { echo "no build for $SHA at $BUILD_DIR (did the build job run?)"; exit 1; }
+  ENV_PREFIX="$(cat "$BUILD_DIR/.env_prefix")"
+  [ -d "$ENV_PREFIX" ] || { echo "env $ENV_PREFIX from the build is gone"; exit 1; }
+  setup_env || { echo "environment setup failed"; exit 1; }
   cd "$BUILD_DIR"
   export PYTHONPATH="$BUILD_DIR:$BUILD_DIR/gpu4pyscf"
   toolchain_check || exit 1
@@ -128,7 +139,6 @@ do_test() {
   exit "${PIPESTATUS[0]}"
 }
 
-setup_env || { echo "environment setup failed"; exit 1; }
 case "$MODE" in
   build) do_build ;;
   test)  do_test "$@" ;;

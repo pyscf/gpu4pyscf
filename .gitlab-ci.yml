@@ -5,10 +5,9 @@
 #
 # build : builds the SYCL backend (PVC AOT) and publishes the tree to the shared
 #         filesystem, keyed by commit SHA.
-# test  : the test suite split into suites that run in parallel, one chiatta
-#         node each (the queue allows 8 queued jobs per user and 2 h per job).
+# test  : the SCF suite (gpu4pyscf/scf) only, on one chiatta node.
 #
-# Optional CI/CD variables (Settings > CI/CD > Variables): SYCL_AOT, CI_ROOT,
+# Optional CI/CD variables (Settings > CI/CD > Variables): SYCL_TESTS, SYCL_AOT, CI_ROOT,
 # ZE_DRIVER_DIR, PYTEST_WORKERS. See .github/jlse/ci_sycl.sh.
 
 include:
@@ -60,25 +59,13 @@ sycl-test:
   needs: [sycl-build]
   timeout: 2h
   interruptible: true
-  parallel:
-    matrix:
-      # Suite groupings are a first guess; rebalance once per-suite timings are known.
-      - SUITE: "core"
-        PATHS: "gpu4pyscf/scf gpu4pyscf/tests gpu4pyscf/lib gpu4pyscf/gto gpu4pyscf/x2c gpu4pyscf/pop"
-      - SUITE: "dft"
-        PATHS: "gpu4pyscf/dft"
-      - SUITE: "df-solvent"
-        PATHS: "gpu4pyscf/df gpu4pyscf/solvent gpu4pyscf/qmmm"
-      - SUITE: "grad-hessian"
-        PATHS: "gpu4pyscf/grad gpu4pyscf/hessian"
-      - SUITE: "excited"
-        PATHS: "gpu4pyscf/tdscf gpu4pyscf/nac gpu4pyscf/properties"
-      - SUITE: "pbc"
-        PATHS: "gpu4pyscf/pbc"
-      - SUITE: "post-hf"
-        PATHS: "gpu4pyscf/cc gpu4pyscf/mp gpu4pyscf/mcscf gpu4pyscf/fci gpu4pyscf/sem gpu4pyscf/md gpu4pyscf/geomopt gpu4pyscf/dispersion"
+  variables:
+    # Only the SCF suite runs by default (about 18 min on one PVC GPU). To run
+    # more, set SYCL_TESTS (space-separated pytest paths) when starting a
+    # pipeline manually: Build > Pipelines > New pipeline > Variables.
+    SYCL_TESTS: "gpu4pyscf/scf"
   script:
-    - .github/jlse/ci_sycl.sh test $PATHS
+    - .github/jlse/ci_sycl.sh test $SYCL_TESTS
   artifacts:
     when: always
     expire_in: 2 weeks
