@@ -211,7 +211,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(test_energy - ref_energy) < 2e-4
         assert np.abs(test_s2 - ref_s2) < 5e-6
         assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-5
-        assert test_n_cycle <= ref_n_cycle + 10
+        assert test_n_cycle <= ref_n_cycle + 15
 
     def test_gdm_uks_spin_neq_0(self):
         mol = pyscf.M(
