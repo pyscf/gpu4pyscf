@@ -25,7 +25,8 @@ stages:
 .chiatta-runner:
   extends: .batch-runner
   variables:
-    JLSE_SCHEDULER_PARAMETERS: "-n 1 -t 120 -q chiatta"
+    # --jobname shows up in qstat, e.g. gpu4pyscf-sycl-build-p42.
+    JLSE_SCHEDULER_PARAMETERS: "-n 1 -t 120 -q chiatta --jobname gpu4pyscf-$CI_JOB_NAME-p$CI_PIPELINE_IID"
     HTTP_PROXY: "http://proxy.ftm.alcf.anl.gov:3128"
     HTTPS_PROXY: "http://proxy.ftm.alcf.anl.gov:3128"
     http_proxy: "http://proxy.ftm.alcf.anl.gov:3128"
