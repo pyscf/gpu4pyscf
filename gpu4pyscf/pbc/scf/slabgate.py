@@ -94,6 +94,8 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     width and z0 are reset to the Brumme convention. In particular,
     z0 = (cut+L/2) % L makes Eq. (7) vanish without a constant shift.
     Its total dipole includes the sheet; the barrier does not contribute.
+    The sheet's dipole contribution has no atomic position derivative when
+    its charge, position and the dipole geometry are fixed.
     The return region is on the gate's side away from the slab; the default
     barrier extends toward the slab. Put the gate and the entire return
     region in vacuum. Reapply gate_charge to update this placement when

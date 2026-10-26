@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Atomic gradients for a fixed compensating gate and barrier.'''
+'''
+Atomic gradients for a fixed compensating gate and barrier.
+references: Phys. Rev. B 89, 245406 (2014).
+'''
 
 import numpy as np
 import cupy as cp
@@ -23,7 +26,8 @@ from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
 
 
 def gate_grad(grad, dm, kpts=None):
-    '''Explicit d(E_gate + E_barrier)/dR at fixed AO density, Hartree/Bohr.
+    '''
+    Explicit d(E_gate + E_barrier)/dR at fixed AO density, Hartree/Bohr.
 
     AO center derivatives are minus spatial derivatives. The underlying SCF
     gradient already contains the Pulay term with corrected orbital energies.
@@ -55,6 +59,7 @@ def gate_grad(grad, dm, kpts=None):
             v += _barrier_potential(z, start, end, length, height, width)
         for k, ao in enumerate(ao_kpts):
             aow = (weight*v)[:, None] * ao[0]
+            # TODO: this can be optimized
             for x in range(3):
                 vmat[k, x] += ao[x + 1].conj().T @ aow
     de = -contract_h1e_dm(cell, vmat, dm, hermi=1) / len(kpts)
@@ -63,7 +68,7 @@ def gate_grad(grad, dm, kpts=None):
     ionic = _sheet_potential(z, zgate, length, area, qc, deriv=1)
     if mf.barrier:
         ionic -= _barrier_potential(z, start, end, length, height, width, deriv=1)
-    de[:, 2] += cell.atom_charges() * ionic
+    de[:, 2] += cell.atom_charges() * ionic.get()
     return de
 
 
