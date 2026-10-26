@@ -112,6 +112,25 @@ checkout_pr() {
     tee "$LOG_DIR/03_pr.log"
 }
 
+# The port's CMake links libxc.so and libgdft.so against libexchcxx.so by absolute
+# path, i.e. into the build job's checkout, which the runner deletes when the job
+# ends. Make the published tree self-contained: relative NEEDED + $ORIGIN rpath.
+relocate_libs() {
+  local root="$1" f n bad=0
+  for f in $(find "$root/gpu4pyscf/lib" -name '*.so'); do
+    for n in $(readelf -d "$f" | sed -n 's/.*NEEDED.*\[\(\/.*\)\]/\1/p'); do
+      patchelf --replace-needed "$n" "$(basename "$n")" "$f" &&
+        patchelf --add-rpath '$ORIGIN:$ORIGIN/deps/lib' "$f" || bad=1
+      echo "relocated $(basename "$f") -> $(basename "$n")"
+    done
+  done
+  # Nothing may still point at an absolute path.
+  for f in $(find "$root/gpu4pyscf/lib" -name '*.so'); do
+    if readelf -d "$f" | grep -E 'NEEDED.*\[/' ; then echo "absolute dependency left in $f"; bad=1; fi
+  done
+  return $bad
+}
+
 do_build() {
   mkdir -p "$CI_ROOT/envs"
   create_env || { echo "environment creation failed"; exit 1; }
@@ -148,6 +167,7 @@ do_build() {
   # Publish the built tree for the test jobs of this pipeline (shared filesystem).
   mkdir -p "$BUILD_DIR"
   rsync -a --delete --exclude=.git --exclude=build --exclude=ci-logs "$SRC_DIR"/ "$BUILD_DIR"/ || exit 1
+  relocate_libs "$BUILD_DIR" || { echo "could not relocate libraries"; exit 1; }
   echo "$ENV_PREFIX" > "$BUILD_DIR/.env_prefix"
   touch "$BUILD_DIR/.build_ok"
   find "$CI_ROOT/builds" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
