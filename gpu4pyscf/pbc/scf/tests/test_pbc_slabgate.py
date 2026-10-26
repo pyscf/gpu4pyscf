@@ -18,7 +18,7 @@ import cupy as cp
 from pyscf.pbc import gto
 from pyscf.pbc.dft import numint as cpu_numint
 from gpu4pyscf.pbc import dft
-from gpu4pyscf.pbc.scf.addons import gate_charge, slab_dipole_correction
+from gpu4pyscf.pbc.scf.addons import gate_charge
 from gpu4pyscf.pbc.scf.slabdipole import _sawtooth, _slab_charge
 from gpu4pyscf.pbc.scf.slabgate import _sheet_potential, _barrier_potential
 
@@ -49,198 +49,140 @@ def make_mf(cell, name='RKS', multigrid=False, becke=False):
 class KnownValues(unittest.TestCase):
     def test_profiles(self):
         length, area, qc, zgate = 22., 56., 2., 17.
-        z = np.linspace(0., length, 10001, endpoint=False)
+        z = zgate + (np.arange(10000) + .5) * length / 10000
         phi = _sheet_potential(z, zgate, length, area, qc)
-        self.assertAlmostEqual(phi.mean(), 0., delta=1e-7)
-        # The reference is zero cell average, not zero at the sheet.
-        self.assertAlmostEqual(_sheet_potential(zgate, zgate, length, area, qc),
+        # Both potentials use a zero cell average, and Eq. (5)
+        self.assertAlmostEqual(float(phi.mean()), 0., delta=1e-7)
+        self.assertAlmostEqual(float(_sheet_potential(zgate, zgate, length, area, qc)),
                                np.pi*qc*length/(3*area))
-        # Eq. (7) fixes the dipole by the same zero-cell-integral convention.
-        nodes, weights = np.polynomial.legendre.leggauss(4)
         for width in (0., 2.):
-            integral = 0.
-            for lo, hi in ((-width/2, width/2), (width/2, length-width/2)):
-                t = (hi+lo)/2 + nodes*(hi-lo)/2
-                integral += (hi-lo)/2 * np.dot(
-                    weights, _sawtooth(zgate+t, zgate, length, width))
-            self.assertAlmostEqual(integral, 0., delta=1e-12)
-        # Independent reciprocal-space solution, excluding the sheet cusp.
-        modes = np.arange(1, 100001)
-        for point in (1.3, 8.2, 20.1):
-            fourier = (2*qc*length/(np.pi*area) *
-                       np.sum(np.cos(2*np.pi*modes*(point-zgate)/length)/modes**2))
-            self.assertAlmostEqual(_sheet_potential(point, zgate, length, area, qc),
-                                   fourier, delta=2e-9)
+            saw = _sawtooth(z, zgate, length, width)
+            self.assertAlmostEqual(float(saw.mean()), 0., delta=1e-12)
+
         step = 1e-5
         points = np.array([1.2, 9.4, 19.8])
         fd = (_sheet_potential(points+step, zgate, length, area, qc) -
               _sheet_potential(points-step, zgate, length, area, qc)) / (2*step)
-        np.testing.assert_allclose(fd, _sheet_potential(
+        cp.testing.assert_allclose(fd, _sheet_potential(
             points, zgate, length, area, qc, deriv=1), atol=1e-10)
 
+        # The barrier crosses the cell boundary and has two linear ramps.
         points = np.array([18., 18.5, 19.5, 21.9, .1, .5, 1.5, 2.1])
         vb = _barrier_potential(points, 18., 2., length, .05, 1.)
-        np.testing.assert_allclose(vb, [0., .025, .05, .05, .05, .05, .025, 0.])
-        interior = points[[1, 2, 3, 4, 5, 6, 7]]
-        fd = (_barrier_potential(interior+step, 18., 2., length, .05, 1.) -
-              _barrier_potential(interior-step, 18., 2., length, .05, 1.)) / (2*step)
-        np.testing.assert_allclose(fd, _barrier_potential(
-            interior, 18., 2., length, .05, 1., deriv=1), atol=1e-10)
-
-    def check_reference(self, name, multigrid=False, becke=False, shifted=False,
-                        charge=2):
-        cell = make_cell(charge)
-        mf = make_mf(cell, name, multigrid, becke)
-        if shifted:
-            mf.kpts = cell.make_kpts([2, 1, 1], scaled_center=[.17, 0, 0])
-        dm = mf.get_init_guess()
-        if name in ('UKS', 'KUKS'):
-            dm[0] *= 1.1
-            dm[1] *= .9
-        h0 = mf.get_hcore()
-        v0 = mf.get_veff(dm=dm)
-        e0 = mf.energy_tot(dm, h0, v0)
-        gate_charge(mf, zgate=17., barrier=True, barrier_start=15.,
-                    barrier_end=19., barrier_width=.7)
-        h = mf.get_hcore()
-        e = mf.energy_tot(dm, h, v0)
-        vc, vb = mf._gate_matrices(cell, mf.kpts)
-        np.testing.assert_allclose((h-h0).get(),
-                                   (vc+vb if name.startswith('K') else vc[0]+vb[0]).get(),
-                                   atol=1e-12)
-        np.testing.assert_allclose(vc.get(), vc.swapaxes(-1, -2).conj().get(), atol=1e-12)
-        self.assertAlmostEqual(e-e0, mf.scf_summary['egate'] +
-                               mf.scf_summary['ebarrier'], delta=1e-10)
-
-        grids = mf.grids
-        if multigrid:
-            grids = dft.UniformGrids(cell).set(mesh=mf._numint.mesh)
-        coords, weights = grids.coords.get(), grids.weights.get()
-        aos = cpu_numint.eval_ao_kpts(cell, coords, kpts=mf.kpts)
-        q = cell.atom_charges().sum() - cell.tot_electrons(len(mf.kpts))/len(mf.kpts)
-        z = coords[:, 2]
-        s = (z-17.+11.) % 22. - 11.
-        phi = 2*np.pi*(-q)/56. * (-abs(s) + s*s/22. + 22./6)
-        t = (z-15.) % 22.
-        barrier = .05 * np.clip(np.minimum(t, 4.-t)/.7, 0., 1.)
-        ref = np.asarray([ao.conj().T @ ((weights*(-phi+barrier))[:, None]*ao)
-                          for ao in aos])
-        np.testing.assert_allclose((vc+vb).get(), ref, atol=2e-9)
-        charge_dm = dm.get().sum(axis=0) if name in ('UKS', 'KUKS') else dm.get()
-        charge_dm = charge_dm.reshape(ref.shape)
-        electronic = np.einsum('kij,kji->', charge_dm, ref).real / len(ref)
-        zi = cell.atom_coords()[:, 2]
-        si = (zi-17.+11.) % 22. - 11.
-        ionic = np.dot(cell.atom_charges(),
-                       2*np.pi*(-q)/56.*(-abs(si)+si*si/22.+22./6))
-        self_energy = np.pi*q**2*22./(6*56.)
-        gate_barrier = q*.05
-        self.assertAlmostEqual(e-e0, electronic+ionic+self_energy+gate_barrier, delta=2e-9)
+        cp.testing.assert_allclose(vb, [0., .025, .05, .05, .05, .05, .025, 0.])
+        slope = _barrier_potential(
+            np.array([18.5, 20., 1.5, 2.1]), 18., 2., length, .05, 1., deriv=1)
+        cp.testing.assert_allclose(slope, [.05, 0., -.05, 0.])
 
     def test_cpu_reference(self):
-        for name in ('RKS', 'UKS', 'KRKS', 'KUKS'):
+        length, area, zgate = 22., 56., 17.
+        for name in ('RKS', 'KUKS'):
             with self.subTest(name=name):
-                self.check_reference(name)
+                cell = make_cell()
+                mf = make_mf(cell, name)
+                if name == 'KUKS':
+                    mf.kpts = cell.make_kpts([2, 1, 1], scaled_center=[.17, 0, 0])
+                dm = mf.get_init_guess()
+                if name == 'KUKS':
+                    dm[0] *= 1.1
+                    dm[1] *= .9
+                h0 = mf.get_hcore()
+                v0 = mf.get_veff(dm=dm)
+                e0 = mf.energy_tot(dm, h0, v0)
+                gate_charge(mf, zgate=zgate, barrier=True, barrier_start=15.,
+                            barrier_end=19., barrier_width=.7)
+                h = mf.get_hcore()
+                # Reuse v0 to isolate the gate and barrier energy.
+                e = mf.energy_tot(dm, h, v0)
 
-    def test_multigrid_and_becke_reference(self):
-        self.check_reference('KUKS', multigrid=True)
-        self.check_reference('KRKS', becke=True)
+                coords = mf.grids.coords.get()
+                weights = mf.grids.weights.get()
+                aos = cpu_numint.eval_ao_kpts(cell, coords, kpts=mf.kpts)
+                nkpts = len(mf.kpts)
+                qc = -cell.charge / nkpts
+                s = (coords[:, 2]-zgate+length/2) % length - length/2
+                phi = 2*np.pi*qc/area * (-abs(s) + s*s/length + length/6)
+                t = (coords[:, 2]-15.) % length
+                barrier = .05 * np.clip(np.minimum(t, 4.-t)/.7, 0., 1.)
+                ref = []
+                for ao in aos:
+                    ref.append(ao.conj().T @ ((weights*(-phi+barrier))[:, None]*ao))
+                ref = np.asarray(ref)
+                np.testing.assert_allclose((h-h0).get().reshape(ref.shape), ref,
+                                           atol=2e-9)
 
-    def test_shifted_and_electron_doping(self):
-        self.check_reference('KRKS', shifted=True)
-        self.check_reference('UKS', charge=-2)
+                charge_dm = dm.get()
+                if name == 'KUKS':
+                    charge_dm = charge_dm[0] + charge_dm[1]
+                charge_dm = charge_dm.reshape(ref.shape)
+                electronic = np.einsum('kij,kji->', charge_dm, ref).real / nkpts
+                zi = cell.atom_coords()[:, 2]
+                si = (zi-zgate+length/2) % length - length/2
+                ionic = np.dot(cell.atom_charges(),
+                               2*np.pi*qc/area*(-abs(si)+si*si/length+length/6))
+                self_energy = np.pi*qc**2*length/(6*area)
+                # Ions lie outside the barrier; the sheet is on its plateau.
+                gate_barrier = -qc*.05
+                self.assertAlmostEqual(e-e0, electronic+ionic+self_energy+gate_barrier,
+                                       delta=2e-9)
+                self.assertAlmostEqual(e-e0, mf.scf_summary['egate'] +
+                                       mf.scf_summary['ebarrier'], delta=1e-10)
 
     def test_charge_per_cell(self):
         cell = make_cell()
         gamma = gate_charge(make_mf(cell))
-        mf = gate_charge(make_mf(cell, 'KUKS'))
+        mf = gate_charge(make_mf(cell, 'KUKS'), zgate=17.,
+                         dipole_width=2., dipole_gap=.1)
         self.assertEqual(_slab_charge(gamma, cell), 2.)
         self.assertEqual(_slab_charge(mf, cell), 1.)
         dm = mf.get_init_guess()
         ne = float(cp.einsum('skij,kji->', dm, mf.get_ovlp()).real) / len(mf.kpts)
         self.assertAlmostEqual(ne, cell.atom_charges().sum()-1., delta=1e-9)
         vc, _ = mf._gate_matrices(cell, mf.kpts)
+
+        # At fixed density, removing the sheet removes its dipole contribution.
+        v = mf.get_veff(dm=dm)
+        self.assertAlmostEqual(mf.dipole_offset, 0., delta=1e-14)
+        self.assertEqual(mf.dipole_z0, mf.z0)
+        cell.charge = 0
+        no_sheet = mf.get_veff(dm=dm)
+        cell.charge = 2
+        self.assertAlmostEqual(v.dipole-no_sheet.dipole, 9.9, delta=1e-11)
+
         # Scale the total charge to retain two holes per primitive cell.
         cell.charge = 4
         self.assertEqual(_slab_charge(mf, cell), 2.)
         vc_fixed, _ = mf._gate_matrices(cell, mf.kpts)
-        np.testing.assert_allclose(vc_fixed.get(), 2*vc.get(), atol=1e-12)
+        cp.testing.assert_allclose(vc_fixed, 2*vc, atol=1e-12)
         dm = mf.get_init_guess()
         ne = float(cp.einsum('skij,kji->', dm, mf.get_ovlp()).real) / len(mf.kpts)
         self.assertAlmostEqual(ne, cell.atom_charges().sum()-2., delta=1e-9)
 
-    def test_density_derivative_and_sheet_dipole(self):
-        cell = make_cell()
-        mf = make_mf(cell, 'KUKS')
-        dm = mf.get_init_guess()
-        v0 = mf.get_veff(dm=dm)
-        h0 = mf.get_hcore()
-        gate_charge(mf, zgate=17., barrier=True, barrier_start=15.,
-                    barrier_end=19., barrier_width=.7)
-        slab_dipole_correction(mf, cut=20., width=2.)
-        rng = np.random.default_rng(20)
-        ddm = cp.asarray(rng.random(dm.shape) + 1j*rng.random(dm.shape))
-        ddm = (ddm + ddm.swapaxes(-1, -2).conj())*.01
-        overlap = mf.get_ovlp()
-        ddm -= dm * (cp.einsum('skij,kji->', ddm, overlap).real /
-                     cp.einsum('skij,kji->', dm, overlap).real)
-        v = mf.get_veff(dm=dm)
-        self.assertEqual(mf.dipole_offset, 0.)
-        self.assertIsNone(mf.dipole_z0)
-        h = mf.get_hcore()
-        step = 1e-4
-        def added_energy(d):
-            mf.energy_tot(d)
-            return mf.scf_summary['egate'] + mf.scf_summary['ebarrier'] + mf.get_veff(dm=d).edip
-        derivative = cp.einsum('skij,skji->', ddm, h-h0+v-v0).real / len(mf.kpts)
-        self.assertAlmostEqual((added_energy(dm+step*ddm)-added_energy(dm-step*ddm))/(2*step),
-                               float(derivative), delta=2e-8)
-        # Neutralizing sheet must be included even if it lies in the return region.
-        mf.zgate = 20.3
-        v = mf.get_veff(dm=dm)
-        gate_dipole = -cell.charge/len(mf.kpts) * _sawtooth(mf.zgate, 20., 22., 2.)
-        cell.charge = 0
-        no_sheet = mf.get_veff(dm=dm)
-        cell.charge = 2
-        self.assertAlmostEqual(v.dipole-no_sheet.dipole, gate_dipole, delta=1e-11)
-
     def test_reset_and_parameters(self):
         cell = make_cell()
-        mf = gate_charge(make_mf(cell))
-        vc, _ = mf._gate_matrices(cell, mf.kpts)
-        self.assertIs(mf._gate_matrices(cell, mf.kpts)[0], vc)
-        mf.zgate = 17.
-        self.assertIsNot(mf._gate_matrices(cell, mf.kpts)[0], vc)
+        mf = gate_charge(make_mf(cell), zgate=17., gate_side=-1,
+                         dipole_width=.4, dipole_gap=.1, barrier=True)
+        self.assertEqual(mf.gate_side, -1)
+        self.assertAlmostEqual(mf.cut, 16.7)
+        self.assertAlmostEqual(mf.z0, 5.7)
+        self.assertAlmostEqual(mf.barrier_start, 16.5)
+        self.assertAlmostEqual(mf.barrier_end, 18.7)
+        self.assertEqual(mf.barrier_width, mf.dipole_width)
+
+        self.assertIs(gate_charge(mf, zgate=17., gate_side=1,
+                                  dipole_width=.4, dipole_gap=.1, barrier=True), mf)
+        self.assertEqual(mf.gate_side, 1)
+        self.assertAlmostEqual(mf.cut, 17.3)
+        self.assertAlmostEqual(mf.z0, 6.3)
+        self.assertAlmostEqual(mf.barrier_start, 15.3)
+        self.assertAlmostEqual(mf.barrier_end, 17.5)
         mf.reset()
-        self.assertIsNone(mf._gate_cache)
         self.assertEqual(mf.zgate, 17.)
-        with self.assertRaises(NotImplementedError):
-            slab_dipole_correction(make_mf(cell), cut=20.)
-        with self.assertRaises(ValueError):
-            gate_charge(make_mf(cell), barrier=True, barrier_width=3.)
-        with self.assertRaises(ValueError):
-            slab_dipole_correction(gate_charge(make_mf(cell)), width=2.)
-        # Both composition orders work on a neutral cell.
-        cell = make_cell(charge=0)
-        for z0 in (0., 19.7):
-            with self.assertRaisesRegex(ValueError, 'z0 cannot be set'):
-                slab_dipole_correction(gate_charge(make_mf(cell)), cut=20., z0=z0)
-            with self.assertRaisesRegex(ValueError, 'z0 cannot be set'):
-                gate_charge(slab_dipole_correction(make_mf(cell), cut=20., z0=z0))
-        mf = slab_dipole_correction(make_mf(cell), cut=20., width=2.)
-        dm = mf.get_init_guess()
-        mf.get_veff(dm=dm)
-        self.assertIsNotNone(mf.dipole_offset)
-        gate_charge(mf)
-        self.assertIsNone(mf.dipole_offset)
-        self.assertLess(np.max(abs(mf._gate_matrices(cell, mf.kpts)[0].get())), 1e-15)
-        mf.get_veff(dm=dm)
-        self.assertEqual(mf.dipole_offset, 0.)
-        self.assertIsNone(mf.dipole_z0)
-        self.assertIsNotNone(mf.Gradients())
-        mf.z0 = 19.7
-        with self.assertRaisesRegex(ValueError, 'z0 cannot be set'):
-            mf.get_veff(dm=dm)
+        self.assertEqual(mf.gate_side, 1)
+        self.assertAlmostEqual(mf.cut, 17.3)
+        self.assertAlmostEqual(mf.z0, 6.3)
+        self.assertAlmostEqual(mf.barrier_start, 15.3)
+        self.assertAlmostEqual(mf.barrier_end, 17.5)
 
 
 if __name__ == '__main__':

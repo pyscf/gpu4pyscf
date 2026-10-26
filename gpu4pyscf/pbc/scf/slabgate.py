@@ -25,9 +25,10 @@ from gpu4pyscf.pbc.scf.slabdipole import _slab_length, _dipole_grids, _slab_char
 
 
 def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
-                barrier_end=None, barrier_height=.05, barrier_width=None):
+                barrier_end=None, barrier_height=.05, barrier_width=None,
+                dipole_width=None, dipole_gap=1e-4, gate_side=-1):
     '''
-    Apply a compensating planar gate charge in place.
+    Apply a compensating planar gate and its dipole correction in place.
 
     The sheet carries qc = -q, where q = cell.charge/nkpts is the charge
     PER PRIMITIVE CELL. At a single k-point, q = cell.charge. Negative q
@@ -64,90 +65,126 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             The slab normal is z, with the third lattice vector along positive
             z and the other two in the xy plane.
         zgate: Sheet position in Bohr; None means L/2.
+        gate_side: Gate side relative to the slab along z: +1 means
+            the higher-coordinate side, -1 the lower-coordinate side
+            (default: -1, Brumme's orientation). zgate sets the actual
+            sheet position; this sign places the dipole and default barrier.
+        dipole_width: Separation d_dip of the dipole planes in Bohr; None
+            means .01*L, as in Brumme. The return region is centered at
+            cut = zgate + gate_side*(dipole_gap + dipole_width/2).
+        dipole_gap: Small positive distance epsilon in Bohr between the
+            gate and the nearest dipole plane (default: 1e-4).
         barrier: Enable the repulsive electronic barrier (default: False).
-        barrier_start, barrier_end: Periodic barrier edges in Bohr; defaults
-            are .45*L and .55*L. An interval can cross the cell boundary.
+        barrier_start, barrier_end: Periodic barrier edges in Bohr. For
+            gate_side=-1, start defaults to cut-dipole_width/2 and end to
+            start+.1*L. For gate_side=+1, end defaults to cut+dipole_width/2
+            and start to end-.1*L. Explicit edges are coordinates along
+            z, independent of gate_side. Intervals can cross the boundary.
         barrier_height: Plateau height in Hartree (default: .05 = .1 Ry).
         barrier_width: Linear ramp width INSIDE each edge, in Bohr; None
-            means .01*L. Zero gives a rectangular barrier.
+            means dipole_width, as in Brumme. Zero gives a rectangular barrier.
 
     All lengths use Bohr, regardless of cell.unit; ABACUS fractional lengths
     must be multiplied by L. The sheet, barrier and cell remain fixed when
     differentiating atomic positions. Gradients are dE/dR; forces are -dE/dR.
     No translation-force subtraction is made for this external field.
 
-    Compose with slab_dipole_correction(mf, cut=..., width=...) to cancel
-    the periodic residual field. Its total dipole then includes the sheet;
-    the barrier does not contribute to that dipole. Use the same normal and
-    put the whole dipole return region in vacuum. With gate_charge, the
-    dipole uses Brumme Eqs. (7)-(9) without a constant shift; setting z0
-    raises ValueError, in either addon composition order.
+    The dipole correction is added automatically to cancel the periodic
+    residual field. An existing dipole addon is reused and its cut,
+    width and z0 are reset to the Brumme convention. In particular,
+    z0 = (cut+L/2) % L makes Eq. (7) vanish without a constant shift.
+    Its total dipole includes the sheet; the barrier does not contribute.
+    The return region is on the gate's side away from the slab; the default
+    barrier extends toward the slab. Put the gate and the entire return
+    region in vacuum. Reapply gate_charge to update this placement when
+    changing gate parameters.
 
     Uniform and MultiGrid integration and frozen Becke grids are supported.
     Becke grid response, stress, Hessians, response kernels and band k-points
-    are not implemented. reset() invalidates AO matrices; use reset(new_cell)
+    are not implemented. Use reset(new_cell)
     after changing geometry or basis, as for the underlying SCF object.
     '''
     from gpu4pyscf.pbc.dft import rks, uks, krks, kuks
-    from gpu4pyscf.pbc.scf.slabdipole import SlabDipoleCorrection
+    from gpu4pyscf.pbc.scf.slabdipole import slab_dipole_correction
     if not isinstance(mf, (rks.RKS, uks.UKS, krks.KRKS, kuks.KUKS)):
         raise NotImplementedError('Gate charge requires RKS/UKS/KRKS/KUKS')
-    _slab_length(mf.cell)
-    if isinstance(mf, SlabDipoleCorrection):
-        if mf.z0 is not None:
-            raise ValueError('z0 cannot be set with gate_charge; the potential reference '
-                             'is fixed by zero cell integral')
-        mf.dipole_offset = None  # Recompute the reference after adding the gate.
-        mf.dipole_z0 = None
+    length = _slab_length(mf.cell)
+    if gate_side not in (-1, 1):
+        raise ValueError('gate_side must be -1 or +1')
+    zgate = (.5*length if zgate is None else zgate) % length
+    dipole_width = .01*length if dipole_width is None else dipole_width
+    if not 0 < dipole_width < length:
+        raise ValueError('Gate dipole width must satisfy 0 < width < cell length')
+    if not 0 < dipole_gap < length-dipole_width:
+        raise ValueError('Dipole gap must satisfy 0 < gap < cell length - dipole width')
+    # z_dip - gate_side*d_dip/2 = z_mono + gate_side*epsilon.
+    cut = (zgate + gate_side*(dipole_gap + dipole_width/2)) % length
+    if gate_side == -1:
+        if barrier_start is None:
+            barrier_start = (cut - dipole_width/2) % length
+        if barrier_end is None:
+            barrier_end = (barrier_start + .1*length) % length
+    else:
+        if barrier_end is None:
+            barrier_end = (cut + dipole_width/2) % length
+        if barrier_start is None:
+            barrier_start = (barrier_end - .1*length) % length
+    if barrier_width is None:
+        barrier_width = dipole_width
     if not isinstance(mf, SlabGateCharge):
         lib.set_class(mf, (SlabGateCharge, mf.__class__))
+    mf.gate_side = gate_side
     mf.zgate = zgate
     mf.barrier = barrier
     mf.barrier_start = barrier_start
     mf.barrier_end = barrier_end
     mf.barrier_height = barrier_height
     mf.barrier_width = barrier_width
-    mf._gate_cache = None
     mf._gate_parameters(mf.cell)
-    return mf
+    # Mark the compensating gate before checking the slab's net charge.
+    # The dipole factory adds its mixin only if absent, and resets parameters.
+    # z0 = (cut+L/2) % L vanish the dipole potential constant shift.
+    return slab_dipole_correction(mf, cut=cut,
+                                  width=dipole_width, z0=(cut+length/2) % length)
 
 
 def _sheet_potential(z, zgate, length, area, charge, deriv=0):
-    '''Electrostatic potential of a sheet and its neutralizing background.'''
+    '''
+    Electrostatic potential of a sheet and its neutralizing background.
+    '''
+    z = cp.asarray(z)
     s = (z - zgate + length/2) % length - length/2
     factor = 2*np.pi*charge/area
     if deriv:
-        return factor * (-cp.get_array_module(z).sign(s) + 2*s/length)
-    return factor * (-abs(s) + s*s/length + length/6)
+        return factor * (-cp.sign(s) + 2*s/length)
+    return factor * (-cp.abs(s) + s*s/length + length/6)
 
 
 def _barrier_potential(z, start, end, length, height, width, deriv=0):
-    '''Periodic barrier with linear ramps inside its edges.'''
-    xp = cp.get_array_module(z)
+    '''
+    Periodic barrier with linear ramps inside its edges.
+    '''
+    z = cp.asarray(z)
     t = (z - start) % length
     span = (end - start) % length
     if width == 0:
-        return xp.zeros_like(z) if deriv else height * ((t < span) & (t >= 0))
+        return cp.zeros_like(z) if deriv else height * ((t < span) & (t >= 0))
     if deriv:
-        return height/width * (xp.asarray(t < width, dtype=float)
-                               - xp.asarray((t > span-width) & (t < span), dtype=float))
-    return height * xp.maximum(0., xp.minimum(1., xp.minimum(t, span-t)/width))
+        return height/width * (cp.asarray(t < width, dtype=float)
+                               - cp.asarray((t > span-width) & (t < span), dtype=float))
+    return height * cp.maximum(0., cp.minimum(1., cp.minimum(t, span-t)/width))
 
 
 class SlabGateCharge:
-    _keys = {'zgate', 'barrier', 'barrier_start', 'barrier_end',
-             'barrier_height', 'barrier_width'}
-
-    def reset(self, cell=None):
-        self._gate_cache = None
-        return super().reset(cell)
+    _keys = {'gate_side', 'zgate', 'barrier', 'barrier_start',
+             'barrier_end', 'barrier_height', 'barrier_width'}
 
     def _gate_parameters(self, cell):
         length = _slab_length(cell)
-        zgate = (.5*length if self.zgate is None else self.zgate) % length
-        start = (.45*length if self.barrier_start is None else self.barrier_start) % length
-        end = (.55*length if self.barrier_end is None else self.barrier_end) % length
-        width = .01*length if self.barrier_width is None else self.barrier_width
+        zgate = self.zgate % length
+        start = self.barrier_start % length
+        end = self.barrier_end % length
+        width = self.barrier_width
         if self.barrier:
             span = (end - start) % length
             if span == 0 or not 0 <= width <= span/2:
@@ -157,22 +194,13 @@ class SlabGateCharge:
         return length, zgate, start, end, self.barrier_height, width
 
     def _gate_matrices(self, cell, kpts):
-        from gpu4pyscf.pbc.dft import numint, gen_grid
-        params = self._gate_parameters(cell)
-        length, zgate, start, end, height, width = params
+        from gpu4pyscf.pbc.dft import numint
+        length, zgate, start, end, height, width = self._gate_parameters(cell)
         kpts = np.asarray(kpts).reshape(-1, 3)
         grids = _dipole_grids(self, cell)
         qc = -_slab_charge(self, cell)
-        if isinstance(grids, gen_grid.UniformGrids):
-            grid_signature = (tuple(grids.mesh), id(grids._coords), id(grids._weights))
-        else:
-            grid_signature = (id(grids.coords), id(grids.weights))
-        # Geometry and basis changes go through reset(), as in the SCF base.
-        signature = (id(cell), qc, self.barrier, params,
-                     kpts.tobytes(), grid_signature)
-        if self._gate_cache is not None and self._gate_cache[0] == signature:
-            return self._gate_cache[1:]
         charge_matrix = barrier_matrix = None
+        # TODO: may use multigrid to speed up
         ni = numint.KNumInt()
         area = cell.vol/length
         for ao_kpts, weight, coords in ni.block_loop(cell, grids, kpts=kpts):
@@ -181,29 +209,33 @@ class SlabGateCharge:
                 charge_matrix = cp.zeros(shape, dtype=ao_kpts.dtype)
                 barrier_matrix = cp.zeros_like(charge_matrix)
             z = coords[:, 2]
-            vc = -_sheet_potential(z, zgate, length, area, qc)
+            vc = -_sheet_potential(z, zgate, length, area, qc) # - for electron
             vb = (_barrier_potential(z, start, end, length, height, width)
                   if self.barrier else cp.zeros_like(z))
             for k, ao in enumerate(ao_kpts):
                 charge_matrix[k] += ao.conj().T @ ((weight*vc)[:, None] * ao)
                 if self.barrier:
                     barrier_matrix[k] += ao.conj().T @ ((weight*vb)[:, None] * ao)
-        self._gate_cache = signature, charge_matrix, barrier_matrix
         return charge_matrix, barrier_matrix
 
     def _gate_ionic_energy(self, cell):
+        # electron energy will be added in energy_tot
         length, zgate, start, end, height, width = self._gate_parameters(cell)
         area = cell.vol/length
         qc = -_slab_charge(self, cell)
         z = cell.atom_coords()[:, 2]
         egate = np.dot(cell.atom_charges(),
-                       _sheet_potential(z, zgate, length, area, qc))
+                       _sheet_potential(z, zgate, length, area, qc).get())
         egate += np.pi*qc**2*length/(6*area)
         ebarrier = 0.
         if self.barrier:
+            # TODO: the following two terms may be modified.
+            # if barrier interacts with atoms this will appear
             ebarrier = -np.dot(cell.atom_charges(),
-                               _barrier_potential(z, start, end, length, height, width))
-            ebarrier -= qc * _barrier_potential(zgate, start, end, length, height, width)
+                               _barrier_potential(z, start, end, length, height, width).get())
+            # this term can be ignored for this is a constant.
+            ebarrier -= qc * float(
+                _barrier_potential(zgate, start, end, length, height, width))
         return float(egate), float(ebarrier)
 
     def get_hcore(self, cell=None, kpts=None, *, kpt=None):
@@ -213,6 +245,7 @@ class SlabGateCharge:
         if kpts is None:
             kpts = self.kpts if is_kpts else (self.kpt if kpt is None else kpt)
         hcore = super().get_hcore(cell, kpts)
+        # charge and barrier matrices
         vc, vb = self._gate_matrices(cell, kpts)
         return hcore + (vc + vb if is_kpts else vc[0] + vb[0])
 
