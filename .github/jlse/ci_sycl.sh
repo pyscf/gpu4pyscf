@@ -59,14 +59,20 @@ setup_env() {
   export CC=icx CXX=icpx FC=ifx
   export CCACHE_DIR="$CI_ROOT/ccache" CCACHE_MAXSIZE=10G
   export SYCL_CACHE_PERSISTENT=1 SYCL_CACHE_DIR="$CI_ROOT/sycl_cache"
-  # chiatta nodes have 8 two-tile Max 1550 cards; single-GPU CI uses device 0.
-  export ONEAPI_DEVICE_SELECTOR="${ONEAPI_DEVICE_SELECTOR:-level_zero:0}"
-  export OMP_NUM_THREADS=2
+  # chiatta nodes have 8 two-tile Max 1550 cards. Single-GPU CI: with the FLAT
+  # hierarchy every tile is a device, and mask 0 leaves exactly one (tile 0).
+  # All overridable from the job environment.
+  export ZE_ENABLE_SYSMAN="${ZE_ENABLE_SYSMAN:-1}"
+  export ZE_FLAT_DEVICE_HIERARCHY="${ZE_FLAT_DEVICE_HIERARCHY:-FLAT}"
+  export ZE_AFFINITY_MASK="${ZE_AFFINITY_MASK:-0}"
+  export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+  export ONEAPI_DEVICE_SELECTOR="${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}"
 }
 
 toolchain_check() {
   {
     hostname; date
+    env | grep -E '^(ZE_|ONEAPI_DEVICE_SELECTOR|OMP_NUM_THREADS)' | sort
     icpx --version | head -1
     python -c "import dpctl, dpnp; print('dpctl', dpctl.__version__, '| dpnp', dpnp.__version__); dpctl.lsplatform()"
     python -c "import dpctl; d = dpctl.get_devices(device_type='gpu'); print(d); assert d, 'no SYCL GPU device'"
@@ -135,7 +141,7 @@ do_test() {
   toolchain_check || exit 1
   # Same pytest invocation as upstream unittest.yml.
   pytest -n "${PYTEST_WORKERS:-4}" --dist loadfile -m 'not slow and not benchmark and not special' \
-    --durations=50 "$@" 2>&1 | tee "$LOG_DIR/60_pytest.log"
+    --cov="$BUILD_DIR" --durations=50 "$@" 2>&1 | tee "$LOG_DIR/60_pytest.log"
   exit "${PIPESTATUS[0]}"
 }
 
