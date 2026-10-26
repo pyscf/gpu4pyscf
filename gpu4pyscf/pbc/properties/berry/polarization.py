@@ -517,3 +517,24 @@ def polarization_difference(final, initial, cell, unit='au',
     if return_branch:
         return difference, branch
     return difference
+
+
+def continuous_phases(principal, kmesh, direction, reference=None):
+    """Choose the periodic transverse branch, or follow an accepted reference."""
+    principal = np.asarray(cp.asnumpy(principal))
+    if reference is not None:
+        ref = np.asarray(cp.asnumpy(reference))
+        if ref.shape != principal.shape:
+            raise ValueError('Branch reference does not match k strings')
+        phase = principal + 2*np.pi*np.rint((ref-principal)/(2*np.pi))
+        if np.any(np.abs(phase-ref) >= np.pi-1e-8):
+            raise ValueError('Ambiguous Berry branch step; reduce the orbital step')
+        return phase
+    shape = tuple(kmesh[j] for j in range(3) if j != direction)
+    phase = principal.reshape(shape)
+    for axis in range(2):
+        phase = np.unwrap(phase, axis=axis)
+    for axis in range(2):
+        if np.any(np.abs(np.roll(phase, -1, axis=axis)-phase) >= np.pi-1e-8):
+            raise ValueError('Ambiguous transverse Berry branch; refine the k mesh')
+    return phase.ravel()
