@@ -3,7 +3,7 @@
 # Jacamar `batch` runner. Single GPU (level_zero:0).
 #
 #   ci_sycl.sh build              build the SYCL backend, publish the built tree
-#                                 to $CI_ROOT/builds/$CI_COMMIT_SHA
+#                                 to $CI_ROOT/builds/$CI_PIPELINE_ID
 #   ci_sycl.sh test <path>...     run pytest on that built tree
 #
 # Optional environment (GitLab CI/CD variables):
@@ -11,14 +11,19 @@
 #   SYCL_AOT       ON | OFF | auto                      (default auto: PVC -> ON)
 #   ZE_DRIVER_DIR  dir with libze_intel_gpu             (default /soft intel-gpu-umd 821.36)
 #   PYTEST_WORKERS                                      (default 4)
+#   PR_NUMBER, PR_REPO   set by the PR poller: build that GitHub PR's merge
+#                        ref (or head, on conflicts) instead of this checkout.
+#                        This script, env.yml and .gitlab-ci.yml always come
+#                        from the trusted checkout, never from the PR.
 set -uo pipefail
 
 MODE="${1:-}"; shift || true
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TRUSTED_DIR="$SRC_DIR"   # CI config; SRC_DIR becomes the PR worktree for PR builds
 CI_ROOT="${CI_ROOT:-$HOME/gitlab-sycl-ci}"
-LOG_DIR="${LOG_DIR:-$SRC_DIR/ci-logs}"
-SHA="${CI_COMMIT_SHA:-local}"
-BUILD_DIR="$CI_ROOT/builds/$SHA"
+LOG_DIR="${LOG_DIR:-$TRUSTED_DIR/ci-logs/$MODE}"
+# Keyed by pipeline: PR pipelines all run from the same trusted commit.
+BUILD_DIR="$CI_ROOT/builds/${CI_PIPELINE_ID:-local}"
 # One fresh conda env per pipeline, like the GitHub CPU CI (which re-solves on
 # every run and caches only downloaded packages): the nightly dpnp / newest
 # dpctl are picked up automatically. Test jobs reuse the env their build used.
@@ -36,7 +41,7 @@ create_env() {
   # Shared package cache: re-solving per pipeline only re-downloads what changed.
   export MAMBA_ROOT_PREFIX="$CI_ROOT/mroot"
   rm -rf "$ENV_PREFIX"
-  "$MM" create -y -p "$ENV_PREFIX" -f "$SRC_DIR/.github/jlse/env.yml" || return 1
+  "$MM" create -y -p "$ENV_PREFIX" -f "$TRUSTED_DIR/.github/jlse/env.yml" || return 1
   "$MM" list -p "$ENV_PREFIX" 2>&1 | grep -E 'dpnp|dpctl|dpcpp|intel-sycl-rt|mkl ' | tee "$LOG_DIR/05_env_versions.log"
   # Drop envs of old pipelines.
   find "$CI_ROOT/envs" -mindepth 1 -maxdepth 1 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null
@@ -89,10 +94,29 @@ toolchain_check() {
   fi
 }
 
+checkout_pr() {
+  [ -n "${PR_NUMBER:-}" ] || return 0
+  local repo="${PR_REPO:-pyscf/gpu4pyscf}" dir="$CI_ROOT/pr-src/${CI_PIPELINE_ID:-local}"
+  mkdir -p "$CI_ROOT/pr-src"
+  cd "$TRUSTED_DIR" && git worktree prune
+  find "$CI_ROOT/pr-src" -mindepth 1 -maxdepth 1 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null
+  rm -rf "$dir"
+  # GitHub's merge ref is the PR merged into its base, like actions/checkout.
+  if ! git fetch --depth=1 --no-tags "https://github.com/$repo.git" "pull/$PR_NUMBER/merge"; then
+    echo "no merge ref (conflicts?): testing the PR head instead"
+    git fetch --depth=1 --no-tags "https://github.com/$repo.git" "pull/$PR_NUMBER/head" || return 1
+  fi
+  git worktree add --detach "$dir" FETCH_HEAD || return 1
+  SRC_DIR="$dir"
+  echo "testing $repo PR #$PR_NUMBER at $(git -C "$dir" rev-parse HEAD) (head when triggered: ${PR_SHA:-unknown})" |
+    tee "$LOG_DIR/03_pr.log"
+}
+
 do_build() {
   mkdir -p "$CI_ROOT/envs"
   create_env || { echo "environment creation failed"; exit 1; }
   setup_env || { echo "environment setup failed"; exit 1; }
+  checkout_pr || { echo "could not fetch PR $PR_NUMBER"; exit 1; }
   cd "$SRC_DIR"
   # A CMake cache left by an earlier job would point at that job's conda env.
   rm -rf "$SRC_DIR/build"
@@ -132,7 +156,7 @@ do_build() {
 
 do_test() {
   [ $# -gt 0 ] || { echo "usage: $0 test <pytest paths...>"; exit 2; }
-  [ -e "$BUILD_DIR/.build_ok" ] || { echo "no build for $SHA at $BUILD_DIR (did the build job run?)"; exit 1; }
+  [ -e "$BUILD_DIR/.build_ok" ] || { echo "no build for pipeline ${CI_PIPELINE_ID:-local} at $BUILD_DIR (did the build job run?)"; exit 1; }
   ENV_PREFIX="$(cat "$BUILD_DIR/.env_prefix")"
   [ -d "$ENV_PREFIX" ] || { echo "env $ENV_PREFIX from the build is gone"; exit 1; }
   setup_env || { echo "environment setup failed"; exit 1; }

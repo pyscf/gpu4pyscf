@@ -3,12 +3,22 @@
 # Counterpart of upstream's CUDA single-GPU job (.github/workflows/unittest.yml);
 # the SYCL backend is single-GPU only for now, so there is no multi-GPU job.
 #
+# Pipelines:
+#   - merge requests, pushes to the default branch, manual ("web") runs:
+#       build + test of this checkout.
+#   - pull requests of the upstream GitHub repo: a scheduled pipeline (POLL_PRS=true)
+#       runs pr-poller on a login node every few minutes; for each new or updated PR
+#       it starts a pipeline (PR_NUMBER set) that builds and tests that PR's merge
+#       ref, then publishes the logs (see .github/jlse/README.md).
+#
 # build : builds the SYCL backend (PVC AOT) and publishes the tree to the shared
-#         filesystem, keyed by commit SHA.
+#         filesystem, keyed by pipeline id.
 # test  : the SCF suite (gpu4pyscf/scf) only, on one chiatta node.
 #
-# Optional CI/CD variables (Settings > CI/CD > Variables): SYCL_TESTS, SYCL_AOT, CI_ROOT,
-# ZE_DRIVER_DIR, PYTEST_WORKERS. See .github/jlse/ci_sycl.sh.
+# CI/CD variables (Settings > CI/CD > Variables): SYCL_TESTS, SYCL_AOT, CI_ROOT,
+# ZE_DRIVER_DIR, PYTEST_WORKERS; PR_REPO, PR_ALLOWED_ASSOCIATIONS, PR_MAX_TRIGGERS,
+# GITLAB_TRIGGER_TOKEN, GITHUB_GIST_TOKEN, GITHUB_STATUS_TOKEN, GITHUB_READ_TOKEN.
+# See .github/jlse/ci_sycl.sh, poll_prs.py and report_pr.py.
 
 include:
   - project: 'ci-resources/defaults'
@@ -17,8 +27,10 @@ include:
       - '/runners.yml'
 
 stages:
+  - poll
   - build
   - test
+  - report
 
 # ci-resources/defaults has no chiatta runner yet, so define it here from the
 # same pieces its other runners use (id token, batch tag, ALCF proxy).
@@ -34,12 +46,30 @@ stages:
     NO_PROXY: "localhost,127.0.0.1,.anl.gov"
     GIT_DEPTH: "1"
 
-# Every merge request, pushes to the default branch, manual and scheduled runs.
+# Merge requests, default-branch pushes, manual runs, and PR pipelines started by
+# pr-poller. The polling schedule itself builds nothing.
 .sycl-rules:
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $POLL_PRS == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE =~ /^(trigger|pipeline)$/ && $PR_NUMBER'
+
+.pr-only-rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(trigger|pipeline)$/ && $PR_NUMBER'
+
+pr-poller:
+  stage: poll
+  extends: .shell-runner
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $POLL_PRS == "true"'
+  variables:
+    GIT_STRATEGY: fetch
+  script:
+    - python3 .github/jlse/poll_prs.py
 
 sycl-build:
   stage: build
@@ -52,7 +82,7 @@ sycl-build:
     when: always
     expire_in: 2 weeks
     paths:
-      - ci-logs/*.log
+      - ci-logs/
 
 sycl-test:
   stage: test
@@ -71,4 +101,29 @@ sycl-test:
     when: always
     expire_in: 2 weeks
     paths:
-      - ci-logs/*.log
+      - ci-logs/
+
+# Publish the result of PR pipelines where contributors can read it without a
+# GitLab account (a gist, plus a commit status on the PR when a token is set).
+.report:
+  stage: report
+  extends: [.shell-runner, .pr-only-rules]
+  needs:
+    - job: sycl-build
+      optional: true
+      artifacts: true
+    - job: sycl-test
+      optional: true
+      artifacts: true
+
+report-success:
+  extends: .report
+  when: on_success
+  script:
+    - python3 .github/jlse/report_pr.py success
+
+report-failure:
+  extends: .report
+  when: on_failure
+  script:
+    - python3 .github/jlse/report_pr.py failure
