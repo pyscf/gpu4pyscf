@@ -11,6 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Author: Tianyu Zhu <zhutianyu1991@gmail.com>
+# Author: Christopher Hillenbrand <chillenbrand15@gmail.com>
+# Author: Chaoqun Zhang <cq_zhang@outlook.com>
+# Author: Jincheng Yu <pimetamon@gmail.com>
+# Author: Jiachen Li <lijiachen.duke@gmail.com>
+#
 
 """
 Spin-restricted random phase approximation (direct RPA) with N^4 scaling.
@@ -651,4 +658,3 @@ class RPA(lib_cpu.StreamObject):
     to_cpu = utils.to_cpu
     to_gpu = utils.to_gpu
     device = utils.device
-
