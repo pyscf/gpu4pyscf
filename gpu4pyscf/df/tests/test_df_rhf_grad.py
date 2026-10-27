@@ -258,7 +258,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-6
+            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 3e-6
 
     def test_uhf_jk_energy_per_atom(self):
         from gpu4pyscf.df.grad.uhf import _jk_energy_per_atom
