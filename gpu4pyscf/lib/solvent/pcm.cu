@@ -724,8 +724,8 @@ static void _pcm_d2F_to_d2Sii(const double* __restrict__ F, const double* __rest
         return;
     }
 
-    const int i_atom = ij_atom / n_atom;
-    const int j_atom = ij_atom % n_atom;
+    const size_t i_atom = ij_atom / n_atom;
+    const size_t j_atom = ij_atom % n_atom;
 
     const double zeta = charge_exp[i_grid];
     const double F_value = F[i_grid];

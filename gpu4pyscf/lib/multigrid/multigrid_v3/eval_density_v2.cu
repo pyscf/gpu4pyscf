@@ -53,15 +53,15 @@ void eval_density_kernel(double *rho_c, double *dm, PBCIntEnvVars envs,
     float2 y_range = atom_frac_ranges[nseg  +segment_id];
     float2 z_range = atom_frac_ranges[nseg*2+segment_id];
     if (thread_id == 0) {
-        b_start = ceil(y_range.x * mesh_b);
-        c_start = ceil(z_range.x * mesh_c);
-        b_stop = ceil(y_range.y * mesh_b);
-        c_stop = ceil(z_range.y * mesh_c);
-        int a_start = ceil(x_range.x * mesh_a);
+        b_start = ceil(double(y_range.x) * mesh_b);
+        c_start = ceil(double(z_range.x) * mesh_c);
+        b_stop = ceil(double(y_range.y) * mesh_b);
+        c_stop = ceil(double(z_range.y) * mesh_c);
+        int a_start = ceil(double(x_range.x) * mesh_a);
         a_index = a_start + a_index_id;
     }
     __syncthreads();
-    int a_stop = ceil(x_range.y * mesh_a);
+    int a_stop = ceil(double(x_range.y) * mesh_a);
     if (a_index >= a_stop) {
         return;
     }

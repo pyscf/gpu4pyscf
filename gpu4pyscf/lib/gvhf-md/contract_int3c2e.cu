@@ -594,9 +594,9 @@ void unroll_contract_auxvec(RysIntEnvVars& envs, JKMatrix& jk,
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
     extern __shared__ double shared_memory[];
-    double *gamma_inc = shared_memory + sp_id;
-    double *auxvec_cache = shared_memory + (order+1) * nsp_per_block;
-    double *Rt = auxvec_cache + nf3k + sp_id;
+    double *auxvec_cache = shared_memory;
+    double *gamma_inc = auxvec_cache + nf3k + sp_id;
+    double *Rt = gamma_inc + (order+1) * nsp_per_block;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     double *auxvec = jk.dm;

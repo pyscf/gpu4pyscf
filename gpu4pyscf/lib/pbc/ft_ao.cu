@@ -198,6 +198,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     __shared__ int Gv_block_id, sp_block_id;
     double *c2s_pool = pool + blockIdx.x * POOL_SIZE;
 while (1) {
+    __syncthreads();
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
         Gv_block_id = batch_id / nbatches_shl_pair;

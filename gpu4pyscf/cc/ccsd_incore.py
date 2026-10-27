@@ -249,7 +249,8 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
             if npairs_kl == 0:
                 return eri
             nao_kl_pairs = npairs_kl * nf[k] * nf[l]
-            eri_tmp = cp.empty((nao_pairs, nao_kl_pairs))
+            # Screened quartets are not written by RYS_fill_int4c2e.
+            eri_tmp = cp.zeros((nao_pairs, nao_kl_pairs))
             ij0 = ij1 = 0
             for ij_id, (i, j) in enumerate(bas_pair_cache):
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]

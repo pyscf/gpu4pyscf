@@ -764,6 +764,9 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
 
                 atom_range = cp.ceil(atom_grid_ranges * cp.array(mesh[:,None,None]))
                 atom_mesh = atom_range[:,:,1] - atom_range[:,:,0]
+                # Cover the float32 tau bounds as well as the float64 density bounds.
+                atom_range_f = cp.ceil(atom_grid_ranges * cp.asarray(mesh[:,None,None], dtype=np.float32))
+                atom_mesh = cp.maximum(atom_mesh, atom_range_f[:,:,1] - atom_range_f[:,:,0])
                 atom_mesh = atom_mesh.max(axis=1).get().astype(np.int32)
                 log.debug2('atom_mesh %s', atom_mesh)
                 atom_mesh_max.append(atom_mesh)
@@ -1196,6 +1199,7 @@ int nx, int ny, int nz)
                 sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
             }
         }
+        __syncthreads();
         if (tid == 0) atomicAdd(out+n, sigma[n]);
     }
 }'''
