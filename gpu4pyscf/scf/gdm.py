@@ -278,11 +278,11 @@ def get_nocc(mo_occ):
         nocca = int(cp.sum(mo_occ[0] == 1))
         nvira = int(cp.sum(mo_occ[0] == 0))
         assert nocca + nvira == nmo, "Only integer occupations are supported for GDM yet."
-        assert cp.all(mo_occ[:nocca, 0] == 1), "Occupation number must be sorted."
+        assert cp.all(mo_occ[0, :nocca] == 1), "Occupation number must be sorted."
         noccb = int(cp.sum(mo_occ[1] == 1))
         nvirb = int(cp.sum(mo_occ[1] == 0))
         assert noccb + nvirb == nmo, "Only integer occupations are supported for GDM yet."
-        assert cp.all(mo_occ[:noccb, 1] == 1), "Occupation number must be sorted."
+        assert cp.all(mo_occ[1, :noccb] == 1), "Occupation number must be sorted."
         return (nocca, noccb)
 
 def get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e):
@@ -293,7 +293,7 @@ def get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e):
     dm = mf.make_rdm1(mo_coeff, mo_occ)
     vhf = mf.get_veff(mf.mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
-    fock = h1e + vhf
+    fock = mf.get_fock(h1e, s1e, vhf, dm)
     return e_tot, fock
 
 def lbfgs_get_direction(gradient, lbfgs_s_y, initial_inverse_hessian = None):
@@ -414,7 +414,7 @@ def _kernel(mf, dm0,
             spin_text = ""
         else:
             assert len(nocc) == 2
-            ss, _ = mf.spin_square((mo_coeff[0, :, nocc[0]:], mo_coeff[1, :, nocc[1]:]))
+            ss, _ = mf.spin_square((mo_coeff[0, :, :nocc[0]], mo_coeff[1, :, :nocc[1]]))
             spin_text = f" {ss:10.4f}"
 
         if previous_e_tot is None:
@@ -465,6 +465,7 @@ def _kernel(mf, dm0,
         assert 0.0 < line_search_tau and line_search_tau < 1.0
         assert 0.0 < line_search_c and line_search_c < 1.0
 
+        line_search_succeed = False
         line_search_slope = float(cp.vdot(gradient, step).real) # It's negative!
         line_search_scale = line_search_initial_scale
         for i_line_search_attempt in range(max_n_line_search_attempt + 1):
@@ -472,11 +473,16 @@ def _kernel(mf, dm0,
             line_search_mo_coeff = packed_apply_exp_U(mo_coeff, nocc, line_search_step)
             line_search_energy, line_search_fock = get_energy_and_fock(mf, line_search_mo_coeff, mo_occ, h1e, s1e)
             if e_tot - line_search_energy >= -line_search_c * line_search_scale * line_search_slope:
+                line_search_succeed = True
                 break
             line_search_scale *= line_search_tau
 
         if i_line_search_attempt > 0:
             step_type = f"Line search ({i_line_search_attempt})"
+
+        if not line_search_succeed:
+            lbfgs_s_y.clear()
+            log.info("Line search failed! However we accept the last (smallest) line search step and keep going. LBFGS record cleared.")
 
         previous_e_tot = e_tot
         e_tot = line_search_energy

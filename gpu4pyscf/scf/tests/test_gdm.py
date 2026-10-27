@@ -281,6 +281,57 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-5
         assert test_n_cycle <= ref_n_cycle + 5
 
+    def test_gdm_rks_pcm(self):
+        mol = pyscf.M(
+            atom = """
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+            """,
+            basis = "def2-tzvp",
+            verbose = 0,
+        )
+
+        mf = RKS(mol, xc = "wB97M-V").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99,590)
+        mf.nlcgrids.atom_grid = (50,194)
+        mf = mf.PCM()
+        mf.with_solvent.method = "IEFPCM"
+        mf.with_solvent.eps = 40.0
+        mf.conv_tol = 1e-11
+
+        ref_energy = mf.kernel()
+        assert mf.converged
+        ref_n_cycle = mf.cycles
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        ref_gradient = gobj.kernel()
+        del mf, gobj
+
+        #
+
+        mf = RKS(mol, xc = "wB97M-V").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99,590)
+        mf.nlcgrids.atom_grid = (50,194)
+        mf = mf.PCM()
+        mf.with_solvent.method = "IEFPCM"
+        mf.with_solvent.eps = 40.0
+        mf.conv_tol = 1e-11
+
+        mf = gdm(mf)
+        test_energy = mf.kernel()
+        mf = mf.undo_gdm()
+        assert mf.converged
+        test_n_cycle = mf.cycles
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+
+        assert np.abs(test_energy - ref_energy) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
+        assert test_n_cycle <= ref_n_cycle + 5
 
 if __name__ == "__main__":
     print("Full Tests for GDM")
