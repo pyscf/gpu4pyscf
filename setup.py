@@ -159,8 +159,8 @@ try:
 except ImportError:
     pass
 
+package_name = NAME
 if 'sdist' in sys.argv:
-    package_name = NAME
     CUDA_VERSION = '12x'
 elif BACKEND == 'sycl':
     package_name = NAME + '-sycl' + get_sycl_version()

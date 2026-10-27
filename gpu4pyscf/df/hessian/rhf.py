@@ -665,8 +665,9 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     # ...
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
-    batch_size = min(naux, int(word_avail*0.75) // (3*nao_pair*2))
-    blksize = min(naux, int(word_avail*0.15) // (nao**2*8) * 8)
+    # Reserve two integral buffers and one equally sized contraction temporary.
+    batch_size = min(naux, int(word_avail*0.75) // (3*nao_pair*3))
+    blksize = min(naux, int(word_avail*0.15) // (3*nao**2*8) * 8)
     assert batch_size > 0 and blksize > 0
     log.debug1('mem_avail=%.3f MB, batch_size=%d, blksize=%d',
                mem_avail*1e-6, batch_size, blksize)

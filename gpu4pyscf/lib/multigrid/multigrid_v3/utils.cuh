@@ -71,5 +71,8 @@ double reduce(double val, double *swap, int thread_id)
             val += __shfl_down_sync(0xffffffff, val, offset);
         }
     }
+    // Without this barrier the other warps can enter the next reduce and
+    // overwrite swap[] before warp 0 has read it.
+    __syncthreads();
     return val;
 }
