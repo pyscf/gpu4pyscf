@@ -228,7 +228,7 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
             float div_nfk = c_div_nf[lk];
             int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
             size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
-            size_t offset = nao_pairs * naux;
+            size_t offset = (size_t)nao_pairs * naux;
             double *j3c_tensor = out + pair_offset * naux + k0;
             for (int n = 0; n < GOUT_IP1_WIDTH; ++n) {
                 int ijk = n*gout_stride+gout_id;
@@ -443,7 +443,7 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
             float div_nfk = c_div_nf[lk];
             int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
             size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
-            size_t offset = nao_pairs * naux;
+            size_t offset = (size_t)nao_pairs * naux;
             double *j3c_tensor = out + pair_offset * naux + k0;
             for (int n = 0; n < GOUT_IP1_WIDTH; ++n) {
                 int ijk = n*gout_stride+gout_id;
