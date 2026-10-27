@@ -373,9 +373,9 @@ def _kernel(mf, dm0,
         log.info('Set gradient conv threshold to %g', mf.conv_tol_grad)
 
     if mo_coeff.ndim == 2:
-        log.info(" Cycle               Energy    RMS Gradient    Step")
+        log.info(" Cycle               Energy   Gradient Norm    Step")
     else:
-        log.info(" Cycle               Energy    RMS Gradient      <S^2>    Step")
+        log.info(" Cycle               Energy   Gradient Norm      <S^2>    Step")
 
     lbfgs_s_y = []
     previous_gradient = previous_step = None
@@ -408,7 +408,7 @@ def _kernel(mf, dm0,
         del transformed_s_y
 
         gradient = packed_kappa_gradient(mo_coeff, nocc, fock)
-        gradient_rms = float(cp.linalg.norm(gradient) / cp.sqrt(gradient.size))
+        gradient_norm = float(cp.linalg.norm(gradient))
 
         if mo_coeff.ndim == 2:
             spin_text = ""
@@ -419,15 +419,15 @@ def _kernel(mf, dm0,
 
         if previous_e_tot is None:
             assert cycle == 0
-            log.info(f"{cycle + 1:6d} {e_tot:20.12f} {gradient_rms:15.3e}{spin_text}  Roothaan")
+            log.info(f"{cycle + 1:6d} {e_tot:20.12f} {gradient_norm:15.3e}{spin_text}  Roothaan")
         else:
             delta_E = e_tot - previous_e_tot
-            if gradient_rms < mf.conv_tol_grad and abs(delta_E) < mf.conv_tol:
+            if gradient_norm < mf.conv_tol_grad and abs(delta_E) < mf.conv_tol:
                 converged = True
-                log.info(f"{cycle + 1:6d} {e_tot:20.12f} {gradient_rms:15.3e}{spin_text}  Converged")
+                log.info(f"{cycle + 1:6d} {e_tot:20.12f} {gradient_norm:15.3e}{spin_text}  Converged")
                 break
             else:
-                log.info(f"{cycle + 1:6d} {e_tot:20.12f} {gradient_rms:15.3e}{spin_text}  {step_type}")
+                log.info(f"{cycle + 1:6d} {e_tot:20.12f} {gradient_norm:15.3e}{spin_text}  {step_type}")
 
         if previous_gradient is not None:
             y = gradient - previous_gradient
@@ -564,6 +564,17 @@ def gdm(mf):
     from gpu4pyscf.scf.hf import SCF
     assert isinstance(mf, SCF)
 
-    assert mf.istype('RHF') or mf.istype('UHF'), "RO/G HF/KS not supported yet, only R/U HF/KS are supported"
+    if mf.istype('ROHF'):
+        raise NotImplementedError("GDM does not support ROHF yet")
+    elif mf.istype('UHF'):
+        pass
+    elif mf.istype('GHF'):
+        raise NotImplementedError("GDM does not support GHF yet")
+    elif mf.istype('RDHF'):
+        raise NotImplementedError("GDM does not support RDHF yet")
+    elif mf.istype('DHF'):
+        raise NotImplementedError("GDM does not support DHF yet")
+    else: # RHF
+        pass
 
     return GDM(mf)
