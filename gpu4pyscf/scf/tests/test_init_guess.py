@@ -527,6 +527,196 @@ class KnownValues(unittest.TestCase):
         cp.testing.assert_allclose(mf.make_rdm1(dm.mo_coeff, dm.mo_occ), dm, atol=1e-12)
         assert float(cp.max(cp.abs(dm - mf.get_init_guess(key='minao')))) > 1e-2
 
+    def test_sap_guess_rhf(self):
+        mol = pyscf.M(
+            atom = """
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+            """,
+            basis = "def2-tzvp",
+            verbose = 0,
+        )
+
+        mf = mol.RHF()
+        ref_dm0 = mf.get_init_guess(key='sap')
+        ref_coeff = ref_dm0.mo_coeff
+        ref_dm0 = cp.asarray(ref_dm0)
+        ref_coeff = cp.asarray(ref_coeff)
+        S = cp.asarray(mf.get_ovlp())
+
+        mf = RHF(mol)
+        test_dm0 = mf.get_init_guess(key='sap')
+        test_coeff = test_dm0.mo_coeff
+
+        assert cp.max(cp.abs(test_dm0 - ref_dm0)) < 1e-10
+        assert cp.max(cp.abs(cp.abs(test_coeff.T @ S @ ref_coeff) - cp.eye(mol.nao))) < 1e-10
+
+    def test_sap_guess_rks(self):
+        mol = pyscf.M(
+            atom = """
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+            """,
+            basis = "def2-tzvp",
+            verbose = 0,
+        )
+
+        mf = RKS(mol, xc = "wB97MV").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99,590)
+        mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        mf.grids.prune = None
+        mf.grids.radii_adjust = None
+
+        ref_dm0 = mf.get_init_guess(key='sap')
+        ref_coeff = ref_dm0.mo_coeff
+        ref_dm0 = cp.asarray(ref_dm0)
+        ref_coeff = cp.asarray(ref_coeff)
+        S = cp.asarray(mf.get_ovlp())
+
+        mf = RKS(mol, xc = "wB97MV").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99,590)
+        mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        mf.grids.prune = None
+        mf.grids.radii_adjust = None
+
+        test_dm0 = mf.get_init_guess(key='sap')
+        test_coeff = test_dm0.mo_coeff
+
+        assert cp.max(cp.abs(test_dm0 - ref_dm0)) < 1e-10
+        assert cp.max(cp.abs(cp.abs(test_coeff.T @ S @ ref_coeff) - cp.eye(mol.nao))) < 1e-10
+
+    def test_sap_guess_uks(self):
+        mol = pyscf.M(
+            atom = """
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+            """,
+            basis = "def2-tzvp",
+            charge = 1,
+            spin = 1,
+            verbose = 0,
+        )
+
+        mf = UKS(mol, xc = "HSE06").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+
+        ref_dm0 = mf.get_init_guess(key='sap')
+        ref_coeff = ref_dm0.mo_coeff
+        ref_dm0 = cp.asarray(ref_dm0)
+        ref_coeff = cp.asarray(ref_coeff)
+        S = cp.asarray(mf.get_ovlp())
+
+        mf = UKS(mol, xc = "HSE06").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+
+        test_dm0 = mf.get_init_guess(key='sap')
+        test_coeff = test_dm0.mo_coeff
+
+        assert cp.max(cp.abs(test_dm0 - ref_dm0)) < 1e-10
+        CtestT_S_Cref = cp.einsum("upi,pq,uqj->uij", test_coeff, S, ref_coeff)
+        assert cp.max(cp.abs(cp.abs(CtestT_S_Cref) - cp.eye(mol.nao)[None,:,:])) < 1e-10
+
+    def test_vsap_guess_rhf(self):
+        mol = pyscf.M(
+            atom = """
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+            """,
+            basis = "def2-tzvp",
+            verbose = 0,
+        )
+
+        mf = mol.RKS(xc = "HF")
+        mf.grids.atom_grid = (99,590)
+        ref_dm0 = mf.get_init_guess(key='vsap')
+        ref_coeff = ref_dm0.mo_coeff
+        ref_dm0 = cp.asarray(ref_dm0)
+        ref_coeff = cp.asarray(ref_coeff)
+        S = cp.asarray(mf.get_ovlp())
+
+        mf = RHF(mol)
+        test_dm0 = mf.get_init_guess(key='vsap')
+        test_coeff = test_dm0.mo_coeff
+
+        assert cp.max(cp.abs(test_dm0 - ref_dm0)) < 1e-10
+        assert cp.max(cp.abs(cp.abs(test_coeff.T @ S @ ref_coeff) - cp.eye(mol.nao))) < 1e-10
+
+    def test_vsap_guess_rks(self):
+        mol = pyscf.M(
+            atom = """
+                GHOST:Ne 0 0 1
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+                GHOST:He 1000 0 0
+            """,
+            basis = "def2-tzvp",
+            verbose = 0,
+        )
+
+        mf = mol.RKS(xc = "wB97M-d3bj")
+        mf.grids.atom_grid = (99,590)
+        mf = mf.PCM()
+        mf.with_solvent.eps = 20.0
+
+        ref_dm0 = mf.get_init_guess(key='vsap')
+        ref_coeff = ref_dm0.mo_coeff
+        ref_dm0 = cp.asarray(ref_dm0)
+        ref_coeff = cp.asarray(ref_coeff)
+        S = cp.asarray(mf.get_ovlp())
+
+        mf = RKS(mol, xc = "wB97M-d3bj")
+        mf.grids.atom_grid = (99,590)
+        mf = mf.PCM()
+        mf.with_solvent.eps = 20.0
+
+        test_dm0 = mf.get_init_guess(key='vsap')
+        test_coeff = test_dm0.mo_coeff
+
+        assert cp.max(cp.abs(test_dm0 - ref_dm0)) < 1e-10
+        assert cp.max(cp.abs(cp.abs(test_coeff.T @ S @ ref_coeff) - cp.eye(mol.nao))) < 1e-10
+
+    def test_vsap_guess_uks(self):
+        mol = pyscf.M(
+            atom = """
+                O  0.0000  0.7375 -0.0528
+                O  0.0000 -0.7375 -0.1528
+                H  0.8190  0.8170  0.4220
+                H -0.8190 -0.8170  1.4220
+                GHOST:He 1000 0 0
+            """,
+            basis = "def2-tzvp",
+            verbose = 0,
+        )
+
+        mf = mol.UKS(xc = "wB97M-d3bj").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99,590)
+
+        ref_dm0 = mf.get_init_guess(key='vsap')
+        ref_coeff = ref_dm0.mo_coeff
+        ref_dm0 = cp.asarray(ref_dm0)
+        ref_coeff = cp.asarray(ref_coeff)
+        S = cp.asarray(mf.get_ovlp())
+
+        mf = UKS(mol, xc = "wB97M-d3bj").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (99,590)
+
+        test_dm0 = mf.get_init_guess(key='vsap')
+        test_coeff = test_dm0.mo_coeff
+
+        assert cp.max(cp.abs(test_dm0 - ref_dm0)) < 1e-10
+        CtestT_S_Cref = cp.einsum("upi,pq,uqj->uij", test_coeff, S, ref_coeff)
+        assert cp.max(cp.abs(cp.abs(CtestT_S_Cref) - cp.eye(mol.nao)[None,:,:])) < 1e-10
+
 if __name__ == "__main__":
     print("Full Tests for initial guess")
     unittest.main()
