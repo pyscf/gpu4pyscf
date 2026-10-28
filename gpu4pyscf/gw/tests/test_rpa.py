@@ -13,8 +13,15 @@
 # limitations under the License.
 
 import unittest
+from packaging.version import Version
+import pyscf
 from pyscf import gto
 from gpu4pyscf import dft
+
+# gpu4pyscf.gw uses the pyscf.gw helpers of pyscf >= 2.14
+if Version(pyscf.__version__) < Version('2.14'):
+    raise unittest.SkipTest('gpu4pyscf.gw requires pyscf >= 2.14')
+
 from gpu4pyscf.gw import rpa
 
 
