@@ -263,6 +263,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
                     ctypes.cast(eri_tmp[ij0:ij1].data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nao_kl_pairs),
                     ctypes.c_double(0.),
+                    ctypes.c_double(1.), ctypes.c_double(0.),
                     ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(int4c2e.shm_size),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
