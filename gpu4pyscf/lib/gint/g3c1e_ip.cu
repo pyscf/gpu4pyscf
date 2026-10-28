@@ -97,8 +97,9 @@ static void GINTfill_int3c1e_ip_kernel_general(double* output, const BasisProdOf
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int task_ij = global_x;
+    const int task_grid = global_y;
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -203,7 +204,10 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_expanded(double* outpu
 
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int task_ij = global_x;
+    const int thread_y_id = global_y;
+    const int total_threads_y = gridDim_y * blockDim_y;
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -220,7 +224,7 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_expanded(double* outpu
     constexpr int n_density_elements_j = (LJ + 1) * (LJ + 2) / 2;
     double output_cache[n_density_elements_i * n_density_elements_j * 3] { 0.0 };
 
-    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+    for (int task_grid = thread_y_id; task_grid < ngrids; task_grid += total_threads_y) {
         const double* grid_point = grid_points + task_grid * 4;
         const double charge = grid_point[3];
         const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
@@ -313,7 +317,10 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_general(double* output
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int task_ij = global_x;
+    const int thread_y_id = global_y;
+    const int total_threads_y = gridDim_y * blockDim_y;
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -333,7 +340,7 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_general(double* output
                         * (l_j_max_density_elements + 1) * (l_j_max_density_elements + 2) / 2
                         * 3] { 0.0 };
 
-    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+    for (int task_grid = thread_y_id; task_grid < ngrids; task_grid += total_threads_y) {
         const double* grid_point = grid_points + task_grid * 4;
         const double charge = grid_point[3];
         const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
@@ -437,8 +444,9 @@ static void GINTfill_int3c1e_ip1_density_contracted_kernel_general(double* outpu
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int task_ij = global_x;
+    const int task_grid = global_y;
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;
@@ -474,7 +482,10 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel_general(double* outpu
 
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int task_grid = global_y;
+    const int thread_x_id = global_x;
+    const int total_threads_x = gridDim_x * blockDim_x;
     if (task_grid >= ngrids) {
         return;
     }
@@ -488,7 +499,7 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel_general(double* outpu
     double deri_dCx_pair_sum = 0.0;
     double deri_dCy_pair_sum = 0.0;
     double deri_dCz_pair_sum = 0.0;
-    for (int task_ij = blockIdx.x * blockDim.x + threadIdx.x; task_ij < ntasks_ij; task_ij += gridDim.x * blockDim.x) {
+    for (int task_ij = thread_x_id; task_ij < ntasks_ij; task_ij += total_threads_x) {
         const int bas_ij = offsets.bas_ij + task_ij;
         const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
         const int* bas_pair2bra = c_bpcache.bas_pair2bra;
@@ -639,8 +650,9 @@ static void GINTfill_int3c1e_ip2_charge_contracted_kernel_general(double* output
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int task_ij = global_x;
+    const int task_grid = global_y;
 
     if (task_ij >= ntasks_ij || task_grid >= ngrids) {
         return;

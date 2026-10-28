@@ -33,6 +33,12 @@ import unittest
 import numpy as np
 import cupy as cp
 
+# cuEST is a CUDA-only package; skip cleanly instead of erroring in
+# setUpClass on backends (SYCL, HIP) or environments where it is absent.
+pytestmark = pytest.mark.skipif(
+    apply_cuest_wrapper is None,
+    reason='cuest is not installed (CUDA-only package)')
+
 @pytest.mark.special
 class KnownValues(unittest.TestCase):
     @classmethod

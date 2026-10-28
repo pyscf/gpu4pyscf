@@ -279,6 +279,20 @@ class KnownValues(unittest.TestCase):
         vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-8
 
+    def test_range_separated_j_only_then_k(self):
+        cell = pgto.M(atom='He 0 0 0', basis='sto3g', a=np.eye(3)*4)
+        kpts = cell.make_kpts([2, 1, 1])
+        dm = np.ones((2, 1, 1))
+        omega = -0.3
+        mydf = GDF(cell, kpts)
+
+        # A J-only cache lacks the off-diagonal k-point pairs needed for K.
+        vj, _ = mydf.get_jk(dm, kpts=kpts, omega=omega, with_k=False)
+        _, vk = mydf.get_jk(dm, kpts=kpts, omega=omega, with_j=False)
+        jref, kref = mydf.reset(cell).get_jk(dm, kpts=kpts, omega=omega)
+        assert abs(vj-jref).max().get() < 1e-12
+        assert abs(vk-kref).max().get() < 1e-12
+
 if __name__ == '__main__':
     print("Full Tests for PBC DF")
     unittest.main()

@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #define INV_SQRT(x) (1.0 / sqrt(x))
 #define SQR(x) ((x) * (x))
@@ -775,8 +776,8 @@ __device__ double ccrep_pm6_device(
     enuclr += scale_vdw;
     
     // Short distance repulsion
-    double zi = pow(ele_i, 0.3333); //follow mopac the 1/3 is set to 0.3333
-    double zj = pow(ele_j, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    double zi = pow((double)ele_i, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    double zj = pow((double)ele_j, 0.3333); //follow mopac the 1/3 is set to 0.3333
     // double zi = cbrt((double)ele_i); 
     // double zj = cbrt((double)ele_j); 
     double ax = r_angstrom / (zi + zj);
@@ -804,7 +805,8 @@ __global__ void multipole_eval_kernel(
     const double* __restrict__ add_vec, // (n_pairs,)
     double* __restrict__ out_vec        // (n_pairs,)
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int idx = global_x;
     if (idx >= n_pairs) return;
 
     out_vec[idx] = charg_kernel_device(
@@ -826,7 +828,8 @@ __global__ void solve_poij_kernel(
     double* __restrict__ rho_vec,      // (N,) Output
     const double hartree2ev            // Constant passed from Python
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int idx = global_x;
     if (idx >= n_atoms) return;
 
     int l = l_vec[idx];
@@ -913,7 +916,8 @@ __global__ void test_rijkl_kernel(
     const double* __restrict__ ch,
     double* __restrict__ out_val
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int idx = global_x;
     if (idx >= n_tasks) return;
 
     out_val[idx] = rijkl_device(
@@ -965,7 +969,8 @@ __global__ void calc_local_rep_core_kernel(
     double* __restrict__ core_out,  // (n_pairs, 10, 2)
     double* __restrict__ gab_out    // (n_pairs)
 ) {
-    int p_idx = blockIdx.x;
+    setup_context();
+    int p_idx = blockIdx_x;
     if (p_idx >= n_pairs) return;
 
     int ni = pair_i_vec[p_idx]; // Atom index
@@ -975,15 +980,15 @@ __global__ void calc_local_rep_core_kernel(
     int e_i = ele_id[ni]; // Element index
     int e_j = ele_id[nj]; // Element index
 
-    __shared__ double s_ri[22];     // sp parts
-    __shared__ double s_rep[491];   // spd parts
-    __shared__ double s_core[20];   // 10 rows, 2 cols
-    __shared__ double s_gab;
+    SHARED_ARRAY(double, s_ri, [22]);
+    SHARED_ARRAY(double, s_rep, [491]);
+    SHARED_ARRAY(double, s_core, [20]);
+    SHARED_ARRAY(double, s_gab);
 
-    int tid = threadIdx.x;
+    int tid = threadIdx_x;
 
     if (tid < 20) s_core[tid] = 0.0;
-    for (int t = tid; t < 491; t += blockDim.x) s_rep[t] = 0.0;
+    for (int t = tid; t < 491; t += blockDim_x) s_rep[t] = 0.0;
     __syncthreads();
 
     // Thread 0 handles serial computation of prerequisite physical quantities
@@ -1012,7 +1017,7 @@ __global__ void calc_local_rep_core_kernel(
     __syncthreads();
 
     // parallel evaluation of 491 terms (Stage 1: Direct computation)
-    for (int t = tid; t < 491; t += blockDim.x) {
+    for (int t = tid; t < 491; t += blockDim_x) {
         int action = task_action[t];
         
         bool valid_i = dorbs[ni] ? true : (task_li[t] == 0 ? true : (task_li[t] <= 1 && e_i >= 3));
@@ -1032,7 +1037,7 @@ __global__ void calc_local_rep_core_kernel(
     __syncthreads();
 
     // parallel evaluation of 491 terms (Stage 2: Symmetry copying)
-    for (int t = tid; t < 491; t += blockDim.x) {
+    for (int t = tid; t < 491; t += blockDim_x) {
         int action = task_action[t];
         if (action == 2) {
             s_rep[t] = s_rep[task_target[t]];
@@ -1043,7 +1048,7 @@ __global__ void calc_local_rep_core_kernel(
     __syncthreads();
 
     // Flush the computed results into Global Memory at once
-    for (int t = tid; t < 491; t += blockDim.x) {
+    for (int t = tid; t < 491; t += blockDim_x) {
         rep_out[p_idx * 491 + t] = s_rep[t];
     }
     if (tid < 20) {
@@ -1056,7 +1061,9 @@ __global__ void calc_local_rep_core_kernel(
 
 // HARDCODED MAPPINGS
 // Dense 1D index (0..44) to 2D orbital index (i)
-__device__ const int DENSE_TO_I[45] = {
+// `static constexpr` serves both backends: same device-side constant data
+// in CUDA and SYCL, with no cross-TU linkage issues.
+static constexpr int DENSE_TO_I[45] = {
     0,
     1, 1,
     2, 2, 2,
@@ -1069,7 +1076,7 @@ __device__ const int DENSE_TO_I[45] = {
 };
 
 // Dense 1D index (0..44) to 2D orbital index (j)
-__device__ const int DENSE_TO_J[45] = {
+static constexpr int DENSE_TO_J[45] = {
     0,
     0, 1,
     0, 1, 2,
@@ -1082,7 +1089,7 @@ __device__ const int DENSE_TO_J[45] = {
 };
 
 // It is indexd in the mopac
-__device__ const int MOPAC_INDEXD[9][9] = {
+static constexpr int MOPAC_INDEXD[9][9] = {
     { 0,  1,  2,  3,  4,  5,  6,  7,  8},
     { 1,  9, 10, 11, 12, 13, 14, 15, 16},
     { 2, 10, 17, 18, 19, 20, 21, 22, 23},
@@ -1116,10 +1123,11 @@ __global__ void global_transform_kernel(
     double* __restrict__ e2a_out,      
     double* __restrict__ enuc_out
 ) {
-    int p_idx = blockIdx.x;
+    setup_context();
+    int p_idx = blockIdx_x;
+    int tid = threadIdx_x;
     if (p_idx >= n_pairs) return;
 
-    int tid = threadIdx.x;
     int ni = pair_i_vec[p_idx];
     int nj = pair_j_vec[p_idx];
     int ele_i = ele_id[ni];
@@ -1130,10 +1138,10 @@ __global__ void global_transform_kernel(
     int limij = ii * (ii + 1) / 2;
     int limkl = kk * (kk + 1) / 2;
 
-    __shared__ double s_R[45][45];
-    __shared__ double s_V[45][45];
-    __shared__ double s_L_A[45];
-    __shared__ double s_L_B[45];
+    SHARED_ARRAY(double, s_R, [45][45]);
+    SHARED_ARRAY(double, s_V, [45][45]);
+    SHARED_ARRAY(double, s_L_A, [45]);
+    SHARED_ARRAY(double, s_L_B, [45]);
 
     if (tid == 0) {
         double xi = coords[ni * 3 + 0], yi = coords[ni * 3 + 1], zi = coords[ni * 3 + 2];
@@ -1190,7 +1198,7 @@ __global__ void global_transform_kernel(
     // __syncthreads();
 
     // Tensor Contraction 1
-    for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
+    for (int idx = tid; idx < limij * limkl; idx += blockDim_x) {
         int ij = idx / limkl;
         int KL = idx % limkl;
         
@@ -1220,7 +1228,7 @@ __global__ void global_transform_kernel(
 
     // Tensor Contraction 2
     int kr = kr_offsets[p_idx];
-    for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
+    for (int idx = tid; idx < limij * limkl; idx += blockDim_x) {
         int IJ = idx / limkl;
         int KL = idx % limkl;
         double w_val = 0.0;
@@ -1232,13 +1240,13 @@ __global__ void global_transform_kernel(
     }
     
     // Transform Elenuc Integrals
-    for (int IJ = tid; IJ < limij; IJ += blockDim.x) {
+    for (int IJ = tid; IJ < limij; IJ += blockDim_x) {
         double h_val = 0.0;
         for (int ij = 0; ij < limij; ++ij) h_val += s_R[IJ][ij] * s_L_A[ij];
         e1b_out[p_idx * 45 + IJ] = h_val;
     }
     
-    for (int KL = tid; KL < limkl; KL += blockDim.x) {
+    for (int KL = tid; KL < limkl; KL += blockDim_x) {
         double h_val = 0.0;
         for (int kl = 0; kl < limkl; ++kl) h_val += s_R[KL][kl] * s_L_B[kl];
         e2a_out[p_idx * 45 + KL] = h_val;
@@ -1261,10 +1269,10 @@ int launch_multipole_eval_kernel_c(
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-    multipole_eval_kernel<<<blocks_per_grid, threads_per_block>>>(
-        n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec
-    );
-
+    auto block = make_block(threads_per_block);
+    auto grid = make_grid(blocks_per_grid);
+    LAUNCH_KERNEL( multipole_eval_kernel, grid, block, 0,
+        n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1283,10 +1291,10 @@ int launch_solve_poij_kernel_c(
     int threads_per_block = 128;
     int blocks_per_grid = (n_atoms + threads_per_block - 1) / threads_per_block;
 
-    solve_poij_kernel<<<blocks_per_grid, threads_per_block>>>(
-        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev
-    );
-
+    auto block = make_block(threads_per_block);
+    auto grid = make_grid(blocks_per_grid);
+    LAUNCH_KERNEL( solve_poij_kernel, grid, block, 0,
+        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1308,15 +1316,15 @@ int launch_test_rijkl_kernel_c(
     int threads = 128;
     int blocks = (n_tasks + threads - 1) / threads;
     
-    test_rijkl_kernel<<<blocks, threads>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL( test_rijkl_kernel, grid, block, 0,
         n_tasks, n_atom,
         ni_vec, nj_vec, ij_vec, kl_vec,
         li_vec, lj_vec, lk_vec, ll_vec,
         ic_vec, r_vec,
         po_tensor, ddp_tensor, core_rho, ch,
-        out_val
-    );
-    
+        out_val);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1342,7 +1350,9 @@ int launch_calc_local_rep_core_kernel_c(
     int threads = 128;
     int blocks = n_pairs; 
     
-    calc_local_rep_core_kernel<<<blocks, threads>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL( calc_local_rep_core_kernel, grid, block, 0,
         n_pairs, pair_i_vec, pair_j_vec, ele_id, r_vec, n_atom,
         am, ad, aq, dd, qq,
         po_tensor, ddp_tensor, core_rho, ch,
@@ -1350,9 +1360,7 @@ int launch_calc_local_rep_core_kernel_c(
         task_action, task_target, task_ij, task_kl,
         task_li, task_lj, task_lk, task_ll,
         HATREE2EV,
-        rep_out, core_out, gab_out
-    );
-    
+        rep_out, core_out, gab_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1373,13 +1381,13 @@ int launch_global_transform_kernel_c(
     int threads = 128;
     int blocks = n_pairs; 
     
-    global_transform_kernel<<<blocks, threads>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL( global_transform_kernel, grid, block, 0,
         n_pairs, pair_i_vec, pair_j_vec, ele_id, coords,
         rep_in, core_in, gab_in, ind2_arr, natorb, kr_offsets,
         tore, xfac, alpb, guess1, guess2, guess3, v_par6, BOHR,
-        w_out, e1b_out, e2a_out, enuc_out
-    );
-    
+        w_out, e1b_out, e2a_out, enuc_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

@@ -161,6 +161,7 @@ void fill_dm_xyz_ip1(double *dm_xyz, double *gx_dmyz, double *xs_exp,
         if (m < nf2*L2) {
             dm_xyz[m*WARP_SIZE] = r3[n];
         }
+        __syncthreads();
 //    } else if (L == 6) {
 //        double r2[62];
 //        double r1[L2];

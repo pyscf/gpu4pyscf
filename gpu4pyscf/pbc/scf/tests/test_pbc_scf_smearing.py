@@ -40,7 +40,7 @@ class KnownValues(unittest.TestCase):
         mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu()
         mf = mf.smearing(0.1, 'fermi')
         nkpts = len(mf.kpts)
-        mo_energy_kpts = cp.array([cp.arange(nao)*.2+cp.cos(i+.5)*.1 for i in range(nkpts)])
+        mo_energy_kpts = cp.array([cp.arange(nao)*.2+np.cos(i+.5)*.1 for i in range(nkpts)])
         mf.get_occ(mo_energy_kpts)
         self.assertAlmostEqual(mf.entropy, 6.1656394960533021/2, 9)
 
@@ -56,7 +56,7 @@ class KnownValues(unittest.TestCase):
         mf = cell.KUHF(kpts=cell.make_kpts([2,1,1])).to_gpu()
         mf = mf.smearing(0.1, 'fermi')
         nkpts = len(mf.kpts)
-        mo_energy_kpts = cp.array([cp.arange(nao)*.2+cp.cos(i+.5)*.1 for i in range(nkpts)])
+        mo_energy_kpts = cp.array([cp.arange(nao)*.2+np.cos(i+.5)*.1 for i in range(nkpts)])
         mo_energy_kpts = cp.array([mo_energy_kpts, mo_energy_kpts+cp.cos(mo_energy_kpts)*.02])
         mf.get_occ(mo_energy_kpts)
         self.assertAlmostEqual(mf.entropy, 6.1803390081500869/2, 9)

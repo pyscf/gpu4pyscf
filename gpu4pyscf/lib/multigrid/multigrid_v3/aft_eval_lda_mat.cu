@@ -17,9 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
 #include <cuda_runtime.h>
-#include <cuComplex.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "constant_objects.cuh"
@@ -36,31 +34,33 @@
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
 
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128) static
-#else
 __global__ static
-#endif
 void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
-                         PBCIntEnvVars envs, int64_t *bas_ij_idx,
+                         int64_t *bas_ij_idx,
                          double *G_bases, double *L_bases,
                          int *mesh_cum, int *nimgs_cum,
-                         int npair, int ntiles_x, int ntiles_y, int ntiles_z)
+                         int npair, int ntiles_x, int ntiles_y, int ntiles_z,
+                         PBCIntEnvVars envs)
 {
-    int thread_id = threadIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
+    int pair_id = blockIdx_x % npair;
     int x_id = thread_id / NGV_PER_BLOCK;
     int Gv_id = thread_id % NGV_PER_BLOCK;
-    __shared__ int tile_batch;
-    int pair_id = blockIdx.x % npair;
+    SHARED_ARRAY(int, tile_batch);
     if (thread_id == 0) {
-        tile_batch = blockIdx.x / npair;
+        tile_batch = blockIdx_x / npair;
     }
-    __shared__ double gx[NGV_PER_BLOCK*3*2*LMAX1*LMAX1];
-    __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)];
-    __shared__ int mesh_start[3];
-    __shared__ double vjR[NCART_MAX*NCART_MAX * WARPS];
-    __shared__ int ri, rj, li, lj;
-    __shared__ double ai, aj;
+    SHARED_ARRAY(double, gx, [NGV_PER_BLOCK*3*2*LMAX1*LMAX1]);
+    SHARED_ARRAY(double, swap, [NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)]);
+    SHARED_ARRAY(int, mesh_start, [3]);
+    SHARED_ARRAY(double, vjR, [NCART_MAX*NCART_MAX * WARPS]);
+    SHARED_ARRAY(int, ri);
+    SHARED_ARRAY(int, rj);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(double, ai);
+    SHARED_ARRAY(double, aj);
 
     int mesh_x = mesh_cum[1] - mesh_cum[0];
     int mesh_y = mesh_cum[2] - mesh_cum[1];
@@ -245,9 +245,10 @@ int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeh
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
-    orth_lda_mat_kernel<<<ntile_batch*npair, THREADS>>>(
-        out, vxcG, *envs, bas_ij_idx, G_bases, L_bases,
-        mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
+    auto threads = make_block(THREADS);
+    auto grids = make_grid(ntile_batch*npair);
+    auto dev_envs = *envs;
+        LAUNCH_KERNEL(orth_lda_mat_kernel, grids, threads, 0, out, vxcG, bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z, dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_lda_mat_kernel: %s\n", cudaGetErrorString(err));

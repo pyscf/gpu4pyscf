@@ -18,6 +18,10 @@
 
 template <int blockx, int blocky>
 __device__ static void block_reduce_x(double val, double *addr, int tx, int ty){
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    double (&sdata)[blockx*blocky] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[blockx*blocky]>(item.get_group());
+    #else
     __shared__ double sdata[blockx*blocky];
     sdata[tx*blocky+ty] = val; __syncthreads();
     if (blockx >= 32) if (tx < 16) sdata[tx*blocky+ty] += sdata[(tx+16)*blocky+ty]; __syncthreads();
@@ -26,6 +30,7 @@ __device__ static void block_reduce_x(double val, double *addr, int tx, int ty){
     if (blockx >= 4)  if (tx < 2)  sdata[tx*blocky+ty] += sdata[(tx+2)*blocky+ty];  __syncthreads();
     if (blockx >= 2)  if (tx < 1)  sdata[tx*blocky+ty] += sdata[(tx+1)*blocky+ty];  __syncthreads();
     if (tx == 0) atomicAdd(addr, sdata[ty]);
+    #endif
 }
 
 template <int blockx, int blocky>
@@ -38,7 +43,12 @@ __device__ static void block_reduce_y(double val, double *addr, int tx, int ty){
     if(blocky >= 2)  sdata[tx*blocky+ty] += sdata[tx*blocky+ty+1];
     */
     int stride = blocky + 1;
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    double (&sdata)[blockx*(blocky+1)] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[blockx*(blocky+1)]>(item.get_group());
+    #else
     __shared__ double sdata[blockx*(blocky+1)];
+    #endif
     sdata[tx*stride+ty] = val; __syncthreads();
     if (blocky >= 32) if (ty < 16) sdata[tx*stride+ty] += sdata[tx*stride+ty+16]; __syncthreads();
     if (blocky >= 16) if (ty < 8)  sdata[tx*stride+ty] += sdata[tx*stride+ty+8];  __syncthreads();
@@ -48,11 +58,18 @@ __device__ static void block_reduce_y(double val, double *addr, int tx, int ty){
     if (ty == 0) atomicAdd(addr, sdata[tx*stride]);
  }
 
-template <int BLKSIZE> 
+template <int BLKSIZE>
 __device__ void block_reduce(double *sum, double a){
-    const int tx = threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int tx = item.get_local_id(1);
     __syncthreads();
+    double (&as)[BLKSIZE] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[BLKSIZE]>(item.get_group());
+    #else
+    __syncthreads();
+    const int tx = threadIdx.x;
     __shared__ double as[BLKSIZE];
+    #endif
     as[tx] = a;
     __syncthreads();
 

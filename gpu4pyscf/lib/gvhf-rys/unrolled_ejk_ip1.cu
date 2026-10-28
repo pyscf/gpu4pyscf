@@ -42,7 +42,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -318,7 +318,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -683,7 +683,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -1301,7 +1301,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -2675,7 +2675,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -3301,7 +3301,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -4685,7 +4685,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -5056,9 +5056,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -6679,7 +6676,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -7170,7 +7167,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -8164,7 +8161,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -8481,9 +8478,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[64];
-                    double zlzk = rlrk[128];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -9583,7 +9577,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -11318,7 +11312,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -11666,9 +11660,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -13802,7 +13793,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -14804,7 +14795,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -15113,9 +15104,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[64];
-                    double zlzk = rlrk[128];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -16219,7 +16207,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -16636,9 +16624,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -19802,7 +19787,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -20147,9 +20132,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -22283,7 +22265,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -24044,7 +24026,7 @@ while (1) {
     if (pair_kl0 >= bounds.npairs_kl) {
         break;
     }
-    if (jk.omega >= 0) {
+    if (jk.lr_factor != 0) {
         _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                         q_cond_ij, q_cond_kl,
                         (int *)shared_memory, jk, envs, bounds);
@@ -24409,9 +24391,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];

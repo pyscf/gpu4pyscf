@@ -94,15 +94,22 @@ class QMMMSCF(QMMM):
         # interactions between QM nuclei and MM particles
         nuc = super().energy_nuc()
 
-        assert self.mm_mol.charge_model == 'point' # TODO: support Gaussian charge, same as the one in PCM
-        coords = self.mm_mol.atom_coords()
-        charges = self.mm_mol.atom_charges()
-        nuclear_charges = self.mol.atom_charges()
-        nuclear_coords = self.mol.atom_coords()
-        r_nuc_ext = np.linalg.norm(nuclear_coords[None, :, :] - coords[:, None, :], axis = 2)
-        e_nuc_ext = np.einsum("qA->", (nuclear_charges[None, :] * charges[:, None]) / r_nuc_ext)
+        e_nuc_ext = getattr(self, '_e_nuc_ext', None)
+        if e_nuc_ext is None:
+            assert self.mm_mol.charge_model == 'point' # TODO: support Gaussian charge, same as the one in PCM
+            coords = self.mm_mol.atom_coords()
+            charges = self.mm_mol.atom_charges()
+            nuclear_charges = self.mol.atom_charges()
+            nuclear_coords = self.mol.atom_coords()
+            r_nuc_ext = np.linalg.norm(nuclear_coords[None, :, :] - coords[:, None, :], axis = 2)
+            e_nuc_ext = np.einsum("qA->", (nuclear_charges[None, :] * charges[:, None]) / r_nuc_ext)
+            self._e_nuc_ext = e_nuc_ext
         nuc += e_nuc_ext
         return nuc
+
+    def reset(self, mol=None):
+        self._e_nuc_ext = None
+        return super().reset(mol)
 
     to_gpu = utils.to_gpu
     def to_cpu(self):

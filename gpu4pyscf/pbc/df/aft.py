@@ -225,6 +225,8 @@ class AFTDF(lib.StreamObject):
         The tensors returned by this function is different to the one in PySCF CPU version
         '''
         cell = self.cell
+        if isinstance(cell, SortedGTO):
+            cell = cell.cell
         if mesh is None:
             mesh = self.mesh
         if bvk_kmesh is None:
@@ -314,6 +316,8 @@ class AFTDF(lib.StreamObject):
     get_j_e1 = aft_jk.get_ej_ip1
     get_k_e1 = aft_jk.get_ek_ip1
     get_jk_e1 = NotImplemented
+    get_ej_derivatives = aft_jk.get_ej_derivatives
+    get_ek_derivatives = aft_jk.get_ek_derivatives
 
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented

@@ -36,8 +36,12 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         frequency mode: in cm^-1
         infrared spectra intensity: in km/mol
     '''
-    log = logger.new_logger(hessian_obj, mf.mol.verbose)
     assert isinstance(mf, RHF)
+    if getattr(mf, 'with_solvent', None) is not None:
+        raise NotImplementedError(
+            'PCM solvent response is not supported for IR intensity calculations')
+
+    log = logger.new_logger(hessian_obj, mf.mol.verbose)
     hessian = hessian_obj.kernel()
     hartree_kj = nist.HARTREE2J*1e3
     unit2cm = ((hartree_kj * nist.AVOGADRO)**.5 / (nist.BOHR*1e-10)
@@ -67,7 +71,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         TRspace.append(TR[3:])
 
     if TRspace:
-        TRspace = cupy.vstack(TRspace)
+        TRspace = cupy.asarray(np.vstack(TRspace))
         q, r = cupy.linalg.qr(TRspace.T)
         P = cupy.eye(natm * 3) - q.dot(q.T)
         w, v = cupy.linalg.eigh(P)

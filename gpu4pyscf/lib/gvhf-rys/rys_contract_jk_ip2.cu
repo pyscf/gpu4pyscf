@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
@@ -36,18 +37,25 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                                uint32_t *pool, double *dd_pool, int *head, int nf)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
-    extern __shared__ double shared_memory[];
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[4];
-    __shared__ int ri, expi, expj;
+    setup_context();
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [4]);
+    SHARED_ARRAY(int, ri);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
 
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -79,10 +87,10 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+6);
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
-    int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
+    const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -116,6 +124,7 @@ while (1) {
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -627,18 +636,25 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                               float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                               uint32_t *pool, double *dd_pool, int *head, int nf)
 {
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
-    extern __shared__ double shared_memory[];
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[4];
-    __shared__ int ri, expi, expj;
+    setup_context();
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [4]);
+    SHARED_ARRAY(int, ri);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
 
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -670,10 +686,10 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+6);
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
-    int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
+    const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -707,6 +723,7 @@ while (1) {
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1263,9 +1280,10 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block + ij_prims;
         buflen *= sizeof(double);
+        auto blocks = make_grid(workers, 1);
+        auto threads = make_block(quartets_per_block, gout_stride);
         if (buflen > 48000) {
             cudaFuncSetAttribute(rys_ejk_ip2_type12_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
             cudaError_t err = cudaGetLastError();
@@ -1276,9 +1294,9 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
             }
         }
 
-        rys_ejk_ip2_type12_kernel<<<workers, threads, buflen>>>(
-                envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
+        LAUNCH_KERNEL( rys_ejk_ip2_type12_kernel, blocks, threads, buflen,
+            envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1354,10 +1372,11 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block + ij_prims;
         buflen = max(buflen, 9*gout_stride*quartets_per_block);
         buflen *= sizeof(double);
+        auto blocks = make_grid(workers, 1);
+        auto threads = make_block(quartets_per_block, gout_stride);
         if (buflen > 48000) {
             cudaFuncSetAttribute(rys_ejk_ip2_type3_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
             cudaError_t err = cudaGetLastError();
@@ -1368,9 +1387,9 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
             }
         }
 
-        rys_ejk_ip2_type3_kernel<<<workers, threads, buflen>>>(
-                envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
+        LAUNCH_KERNEL( rys_ejk_ip2_type3_kernel, blocks, threads, buflen,
+            envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

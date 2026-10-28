@@ -15,6 +15,7 @@
  */
 
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #define THREADS     16
 #define BLOCK_DIM   16
@@ -22,17 +23,18 @@
 static __global__
 void _transpose_dsum(double *a, int n, int counts, int hermi)
 {
-    if(blockIdx.x > blockIdx.y){
+    setup_context();
+    SHARED_ARRAY(double, block, [THREADS][THREADS]);
+    if(blockIdx_x > blockIdx_y){
         return;
     }
-    __shared__ double block[THREADS][THREADS];
 
-    int blockx_off = blockIdx.x * BLOCK_DIM;
-    int blocky_off = blockIdx.y * BLOCK_DIM;
-    size_t x0 = blockx_off + threadIdx.x;
-    size_t y0 = blocky_off + threadIdx.y;
-    size_t x1 = blocky_off + threadIdx.x;
-    size_t y1 = blockx_off + threadIdx.y;
+    int blockx_off = blockIdx_x * BLOCK_DIM;
+    int blocky_off = blockIdx_y * BLOCK_DIM;
+    size_t x0 = blockx_off + threadIdx_x;
+    size_t y0 = blocky_off + threadIdx_y;
+    size_t x1 = blocky_off + threadIdx_x;
+    size_t y1 = blockx_off + threadIdx_y;
     size_t nn = n * n;
     size_t xy0 = y0 * n + x0;
     size_t xy1 = y1 * n + x1;
@@ -40,26 +42,26 @@ void _transpose_dsum(double *a, int n, int counts, int hermi)
     for (int k = 0; k < counts; ++k) {
         double *pa = a + nn * k;
         if (x0 < n && y0 < n){
-            block[threadIdx.y][threadIdx.x] = pa[xy0];
+            block[threadIdx_y][threadIdx_x] = pa[xy0];
         }
         __syncthreads();
         if (x1 < n && y1 < n){
             if (hermi == 1) {
-                block[threadIdx.x][threadIdx.y] += pa[xy1];
+                block[threadIdx_x][threadIdx_y] += pa[xy1];
             } else {
-                block[threadIdx.x][threadIdx.y] -= pa[xy1];
+                block[threadIdx_x][threadIdx_y] -= pa[xy1];
             }
         }
         __syncthreads();
 
         if(x0 < n && y0 < n){
-            pa[xy0] = block[threadIdx.y][threadIdx.x];
+            pa[xy0] = block[threadIdx_y][threadIdx_x];
         }
         if(x1 < n && y1 < n){
             if (hermi == 1) {
-                pa[xy1] = block[threadIdx.x][threadIdx.y];
+                pa[xy1] = block[threadIdx_x][threadIdx_y];
             } else {
-                pa[xy1] = -block[threadIdx.x][threadIdx.y];
+                pa[xy1] = -block[threadIdx_x][threadIdx_y];
             }
         }
         __syncthreads();
@@ -69,18 +71,19 @@ void _transpose_dsum(double *a, int n, int counts, int hermi)
 static __global__
 void _transpose_zsum(double *a, int n, int counts, int hermi)
 {
-    if(blockIdx.x > blockIdx.y){
+    setup_context();
+    SHARED_ARRAY(double, blockR, [THREADS][THREADS]);
+    SHARED_ARRAY(double, blockI, [THREADS][THREADS]);
+    if(blockIdx_x > blockIdx_y){
         return;
     }
-    __shared__ double blockR[THREADS][THREADS];
-    __shared__ double blockI[THREADS][THREADS];
 
-    int blockx_off = blockIdx.x * BLOCK_DIM;
-    int blocky_off = blockIdx.y * BLOCK_DIM;
-    size_t x0 = blockx_off + threadIdx.x;
-    size_t y0 = blocky_off + threadIdx.y;
-    size_t x1 = blocky_off + threadIdx.x;
-    size_t y1 = blockx_off + threadIdx.y;
+    int blockx_off = blockIdx_x * BLOCK_DIM;
+    int blocky_off = blockIdx_y * BLOCK_DIM;
+    size_t x0 = blockx_off + threadIdx_x;
+    size_t y0 = blocky_off + threadIdx_y;
+    size_t x1 = blocky_off + threadIdx_x;
+    size_t y1 = blockx_off + threadIdx_y;
     size_t nn = n * n * 2;
     size_t xy0 = (y0 * n + x0) * 2;
     size_t xy1 = (y1 * n + x1) * 2;
@@ -88,32 +91,32 @@ void _transpose_zsum(double *a, int n, int counts, int hermi)
     for (int k = 0; k < counts; ++k) {
         double *pa = a + nn * k;
         if (x0 < n && y0 < n){
-            blockR[threadIdx.y][threadIdx.x] = pa[xy0  ];
-            blockI[threadIdx.y][threadIdx.x] = pa[xy0+1];
+            blockR[threadIdx_y][threadIdx_x] = pa[xy0  ];
+            blockI[threadIdx_y][threadIdx_x] = pa[xy0+1];
         }
         __syncthreads();
         if (x1 < n && y1 < n){
             if (hermi == 1) {
-                blockR[threadIdx.x][threadIdx.y] += pa[xy1  ];
-                blockI[threadIdx.x][threadIdx.y] -= pa[xy1+1];
+                blockR[threadIdx_x][threadIdx_y] += pa[xy1  ];
+                blockI[threadIdx_x][threadIdx_y] -= pa[xy1+1];
             } else {
-                blockR[threadIdx.x][threadIdx.y] -= pa[xy1  ];
-                blockI[threadIdx.x][threadIdx.y] += pa[xy1+1];
+                blockR[threadIdx_x][threadIdx_y] -= pa[xy1  ];
+                blockI[threadIdx_x][threadIdx_y] += pa[xy1+1];
             }
         }
         __syncthreads();
 
         if(x0 < n && y0 < n){
-            pa[xy0  ] = blockR[threadIdx.y][threadIdx.x];
-            pa[xy0+1] = blockI[threadIdx.y][threadIdx.x];
+            pa[xy0  ] = blockR[threadIdx_y][threadIdx_x];
+            pa[xy0+1] = blockI[threadIdx_y][threadIdx_x];
         }
         if(x1 < n && y1 < n){
             if (hermi == 1) {
-                pa[xy1  ] =  blockR[threadIdx.x][threadIdx.y];
-                pa[xy1+1] = -blockI[threadIdx.x][threadIdx.y];
+                pa[xy1  ] =  blockR[threadIdx_x][threadIdx_y];
+                pa[xy1+1] = -blockI[threadIdx_x][threadIdx_y];
             } else {
-                pa[xy1  ] = -blockR[threadIdx.x][threadIdx.y];
-                pa[xy1+1] =  blockI[threadIdx.x][threadIdx.y];
+                pa[xy1  ] = -blockR[threadIdx_x][threadIdx_y];
+                pa[xy1+1] =  blockI[threadIdx_x][threadIdx_y];
             }
         }
         __syncthreads();
@@ -124,9 +127,10 @@ extern "C" {
 int transpose_dsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
 {
     int ntile = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntile, ntile);
-    _transpose_dsum<<<blocks, threads, 0, stream>>>(a, n, counts, hermi);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntile, ntile);
+    LAUNCH_KERNEL(_transpose_dsum, blocks, threads, 0, stream,
+                  a, n, counts, hermi);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -137,9 +141,10 @@ int transpose_dsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
 int transpose_zsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
 {
     int ntile = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntile, ntile);
-    _transpose_zsum<<<blocks, threads, 0, stream>>>(a, n, counts, hermi);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntile, ntile);
+    LAUNCH_KERNEL(_transpose_zsum, blocks, threads, 0, stream,
+                  a, n, counts, hermi);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

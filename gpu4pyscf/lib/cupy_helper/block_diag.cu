@@ -16,13 +16,15 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "gsycl/gpu_compat.h"
 #define THREADS        16
 
 __global__
 static void _block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
 {
-    int r = blockIdx.x;
-
+    setup_context();
+    int r = blockIdx_x;
+    
     if (r >= ndiags){
         return;
     }
@@ -32,8 +34,8 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
     int row_offset = rows[r];
     int col_offset = cols[r];
     
-    for (int i = threadIdx.y; i < m0; i += THREADS){
-        for (int j = threadIdx.x; j < n0; j += THREADS){
+    for (int i = threadIdx_y; i < m0; i += THREADS){
+        for (int j = threadIdx_x; j < n0; j += THREADS){
             out[(i+row_offset)*n + (j+col_offset)] = diags[diag_offset + i*n0 + j];
         }
     }
@@ -42,9 +44,10 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
 extern "C" {
 int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
 {
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ndiags);
-    _block_diag<<<blocks, threads, 0, stream>>>(out, m, n, diags, ndiags, offsets, rows, cols);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ndiags);
+    LAUNCH_KERNEL(_block_diag, blocks, threads, 0, stream,
+                  out, m, n, diags, ndiags, offsets, rows, cols);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in block_diag: %s\n", cudaGetErrorString(err));

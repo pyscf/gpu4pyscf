@@ -55,26 +55,26 @@ libgdft.GDFTdot_aow_ao_sparse.restype = ctypes.c_int
 
 def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=None,
             non0tab=None, out=None, verbose=None, ctr_offsets_slice=None, gdftopt=None,
-            transpose=True):
-    ''' Evaluate ao values with mol and given coords.
-        Calculate all AO values by default if shell indices is not given.
+            transpose=True, screening_info=None):
+    '''Evaluate AO values on the given coordinates.
+
+    Args:
+        mol: regular mol object or gdftopt._sorted_mol.
 
     Kwargs:
-        mol: can be regular mol object or sorted mol.
-            mol has to be consistent with gdftopt if given.
-
-        Note: The following arguments are for sorted mol only.
-        shls_slice :       shell indices to be evaluated.
-        ao_loc_slice:      offset address of AO corresponding to shells.
-                           controls the output of each shell.
-        ctr_offsets_slice: offsets of contraction patterns.
-                           Each contraction pattern is evaluated as a batch.
+        shls_slice: Not supported.
+        nao_slice, ao_loc_slice, ctr_offsets_slice:
+            Unused legacy arguments
+        screening_info: Internal grid-screening metadata.
 
     Returns:
         ao (out): comp x nao_slice x ngrids, ao is in C-contiguous.
             comp x ngrids x nao_slice if tranpose, be compatiable with PySCF.
             The order of AO values is the AO direction is consistent with mol.
     '''
+    if shls_slice is not None:
+        raise NotImplementedError('shls_slice is not supported by GPU eval_ao')
+
     if gdftopt is None:
         gdftopt = _GDFTOpt.from_mol(mol)
 
@@ -84,17 +84,15 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
 
     _sorted_mol = opt._sorted_mol
 
-    if shls_slice is None:
-        shls_slice = cupy.arange(_sorted_mol.nbas, dtype=np.int32)
+    if screening_info is None:
+        shls_idx = cupy.arange(_sorted_mol.nbas, dtype=np.int32)
         ctr_offsets = opt.l_ctr_offsets
         ctr_offsets_slice = opt.l_ctr_offsets
         ao_loc_slice = cupy.asarray(_sorted_mol.ao_loc_nr())
         nao_slice = _sorted_mol.nao
     else:
-        assert mol is gdftopt._sorted_mol, "slice evaluation of mol is not supported"
-        assert ao_loc_slice is not None
-        assert nao_slice is not None
-        assert ctr_offsets_slice is not None
+        assert mol is gdftopt._sorted_mol
+        nao_slice, shls_idx, ao_loc_slice, ctr_offsets_slice = screening_info
         ctr_offsets = opt.l_ctr_offsets
 
     nctr = ctr_offsets.size - 1
@@ -110,7 +108,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.c_int(deriv), ctypes.c_int(_sorted_mol.cart),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
-        ctypes.cast(shls_slice.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shls_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(ao_loc_slice.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao_slice),
         ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
@@ -1073,7 +1071,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
 
     ao_deriv = 0
     ngrids = grids.weights.size
-    rho = cupy.empty(ngrids)
+    rho = cupy.zeros(ngrids)
 
     t1 = t0 = log.init_timer()
     p0 = p1 = 0
@@ -1086,6 +1084,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
             mo_coeff_mask = mo_coeff[idx,:]
             rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'LDA')
         t1 = log.timer_debug2('eval rho slice', *t1)
+    assert p1 == ngrids
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
@@ -1121,6 +1120,7 @@ def get_rho_naive(mol, dm, grids):
         ao = ni.eval_ao(mol, grids_coords[g0:g1, :], deriv = 0)
         for i_dm in range(nset):
             rho_tot[i_dm, g0:g1] = np.einsum("gi,gj,ij->g", ao, ao, dm[i_dm])
+    assert g1 == ngrids
 
     rho_tot = np.sum(rho_tot, axis = 0)
     return rho_tot
@@ -1168,7 +1168,7 @@ def get_rho_with_derivatives(ni, mol, dm, grids, xc = "r2scan", max_memory=2000,
         rho_dim = 5
 
     ngrids = grids.coords.shape[0]
-    rho_tot = cupy.empty([nset, rho_dim, ngrids])
+    rho_tot = cupy.zeros([nset, rho_dim, ngrids])
 
     t1 = t0 = log.init_timer()
     p0 = p1 = 0
@@ -1183,6 +1183,7 @@ def get_rho_with_derivatives(ni, mol, dm, grids, xc = "r2scan", max_memory=2000,
                 rho_tot[i_dm, :, p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ[i_dm], None, xctype)
 
         t1 = log.timer_debug2('eval rho slice', *t1)
+    assert p1 == ngrids
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
@@ -1222,7 +1223,7 @@ def get_rho_with_derivatives_naive(mol, dm, grids, xc = "r2scan"):
         rho_dim = 4
     else:
         rho_dim = 5
-    rho_tot = np.empty([nset, rho_dim, ngrids])
+    rho_tot = np.zeros([nset, rho_dim, ngrids])
 
     ngrids_per_batch = 4096
     for g0 in range(0, ngrids, ngrids_per_batch):
@@ -1231,6 +1232,7 @@ def get_rho_with_derivatives_naive(mol, dm, grids, xc = "r2scan"):
         for i_dm in range(nset):
             rho = ni.eval_rho(mol, ao, dm[i_dm], xctype = xctype, hermi = 1, with_lapl = False)
             rho_tot[i_dm, :, g0:g1] = rho
+    assert g1 == ngrids
 
     return rho_tot
 
@@ -1795,7 +1797,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
             spin = 1
         else:
             spin = 0
-    xcfuns = ni._init_xcfuns(xc_code, spin)
+    xcfuns = ni._init_xcfuns(xc_code, spin, omega)
 
     if len(xcfuns) == 0: # HF
         ngrids = rho.shape[-1]
@@ -1807,10 +1809,15 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
                 out[m] = cupy.zeros([2,1]*m + [ngrids])
         return out
 
-    # Fall back to the libxc library provided by PySCF, evaluate xc on CPUs
-    if not all(x.on_gpu for x, w in xcfuns):
+    # Fall back to the libxc library provided by PySCF, evaluate xc on CPUs.
+    # Either the functional has no device implementation, or the requested
+    # derivative order is beyond what the device library supports (the SYCL
+    # ExchCXX shim stops at fxc; CUDA libxc reports no limit).
+    max_deriv = libxc.MAX_DERIV_ORDER
+    if (not all(x.on_gpu for x, w in xcfuns)
+            or (max_deriv is not None and deriv > max_deriv)):
         ni_cpu = ni.to_cpu()
-        ret = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)
+        ret = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, omega=omega, xctype=xctype)
         for i in range(deriv+1):
             ret[i] = cupy.asarray(ret[i])
         return ret
@@ -1900,17 +1907,21 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     return exc, vxc, fxc, kxc
 
 @lru_cache(10)
-def _init_xcfuns(xc_code, spin):
+def _init_xcfuns(xc_code, spin, omega=None):
     xc_upper = xc_code.upper()
     # Note: libxc_cpu.parse_xc relies on pyscf.scf.dispersion.parse_dft. It does NOT use gpu4pyscf.scf.dispersion.parse_dft.
-    xc_ids = libxc_cpu.parse_xc(xc_upper)[1]
+    hyb, xc_ids = libxc_cpu.parse_xc(xc_upper)
+    # As in pyscf.dft.libxc.XCFunctionalCache: an explicit omega overrides the
+    # one declared in xc_code, and zero leaves libxc's default in place.
+    if omega is None:
+        omega = hyb[2]
     if spin:
         spin_polarized = 'polarized'
     else:
         spin_polarized = 'unpolarized'
     xcfuns = []
     for xc, w in xc_ids:
-        xcfun = libxc.XCfun(xc, spin_polarized)
+        xcfun = libxc.XCfun(xc, spin_polarized, omega)
         xcfuns.append((xcfun,w))
         if libxc_cpu.needs_laplacian(xcfun.func_id):
             raise NotImplementedError()
@@ -1988,7 +1999,7 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
     return pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
-                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None, strict_grid_order=False):
+                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None):
     '''
     Generator loops over grids block-by-block.
     Kwargs:
@@ -1998,7 +2009,6 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         blksize: if not given, it will be estimated with avail GPU memory.
         buf: dummy argument for compatibility with PySCF
         grid_range: loop [grid_start, grid_end] in grids only. Both values has to be multiple of MIN_BLK_SIZE.
-        strict_grid_order: if True, no grids will be skipped, even if ao dimension is zero.
     '''
     log = logger.new_logger(mol)
     if grids.coords is None:
@@ -2051,18 +2061,11 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         coords = cupy.asarray(grids.coords[ip0:ip1])
         weight = cupy.asarray(grids.weights[ip0:ip1])
 
-        if nao_sub == 0:
-            if strict_grid_order:
-                zero_sized_ao = cupy.ndarray((comp,nao_sub,ip1-ip0), memptr=buf.data)
-                yield zero_sized_ao, idx, weight, coords
-            continue
+        # Note: do NOT skip when nao_sub == 0, it'll mess up the grid order!
 
         ao_mask = eval_ao(
             _sorted_mol, coords, deriv,
-            nao_slice=len(idx),
-            shls_slice=non0shl_idx,
-            ao_loc_slice=ao_loc_slice,
-            ctr_offsets_slice=ctr_offsets_slice,
+            screening_info=(nao_sub, non0shl_idx, ao_loc_slice, ctr_offsets_slice),
             gdftopt=opt,
             transpose=False,
             out=cupy.ndarray((comp,nao_sub,ip1-ip0), memptr=buf.data))
@@ -2115,10 +2118,7 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
 
         ao_mask = eval_ao(
             _sorted_mol, coords, deriv,
-            nao_slice=len(idx),
-            shls_slice=non0shl_idx,
-            ao_loc_slice=ao_loc_slice,
-            ctr_offsets_slice=ctr_offsets_slice,
+            screening_info=(len(idx), non0shl_idx, ao_loc_slice, ctr_offsets_slice),
             gdftopt=opt,
             transpose=False
         )
@@ -2216,10 +2216,13 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
     def to_cpu(self):
         ni = numint.NumInt()
+        ni.omega = self.omega
         return ni
 
-    def _init_xcfuns(self, xc_code, spin=0):
-        return _init_xcfuns(xc_code, spin)
+    def _init_xcfuns(self, xc_code, spin=0, omega=None):
+        if omega is None:
+            omega = self.omega
+        return _init_xcfuns(xc_code, spin, omega)
 
     def reset(self):
         self.gdftopt      = None
@@ -2261,7 +2264,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
         ngrids = rho.shape[-1]
         if work is None:
-            blksize = int(MEMPOOL_THRESHOLD / 8 / nvar)
+            blksize = int(MEMPOOL_THRESHOLD // 8 // nvar)
             blksize = min(ngrids, blksize // 64 * 64)
             work = cupy.empty((nvar, blksize))
         else:
@@ -2288,7 +2291,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
             rho_sub = cupy.asarray(rho[...,p0:p1], order='C')
-            res = eval_xc_eff(self, xc_code, rho_sub, deriv=deriv,
+            res = eval_xc_eff(self, xc_code, rho_sub, deriv=deriv, omega=omega,
                               xctype=xctype, spin=spin, work=work)
             for i in range(deriv+1):
                 out[i][...,p0:p1] = res[i]
@@ -2319,6 +2322,9 @@ def _contract_rho1(bra, ket, rho=None):
         bra = cupy.expand_dims(bra, axis=0)
     nvar, nao, ngrids = bra.shape
     rho = ndarray([nvar, ngrids], buffer=rho)
+
+    if not (bra.flags.c_contiguous and ket.flags.c_contiguous):
+        return contract('xig,ig->xg', bra, ket, out=rho)
 
     for i in range(nvar):
         stream = cupy.cuda.get_current_stream()
@@ -2454,6 +2460,8 @@ def _scale_ao(ao, wv, out=None):
     nvar, nao, ngrids = ao.shape
     assert wv.shape == (nvar, ngrids)
     out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
+    if ao.size == 0:
+        return out
     if not ao.flags.c_contiguous:
         return contract('nip,np->ip', ao, wv, out=out)
 

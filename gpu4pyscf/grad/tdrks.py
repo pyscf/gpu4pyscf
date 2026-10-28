@@ -16,7 +16,7 @@
 from functools import reduce
 import cupy as cp
 import numpy as np
-from pyscf import lib
+from pyscf import lib, gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, add_sparse, tag_array
 from gpu4pyscf.df import int3c2e
@@ -245,7 +245,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
 
     dh1e_ground_and_td = int3c2e.get_dh1e(mol, dm_correlated)  # 1/r like terms
     if len(mol._ecpbas) > 0:
-        dh1e_ground_and_td += rhf_grad.get_dh1e_ecp(mol, dm_correlated)  # 1/r like terms
+        ecp_atoms = np.unique(mol._ecpbas[:, gto.ATOM_OF])
+        dh1e_ground_and_td[ecp_atoms] += rhf_grad.get_dh1e_ecp(mol, dm_correlated)  # 1/r like terms
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")

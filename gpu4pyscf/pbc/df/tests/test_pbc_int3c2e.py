@@ -19,6 +19,7 @@ import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.df import int3c2e
+from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, fill_triu_bvk
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 from gpu4pyscf.lib.cupy_helper import contract
@@ -324,11 +325,10 @@ C    D
     np.random.seed(9)
     auxvec = np.random.rand(auxcell.nao)
     vj = opt.contract_auxvec(opt.auxcell.apply_C_dot(auxvec), kpts=kpts)
-    ref = cp.einsum('kpqr,r->kpq', j3c, auxvec)
+    ref = cp.einsum('kpqr,r->kpq', j3c, cp.asarray(auxvec))  # auxvec is host data
     assert abs(vj - ref).max() < 1e-10
 
 def test_int3c2e_batch_evaluation():
-    from gpu4pyscf.df.int3c2e_bdiv import argsort_aux
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
@@ -364,16 +364,19 @@ C    D
     auxcell.build()
     omega = -0.2
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
-    eval_j3c = opt.int3c2e_evaluator()[0]
+    eval_j3c, batches = opt.int3c2e_evaluator()[:2]
     dat = eval_j3c()
 
     nao = cell.nao
     naux = auxcell.nao
-    pair_address = opt.pair_and_diag_indices()[0]
+    recontract, pair_address = int3c2e._create_pair_recontractor(
+        opt.cell, batches, cell.cart)
+    cderi = np.zeros((naux, len(pair_address)))
+    recontract(0, cderi, dat[:,0].dot(opt.auxcell.ctr_coeff).get())
     i, j = divmod(pair_address, nao)
     j3c = cp.zeros((nao, nao, naux))
-    j3c[j, i] = j3c[i, j] = dat[:,0].dot(opt.auxcell.ctr_coeff)
-    cp.cuda.get_current_stream().synchronize()
+    j3c[i, j] = cp.asarray(cderi.T)
+    j3c[j, i] += cp.asarray(cderi.T)
 
     cell.precision=1e-10
     cell.build()
@@ -384,39 +387,74 @@ C    D
 
     ref = dat
     batch_size = int(ref.shape[0] *.23)
-    eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
-        ao_pair_batch_size=batch_size)[:3]
+    eval_j3c, batches = opt.int3c2e_evaluator(ao_pair_batch_size=batch_size)[:2]
+    counts = int3c2e._count_ao_pairs(
+        opt.cell, batches, cell.cart, np.prod(opt.bvk_kmesh))
+    ao_pair_offsets = np.append(0, np.cumsum(counts))
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
                                      ao_pair_offsets[1:])):
         dat[p0:p1] = eval_j3c(i)
     assert abs(dat - ref).max() < 1e-12
 
-    batch_size = int(ref.shape[1] * 0.22)
-    eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
-        aux_batch_size=batch_size)[:4]
+    batch_size = max(1, int(ref.shape[2] * 0.22))
+    eval_j3c, _, aux_offsets = opt.int3c2e_evaluator(
+        aux_batch_size=batch_size)
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         dat[:,:,p0:p1] = eval_j3c(aux_batch_id=i)
     assert abs(dat - ref).max() < 2e-10
 
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh=[3,1,2]).build()
-    eval_j3c, aux_sorting = opt.int3c2e_evaluator()[:2]
+    eval_j3c = opt.int3c2e_evaluator()[0]
     ref = eval_j3c()
     batch_size = int(ref.shape[0] *.23)
 
-    eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
-        ao_pair_batch_size=batch_size)[:3]
+    eval_j3c, batches = opt.int3c2e_evaluator(ao_pair_batch_size=batch_size)[:2]
+    counts = int3c2e._count_ao_pairs(
+        opt.cell, batches, cell.cart, np.prod(opt.bvk_kmesh))
+    ao_pair_offsets = np.append(0, np.cumsum(counts))
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
                                      ao_pair_offsets[1:])):
         dat[p0:p1] = eval_j3c(i)
     assert abs(dat - ref).max() < 1e-12
 
-    batch_size = int(ref.shape[1] * 0.22)
-    eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
-        aux_batch_size=batch_size)[:4]
+    batch_size = max(1, int(ref.shape[2] * 0.22))
+    eval_j3c, _, aux_offsets = opt.int3c2e_evaluator(
+        aux_batch_size=batch_size)
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         dat[:,:,p0:p1] = eval_j3c(aux_batch_id=i)
     assert abs(dat - ref).max() < 1e-10
+
+def test_int2c2e_strain_deriv_vs_finite_difference():
+    from gpu4pyscf.pbc.df import int2c2e
+    from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    omega = -0.2
+    nao = cell.nao
+    dm = cp.random.seed(9)
+    dm = cp.random.rand(nao, nao)
+    dm = dm + dm.T
+    sorted_cell = SortedCell.from_cell(cell)
+    dat = int2c2e.int2c2e_energy_derivatives(
+        cell, sorted_cell.apply_C_mat_CT(dm), omega=omega)
+    dat = cp.asnumpy(dat[-3:])
+
+    disp = 1e-4
+    for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+        cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
+        e1 = .5 * cp.einsum('ij,ji->', dm, int2c2e.sr_int2c2e(cell1, omega))
+        e2 = .5 * cp.einsum('ij,ji->', dm, int2c2e.sr_int2c2e(cell2, omega))
+        assert abs(dat[i,j] - (e1-e2)/disp/2) < 1e-6

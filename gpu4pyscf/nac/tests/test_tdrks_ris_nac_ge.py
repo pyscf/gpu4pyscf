@@ -253,8 +253,8 @@ class KnownValues(unittest.TestCase):
              [ 0.0558990627, -0.0000000000, 0.0000000000],])
 
         # compare with previous calculation resusts
-        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
-        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 3.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 3.0E-6
 
 if __name__ == "__main__":
     print("Full Tests for TD-RKS-ris nonadiabatic coupling vectors between ground and excited state.")

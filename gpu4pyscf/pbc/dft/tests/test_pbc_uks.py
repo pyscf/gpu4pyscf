@@ -25,11 +25,10 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 def setUpModule():
     global cell
     L = 4
-    n = 21
     cell = pbcgto.Cell()
     cell.build(unit = 'B',
                a = ((L,0,0),(0,L,0),(0,0,L)),
-               mesh = [n,n,n],
+               precision = 1e-9,
                atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
                        ['He', (L/2.   ,L/2.,L/2.+.5)]],
                basis = { 'He': [[0, (0.8, 1.0)],
@@ -100,6 +99,7 @@ class KnownValues(unittest.TestCase):
         mf_ref = mf.to_cpu().run()
         assert abs(mf.e_tot - mf_ref.e_tot) < 1e-6
 
+    @unittest.skip('GPU PBC SCF requires k-point sampling to include the Gamma point')
     def test_lda_fft_with_kpt(self):
         np.random.seed(1)
         k = np.random.random((1, 3))
@@ -117,6 +117,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
+    @unittest.skip('GPU PBC SCF requires k-point sampling to include the Gamma point')
     def test_gga_fft_with_kpt(self):
         np.random.seed(1)
         k = np.random.random((1, 3))
@@ -134,6 +135,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, delta=1e-5)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, delta=1e-5)
 
+    @unittest.skip('GPU PBC SCF requires k-point sampling to include the Gamma point')
     def test_rsh_fft_with_kpt(self):
         np.random.seed(1)
         k = np.random.random((1, 3))

@@ -17,14 +17,14 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import gen_grid as gen_grid_cpu
-from pyscf.pbc.gto.cell import get_uniform_grids
 from pyscf.pbc.gto import eval_gto as pbc_eval_gto
 from pyscf.dft.gen_grid import gen_atomic_grids
 import gpu4pyscf
-from gpu4pyscf.dft import Grids
 from gpu4pyscf.lib import utils, logger
-from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
+from gpu4pyscf.dft import Grids
+from gpu4pyscf.dft import radi
+from gpu4pyscf.pbc.gto.cell import get_uniform_grids
 
 libgdft = load_library('libgdft')
 
@@ -53,7 +53,9 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     Ls = pbc_eval_gto.get_lattice_Ls(cell, rcut=rcut)
     logger.debug(cell, f'Becke grid rcut = {rcut}')
 
-    supatm_coords = Ls.reshape(-1,1,3) + cell.atom_coords()
+    from gpu4pyscf.pbc.dft.numint import MIN_BLK_SIZE
+
+    supatm_coords = cell.atom_coords()[:,None,:] + Ls[None,:,:]
     atom_grids_tab = gen_atomic_grids(cell, atom_grid, radi_method, level, prune)
     coords_all = []
     weights_all = []
@@ -62,10 +64,12 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     atm_idx = []
     k = 0
     tol = 1e-15
-    for iL, L in enumerate(Ls):
-        for ia in range(cell.natm):
+    for ia in range(cell.natm):
+        coords_of_atom = []
+        weights_of_atom = []
+        for iL, L in enumerate(Ls):
             coords, vol = atom_grids_tab[cell.atom_symbol(ia)]
-            coords = coords + supatm_coords[iL,ia]
+            coords = coords + supatm_coords[ia, iL]
             # search for grids in unit cell
             c = b.dot(coords.T)
 
@@ -90,11 +94,21 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
                     vol[abs(c[2]+.5) < tol] *= .5
                     vol[abs(c[2]-.5) < tol] *= .5
                 coords = coords[mask]
-                coords_all.append(coords)
-                weights_all.append(vol)
+                coords_of_atom.append(coords)
+                weights_of_atom.append(vol)
                 supatm_idx.append(k)
                 atm_idx.append(ia)
             k += 1
+        if len(weights_of_atom) > 0:
+            n_grids_of_atom = sum([w.size for w in weights_of_atom])
+            n_pad = ((n_grids_of_atom + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE) * MIN_BLK_SIZE - n_grids_of_atom
+            weights_of_atom[-1] = np.hstack([weights_of_atom[-1], np.zeros(n_pad)])
+
+            last_coords_of_atom = coords_of_atom[-1][-1]
+            coords_of_atom[-1] = np.vstack([coords_of_atom[-1], np.tile(last_coords_of_atom, (n_pad, 1))])
+
+            coords_all.extend(coords_of_atom)
+            weights_all.extend(weights_of_atom)
 
     supatm_coords = np.asarray(supatm_coords.reshape(-1,3)[supatm_idx], order='C')
     sup_natm = len(supatm_coords)
@@ -107,6 +121,7 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     ngrids = weights_all.size
     assert coords_all.shape == (ngrids, 3)
     assert supatm_idx.shape == (ngrids,)
+    assert ngrids % MIN_BLK_SIZE == 0
 
     weights_all = cp.asarray(weights_all, dtype = cp.float64)
     coords_all = cp.asarray(coords_all, dtype = cp.float64, order = "F")
@@ -148,7 +163,7 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
 
     return coords_all, weights_all, quadrature_weights_all, supatm_idx, supatm_coords, supatm_to_atm_idx
 
-def get_becke_weight_derivative(grids, natm):
+def get_becke_weight_derivative(grids, natm, grid_range = None):
     assert type(grids) is BeckeGrids
     ngrids = grids.coords.shape[0]
     assert grids.supatm_idx.shape[0] == ngrids
@@ -162,14 +177,28 @@ def get_becke_weight_derivative(grids, natm):
     from gpu4pyscf.dft.gen_grid import get_C_interface_scheme_id, original_becke
     scheme_id = get_C_interface_scheme_id(original_becke) # TODO: Support other partition scheme
 
-    grids_coords = cp.asarray(grids.coords, order = "F")
-    grids_quadrature_weights = cp.asarray(grids.quadrature_weights)
-    grids_supatm_idx = cp.asarray(grids.supatm_idx)
     grids_supatm_coords = cp.asarray(grids.supatm_coords, order = "F")
     grids_supatm_to_atm_idx = cp.asarray(grids.supatm_to_atm_idx)
 
     inv_atom_distance = 1 / cp.linalg.norm(grids_supatm_coords[:, None, :] - grids_supatm_coords[None, :, :], axis = 2)
     cp.fill_diagonal(inv_atom_distance, 0)
+
+    grids_coords = cp.asarray(grids.coords, order = "F")
+    grids_quadrature_weights = cp.asarray(grids.quadrature_weights)
+    grids_supatm_idx = cp.asarray(grids.supatm_idx)
+
+    if grid_range is not None:
+        assert np.asarray(grid_range).shape == (2,)
+        assert grid_range[1] > grid_range[0]
+        ngrids = grid_range[1] - grid_range[0]
+
+        grids_coords = cp.asfortranarray(grids_coords[grid_range[0] : grid_range[1]])
+        # The next two arrays are 1D, so slicing without copy is fine.
+        grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
+        grids_supatm_idx = grids_supatm_idx[grid_range[0] : grid_range[1]]
+        assert grids_coords.shape == (ngrids, 3)
+        assert grids_quadrature_weights.shape == (ngrids,)
+        assert grids_supatm_idx.shape == (ngrids,)
 
     Ar_distance = cp.linalg.norm(grids_supatm_coords[:, None, :] - grids_coords[None, :, :], axis = 2)
     assert Ar_distance.shape == (sup_natm, ngrids)
@@ -217,7 +246,10 @@ def get_becke_weight_derivative(grids, natm):
     dweight_dA_unitcell = cp.zeros([natm, 3, ngrids])
     cp.add.at(dweight_dA_unitcell, grids_supatm_to_atm_idx, dweight_dA_supercell)
 
-    return dweight_dA_unitcell
+    weight_stress = cp.einsum("Axg,Ay->xyg", dweight_dA_supercell, grids_supatm_coords)
+
+    dweight_gradient_stress = cp.vstack((dweight_dA_unitcell, weight_stress))
+    return dweight_gradient_stress
 
 class UniformGrids(lib.StreamObject):
     '''Uniform Grid class.'''
@@ -228,13 +260,26 @@ class UniformGrids(lib.StreamObject):
         self.cell = cell
         self.stdout = cell.stdout
         self.verbose = cell.verbose
-        self.mesh = cell.mesh
+        self._mesh = None
         self.non0tab = None
         self._coords = None
         self._weights = None
 
         # Storing the coords[0:3], weight, rho[0:5], exc, vxc[0:5], will take 128^3 * 15 * 8 bytes = 0.25 GB
         self.max_grid_mesh_block = [128] * 3
+
+    @property
+    def mesh(self):
+        # Follow the current cell unless a grid mesh was explicitly assigned.
+        if self._mesh is None:
+            return self.cell.mesh
+        return self._mesh
+    @mesh.setter
+    def mesh(self, value):
+        self._mesh = value
+        self.non0tab = None
+        self._coords = None
+        self._weights = None
 
     def reset(self, cell=None):
         if cell is not None:
@@ -247,11 +292,8 @@ class UniformGrids(lib.StreamObject):
     @property
     def coords(self):
         if self._coords is None:
-            coords = cp.asarray(get_uniform_grids(self.cell, self.mesh))
-            self._coords = coords
-        if isinstance(self._coords, np.ndarray):
-            self._coords = cp.asarray(self._coords)
-        return self._coords
+            return get_uniform_grids(self.cell, self.mesh)
+        return cp.asarray(self._coords)
     @coords.setter
     def coords(self, x):
         self._coords = x
@@ -260,12 +302,8 @@ class UniformGrids(lib.StreamObject):
     def weights(self):
         if self._weights is None:
             ngrids = np.prod(self.mesh)
-            weights = cp.empty(ngrids)
-            weights[:] = self.cell.vol / ngrids
-            self._weights = weights
-        if isinstance(self._weights, np.ndarray):
-            self._weights = cp.asarray(self._weights)
-        return self._weights
+            return cp.full(ngrids, self.cell.vol / ngrids)
+        return cp.asarray(self._weights)
     @weights.setter
     def weights(self, x):
         self._weights = x
@@ -371,14 +409,14 @@ class UniformGrids(lib.StreamObject):
     to_gpu = utils.to_gpu
 
     def to_cpu(self):
-        # Although appears in _keys, we have to manually set them to be compatible with pyscf==2.8.0
-        # Because they're not in _keys of the CPU version.
-        if self._coords is not None and isinstance(self._coords, cp.ndarray):
-            self._coords = self._coords.get()
-        if self._weights is not None and isinstance(self._weights, cp.ndarray):
-            self._weights = self._weights.get()
-
-        return utils.to_cpu(self)
+        grids = gen_grid_cpu.UniformGrids(self.cell)
+        if self._mesh is not None:
+            grids.mesh = self._mesh
+        if self._coords is not None:
+            grids._coords = cp.asnumpy(self._coords)
+        if self._weights is not None:
+            grids._weights = cp.asnumpy(self._weights)
+        return grids
 
 
 class BeckeGrids(Grids):
@@ -427,7 +465,11 @@ class BeckeGrids(Grids):
         self.non0tab = None
         return self
 
+    def to_cpu(self):
+        grids = gen_grid_cpu.BeckeGrids(self.cell)
+        grids_gpu = self.copy().reset()
+        return utils.to_cpu(grids_gpu, out=grids)
+
     to_gpu = utils.to_gpu
-    to_cpu = utils.to_cpu
 
 AtomicGrids = BeckeGrids

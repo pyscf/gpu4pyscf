@@ -25,12 +25,16 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import hf as hf_cpu
 from gpu4pyscf.lib import logger, utils
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
+from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract, get_avail_mem
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.smearing import smearing
 from gpu4pyscf.pbc import tools
+from gpu4pyscf.__config__ import props as gpu_specs
+
+# 8 for 8 bytes per fp64, 10 is arbitrary (A 80 GB gpu will allow 1000^3 mesh)
+ALLOWED_FFT_MESH_SIZE = gpu_specs['totalGlobalMem'] // 8 // 10
 
 def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     '''Get energy bands at the given (arbitrary) 'band' k-points.
@@ -237,9 +241,10 @@ class SCF(mol_hf.SCF):
         from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
         if cell is None: cell = self.cell
         if kpt is None: kpt = self.kpt
+
         if isinstance(self._numint, multigrid.MultiGridNumIntBase):
             ni = self._numint
-        elif np.prod(cell.mesh) < 1000**3:
+        elif np.prod(cell.mesh) < ALLOWED_FFT_MESH_SIZE:
             # In the pseudo and all-electron mixed case, MultiGridNumInt is
             # still more efficient if Ecut is not too high.
             ni = multigrid_v3.MultiGridNumInt(cell)
@@ -332,11 +337,7 @@ class SCF(mol_hf.SCF):
             raise NotImplementedError
         return cell.enuc
 
-    def get_init_guess(self, cell=None, key='minao', s1e=None):
-        if cell is None: cell = self.cell
-        dm = mol_hf.SCF.get_init_guess(self, cell, key)
-        dm = normalize_dm_(self, dm, s1e)
-        return dm
+    get_init_guess = NotImplemented
 
     # hf_cpu.SCF.init_guess_by_1e calls additional checks. Enabling the
     # following line to enable this.
@@ -388,6 +389,15 @@ class RHF(SCF):
     energy_elec = mol_hf.RHF.energy_elec
     newton = mol_hf.RHF.newton
     canonicalize = mol_hf.RHF.canonicalize
+
+    init_guess_by_minao = mol_hf.RHF.init_guess_by_minao
+    init_guess_by_atom = mol_hf.RHF.init_guess_by_atom
+
+    def get_init_guess(self, cell=None, key='minao', s1e=None):
+        assert isinstance(key, str)
+        if cell is None: cell = self.cell
+        dm = mol_hf.RHF.get_init_guess(self, cell, key)
+        return normalize_dm_(self, dm, s1e)
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
                  hermi=1, kpt=None, kpts_band=None):

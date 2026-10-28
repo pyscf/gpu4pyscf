@@ -107,6 +107,12 @@ class KnownValues(unittest.TestCase):
     
     '''
 
+    def test_pcm_not_supported(self):
+        mf = rks.RKS(mol, xc='b3lyp').PCM()
+        with self.assertRaisesRegex(
+                NotImplementedError, 'PCM solvent response is not supported'):
+            ir.eval_ir_freq_intensity(mf, None)
+
     def test_rks_b3lyp_df(self):
         print('-------- RKS density fitting B3LYP -------------')
         e_tot, freq, intensity = run_dft_df_if('B3LYP')

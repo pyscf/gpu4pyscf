@@ -16,10 +16,12 @@
 
 #pragma once
 
-extern __constant__ double c_lattice_vectors[9];
-extern __constant__ double c_reciprocal_lattice_vectors[9]; // norm to 1
-extern __constant__ double c_dxyz_dabc[9];
-extern __constant__ int c_nf[];
-extern __constant__ float c_div_nf[];
+#include "gsycl/gpu_compat.h"
+#include "gvhf-rys/vhf.cuh"   // c_nf / c_div_nf on both backends
+#include <cuComplex.h>        // gsycl/cuComplex.h shim under SYCL
+
+extern TABLE_DEFINE(double, s_c_lattice_vectors, c_lattice_vectors, 9);
+extern TABLE_DEFINE(double, s_c_reciprocal_lattice_vectors, c_reciprocal_lattice_vectors, 9); // norm to 1
+extern TABLE_DEFINE(double, s_c_dxyz_dabc, c_dxyz_dabc, 9);
 
 #define NBAS_MAX        16777216

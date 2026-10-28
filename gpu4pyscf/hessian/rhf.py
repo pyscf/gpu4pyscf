@@ -285,11 +285,12 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
     diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
     n_groups = len(uniq_l_ctr)
-    tasks = ((i, j, k, l)
-             for i in range(n_groups)
-             for j in range(i+1)
-             for k in range(i+1)
-             for l in range(k+1))
+    # Materialize task metadata before sharing the iterator across workers.
+    tasks = iter([(i, j, k, l)
+                  for i in range(n_groups)
+                  for j in range(i+1)
+                  for k in range(i+1)
+                  for l in range(k+1)])
 
     def proc():
         device_id = cp.cuda.device.get_device_id()
@@ -511,11 +512,12 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None,
         mol, bas_ij_cache, atoms_slice)
 
     n_groups = len(uniq_l_ctr)
-    tasks = ((i, j, k, l)
-             for i in range(n_groups)
-             for j in range(n_groups)
-             for k in range(n_groups)
-             for l in range(k+1))
+    # Materialize task metadata before sharing the iterator across workers.
+    tasks = iter([(i, j, k, l)
+                  for i in range(n_groups)
+                  for j in range(n_groups)
+                  for k in range(n_groups)
+                  for l in range(k+1)])
 
     def proc():
         device_id = cp.cuda.device.get_device_id()
@@ -741,8 +743,9 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         hs = s1mo_blk = h1mo_blk = None
 
         tol = mf.conv_tol_cpscf * (i1 - i0)
+        lindep = max(tol**2, np.finfo(mo1.real.dtype).eps)
         raw_mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
-                         tol=tol, max_cycle=max_cycle, verbose=log)
+                         tol=tol, max_cycle=max_cycle, lindep=lindep, verbose=log)
         raw_mo1 = raw_mo1.reshape(i1-i0,3,nmo,nocc)
         raw_mo1[:,:,occidx] = mo1[:,:,occidx]
 

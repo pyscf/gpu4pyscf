@@ -419,7 +419,9 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     '''Full response including the response of the grids'''
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
+    omega = ni.omega
     ni = numint.NumInt() # Don't mess up with the old numint object
+    ni.omega = omega
     xctype = ni._xc_type(xc_code)
 
     grids = grids.copy()
@@ -456,7 +458,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     rho = cupy.empty([ncomp, ngrids])
     g1 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv):
         g0, g1 = g1, g1 + weight.size
         dms_masked = take_last2d(dms, idx, out=dm_mask_buf)
         rho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dms_masked, xctype = xctype, hermi = 1)
@@ -492,7 +494,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     del exc
 
     g0 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1):
         g1 = g0 + weight.shape[0]
 
         ao = ao[:, :, nonzero_weight_mask[g0:g1]]
@@ -512,7 +514,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             aow = numint._scale_ao(ao[0], split_wv[0])
             vtmp = _d1_dot_(ao[1:4], aow.T)
 
-            dvmat_orbital_response[:, idx[:,None], idx] += vtmp
+            add_sparse(dvmat_orbital_response, vtmp, idx)
             de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
 
         elif xctype == 'GGA':
@@ -521,7 +523,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
             vtmp = _gga_grad_sum_(ao, split_wv[:4])
 
-            dvmat_orbital_response[:, idx[:,None], idx] += vtmp
+            add_sparse(dvmat_orbital_response, vtmp, idx)
             de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
 
         elif xctype == 'NLC':
@@ -535,7 +537,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             vtmp = _gga_grad_sum_(ao, split_wv[:4])
             _tau_grad_dot_(ao, split_wv[4], accumulate=True, out=vtmp)
 
-            dvmat_orbital_response[:, idx[:,None], idx] += vtmp
+            add_sparse(dvmat_orbital_response, vtmp, idx)
             de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
 
         else:
@@ -594,7 +596,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     ngrids_full = grids.coords.shape[0]
     rho_drho = cupy.empty([4, ngrids_full])
     g1 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 1, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 1):
         g0, g1 = g1, g1 + weight.size
         dms_masked = take_last2d(dms_sorted, idx, out = dm_mask_buf)
         rho_drho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dms_masked, xctype = "NLC", hermi = 1)
@@ -666,7 +668,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     g0_full = 0
     g0_nonzero = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2, strict_grid_order = True):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2):
         g1_full = g0_full + weight.shape[0]
 
         ao = ao[:, :, rho_nonzero_mask[g0_full : g1_full]]
@@ -683,7 +685,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         wv = cupy.vstack([fw_rho_i[g0_nonzero : g1_nonzero], fw_gamma_vxc_form[:, g0_nonzero : g1_nonzero]])
         wv[0] *= .5
         vtmp = _gga_grad_sum_(ao, wv)
-        dvmat_orbital_response[numpy.ix_(range(3), idx, idx)] += vtmp
+        add_sparse(dvmat_orbital_response, vtmp, idx)
         dms_masked = take_last2d(dms_sorted, idx, out = dm_mask_buf)
         de_grid_response_rho[i_atom_of_grids] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
 

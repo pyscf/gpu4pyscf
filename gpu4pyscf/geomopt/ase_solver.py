@@ -20,6 +20,7 @@ https://ase-lib.org/ase/optimize.html
 
 from ase.optimize import BFGS
 from ase.filters import UnitCellFilter, StrainFilter
+from ase.constraints import FixCom
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.pbc import gto
@@ -48,6 +49,9 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
             Maximum number of optimization steps.
         restart : bool
             Whether to restart from a previous optimization state.
+
+    For PBC calculations, the current ``cell.mesh`` is fixed when the
+    optimizer starts and reused throughout the optimization.
     '''
     assert not restart
     if hasattr(method, 'cell'):
@@ -57,9 +61,18 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
     else:
         raise RuntimeError(f'{method} not supported')
     is_pbc = isinstance(cell, gto.Cell)
+    if is_pbc:
+        from gpu4pyscf.pbc.tools.discretization import freeze_mesh
+        freeze_mesh(method)
 
     atoms = pyscf_to_ase_atoms(cell)
-    atoms.calc = PySCF(method=method)
+    calculator = PySCF(method=method)
+    atoms.calc = calculator
+
+    if is_pbc and target in (None, 'atoms', 'cell'):
+        # This constraint cannot be used to lattice optimization
+        # because it fixes the atomic positions.
+        atoms.set_constraint(FixCom())
 
     if target is None:
         if is_pbc:

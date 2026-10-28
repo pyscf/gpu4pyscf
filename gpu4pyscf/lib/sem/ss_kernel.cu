@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #define BINOM_DIM 13
 #define IDX2(r, c) ((r) * (BINOM_DIM) + (c))
@@ -29,7 +30,8 @@ __global__ void afn_kernel(
     const double* __restrict__ p_vec,
     double* __restrict__ af_out // Shape: (n_data, 20)
 ) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int tid = global_x;
     int out_id = tid * 20;
 
     if (tid >= n_data) return;
@@ -53,7 +55,8 @@ __global__ void bfn_kernel(
     const double* __restrict__ taylor_coeffs, // Flattened (13 * 16) transposed taylor coeffs
     double* __restrict__ bf_out // Shape: (n_data, 13)
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int idx = global_x;
     if (idx >= n_data) return;
 
     double x_val = x[idx];
@@ -123,7 +126,8 @@ __global__ void rotation_transform_kernel(
     const double* __restrict__ C_tensor, // Input: (N, 3, 5, 5)
     double* __restrict__ di_out          // Output: (N, 9, 9)
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int idx = global_x;
     if (idx >= n_pairs) return;
 
     // ival[shell_idx][local_k_index]
@@ -205,7 +209,8 @@ __global__ void ss_summation_kernel(
     const double* __restrict__ binom,
     double* __restrict__ out
 ) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int tid = global_x;
 
     if (tid >= n_pairs) return;
 
@@ -276,10 +281,10 @@ int launch_ss_kernel_c(
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
 
-    ss_summation_kernel<<<blocks_per_grid, threads_per_block>>>(
-        n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out
-    );
-        
+    auto block = make_block(threads_per_block);
+    auto grid = make_grid(blocks_per_grid);
+    LAUNCH_KERNEL( ss_summation_kernel, grid, block, 0,
+        n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -294,10 +299,10 @@ int launch_afn_kernel_c(
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-    afn_kernel<<<blocks_per_grid, threads_per_block>>>(
-        n_pairs, p_vec, af_out
-    );
-    
+    auto block = make_block(threads_per_block);
+    auto grid = make_grid(blocks_per_grid);
+    LAUNCH_KERNEL( afn_kernel, grid, block, 0,
+        n_pairs, p_vec, af_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -313,10 +318,10 @@ int launch_bfn_kernel_c(
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-    bfn_kernel<<<blocks_per_grid, threads_per_block>>>(
-        n_pairs, x, taylor_coeffs, bf_out
-    );
-    
+    auto block = make_block(threads_per_block);
+    auto grid = make_grid(blocks_per_grid);
+    LAUNCH_KERNEL( bfn_kernel, grid, block, 0,
+        n_pairs, x, taylor_coeffs, bf_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -333,10 +338,10 @@ int launch_rotation_transform_kernel(
 {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-    rotation_transform_kernel<<<blocks_per_grid, threads_per_block>>>(
-        n_pairs, S_local, C_tensor, di_out
-    );
-        
+    auto block = make_block(threads_per_block);
+    auto grid = make_grid(blocks_per_grid);
+    LAUNCH_KERNEL( rotation_transform_kernel, grid, block, 0,
+        n_pairs, S_local, C_tensor, di_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

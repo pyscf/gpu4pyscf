@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "gsycl/gpu_compat.h"
+
 template <typename T>
 __host__ __device__ T distance_squared(const T x, const T y, const T z) {
   return x * x + y * y + z * z;
@@ -33,6 +35,7 @@ void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI
 __device__ __forceinline__
 double reduce(double val, double *swap, int thread_id)
 {
+    setup_context();
     constexpr int WARP_SIZE = 32;
     for (int offset = 16; offset > 0; offset >>= 1) {
         val += __shfl_down_sync(0xffffffff, val, offset);
@@ -49,5 +52,8 @@ double reduce(double val, double *swap, int thread_id)
             val += __shfl_down_sync(0xffffffff, val, offset);
         }
     }
+    // Without this barrier the other warps can enter the next reduce and
+    // overwrite swap[] before warp 0 has read it.
+    __syncthreads();
     return val;
 }

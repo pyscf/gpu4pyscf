@@ -25,14 +25,12 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 def setUpModule():
     global cell
     L = 4
-    n = 21
     cell = pbcgto.Cell()
     cell.build(unit = 'B',
                verbose = 7,
                output = '/dev/null',
-               precision = 1e-10,
+               precision = 1e-9,
                a = ((L,0,0),(0,L,0),(0,0,L)),
-               mesh = [n,n,n],
                atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
                        ['He', (L/2.   ,L/2.,L/2.+.5)]],
                basis = { 'He': [[0, (0.8, 1.0)],
@@ -51,8 +49,8 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts(nk, wrap_around=True)
         kmf = pscf.KUHF(cell, kpts=kpts).run(conv_tol=1e-9)
         kmf_cpu = kmf.to_cpu().run()
-        self.assertAlmostEqual(kmf.e_tot, kmf_cpu.e_tot, 8)
-        self.assertAlmostEqual(kmf.e_tot, -4.021029656152094, 8)
+        self.assertAlmostEqual(kmf.e_tot, kmf_cpu.e_tot, delta=1e-8)
+        self.assertAlmostEqual(kmf.e_tot, -4.021029656152094, delta=1e-8)
         pop = kmf.analyze()[0][0]
         self.assertAlmostEqual(lib.fp(pop), 0.02897067698093582, 5)
 
@@ -60,21 +58,30 @@ class KnownValues(unittest.TestCase):
         kpts_bands = np.random.random((1,3))
         e = kmf.get_bands(kpts_bands)[0]
         e_ref = kmf_cpu.get_bands(kpts_bands)[0]
-        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, delta=5e-6)
 
     def test_uhf_bands(self):
         mf = pscf.UHF(cell).run(conv_tol=1e-9)
         mf_cpu = mf.to_cpu().run()
-        self.assertAlmostEqual(mf.e_tot, mf_cpu.e_tot, 8)
+        self.assertAlmostEqual(mf.e_tot, mf_cpu.e_tot, delta=1e-8)
         self.assertAlmostEqual(mf.e_tot, -3.9546467710639632, 7)
-        pop = mf.analyze()[0][0]
-        self.assertAlmostEqual(lib.fp(pop), -0.04691820429296646, 5)
+        for with_meta_lowdin in (True, False):
+            populations, charges = mf.analyze(
+                verbose=0, with_meta_lowdin=with_meta_lowdin)[0]
+            self.assertEqual(np.asarray(populations).shape, (2, cell.nao_nr()))
+            self.assertEqual(np.asarray(charges).shape, (cell.natm,))
+            self.assertAlmostEqual(np.sum(populations[0]), mf.nelec[0], 7)
+            self.assertAlmostEqual(np.sum(populations[1]), mf.nelec[1], 7)
+            if with_meta_lowdin:
+                self.assertAlmostEqual(
+                    lib.fp(populations[0] + populations[1]),
+                    -0.04691820429296646, 5)
 
         np.random.seed(1)
         kpts_bands = np.random.random((4,3))
         e = mf.get_bands(kpts_bands)[0]
         e_ref = mf_cpu.get_bands(kpts_bands)[0]
-        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, delta=5e-6)
 
     def test_small_system(self):
         mol = pbcgto.Cell(

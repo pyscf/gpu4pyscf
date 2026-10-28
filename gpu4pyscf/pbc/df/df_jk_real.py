@@ -73,7 +73,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
             nocc = max(x.shape[1] for x in occ_coeff)
 
         blksize = mydf.get_blksize(extra=nao*nocc)
-        aux_iter = lib.prange(0, naux, blksize)
+        aux_iter = iter(list(lib.prange(0, naux, blksize)))
 
         def proc():
             vj_packed = vk = None
@@ -103,7 +103,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
             return vj_packed, vk
     else:
         blksize = mydf.get_blksize(extra=nao*nao)
-        aux_iter = lib.prange(0, naux, blksize)
+        aux_iter = iter(list(lib.prange(0, naux, blksize)))
 
         def proc():
             vj_packed = vk = None
@@ -137,7 +137,9 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         vj_packed = [j for j, k in results]
         vj_packed = multi_gpu.array_reduce(vj_packed, inplace=True)
         vj = cp.zeros_like(dms)
-        vj[:,cols,rows] = vj[:,rows,cols] = vj_packed
+        # Ordered columns hold partial sums in either orientation.
+        vj[:,rows,cols] = vj_packed
+        vj = vj + vj.transpose(0, 2, 1)
         vj = vj.reshape(out_shape)
 
     if with_k:

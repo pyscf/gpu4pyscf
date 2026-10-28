@@ -154,7 +154,11 @@ class GKS(rks.KohnShamDFT, GHF):
     reset = rks.RKS.reset
     energy_elec = rks.RKS.energy_elec
     nuc_grad_method = NotImplemented
-    to_hf = NotImplemented
+
+    def to_hf(self):
+        '''Convert to GHF object.'''
+        from gpu4pyscf import scf
+        return self._transfer_attrs_(scf.GHF(self.mol))
     
     def to_cpu(self):
         mf = gks.GKS(self.mol, xc=self.xc)

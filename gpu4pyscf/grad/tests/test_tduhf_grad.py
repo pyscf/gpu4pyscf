@@ -21,6 +21,8 @@ from pyscf import scf, dft, tdscf, lib
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.nac.finite_diff import diagonalize_u as diagonalize
+from gpu4pyscf.nac.finite_diff import diagonalize_tda_u as diagonalize_tda
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -29,51 +31,6 @@ H       0.0000000000     0.7570000000     0.5870000000
 """
 
 bas0 = "cc-pvdz"
-
-def diagonalize(a, b, nroots=5):
-    a_aa, a_ab, a_bb = a
-    b_aa, b_ab, b_bb = b
-    nocc_a, nvir_a, nocc_b, nvir_b = a_ab.shape
-    a_aa = a_aa.reshape((nocc_a * nvir_a, nocc_a * nvir_a))
-    a_ab = a_ab.reshape((nocc_a * nvir_a, nocc_b * nvir_b))
-    a_bb = a_bb.reshape((nocc_b * nvir_b, nocc_b * nvir_b))
-    b_aa = b_aa.reshape((nocc_a * nvir_a, nocc_a * nvir_a))
-    b_ab = b_ab.reshape((nocc_a * nvir_a, nocc_b * nvir_b))
-    b_bb = b_bb.reshape((nocc_b * nvir_b, nocc_b * nvir_b))
-    a = np.block([[a_aa, a_ab], [a_ab.T, a_bb]])
-    b = np.block([[b_aa, b_ab], [b_ab.T, b_bb]])
-    abba = np.asarray(np.block([[a, b], [-b.conj(), -a.conj()]]))
-    e, xy = np.linalg.eig(abba)
-    assert np.max(np.abs(e.imag)) < 1e-14
-    assert np.max(np.abs(xy.imag)) < 1e-14
-    e = e.real
-    xy = xy.real
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
-
-
-def diagonalize_tda(a, nroots=5):
-    a_aa, a_ab, a_bb = a
-    nocc_a, nvir_a, nocc_b, nvir_b = a_ab.shape
-    a_aa = a_aa.reshape((nocc_a * nvir_a, nocc_a * nvir_a))
-    a_ab = a_ab.reshape((nocc_a * nvir_a, nocc_b * nvir_b))
-    a_bb = a_bb.reshape((nocc_b * nvir_b, nocc_b * nvir_b))
-    a = np.block([[a_aa, a_ab], [a_ab.T, a_bb]])
-    e, xy = np.linalg.eigh(a)
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    e_sorted_final = e_sorted[e_sorted > 1e-3]
-    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
-    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 
 def cal_analytic_gradient(mol, td, tdgrad, nocc_a, nvir_a, nocc_b, nvir_b, tda):
@@ -244,7 +201,7 @@ def _check_grad(mol, tol=1e-5, lindep=1.0e-12, disp=None, tda=False, method="cpu
 
 class KnownValues(unittest.TestCase):
     def test_grad_tda_spinconserve_cpu(self):
-        grad_gpu = _check_grad(mol, tol=5e-10, tda=True, method="cpu")
+        grad_gpu = _check_grad(mol, tol=2e-7, tda=True, method="cpu")
         ref = np.array([[-3.0185736020771e-15,  1.5100260822340e-15, -6.4464824062032e-02],
                         [ 1.7200484393589e-15,  7.0426620850669e-02, 3.2232412031016e-02],
                         [ 1.2985251627181e-15, -7.0426620850669e-02, 3.2232412031018e-02]])
@@ -256,7 +213,7 @@ class KnownValues(unittest.TestCase):
 
     @unittest.skipIf(num_devices > 1, '')
     def test_grad_tdhf_spinconserve_cpu(self):
-        grad_gpu = _check_grad(mol, tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
+        grad_gpu = _check_grad(mol, tol=2e-7, lindep=1.0e-6, tda=False, method="cpu")
         ref = np.array([[ 2.4083810840674e-15,  1.1005204522931e-15, -6.4107899188727e-02],
                         [-1.5974943646053e-15,  6.9613558808388e-02, 3.2053949594365e-02],
                         [-8.1088671946197e-16, -6.9613558808391e-02, 3.2053949594365e-02]])

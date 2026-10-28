@@ -188,7 +188,7 @@ class FFTDF(lib.StreamObject):
         self.stdout = cell.stdout
         self.verbose = cell.verbose
         self.max_memory = cell.max_memory
-        self.mesh = cell.mesh
+        self._mesh = None
         self.kpts = kpts
 
         # The following attributes are not input options.
@@ -202,10 +202,21 @@ class FFTDF(lib.StreamObject):
         excludes=('_rsh_df',))
 
     @property
+    def mesh(self):
+        # Follow the current cell unless a DF mesh was explicitly assigned.
+        if self._mesh is None:
+            return self.cell.mesh
+        return self._mesh
+    @mesh.setter
+    def mesh(self, value):
+        self._mesh = value
+
+    @property
     def grids(self):
         from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
         grids = UniformGrids(self.cell)
-        grids.mesh = self.mesh
+        if self._mesh is not None:
+            grids.mesh = self._mesh
         return grids
     @grids.setter
     def grids(self, val):
@@ -265,6 +276,8 @@ class FFTDF(lib.StreamObject):
     get_j_e1 = fft_jk.get_j_e1_kpts
     get_k_e1 = NotImplemented
     get_jk_e1 = NotImplemented
+    get_ej_derivatives = NotImplemented
+    get_ek_derivatives = NotImplemented
 
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented
@@ -281,5 +294,7 @@ class FFTDF(lib.StreamObject):
     def to_cpu(self):
         from pyscf.pbc.df.fft import FFTDF
         out = FFTDF(self.cell, kpts=self.kpts)
-        out.mesh = self.mesh
+        out.exxdiv = self.exxdiv
+        if self._mesh is not None:
+            out.mesh = self._mesh
         return out

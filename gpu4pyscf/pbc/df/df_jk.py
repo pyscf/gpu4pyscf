@@ -75,14 +75,13 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # Alter the contraction order for
     # rho = einsum('piLj,LK,Kji->p', cderi, expLk, dm)
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
+    pair_address, _ = mydf._cderi_idx
+    pair_address = cp.asarray(pair_address, dtype=np.int32)
     expLk = fft_matrix(mydf.kmesh)
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
-    pair_address, diag = mydf._cderi_idx
-    pair_address = cp.asarray(pair_address, dtype=np.int32)
     dm_sparse = dm_sparse[:,pair_address]
-    dm_sparse[:,diag] *= .5
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = int(mem_free * .8)
@@ -93,7 +92,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     blksize = min(int(blksize), mydf.blockdim)
     logger.debug2(mydf, 'max_memory %d MB, blksize %d', avail_mem*1e-6, blksize)
     naux = mydf.get_naoaux()
-    aux_iter = iter((0, p0, p1) for p0, p1 in lib.prange(0, naux, blksize))
+    aux_iter = iter([(0, p0, p1) for p0, p1 in lib.prange(0, naux, blksize)])
 
     def proc():
         _dm_sparse = cp.asarray(dm_sparse)
@@ -139,8 +138,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     t0 = (logger.process_clock(), logger.perf_counter())
     assert kpts_band is None or kpts_band is kpts
     assert mydf.has_kpts(kpts)
-    if mydf._cderi is None:
-        mydf.build(kpts_band=kpts_band)
+    # J-only integrals omit the k-point pairs required for exchange.
+    if mydf._cderi is None or mydf._j_only:
+        mydf.build(j_only=False, kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_k_kpts', *t0)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
@@ -187,19 +187,23 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = int(mem_free * .8)
-    blksize = avail_mem // (nkpts*nao**2*3 * 16)
+    unit = 3 * nao**2
+    blksize = avail_mem // (nkpts*unit * 16)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)
     logger.debug1(mydf, 'max_memory %d MB, blksize %d', avail_mem*1e-6, blksize)
     naux = mydf.get_naoaux()
-    aux_iter = iter((kp, p0, p1)
+    aux_iter = iter([(kp, p0, p1)
                     for p0, p1 in lib.prange(0, naux, blksize)
-                    for kp in mydf._cderi)
+                    for kp in mydf._cderi])
     k_adapt_dic = {}
     for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
         # ki_idx is already sorted
         k_adapt_dic[kp] = kp_conj, kj_idx
+
+    assert len(mydf._cderi) == len(k_adapt_dic), \
+            'cderi should be initialized with j_only=False'
 
     if (is_zero(kpts) and is_zero(kpts_band) and
         not np.iscomplexobj(dm_kpts)):
@@ -277,7 +281,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         raise NotImplementedError(f'get_jk for single k-point {kpt}')
 
     if mydf._cderi is None:
-        mydf.build()
+        mydf.build(j_only=not with_k)
 
     if dm.dtype == np.float64:
         return df_jk_real.get_jk(mydf, dm, hermi, with_j, with_k, exxdiv)

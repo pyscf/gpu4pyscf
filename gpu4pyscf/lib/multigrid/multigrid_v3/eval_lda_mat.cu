@@ -38,6 +38,7 @@ void eval_lda_mat_kernel(double *out, double *vxc_weights, PBCIntEnvVars envs,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
+    TABLE_BIND(c_dxyz_dabc, s_c_dxyz_dabc);
     constexpr int threads = THREADS;
     int thread_id = threadIdx.x;
     int tile_id0 = blockIdx.x * tiles_per_block;
