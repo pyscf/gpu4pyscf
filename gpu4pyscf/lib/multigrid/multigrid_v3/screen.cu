@@ -58,6 +58,7 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
                         int npairs, float log_threshold,
                         float undressed_threshold)
 {
+    TABLE_BIND(c_reciprocal_lattice_vectors, s_c_reciprocal_lattice_vectors);
     setup_context();
     int pair_id = global_x;
     if (pair_id >= npairs) return;

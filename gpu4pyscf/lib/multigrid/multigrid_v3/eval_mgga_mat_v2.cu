@@ -31,6 +31,7 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
                          int mesh_a, int mesh_b, int mesh_c, int npairs,
                          double negligible, PBCIntEnvVars envs)
 {
+    TABLE_BIND(c_dxyz_dabc, s_c_dxyz_dabc);
     setup_context();
     constexpr int tile = 16;
     int tx = threadIdx_x;

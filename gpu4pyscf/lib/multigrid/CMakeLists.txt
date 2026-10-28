@@ -30,6 +30,11 @@ set(GPU_SRCS_v3
   multigrid_v3/aft_eval_mgga_mat.cu
 )
 
+# CUDA-only c_nf / c_div_nf definitions (SYCL gets them from gvhf-rys/vhf.cuh).
+if (NOT USE_SYCL)
+  list(APPEND GPU_SRCS_v3 multigrid_v3/constant_tables.cu)
+endif()
+
 add_library(mgrid_v3 SHARED ${GPU_SRCS_v3})
 
 if (USE_SYCL)
@@ -45,6 +50,11 @@ if (USE_SYCL)
 
   set_target_properties(mgrid_v3 PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(mgrid_v3 PRIVATE -x c++ -nocudainc -nocudalib)
+  # Header-defined device helpers must be inline: every TU of this library
+  # includes them, and plain always_inline functions would be duplicate
+  # symbols at link time. __device__ expands to this attribute (sycl_device.hpp).
+  target_compile_definitions(mgrid_v3 PRIVATE
+    "GPU4PYSCF_DEVICE_ATTR=inline __attribute__((always_inline))")
   target_link_libraries(mgrid_v3 PRIVATE sycl_compat gsycl)
 else()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")

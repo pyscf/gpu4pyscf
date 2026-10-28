@@ -37,6 +37,7 @@ void eval_mgga_grad_kernel(double *grad, double *strain, double *dm,
                            double factor, double negligible,
                            PBCIntEnvVars envs)
 {
+    TABLE_BIND(c_dxyz_dabc, s_c_dxyz_dabc);
     setup_context();
     constexpr int tile = 16;
     int tx = threadIdx_x;

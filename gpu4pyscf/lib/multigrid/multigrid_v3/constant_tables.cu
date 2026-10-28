@@ -1,5 +1,5 @@
 // CUDA-only constant tables (SYCL uses constexpr/device_global).
-// Compiled only when NOT USE_SYCL (see multigrid_v3/CMakeLists.txt).
+// Compiled only when NOT USE_SYCL (see multigrid/CMakeLists.txt).
 #include "constant_objects.cuh"
 
 __constant__ int c_nf[] = {

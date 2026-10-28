@@ -38,6 +38,7 @@ void eval_tau_kernel(double *density, double *tau, double *dm,
                      int mesh_a, int mesh_b, int mesh_c, double negligible,
                      PBCIntEnvVars envs)
 {
+    TABLE_BIND(c_dxyz_dabc, s_c_dxyz_dabc);
     constexpr int threads = THREADS;
     constexpr int WARPS = THREADS / WARP_SIZE;
     setup_context();

@@ -16,9 +16,6 @@
 
 #pragma once
 
-#ifdef USE_SYCL
-inline
-#endif
 __forceinline__ __device__
 void rename_registers(double i_cartesian[], int start, int stop, int count)
 {

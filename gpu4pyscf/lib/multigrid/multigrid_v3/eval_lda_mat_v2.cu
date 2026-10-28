@@ -31,6 +31,7 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights,
                          int mesh_a, int mesh_b, int mesh_c, int npairs,
                          double negligible, PBCIntEnvVars envs)
 {
+    TABLE_BIND(c_dxyz_dabc, s_c_dxyz_dabc);
     constexpr int tile = 16;
     setup_context();
     int tx = threadIdx_x;

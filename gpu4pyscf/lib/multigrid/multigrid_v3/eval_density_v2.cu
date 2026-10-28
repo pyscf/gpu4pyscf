@@ -35,6 +35,7 @@ void eval_density_kernel(double *rho_c, double *dm, PBCIntEnvVars envs,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
+    TABLE_BIND(c_dxyz_dabc, s_c_dxyz_dabc);
     constexpr int nsp_per_block = WARP_SIZE;
     constexpr int threads = WARP_SIZE * TILE;
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
