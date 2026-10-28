@@ -370,6 +370,36 @@ def test_get_k_rsh_distant_centers():
                       lr_factor=lr_factor, sr_factor=sr_factor)
         assert abs(vk.get() - ref).max() < 1e-10
 
+def test_get_jk_rsh_stacked_dms():
+    # J for several densities at a range-separation omega goes through the
+    # J engine (_VHFOpt.get_j). jk.get_jk documents a full-range J there;
+    # SCF.get_jk evaluates it under mol.with_range_coulomb(omega), like pyscf.
+    from gpu4pyscf import scf as gpu_scf
+    mol = pyscf.M(atom='''
+    N  0.000  0.000  0.000
+    H  0.000  0.802  0.583
+    H  0.000 -0.802  0.583
+    ''', basis='def2-svp', spin=1, verbose=0)
+    np.random.seed(5)
+    nao = mol.nao
+    dms = np.random.rand(2, nao, nao) - .5
+    dms = np.einsum('xij,xkj->xik', dms, dms)
+    ref_j_full = get_jk(mol, dms, hermi=1, with_k=False)[0]
+    for omega in (.3, -.3):
+        ref_j, ref_k = get_jk(mol, dms, hermi=1, omega=omega)
+        for with_k in (False, True):
+            vj, vk = jk.get_jk(mol, cp.asarray(dms), hermi=1, with_k=with_k,
+                               omega=omega)
+            assert vj.shape == dms.shape
+            assert abs(vj.get() - ref_j_full).max() < 1e-9
+            if with_k:
+                assert abs(vk.get() - ref_k).max() < 1e-9
+            vj, vk = gpu_scf.UHF(mol).get_jk(mol, cp.asarray(dms), hermi=1,
+                                             with_k=with_k, omega=omega)
+            assert abs(vj.get() - ref_j).max() < 1e-9
+            if with_k:
+                assert abs(vk.get() - ref_k).max() < 1e-9
+
 def test_jk_get_k_sr():
     mol = pyscf.M(atom='''
     O  0.0000  0.7375 -0.0528
