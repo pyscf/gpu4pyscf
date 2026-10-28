@@ -20,7 +20,7 @@ from pyscf.scf import hf as hf_cpu
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array, asarray
-from gpu4pyscf.scf.hf import eigh, damping, level_shift
+from gpu4pyscf.scf.hf import eigh, damping, level_shift, process_sap_basis, make_sap
 from gpu4pyscf.scf import hf
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf import __config__
@@ -371,6 +371,34 @@ class UHF(hf.SCF):
     def init_guess_by_mod_huckel(self, mol=None, breaksym=None):
         if mol is None: mol = self.mol
         return hf_cpu.init_guess_by_mod_huckel(mol)
+
+    def init_guess_by_sap(self, mol=None, breaksym=None):
+        if mol is None: mol = self.mol
+        sap_basis = process_sap_basis(self, mol, self.sap_basis)
+
+        Vsap = make_sap(mol, sap_basis=sap_basis)
+        Vsap = cupy.asarray([Vsap, Vsap])
+        Hcore = self.get_hcore(mol)
+        S = self.get_ovlp(mol)
+        Hsap = Hcore + Vsap
+        mo_energy, mo_coeff = self.eig(Hsap, S)
+
+        mo_occ = self.get_occ(mo_energy, mo_coeff)
+        return self.make_rdm1(mo_coeff, mo_occ)
+
+    def init_guess_by_vsap(self, mol=None):
+        if mol is None: mol = self.mol
+
+        Vsap = self.get_vsap()
+        Vsap = cupy.asarray([Vsap, Vsap])
+        from gpu4pyscf.pbc.gto.int1e import int1e_kin
+        T = int1e_kin(mol)
+        S = self.get_ovlp(mol)
+        Hsap = T + Vsap
+        mo_energy, mo_coeff = self.eig(Hsap, S)
+
+        mo_occ = self.get_occ(mo_energy, mo_coeff)
+        return self.make_rdm1(mo_coeff, mo_occ)
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         if not isinstance(key, str):
