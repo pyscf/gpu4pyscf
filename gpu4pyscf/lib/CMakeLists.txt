@@ -333,6 +333,11 @@ if(BUILD_EXCHCXX)
   add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
   set_target_properties(ExchCXX::ExchCXX PROPERTIES
     IMPORTED_LOCATION             "${_exchcxx_lib}"
+    # The ExchCXX sub-build overrides CMAKE_CXX_CREATE_SHARED_LIBRARY, which drops
+    # -soname, so libexchcxx.so has no SONAME. Without this, libgdft.so/libxc.so
+    # record the absolute path of libexchcxx.so as DT_NEEDED and break as soon as
+    # the build tree moves or is deleted (e.g. CI publishing the built tree).
+    IMPORTED_NO_SONAME            TRUE
     INTERFACE_INCLUDE_DIRECTORIES "${_exchcxx_inc}"
     INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
   )
