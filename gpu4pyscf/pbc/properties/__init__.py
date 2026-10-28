@@ -13,3 +13,4 @@
 # limitations under the License.
 
 from gpu4pyscf.pbc.properties import berry
+from gpu4pyscf.pbc.properties import external_field
