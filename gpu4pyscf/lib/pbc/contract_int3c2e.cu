@@ -68,6 +68,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, double omega, PBCIntEnv
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
     ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx_x * POOL_SIZE;
 while (1) {
+    __syncthreads();
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
         sp_block_id = batch_id / nauxbas;

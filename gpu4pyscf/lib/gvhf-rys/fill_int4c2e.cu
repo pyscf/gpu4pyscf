@@ -88,7 +88,8 @@ void int4c2e_kernel(double *out, RysIntEnvVars envs, BoundsInfo bounds,
                     float *q_cond_ij, float *q_cond_kl,
                     int *ij_pair_loc, int *kl_pair_loc,
                     uint32_t *pool, int *head, int nf, int nao_pairs,
-                    int reserved_shm_size, double omega)
+                    int reserved_shm_size,
+                    double omega, double lr_factor, double sr_factor)
 {
     setup_context();
     DYNAMIC_SHARED_PTR(double, shared_memory);
@@ -291,7 +292,7 @@ while (1) {
                     double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                     double theta = aij * akl / (aij + akl);
                     int nroots = bounds.nroots;
-                    rys_roots_for_k(nroots, theta, rr, rw, omega, 1., 1.);
+                    rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor);
                     for (int irys = 0; irys < nroots; ++irys) {
                         BUILD_4C_GXYZ(lj, ll, task_id < ntasks);
                         if (task_id >= ntasks) {
@@ -371,7 +372,8 @@ static void threads_scheme(int *scheme, BoundsInfo &bounds, int shm_size, int nf
 }
 
 extern "C" {
-int RYS_fill_int4c2e(double *out, int nao_pairs, double omega,
+int RYS_fill_int4c2e(double *out, int nao_pairs,
+                     double omega, double lr_factor, double sr_factor,
                      RysIntEnvVars *envs, int *shls_slice, int shm_size,
                      int npairs_ij, int npairs_kl,
                      uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
@@ -439,7 +441,7 @@ int RYS_fill_int4c2e(double *out, int nao_pairs, double omega,
 
     LAUNCH_KERNEL( int4c2e_kernel, blocks, threads, buflen,
         out, dev_envs, bounds, q_cond_ij, q_cond_kl, ij_pair_loc, kl_pair_loc,
-        pool, head, nf, nao_pairs, reserved_shm_size, omega);
+        pool, head, nf, nao_pairs, reserved_shm_size, omega, lr_factor, sr_factor);
 
     err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -898,6 +898,109 @@ def init_guess_by_qchem_sad(mol, mf_template):
 def init_guess_by_qchem_sad_hf(mol, mf_template):
     return _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=True, high_spin=False)
 
+def get_vsap(ni, mol, grids):
+    assert not mol.has_ecp(), 'ECP or PP not supported for SAP guess'
+
+    if grids.coords is None:
+        grids.build()
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+    _sorted_mol = opt._sorted_mol
+
+    nao = _sorted_mol.nao
+    vmat = cupy.zeros((nao, nao))
+
+    from pyscf.data.elements import charge as charge_of_element
+    atom_Zs = [charge_of_element(e) for e in mol.elements]
+    atom_coords = cupy.asarray(mol.atom_coords())
+
+    from pyscf.dft.sap_data import sap_Zeff as sap_Zeff_cpu
+    sap_Zeff = cupy.asarray(sap_Zeff_cpu)
+
+    from gpu4pyscf.lib.cupy_helper import add_sparse
+    from gpu4pyscf.dft.numint import _scale_ao
+    for ao, mask, weight, coords in ni.block_loop(_sorted_mol, grids, nao, 0):
+        vxc = cupy.zeros(weight.size)
+        for i_atom, Z in enumerate(atom_Zs):
+            if Z < 1:
+                continue
+            if Z >= sap_Zeff.shape[0]:
+                raise ValueError('Atoms beyond Og are not supported')
+            r_nuc_grid = cupy.linalg.norm(atom_coords[i_atom] - coords, axis=1)
+            r_nuc_grid = r_nuc_grid[r_nuc_grid > 1e-12]
+
+            Zeff = cupy.interp(r_nuc_grid, sap_Zeff[0,:], sap_Zeff[Z,:], right = 0.0)
+
+            vxc -= Zeff / r_nuc_grid
+
+        aow = _scale_ao(ao, weight * vxc)
+        add_sparse(vmat, ao.dot(aow.T), mask)
+        vxc = None
+    vmat = opt.unsort_orbitals(vmat, axis=[0, 1])
+
+    return vmat
+
+def make_sap(mol, sap_basis):
+    atom_coords = mol.atom_coords()
+    elements = mol.elements
+
+    # charge sumcheck
+    Z_eff = sum([np.sum(sap_basis[e][:,1]) for e in elements])
+    if np.abs(Z_eff + mol.nelectron) > 1e-6:
+        logger.warn(
+            mol,
+            '\n'.join(['SAP basis coefficients must be equal or close'
+            + f'to total electronic charge: {Z_eff} !≃ {mol.nelectron}',
+            f'Check fails with value {np.abs(Z_eff + mol.nelectron)}']))
+
+    auxmol = None
+
+    from pyscf.gto.mole import fakemol_for_cgtf_charge
+    for i_atom, element in enumerate(elements):
+        expnt = sap_basis[element][:,0]
+        coeff = sap_basis[element][:,1]
+        nucleon_fakemol = fakemol_for_cgtf_charge(
+            np.asarray([atom_coords[i_atom]], dtype=float),
+            expnt,
+            coeff
+        )
+
+        if auxmol is None:
+            auxmol = nucleon_fakemol
+        else:
+            auxmol = auxmol + nucleon_fakemol
+
+    from gpu4pyscf.df import int3c2e_bdiv
+
+    aux_coeff = cupy.ones(auxmol.nao)
+    V = -int3c2e_bdiv.contract_int3c2e_auxvec(mol, auxmol, aux_coeff)
+
+    return V
+
+def process_sap_basis(mf, mol, sap_basis):
+    logger.info(mf, '''Initial guess from superposition of atomic potentials (doi:10.1021/acs.jctc.8b01089)
+This is the Gaussian fit version as described in doi:10.1063/5.0004046.''')
+    if isinstance(sap_basis, str):
+        atoms = [coord[0] for coord in mol._atom]
+        sapbas = {}
+        for atom in set(atoms):
+            single_element_bs = gto.basis.load(sap_basis, atom)
+            if isinstance(single_element_bs, dict):
+                sapbas[atom] = np.asarray(single_element_bs[atom][0][1:], dtype=float)
+            else:
+                sapbas[atom] = np.asarray(single_element_bs[0][1:], dtype=float)
+        logger.note(mf, f'Found SAP basis {sap_basis.split("/")[-1]}')
+    elif isinstance(sap_basis, dict):
+        sapbas = {}
+        for key in sap_basis:
+            sapbas[key] = np.asarray(sap_basis[key][0][1:], dtype=float)
+    else:
+        logger.error(mf, 'sap_basis is of an unexpected datatype.')
+
+    return sapbas
+
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
     def fn_init_guess(mf, mol=None, breaksym=None):
@@ -980,6 +1083,7 @@ class SCF(pyscf_lib.StreamObject):
     max_cycle           = hf_cpu.SCF.max_cycle
     init_guess          = hf_cpu.SCF.init_guess
     conv_tol_cpscf      = 1e-6   # TODO: reuse the default value in PySCF
+    sap_basis           = 'sapgrasplarge'
 
     disp                = None
     DIIS                = diis.SCF_DIIS
@@ -1215,6 +1319,53 @@ class SCF(pyscf_lib.StreamObject):
         if mol is None: mol = self.mol
         return init_guess_by_atom(mol, high_spin)
 
+    def init_guess_by_sap(self, mol=None):
+        if mol is None: mol = self.mol
+        sap_basis = process_sap_basis(self, mol, self.sap_basis)
+
+        Vsap = make_sap(mol, sap_basis=sap_basis)
+        Hcore = self.get_hcore(mol)
+        S = self.get_ovlp(mol)
+        Hsap = Hcore + Vsap
+        mo_energy, mo_coeff = self.eig(Hsap, S)
+
+        mo_occ = self.get_occ(mo_energy, mo_coeff)
+        return self.make_rdm1(mo_coeff, mo_occ)
+
+    def get_vsap(self, mol=None):
+        if mol is None: mol = self.mol
+
+        from gpu4pyscf.dft.gen_grid import Grids
+        if hasattr(self, "grids"):
+            grids = self.grids
+        else:
+            grids = Grids(mol)
+            grids.atom_grid = (99,590)
+            logger.info(self, f"DFT grid not found, set SAP grid to {grids.atom_grid}")
+        assert isinstance(grids, Grids)
+
+        from gpu4pyscf.dft.numint import NumInt
+        if hasattr(self, "_numint"):
+            ni = self._numint
+        else:
+            ni = NumInt()
+        assert isinstance(ni, NumInt)
+
+        return get_vsap(ni, mol, grids)
+
+    def init_guess_by_vsap(self, mol=None):
+        if mol is None: mol = self.mol
+
+        Vsap = self.get_vsap()
+        from gpu4pyscf.pbc.gto.int1e import int1e_kin
+        T = int1e_kin(mol)
+        S = self.get_ovlp(mol)
+        Hsap = T + Vsap
+        mo_energy, mo_coeff = self.eig(Hsap, S)
+
+        mo_occ = self.get_occ(mo_energy, mo_coeff)
+        return self.make_rdm1(mo_coeff, mo_occ)
+
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         '''Dispatch initial guesses
 
@@ -1271,7 +1422,7 @@ class SCF(pyscf_lib.StreamObject):
             dm = self.init_guess_by_1e(mol)
         elif key == 'atom':
             dm = self.init_guess_by_atom(mol)
-        elif key == 'vsap' and hasattr(self, 'init_guess_by_vsap'):
+        elif key == 'vsap':
             # Only available for DFT objects
             dm = self.init_guess_by_vsap(mol)
         elif key == 'sap':

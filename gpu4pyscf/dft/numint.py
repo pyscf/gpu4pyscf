@@ -2323,6 +2323,9 @@ def _contract_rho1(bra, ket, rho=None):
     nvar, nao, ngrids = bra.shape
     rho = ndarray([nvar, ngrids], buffer=rho)
 
+    if not (bra.flags.c_contiguous and ket.flags.c_contiguous):
+        return contract('xig,ig->xg', bra, ket, out=rho)
+
     for i in range(nvar):
         stream = cupy.cuda.get_current_stream()
         err = libgdft.GDFTcontract_rho(

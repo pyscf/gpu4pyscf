@@ -232,6 +232,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     // instead lets two co-resident groups share a slice (silent garbage).
     double *c2s_pool = pool + blockIdx_x * POOL_SIZE;
 while (1) {
+    __syncthreads();
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
         Gv_block_id = batch_id / nbatches_shl_pair;

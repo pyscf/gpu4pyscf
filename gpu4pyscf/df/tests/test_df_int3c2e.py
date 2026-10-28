@@ -638,3 +638,14 @@ def test_contract_Et():
     dm = j_engine_3c2e._Rt_to_dm(opt.mol, dm_xyz, opt.shl_pair_idx,
                                  opt.pair_loc, opt.int3c2e_envs)
     assert abs(dm - ref).max().get() < 1e-12
+
+def test_short_range_contract_auxvec():
+    from gpu4pyscf.df import j_engine_3c2e
+    mol = pyscf.M(atom='He 0 0 0; He 0 0 2', basis='cc-pvdz', verbose=0)
+    auxmol = pyscf.M(atom=mol.atom, basis='weigend', verbose=0)
+    auxvec = np.random.default_rng(20).random(auxmol.nao)
+    with mol.with_range_coulomb(-.3):
+        eri = incore.aux_e2(mol, auxmol)
+        actual = j_engine_3c2e.contract_int3c2e_auxvec(mol, auxmol, auxvec)
+    ref = np.einsum('ijP,P->ij', eri, auxvec)
+    assert abs(actual.get() - ref).max() < 1e-12

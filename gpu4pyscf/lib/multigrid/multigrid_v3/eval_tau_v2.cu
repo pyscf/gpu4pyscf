@@ -58,15 +58,15 @@ void eval_tau_kernel(double *rho_c, double *tau_c, double *dm, PBCIntEnvVars env
     float2 y_range = atom_frac_ranges[nseg  +segment_id];
     float2 z_range = atom_frac_ranges[nseg*2+segment_id];
     if (thread_id == 0) {
-        b_start = ceil(y_range.x * mesh_b);
-        c_start = ceil(z_range.x * mesh_c);
-        b_stop = ceil(y_range.y * mesh_b);
-        c_stop = ceil(z_range.y * mesh_c);
-        int a_start = ceil(x_range.x * mesh_a);
+        b_start = ceilf(y_range.x * mesh_b);
+        c_start = ceilf(z_range.x * mesh_c);
+        b_stop = ceilf(y_range.y * mesh_b);
+        c_stop = ceilf(z_range.y * mesh_c);
+        int a_start = ceilf(x_range.x * mesh_a);
         a_index = a_start + a_index_id;
     }
     __syncthreads();
-    int a_stop = ceil(x_range.y * mesh_a);
+    int a_stop = ceilf(x_range.y * mesh_a);
     if (a_index >= a_stop) {
         return;
     }
@@ -143,7 +143,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
         double exp_db_squared = exp(-2 * aij * db_squared);
         float aij_f = (float)aij;
         float theta_rr_f = (float)theta_rr;
-        float e_cutoff = (float)(log(fabs(cc)) - log(negligible));
+        float e_cutoff = logf(fabsf((float)cc)) - logf((float)negligible);
 #pragma unroll
         for (int dm_i0 = 0; dm_i0 < nfi; dm_i0 += SLICE_SIZE_I) {
 #pragma unroll

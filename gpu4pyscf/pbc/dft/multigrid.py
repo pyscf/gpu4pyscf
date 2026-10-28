@@ -1142,7 +1142,7 @@ def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
             ctypes.cast(ls.data.ptr, ctypes.c_void_p),
             ctypes.c_int(cell0_nprims),
             ctypes.c_int(supmol_nbas),
-            ctypes.c_int(l_inc), ctypes.c_int(hermi),
+            ctypes.c_int(hermi), ctypes.c_int(l_inc),
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('ovlp_mask_estimation kernel failed')

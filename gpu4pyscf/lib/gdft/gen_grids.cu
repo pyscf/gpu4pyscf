@@ -830,6 +830,7 @@ void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const dou
                 idx = atom_j;
             }
         }
+        __syncthreads();
     }
     group_ids[grid_id] = idx;
 }
