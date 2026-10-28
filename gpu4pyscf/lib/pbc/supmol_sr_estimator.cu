@@ -308,7 +308,8 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
                 }
                 for (int irys = nroots-1; irys >= 0; --irys) {
                     __syncthreads();
-                    if (lij > 0 && gout_id == 0) {
+                    if (gout_id == 0) {
+                    if (lij > 0) {
                         float rt = rw[irys*2*nsp_per_block];
                         float rt_aa = rt / (aij + akl);
                         float rt_aij = rt_aa * akl;
@@ -399,6 +400,7 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
                         gx[0] = fac;
                         gx[g_size*nsp_per_block] = 1;
                         gx[g_size*nsp_per_block*2] = rw[(irys*2+1)*nsp_per_block];
+                    }
                     }
 
                     __syncthreads();

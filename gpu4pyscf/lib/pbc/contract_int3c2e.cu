@@ -54,6 +54,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, double omega, PBCIntEnv
     __shared__ int num_ijk_tasks;
     __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
 while (1) {
+    __syncthreads();
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
         sp_block_id = batch_id / nauxbas;

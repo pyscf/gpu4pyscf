@@ -5056,9 +5056,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -8481,9 +8478,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[64];
-                    double zlzk = rlrk[128];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -11666,9 +11660,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -15113,9 +15104,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[64];
-                    double zlzk = rlrk[128];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -16636,9 +16624,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -20147,9 +20132,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -24409,9 +24391,6 @@ while (1) {
                     double xjxi = rjri[0];
                     double yjyi = rjri[1];
                     double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
