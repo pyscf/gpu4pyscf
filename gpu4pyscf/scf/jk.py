@@ -673,8 +673,9 @@ class _VHFOpt:
         if isinstance(dms, cp.ndarray):
             dms = dms.get()
         pair_loc = _make_j_engine_pair_locs(mol)
+        nao_pairs = pair_loc[-1]
         dms = np.ascontiguousarray(dms)
-        dm_xyz = np.empty((n_dm, pair_loc[-1]))
+        dm_xyz = np.empty((n_dm, nao_pairs))
         for i in range(n_dm):
             libvhf_rys.transform_cart_to_xyz(
                 dm_xyz[i].ctypes, dms[i].ctypes, ao_loc.ctypes, pair_loc.ctypes,
@@ -753,7 +754,8 @@ class _VHFOpt:
                     ctypes.c_float(log_cutoff),
                     ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    mol._bas.ctypes, mol._env.ctypes)
+                    mol._bas.ctypes, mol._env.ctypes,
+                    ctypes.c_int(nao_pairs))
                 if err != 0:
                     raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
                 kern_counts += 1
