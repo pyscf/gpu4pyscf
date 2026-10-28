@@ -372,6 +372,20 @@ class UHF(hf.SCF):
         if mol is None: mol = self.mol
         return hf_cpu.init_guess_by_mod_huckel(mol)
 
+    def init_guess_by_vsap(self, mol=None):
+        if mol is None: mol = self.mol
+
+        Vsap = self.get_vsap()
+        Vsap = cupy.asarray([Vsap, Vsap])
+        from gpu4pyscf.pbc.gto.int1e import int1e_kin
+        T = int1e_kin(mol)
+        S = self.get_ovlp(mol)
+        Hsap = T + Vsap
+        mo_energy, mo_coeff = self.eig(Hsap, S)
+
+        mo_occ = self.get_occ(mo_energy, mo_coeff)
+        return self.make_rdm1(mo_coeff, mo_occ)
+
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         if not isinstance(key, str):
             return key

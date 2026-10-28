@@ -357,4 +357,4 @@ class RKS(KohnShamDFT, hf.RHF):
         '''Convert to RHF object.'''
         from gpu4pyscf import scf
         return self._transfer_attrs_(scf.RHF(self.mol))
-    init_guess_by_vsap = rks.init_guess_by_vsap
+

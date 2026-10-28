@@ -104,10 +104,8 @@ class UKS(rks.KohnShamDFT, uhf.UHF):
         rks.KohnShamDFT.__init__(self, xc)
 
     get_veff = get_veff
-    get_vasp = uks_cpu.get_vsap
     energy_elec = energy_elec
     energy_tot = hf.RHF.energy_tot
-    init_guess_by_vsap = uks_cpu.UKS.init_guess_by_vsap
 
     def to_hf(self):
         '''Convert to UHF object.'''
