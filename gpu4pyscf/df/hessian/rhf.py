@@ -41,6 +41,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian.rhf import _hcore_energy, _aggregate_to_atoms
 from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.lib import cutensor
 from gpu4pyscf.gto.mole import _split_l_ctr_groups
 
 num_devices = multi_gpu.num_devices
@@ -665,8 +666,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     # ...
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
-    batch_size = min(naux, int(word_avail*0.75) // (3*nao_pair*2))
-    blksize = min(batch_size, int(word_avail*0.15) // (3*nao**2*8) * 8)
+    batch_size, blksize = _j_energy_buffer_sizes(
+        word_avail, naux, nao, nao_pair, cutensor.contract_engine is not None)
     assert batch_size > 0 and blksize > 0
     log.debug1('mem_avail=%.3f MB, batch_size=%d, blksize=%d',
                mem_avail*1e-6, batch_size, blksize)
@@ -882,8 +883,17 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     # size for caching a tensor with the shape (:,nao_pair) or (:,nocc*nao)
     pair_size_max = max(nao_pair, nocc_per_batch*nao)
     _unit = 6*pair_size_max
+    blk_unit = nao**2 + (nao+nocc)*max(nao_on_atom, nocc)
+    if cutensor.contract_engine is not None:
+        # Without cuTENSOR, cupy.einsum in contract('pqr,qi->pri', j3c, ...)
+        # allocates a transposed copy of j3c (nao,nao,dk) and its own
+        # (nao,dk,nocc_in_batch) output outside the work buffer.
+        blk_unit += nao**2 + nao*nocc_per_batch
     largest_shell_nao = int((aux_loc[1:] - aux_loc[:-1]).max())
     batch_size = int(word_avail*.8 / _unit)
+    if cutensor.contract_engine is not None:
+        # Leave room for at least 8 columns of the j3c blocks
+        batch_size = min(batch_size, int((word_avail*.95 - 8*blk_unit) / _unit))
     if batch_size < largest_shell_nao:
         mem_req = (largest_shell_nao-batch_size) *_unit * 1.5 * 1e-6
         raise MemoryError(f'Insufficient GPU memory. Need {mem_req} MB more.')
@@ -896,8 +906,7 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
-    blksize = int((word_avail*.95 - batch_size*_unit) /
-                  (nao**2 + (nao+nocc)*max(nao_on_atom, nocc))) // 8 * 8
+    blksize = int((word_avail*.95 - batch_size*_unit) / blk_unit) // 8 * 8
     assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, mem_sufficient=%s, aux_batches=%d, batch_size=%d, blksize=%d',
@@ -1434,6 +1443,18 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
             if with_k: vk = vk.reshape(n_dm,-1)
     t1 = log.timer_debug1('vj and vk', *t1)
     return vj, vk
+
+def _j_energy_buffer_sizes(word_avail, naux, nao, nao_pair, einsum_copy=False):
+    '''batch_size of buf0, buf1 (3,nao_pair,batch_size) and blksize of
+    j3c_full (3,nao,nao,blksize) in _j_energy_per_atom. buf0 and buf1 take 75%
+    of word_avail, j3c_full 15%. If contract() falls back to cupy.einsum
+    (einsum_copy=True), contract('xpr,p->xr', buf1, ...) makes a transposed
+    copy of buf1, which is budgeted as a third buffer within the 75%.
+    '''
+    nbuf = 3 if einsum_copy else 2
+    batch_size = min(naux, int(word_avail*0.75) // (3*nao_pair*nbuf))
+    blksize = min(batch_size, int(word_avail*0.15) // (3*nao**2*8) * 8)
+    return batch_size, blksize
 
 def _allocate(shape, buf):
     a = ndarray(shape, buffer=buf)
