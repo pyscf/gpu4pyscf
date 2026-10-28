@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Topology, branch continuity and geometry-cache lifetime for finite fields."""
+"""Topology, branch continuity and geometry-cache lifetime for external fields."""
 from dataclasses import dataclass
 import numpy as np
 import cupy as cp

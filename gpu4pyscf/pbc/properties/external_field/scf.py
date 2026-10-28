@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Periodic finite-field SCF mixin using the ordinary KRKS driver."""
+"""Periodic external-field SCF mixin using the ordinary KRKS driver."""
 import warnings
 import numpy as np
 import cupy as cp
@@ -111,7 +111,7 @@ class ExternalFieldSCF(ExternalField):
         self.overlap = cp.asarray(super().get_ovlp())
         se, su = cp.linalg.eigh(self.overlap)
         if float(cp.asnumpy(se.min())) < 1e-9:
-            raise ValueError('Near-linear-dependent AO basis; finite field requires a nonsingular metric')
+            raise ValueError('Near-linear-dependent AO basis; external field requires a nonsingular metric')
         self.x = su / cp.sqrt(se)[:, None, :]
         self.hcore = cp.asarray(super().get_hcore())
         if self._field_state is None:
@@ -216,7 +216,7 @@ class ExternalFieldSCF(ExternalField):
                 self.history[-1]['gradient_norm'] < self.conv_tol_grad and
                 self.history[-1]['density_norm'] < self.conv_tol_dm)
         if not self.converged:
-            warnings.warn(f'Finite-field {self.solver} did not converge in {self.max_cycle} cycles')
+            warnings.warn(f'External-field {self.solver} did not converge in {self.max_cycle} cycles')
         return self.e_tot
 
     scf = kernel
@@ -299,7 +299,7 @@ class ExternalFieldSCF(ExternalField):
                    density_norm=float(cp.asnumpy(cp.linalg.norm(state[2]-old[2]))),
                    polarization=state[4].polarization.tolist())
         self.history.append(row)
-        logger.info(self, 'finite-field cg cycle %d H=%.12g |g|=%.3g |dD|=%.3g',
+        logger.info(self, 'external-field cg cycle %d H=%.12g |g|=%.3g |dD|=%.3g',
                     cycle+1, row['enthalpy'], row['gradient_norm'], row['density_norm'])
         if self.callback:
             self.callback(row)
@@ -318,13 +318,13 @@ class ExternalFieldSCF(ExternalField):
     def get_bands(self, *args, **kwargs):
         # Interpolating H_E to arbitrary new k points is nontrivial: it depends
         # on occupied orbitals and neighboring Berry links, not just density.
-        raise NotImplementedError("Finite-field arbitrary k-point bands are unsupported")
+        raise NotImplementedError("External-field arbitrary k-point bands are unsupported")
 
     def as_scanner(self):
-        raise NotImplementedError("Finite-field geometry scanning needs link-cache reset")
+        raise NotImplementedError("External-field geometry scanning needs link-cache reset")
 
     def Hessian(self):
-        raise NotImplementedError("Finite-field Hessian is not implemented")
+        raise NotImplementedError("External-field Hessian is not implemented")
 
     def polarization(self):
         if self._branch is None:
@@ -349,11 +349,11 @@ class ExternalFieldSCF(ExternalField):
         return self
 
     def Gradients(self):
-        raise NotImplementedError('Finite-field forces require Berry-link Pulay terms')
+        raise NotImplementedError('External-field forces require Berry-link Pulay terms')
     nuc_grad_method = Gradients
 
     def newton(self):
         raise NotImplementedError('Ordinary SOSCF lacks the Berry Hessian; use an orbital optimizer')
 
     def stress(self, *args, **kwargs):
-        raise NotImplementedError('Finite-field stress is not implemented')
+        raise NotImplementedError('External-field stress is not implemented')
