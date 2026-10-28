@@ -580,7 +580,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, precision, xctype):
     '''Estimate the FFT energy cutoff and the spread of each orbital pair
     in real space'''
     cell = ni.sorted_cell
-    Ecut_by_shell = _estimate_fft_Ecut_per_shell(cell, precision),
+    Ecut_by_shell = _estimate_fft_Ecut_per_shell(cell, precision)
     Ecut_by_shell = cp.asarray(Ecut_by_shell, dtype=np.float32)
 
     npairs = len(bas_ij_idx)
