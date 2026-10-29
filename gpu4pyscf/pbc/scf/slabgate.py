@@ -13,7 +13,7 @@
 # limitations under the License.
 
 '''
-Charged-sheet field-effect doping, 
+Charged-sheet field-effect doping,
 references: Phys. Rev. B 89, 245406 (2014).
 '''
 
@@ -178,6 +178,8 @@ def _barrier_potential(z, start, end, length, height, width, deriv=0):
 
 
 class SlabGateCharge:
+    __name_mixin__ = 'Gate'
+
     _keys = {'gate_side', 'zgate', 'barrier', 'barrier_start',
              'barrier_end', 'barrier_height', 'barrier_width'}
 
@@ -251,10 +253,15 @@ class SlabGateCharge:
         vc, vb = self._gate_matrices(cell, kpts)
         return hcore + (vc + vb if is_kpts else vc[0] + vb[0])
 
-    def energy_tot(self, dm=None, h1e=None, vhf=None):
+    def energy_nuc(self):
+        # Include the static terms before smearing constructs E(T), F and E0.
+        egate, ebarrier = self._gate_ionic_energy(self.cell)
+        return super().energy_nuc() + egate + ebarrier
+
+    def energy_elec(self, dm=None, h1e=None, vhf=None):
         if dm is None:
             dm = self.make_rdm1()
-        energy = super().energy_tot(dm, h1e, vhf)
+        energy = super().energy_elec(dm, h1e, vhf)
         egate, ebarrier = self._gate_ionic_energy(self.cell)
         vc, vb = self._gate_matrices(self.cell, self.kpts if self.istype('KSCF') else self.kpt)
         dm_charge = cp.asarray(dm)
@@ -268,7 +275,7 @@ class SlabGateCharge:
         logger.debug(self, 'Gate energy = %.10g, barrier energy = %.10g',
                      self.scf_summary['egate'], self.scf_summary['ebarrier'])
         # The electronic terms are included once through the corrected hcore.
-        return energy + egate + ebarrier
+        return energy
 
     def Gradients(self):
         from gpu4pyscf.pbc.grad.slabgate import _SlabGateGradients
