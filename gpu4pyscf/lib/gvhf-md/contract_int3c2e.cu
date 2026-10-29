@@ -35,8 +35,8 @@ void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
     int nf2 = (l + 1) * (l + 2) / 2;
     int nf3 = nf2 * (l + 3) / 3;
     int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
-    uint16_t *p1 = c_Rt_idx + offsets;
-    int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
+    const uint16_t *p1 = c_Rt_idx + offsets;
+    const int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
     double Rt_tmp[RT_SIZE];
     nf2 -= 1; // Drop the first element in Rt. It is assigned outside
     nf3 -= 1;
@@ -376,7 +376,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
     double *gamma_inc = shared_memory + sp_id;
     double *Rt = shared_memory + (order+1) * nsp_per_block + sp_id;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
-    int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
+    const int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     for (int kp = 0; kp < kprim; ++kp) {
         __syncthreads();
         __shared__ double ak, ck;
@@ -598,7 +598,7 @@ void unroll_contract_auxvec(RysIntEnvVars& envs, JKMatrix& jk,
     double *gamma_inc = auxvec_cache + nf3k + sp_id;
     double *Rt = gamma_inc + (order+1) * nsp_per_block;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
-    int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
+    const int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     double *auxvec = jk.dm;
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {

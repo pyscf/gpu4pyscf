@@ -89,10 +89,10 @@ void rys_ejk_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
     double *cicj_cache = shared_memory + reserved_shm_size;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lk);
-    int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.ll);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lj);
+    const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lk);
+    const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.ll);
 
     int do_j = jk.j_factor != 0.;
     int do_k = jk.k_factor != 0.;

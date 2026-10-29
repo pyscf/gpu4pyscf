@@ -15,9 +15,7 @@
  */
 
 #include <stdio.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cuComplex.h>
+#include "constant_objects.cuh"
 #include <gvhf-rys/rys_constant.cu>
 
 __constant__ double c_lattice_vectors[9];
