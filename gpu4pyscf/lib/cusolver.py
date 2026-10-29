@@ -45,6 +45,12 @@ libcusolver.cusolverDnDsygvd.restype = int
 
 _buffersize = {}
 
+
+def _set_cusolver_stream(handle):
+    """Bind CuSolver's per-device handle to CuPy's current stream."""
+    stream = cupy.cuda.get_current_stream()
+    cusolver.setStream(handle, stream.ptr)
+
 # https://docs.nvidia.com/cuda/cusolver/index.html#cusolverdn-t-sygvd
 libcusolver.cusolverDnDsygvd_bufferSize.argtypes = [
     ctypes.c_void_p, # handle
@@ -137,6 +143,7 @@ def eigh(h, s, overwrite=False):
             fn = libcusolver.cusolverDnDsygvd_bufferSize
         else:
             fn = libcusolver.cusolverDnZhegvd_bufferSize
+        _set_cusolver_stream(_handle)
         status = fn(
             _handle,
             CUSOLVER_EIG_TYPE_1,
@@ -160,6 +167,7 @@ def eigh(h, s, overwrite=False):
         fn = libcusolver.cusolverDnDsygvd
     else:
         fn = libcusolver.cusolverDnZhegvd
+    _set_cusolver_stream(_handle)
     work = cupy.empty(lwork, dtype=h.dtype)
     devInfo = cupy.empty(1, dtype=np.int32)
     status = fn(
@@ -194,9 +202,11 @@ def cholesky(A):
     else:
         potrf = cusolver.zpotrf
         potrf_bufferSize = cusolver.zpotrf_bufferSize
+    _set_cusolver_stream(handle)
     buffersize = potrf_bufferSize(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n)
     workspace = cupy.empty(buffersize, dtype=A.dtype)
     dev_info = cupy.empty(1, dtype=np.int32)
+    _set_cusolver_stream(handle)
     potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
         workspace.data.ptr, buffersize, dev_info.data.ptr)
 
