@@ -689,7 +689,8 @@ class IntegrationProtocols(unittest.TestCase):
     def _check_response_orbitals(self, xc, unrestricted):
         molecule, grid, grid_cpu = self.molecule, self.grid, self.grid_cpu
         c = self.coeff
-        occ = np.zeros(c.shape[1]); occ[0] = 2
+        occ = np.zeros(c.shape[1])
+        occ[0] = 2
         mo1 = np.stack([.02*c[:, 1:2], -.03*c[:, 2:3]])
         if unrestricted:
             beta = c.copy()

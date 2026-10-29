@@ -755,7 +755,7 @@ class NAC_multistates(lib.StreamObject):
                         self.results[(global_i, global_j)] = res
 
         if self.grad_state == 0:
-            assert atmlst is None or len(atmlst) == mol.natm
+            assert atmlst is None or len(atmlst) == self.mol.natm
             self.grad_result = self.base._scf.nuc_grad_method().kernel()
 
         self._finalize()

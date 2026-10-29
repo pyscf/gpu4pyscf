@@ -271,7 +271,8 @@ class MolecularEmbedding(unittest.TestCase):
         radii = np.array([1.2, 1.6])
         mol = self.tiny_mm_molecule
         wrapped = molecular_itrf.add_mm_charges(gpu_scf.RHF(mol), _MOL_MM_COORDS, _MOL_MM_CHARGES, radii=radii)
-        xyz = mol.atom_coords(); xyz[1] += [.1, -.03, .05]
+        xyz = mol.atom_coords()
+        xyz[1] += [.1, -.03, .05]
         # A different AO dimension also rejects silent use of self.mol.
         other = pyscf.M(atom=list(zip(mol.elements, xyz)), basis='6-31g', unit='Bohr', verbose=0)
         expected = cpu_scf.RHF(other).get_hcore() + _molecular_mm_potential(other, _MOL_MM_COORDS, _MOL_MM_CHARGES, radii)
@@ -303,7 +304,8 @@ class MolecularEmbedding(unittest.TestCase):
         for atom in range(mol.natm):
             for axis in range(3):
                 plus, minus = xyz.copy(), xyz.copy()
-                plus[atom, axis] += step; minus[atom, axis] -= step
+                plus[atom, axis] += step
+                minus[atom, axis] -= step
                 mp = mol.set_geom_(plus, unit='Bohr', inplace=False)
                 mm = mol.set_geom_(minus, unit='Bohr', inplace=False)
                 dv = (_molecular_mm_potential(mp, _MOL_MM_COORDS, _MOL_MM_CHARGES)

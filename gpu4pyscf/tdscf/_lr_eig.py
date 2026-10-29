@@ -368,7 +368,23 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
             if icyc > 0:
                 # Non-Hermitian Ritz vectors and their conjugate partners are
                 # not Euclidean-orthogonal; restore the projected basis metric.
-                x0, x0_ir = orthogonalize(x0, x0_ir)
+                if x0sym is None:
+                    x0 = _symmetric_orth(x0)
+                else:
+                    x0_ir = cp.asnumpy(x0_ir)
+                    x0_orth = []
+                    x0_orth_ir = []
+                    for ir in set(x0_ir):
+                        idx = np.where(x0_ir == ir)[0]
+                        xt_sub = _symmetric_orth(x0[idx])
+                        x0_orth.append(xt_sub)
+                        x0_orth_ir.append([ir] * len(xt_sub))
+                    if x0_orth:
+                        x0 = cp.vstack(x0_orth)
+                        x0_ir = cp.hstack(x0_orth_ir)
+                    else:
+                        x0 = []
+                    x0_orth = x0_orth_ir = xt_sub = None
             vlast = None
             conv_last = conv = np.zeros(nroots, dtype=bool)
             xs = cp.zeros((0, x0_size))
@@ -446,7 +462,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         ax0 = None
         if x0sym is not None:
             xt_ir = v_ir[:space_inc]
-            x0_ir = v_ir[:nroots]
+            x0_ir = v_ir[:space_inc]
 
         dx_norm = cp.linalg.norm(xt, axis=1)
         max_dx_norm = max(dx_norm[:nroots])
@@ -786,8 +802,8 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
     return conv[:nroots], e[:nroots].get(), cp.hstack(x0)
 
 def _gen_x0(v, xs):
-    out = _outprod_to_subspace(v[::2], xs)
-    out_conj = _outprod_to_subspace(v[1::2].conj(), xs)
+    out = v[::2].T @ xs
+    out_conj = v[1::2].conj().T @ xs
     n = out.shape[1] // 2
     # v[1::2] * xs.conj() = (v[1::2].conj() * xs).conj()
     out[:,:n] += out_conj[:,n:].conj()
@@ -795,8 +811,8 @@ def _gen_x0(v, xs):
     return out
 
 def _gen_ax0(v, xs):
-    out = _outprod_to_subspace(v[::2], xs)
-    out_conj = _outprod_to_subspace(v[1::2].conj(), xs)
+    out = v[::2].T @ xs
+    out_conj = v[1::2].conj().T @ xs
     n = out.shape[1] // 2
     out[:,:n] -= out_conj[:,n:].conj()
     out[:,n:] -= out_conj[:,:n].conj()

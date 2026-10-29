@@ -227,7 +227,7 @@ class GHF(pbchf.SCF):
         from gpu4pyscf.pbc.scf.kghf import KGHF
         kpts = np.reshape(self.kpt, (1, 3))
         dm = KGHF.init_guess_by_chkfile(self, chkfile, project, kpts)[0]
-        return pbchf.normalize_dm_(self, dm, s1e)
+        return pbchf.normalize_dm_(self, dm)
 
     def init_guess_by_minao(self, mol=None):
         dm = mol_ghf._from_rhf_init_dm(mol_hf.SCF.init_guess_by_minao(self, mol))

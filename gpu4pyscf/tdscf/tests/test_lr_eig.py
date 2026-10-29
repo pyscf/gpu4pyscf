@@ -354,11 +354,8 @@ def test_response_restart_keeps_labels_for_extra_ritz_vectors(monkeypatch):
 
     diagonal_preconditioner = preconditioner(cp.diag(matrix))
 
-    def preconditioner(residual, energy):
-        return .5*diagonal_preconditioner(residual, energy)
-
     converged, values, vectors = lr.eig(
-        product, cp.eye(24, dtype=complex)[[0, 6]], preconditioner,
+        product, cp.eye(24, dtype=complex)[[0, 6]], diagonal_preconditioner,
         x0sym=[0, 1], nroots=2, max_memory=0, max_cycle=50,
         tol_residual=1e-10, lindep=1e-24, pick=positive_response_roots, verbose=0)
     assert bool(cp.asarray(converged).all())
