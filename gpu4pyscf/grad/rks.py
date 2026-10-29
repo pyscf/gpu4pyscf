@@ -333,7 +333,8 @@ def _reduce_to_atom(mol, exc1):
 def _make_dR_dao_w(ao, wv, out=None):
     assert ao.shape[0] >= 10
     #:aow = numpy.einsum('nip,p->nip', ao[1:4], wv[0])
-    if not ao.flags.c_contiguous or ao.dtype != numpy.float64:
+    if (not ao.flags.c_contiguous or not wv.flags.c_contiguous
+            or ao.dtype != numpy.float64):
         aow = ndarray(ao[:3].shape, dtype=ao.dtype, buffer=out)
         tmp = cupy.empty_like(ao[0])
         numint._scale_ao(ao[1], wv[0], out=aow[0])  # dX nabla_x
@@ -354,8 +355,6 @@ def _make_dR_dao_w(ao, wv, out=None):
         return aow
 
     assert ao.flags.c_contiguous
-    assert wv.flags.c_contiguous
-
     _, nao, ngrids = ao.shape
     aow = ndarray([3,nao,ngrids], buffer=out)
     stream = cupy.cuda.get_current_stream()
